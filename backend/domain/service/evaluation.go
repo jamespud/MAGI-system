@@ -8,20 +8,46 @@ import (
 )
 
 type Evaluation struct {
-	ToolSuccessRate         float64
-	AvgToolCalls            float64
-	GateFailures            int
+	ToolSuccessRate    float64
+	AvgToolCalls       float64
+	ToolParamFailures  int
+	EvidenceCount      int
+	AvgReliability     float64
+	UniqueSourceTypes  int
+	GateFailures       int
+	MaxStepsExceeded   int
+	ValidationFailures int
 	FirstRoundConsensus     bool
+	ConsensusRound          int
+	ConsensusOutcome        entity.ConsensusOutcome
 	TotalTokens             int64
+	AvgTokensPerAgent       float64
+	TotalSteps              int
+	TotalToolCalls          int
 	CounterfactualStability float64
 }
 
 func Evaluate(results []*runtime.LoopResult, consensusRound int, consensusOutcome entity.ConsensusOutcome) *Evaluation {
-	ev := &Evaluation{}
-	totalCalls, successCalls := 0, 0
+	ev := &Evaluation{
+		ConsensusRound:   consensusRound,
+		ConsensusOutcome: consensusOutcome,
+	}
+	totalCalls, successCalls, paramFailCalls := 0, 0, 0
+	var totalRel float64
+	sourceTypes := make(map[string]bool)
+
 	for _, r := range results {
 		if r == nil {
 			continue
+		}
+		if r.Status == runtime.LoopStatusGateFailed {
+			ev.GateFailures++
+		}
+		if r.Status == runtime.LoopStatusMaxSteps {
+			ev.MaxStepsExceeded++
+		}
+		if r.Status == runtime.LoopStatusValidationFailed {
+			ev.ValidationFailures++
 		}
 		if r.Usage != nil {
 			ev.TotalTokens += r.Usage.TotalTokens
@@ -30,19 +56,42 @@ func Evaluate(results []*runtime.LoopResult, consensusRound int, consensusOutcom
 			continue
 		}
 		for _, step := range r.Trace.Steps {
+			ev.TotalSteps++
 			for _, tc := range step.ToolCalls {
 				totalCalls++
-				if tc.Valid {
+				if tc.Valid && tc.Err == "" {
 					successCalls++
+				} else if !tc.Valid {
+					paramFailCalls++
 				}
 			}
 		}
+		if r.Ledger != nil {
+			evs := r.Ledger.List()
+			ev.EvidenceCount += len(evs)
+			for _, e := range evs {
+				totalRel += e.Reliability.Final
+				sourceTypes[string(e.SourceType)] = true
+			}
+		}
 	}
+
+	n := len(results)
 	if totalCalls > 0 {
 		ev.ToolSuccessRate = float64(successCalls) / float64(totalCalls)
-		ev.AvgToolCalls = float64(totalCalls) / float64(len(results))
+		ev.AvgToolCalls = float64(totalCalls) / float64(n)
+		ev.ToolParamFailures = paramFailCalls
 	}
-	ev.FirstRoundConsensus = consensusRound == 1 && (consensusOutcome == entity.ConsensusStrongApproval || consensusOutcome == entity.ConsensusStrongRejection)
+	ev.TotalToolCalls = totalCalls
+	if ev.EvidenceCount > 0 {
+		ev.AvgReliability = totalRel / float64(ev.EvidenceCount)
+	}
+	ev.UniqueSourceTypes = len(sourceTypes)
+	if n > 0 && ev.TotalTokens > 0 {
+		ev.AvgTokensPerAgent = float64(ev.TotalTokens) / float64(n)
+	}
+	ev.FirstRoundConsensus = consensusRound == 1 &&
+		(consensusOutcome == entity.ConsensusStrongApproval || consensusOutcome == entity.ConsensusStrongRejection)
 	return ev
 }
 
