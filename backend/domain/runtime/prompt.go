@@ -9,7 +9,9 @@ import (
 
 // BuildAgentSystemPrompt assembles the full system prompt from MagiConfig +
 // evidence/vote schemas + optional debate context (Reconsider mode).
-func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []byte, debate *DebateContext) string {
+// hasTools indicates whether the agent has tools available; when false, the prompt
+// instructs the agent to reason from intrinsic knowledge instead of tool calls.
+func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []byte, debate *DebateContext, hasTools bool) string {
 	if cfg == nil {
 		return ""
 	}
@@ -27,14 +29,22 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []
 	es := cfg.EvidenceStandard
 	fmt.Fprintf(&b, "\n\nEvidence standard: min evidence=%d, min quantitative=%d, min reliability=%.2f, required claim count=%d.",
 		es.MinEvidenceCount, es.MinQuantitativeCount, es.MinReliability, es.RequiredClaimCount)
-	b.WriteString("\n\nWorkflow: gather evidence via tool calls; when ready, output an EvidenceSummary JSON (no tool calls) citing real EV-IDs; after the gate passes, output a Vote JSON.")
-	b.WriteString("\n\nYou may also submit claims incrementally during the gather phase:")
-	b.WriteString("\n  Output {\"type\":\"claim_submission\",\"claims\":[{\"statement\":\"...\",\"supports\":[\"EV-001\"],\"contradicts\":[]}]}")
-	b.WriteString("\n  Claims with valid EV-ID references will be recorded in the Claim Graph.")
+	if hasTools {
+		b.WriteString("\n\nWorkflow: gather evidence via tool calls; when ready, output an EvidenceSummary JSON (no tool calls) citing real EV-IDs; after the gate passes, output a Vote JSON.")
+		b.WriteString("\n\nYou may also submit claims incrementally during the gather phase:")
+		b.WriteString("\n  Output {\"type\":\"claim_submission\",\"claims\":[{\"statement\":\"...\",\"supports\":[\"EV-001\"],\"contradicts\":[]}]}")
+		b.WriteString("\n  Claims with valid EV-ID references will be recorded in the Claim Graph.")
+	} else {
+		b.WriteString("\n\nWorkflow: You have no tools available. Reason from your intrinsic knowledge to analyze the decision.")
+		b.WriteString(" Output an EvidenceSummary JSON with your analysis claims (empty evidence_by_type is fine).")
+		b.WriteString(" After the summary, output a Vote JSON with your decision.")
+	}
 	b.WriteString("\n\nEvidenceSummary JSON schema:\n")
 	b.Write(summarySchema)
 	b.WriteString("\n\nVote JSON schema:\n")
 	b.Write(voteSchema)
+	b.WriteString("\n\nValid decision values: \"approve\", \"reject\", \"abstain\", \"conditional_approve\".")
+	b.WriteString("\nYou MUST use one of these exact values for the decision field.")
 	if debate != nil {
 		b.WriteString("\n\n--- RECONSIDERATION ---\n")
 		b.WriteString("You are in reconsideration mode. Review the debate context and the majority/minority arguments.")

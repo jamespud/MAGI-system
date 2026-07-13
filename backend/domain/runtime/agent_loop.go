@@ -97,11 +97,19 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 
 	// Resolve tools
 	var defs []port.ToolDefinition
+	hasTools := false
 	if l.toolReg != nil && len(cfg.Tools) > 0 {
 		defs, err = l.toolReg.List(ctx, cfg.Tools)
 		if err != nil {
 			return nil, fmt.Errorf("agent loop: list tools: %w", err)
 		}
+		hasTools = len(defs) > 0
+	}
+	// In standalone/knowledge-only mode, relax evidence requirements so the
+	// agent can reason from intrinsic knowledge and produce a valid vote.
+	evidenceStd := cfg.EvidenceStandard
+	if !hasTools {
+		evidenceStd = entity.EvidenceStandard{} // zero = no requirements
 	}
 	nameToDef := make(map[string]port.ToolDefinition)
 	infos := make([]*schema.ToolInfo, 0, len(defs))
@@ -128,7 +136,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if question == "" {
 		question = ""
 	}
-	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPrompt(cfg, summarySchema, voteSchema, actx.DebateContext))}
+	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPrompt(cfg, summarySchema, voteSchema, actx.DebateContext, hasTools))}
 	messages = append(messages, schema.UserMessage(question))
 
 	trace := &LoopTrace{StartedAt: time.Now()}
@@ -250,7 +258,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			continue
 
 		case ResponseEvidenceSummary:
-			gateRes := l.gate.Evaluate(pr.Summary, ledger, cfg.EvidenceStandard, cfg.Code)
+			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
 			if !gateRes.Passed {
 				ts.gateFail++
 				messages = append(messages, resp)

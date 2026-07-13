@@ -2,6 +2,7 @@ package validation
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bytedance/sonic"
 )
@@ -32,13 +33,15 @@ func (tv *TypedValidator[T]) Schema() []byte {
 // ValidateAndUnmarshal validates data against T's schema; if valid, unmarshals
 // into a new *T. On validation failure it returns (nil, *ValidationResult)
 // without unmarshalling.
+// Strips markdown code fences (```json ... ```) before processing.
 func (tv *TypedValidator[T]) ValidateAndUnmarshal(data []byte) (*T, *ValidationResult) {
-	res := tv.validator.Validate(tv.schema, data)
+	cleaned := stripMarkdownFences(data)
+	res := tv.validator.Validate(tv.schema, cleaned)
 	if res == nil || !res.Valid {
 		return nil, res
 	}
 	var t T
-	if err := sonic.UnmarshalString(string(data), &t); err != nil {
+	if err := sonic.UnmarshalString(string(cleaned), &t); err != nil {
 		return nil, &ValidationResult{
 			Valid: false,
 			Violations: []Violation{{
@@ -48,4 +51,24 @@ func (tv *TypedValidator[T]) ValidateAndUnmarshal(data []byte) (*T, *ValidationR
 		}
 	}
 	return &t, &ValidationResult{Valid: true}
+}
+
+// stripMarkdownFences removes leading/trailing ``` fences (with optional language
+// tag) from LLM responses that wrap JSON in markdown code blocks.
+func stripMarkdownFences(data []byte) []byte {
+	s := strings.TrimSpace(string(data))
+	// Strip leading ```json or ``` fence
+	if strings.HasPrefix(s, "```") {
+		nl := strings.Index(s, "\n")
+		if nl >= 0 {
+			s = s[nl+1:]
+		}
+	}
+	// Strip trailing ``` fence
+	if strings.HasSuffix(strings.TrimSpace(s), "```") {
+		s = strings.TrimSpace(s)
+		s = strings.TrimSuffix(s, "```")
+		s = strings.TrimSpace(s)
+	}
+	return []byte(s)
 }
