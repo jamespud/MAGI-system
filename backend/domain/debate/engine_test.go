@@ -61,7 +61,7 @@ func TestValidateReflection_ChangeWithNewEvidence(t *testing.T) {
 	ledger.Record("tc", "tool", "local", "", "obs", entity.ReliabilityScore{Final: 0.9})
 	evID := ledger.List()[0].ID
 	r := &entity.Reflection{PositionChange: entity.PositionChangeChange, NewEvidenceIDs: []string{evID}}
-	err := ValidateReflection(r, &entity.Vote{}, ledger, map[string]bool{})
+	err := ValidateReflection(r, &entity.Vote{}, ledger, map[string]bool{}, false)
 	if err != nil {
 		t.Fatalf("expected valid: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestValidateReflection_ChangeWithNewEvidence(t *testing.T) {
 
 func TestValidateReflection_ChangeWithoutEvidence(t *testing.T) {
 	r := &entity.Reflection{PositionChange: entity.PositionChangeChange}
-	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{})
+	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{}, false)
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -77,7 +77,7 @@ func TestValidateReflection_ChangeWithoutEvidence(t *testing.T) {
 
 func TestValidateReflection_ChangeWithFakeEvidence(t *testing.T) {
 	r := &entity.Reflection{PositionChange: entity.PositionChangeChange, NewEvidenceIDs: []string{"EV-999"}}
-	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{})
+	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{}, false)
 	if err == nil {
 		t.Fatalf("expected error for fake EV-ID")
 	}
@@ -85,7 +85,7 @@ func TestValidateReflection_ChangeWithFakeEvidence(t *testing.T) {
 
 func TestValidateReflection_Maintain(t *testing.T) {
 	r := &entity.Reflection{PositionChange: entity.PositionChangeMaintain}
-	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{})
+	err := ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{}, false)
 	if err != nil {
 		t.Fatalf("maintain should be valid: %v", err)
 	}

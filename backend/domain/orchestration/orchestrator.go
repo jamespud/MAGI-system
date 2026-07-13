@@ -79,25 +79,41 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 	for {
 		switch status {
+
 		case entity.CaseStatusDraft:
 			status = entity.CaseStatusNormalizing
 
 		case entity.CaseStatusNormalizing:
-			o.publish(ctx, case_, entity.EventTaskNormalized)
 			t, err := o.commander.Normalize(ctx, case_)
 			if err != nil {
 				return o.fail(ctx, case_, fmt.Sprintf("normalize: %v", err))
 			}
 			task = t
+			status = entity.CaseStatusContextBuilding
+
+		case entity.CaseStatusContextBuilding:
+			o.publish(ctx, case_, entity.EventTaskNormalized)
+			status = entity.CaseStatusRetrievingMemory
+
+		case entity.CaseStatusRetrievingMemory:
+			o.publish(ctx, case_, entity.EventMemoryRetrieved)
 			status = entity.CaseStatusInvestigating
 
 		case entity.CaseStatusInvestigating:
 			o.publish(ctx, case_, entity.EventAgentStarted)
 			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs)
+			status = entity.CaseStatusEvidenceGating
+
+		case entity.CaseStatusEvidenceGating:
+			o.publish(ctx, case_, entity.EventEvidenceGatePassed)
+			status = entity.CaseStatusCollectingVotes
+
+		case entity.CaseStatusCollectingVotes:
+			votes = o.extractVotes(results)
+			o.publish(ctx, case_, entity.EventVoteSubmitted)
 			status = entity.CaseStatusConsensusCheck
 
 		case entity.CaseStatusConsensusCheck:
-			votes = o.extractVotes(results)
 			consResult = o.consensus.Evaluate(derefVotes(votes), round, o.policy)
 			o.publish(ctx, case_, entity.EventConsensusEvaluated)
 			switch consResult.Outcome {
@@ -121,36 +137,54 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			allEvidence := o.collectEvidence(results)
 			packet := o.debate.BuildPacket(derefVotes(votes), allClaims, round, allEvidence)
 			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs)
+			status = entity.CaseStatusReflecting
+
+		case entity.CaseStatusReflecting:
+			o.publish(ctx, case_, entity.EventReflectionSubmitted)
+			status = entity.CaseStatusRevoting
+
+		case entity.CaseStatusRevoting:
+			o.publish(ctx, case_, entity.EventRevoteSubmitted)
+			votes = o.extractVotes(results)
 			round++
 			status = entity.CaseStatusConsensusCheck
 
 		case entity.CaseStatusResolving:
 			consResult.Round = round
-			report, err := o.commander.GenerateReport(ctx, case_, &entity.Resolution{Consensus: consResult}, votes)
-			if err != nil {
-				report = "report generation failed"
-			}
 			resolution = &entity.Resolution{
 				Consensus:      consResult,
-				FinalReport:    report,
 				FinalDecision:  finalDecision(consResult),
 				KeyEvidenceIDs: o.collectEvidenceIDs(results),
 				KeyClaimIDs:    o.collectClaimIDs(results),
 				VoteIDs:        voteIDs(votes),
 			}
+			status = entity.CaseStatusGeneratingReport
+
+		case entity.CaseStatusGeneratingReport:
+			report, err := o.commander.GenerateReport(ctx, case_, &entity.Resolution{Consensus: consResult}, votes)
+			if err != nil {
+				report = "report generation failed"
+			}
+			resolution.FinalReport = report
 			o.publish(ctx, case_, entity.EventResolutionCreated)
+			status = entity.CaseStatusSavingMemory
+
+		case entity.CaseStatusSavingMemory:
+			ledger := o.mergeLedgers(results)
+			memory.BuildProjection(case_, resolution, ledger, votes)
+			o.publish(ctx, case_, entity.EventMemoryIndexed)
+			status = entity.CaseStatusEvaluating
+
+		case entity.CaseStatusEvaluating:
+			service.Evaluate(results, round, consResult.Outcome)
 			status = entity.CaseStatusResolved
 
 		case entity.CaseStatusResolved:
-			// Build projection (store stubbed in S4)
-			ledger := o.mergeLedgers(results)
-			memory.BuildProjection(case_, resolution, ledger, votes)
 			o.publish(ctx, case_, entity.EventCaseCompleted)
 			case_.Status = status
 			return resolution, nil
 
 		default:
-			// Terminal failure states
 			o.publish(ctx, case_, entity.EventCaseFailed)
 			case_.Status = status
 			return resolution, fmt.Errorf("case ended: %s", status)

@@ -28,6 +28,9 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []
 	fmt.Fprintf(&b, "\n\nEvidence standard: min evidence=%d, min quantitative=%d, min reliability=%.2f, required claim count=%d.",
 		es.MinEvidenceCount, es.MinQuantitativeCount, es.MinReliability, es.RequiredClaimCount)
 	b.WriteString("\n\nWorkflow: gather evidence via tool calls; when ready, output an EvidenceSummary JSON (no tool calls) citing real EV-IDs; after the gate passes, output a Vote JSON.")
+	b.WriteString("\n\nYou may also submit claims incrementally during the gather phase:")
+	b.WriteString("\n  Output {\"type\":\"claim_submission\",\"claims\":[{\"statement\":\"...\",\"supports\":[\"EV-001\"],\"contradicts\":[]}]}")
+	b.WriteString("\n  Claims with valid EV-ID references will be recorded in the Claim Graph.")
 	b.WriteString("\n\nEvidenceSummary JSON schema:\n")
 	b.Write(summarySchema)
 	b.WriteString("\n\nVote JSON schema:\n")

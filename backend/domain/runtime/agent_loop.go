@@ -26,6 +26,7 @@ type AgentLoop struct {
 	gate       *evidence.EvidenceGate
 	summaryVal *validation.TypedValidator[entity.EvidenceSummary]
 	voteVal    *validation.TypedValidator[entity.Vote]
+	claimVal   *validation.TypedValidator[entity.ClaimSubmission]
 }
 
 type AgentLoopDeps struct {
@@ -50,6 +51,10 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent loop: vote validator: %w", err)
 	}
+	cv, err := validation.NewTypedValidator[entity.ClaimSubmission](d.Gen, d.Validator)
+	if err != nil {
+		return nil, fmt.Errorf("agent loop: claim validator: %w", err)
+	}
 	gate := d.Gate
 	if gate == nil {
 		gate = evidence.NewEvidenceGate()
@@ -63,7 +68,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	return &AgentLoop{
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate,
-		summaryVal: sv, voteVal: vv,
+		summaryVal: sv, voteVal: vv, claimVal: cv,
 	}, nil
 }
 
@@ -161,7 +166,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, result.Err
 		}
 
-		pr := parseResponse(resp, phase, l.summaryVal, l.voteVal)
+		pr := parseResponse(resp, phase, l.summaryVal, l.voteVal, l.claimVal)
 
 		switch pr.Type {
 		case ResponseToolCall:
@@ -220,6 +225,28 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				finalizeTrace(trace, result.Status)
 				return result, result.Err
 			}
+			continue
+
+		case ResponseClaimSubmission:
+			// Incremental claim submission: validate EV-IDs, record claims, continue gather.
+			messages = append(messages, resp)
+			if pr.Claims != nil {
+				for _, c := range pr.Claims.Claims {
+					// Validate that cited EV-IDs exist in the ledger.
+					validEVs := true
+					for _, evID := range c.Supports {
+						if !ledger.ExistsCollected(evID, "") {
+							validEVs = false
+							break
+						}
+					}
+					if validEVs {
+						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
+					}
+				}
+			}
+			messages = append(messages, schema.UserMessage("Claims recorded. Continue investigating or output EvidenceSummary when ready."))
+			trace.Steps = append(trace.Steps, st)
 			continue
 
 		case ResponseEvidenceSummary:

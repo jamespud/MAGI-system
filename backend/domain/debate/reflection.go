@@ -17,6 +17,7 @@ func ValidateReflection(
 	prevVote *entity.Vote,
 	ledger *evidence.EvidenceLedger,
 	claimIDs map[string]bool,
+	requireNewEvidence bool,
 ) error {
 	if r == nil {
 		return errors.New("nil reflection")
@@ -27,7 +28,9 @@ func ValidateReflection(
 
 	switch r.PositionChange {
 	case entity.PositionChangeMaintain, entity.PositionChangeStrengthen, entity.PositionChangeAbstain:
-		// No new evidence required for these positions.
+		if requireNewEvidence && len(r.NewEvidenceIDs) == 0 {
+			return errors.New("requireNewEvidence policy: maintain/strengthen/abstain still requires new EV-ID citation")
+		}
 		return nil
 
 	case entity.PositionChangeChange, entity.PositionChangeWeaken:

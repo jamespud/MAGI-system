@@ -18,6 +18,14 @@ type EvidenceSummary struct {
 	Ready          bool                   `json:"ready"`
 }
 
+// ClaimSubmission is a structured output for incremental claim submission
+// during the gather phase. The Magi can submit claims mid-investigation
+// without waiting for EvidenceSummary.
+type ClaimSubmission struct {
+	Type   string                 `json:"type"` // always "claim_submission"
+	Claims []EvidenceSummaryClaim `json:"claims"`
+}
+
 // Vote is a Magi's structured final decision for a round.
 type Vote struct {
 	ID               string                 `json:"id,omitempty"`

@@ -26,6 +26,9 @@ func Evaluate(results []*runtime.LoopResult, consensusRound int, consensusOutcom
 		if r.Usage != nil {
 			ev.TotalTokens += r.Usage.TotalTokens
 		}
+		if r.Trace == nil {
+			continue
+		}
 		for _, step := range r.Trace.Steps {
 			for _, tc := range step.ToolCalls {
 				totalCalls++
