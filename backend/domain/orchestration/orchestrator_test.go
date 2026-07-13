@@ -228,3 +228,32 @@ func TestOrchestrate_FailurePolicy(t *testing.T) {
 		t.Fatalf("expected resolution despite failure")
 	}
 }
+
+func TestOrchestrate_FirstRoundSplitMaxDebateOne(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{reject(), approve()}
+
+	policy := consensus.DefaultConsensusPolicy()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    policy,
+	})
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{
+		ID: "c1", Question: "q", MaxDebateRounds: 1,
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if res == nil || res.Consensus.Outcome != entity.ConsensusStrongApproval {
+		t.Fatalf("expected strong approval after debate+revote, got: %+v", res)
+	}
+	if res.Consensus.Round != 2 {
+		t.Fatalf("expected round 2 (debate+revote), got %d", res.Consensus.Round)
+	}
+}

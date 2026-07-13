@@ -120,7 +120,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection:
 				status = entity.CaseStatusResolving
 			case entity.ConsensusMajorityApprovalDissent, entity.ConsensusMajorityRejectionDissent:
-				if round < maxDebate {
+				if o.shouldDebate(round, maxDebate) {
 					status = entity.CaseStatusDebating
 				} else {
 					status = entity.CaseStatusResolving
@@ -258,6 +258,16 @@ func (o *Orchestrator) mergeLedgers(results []*runtime.LoopResult) *evidence.Evi
 		}
 	}
 	return merged
+}
+
+// shouldDebate determines whether a split outcome should enter the debate phase.
+// First-round splits always go to debate when the policy says FirstSplitGoesToDebate;
+// subsequent splits respect the maxDebate round limit.
+func (o *Orchestrator) shouldDebate(round int, maxDebate int) bool {
+	if round == 1 && o.policy.FirstSplitGoesToDebate {
+		return true
+	}
+	return round < maxDebate
 }
 
 func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType) {
