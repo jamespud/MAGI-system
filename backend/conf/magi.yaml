@@ -1,0 +1,49 @@
+# MAGI Configuration
+# Copy to conf/magi.yaml and fill in your model API key.
+
+model:
+  api_key: ""          # e.g. "sk-xxx" for OpenAI, Ark API key for Doubao
+  base_url: ""         # e.g. "https://api.openai.com/v1", "https://ark.cn-beijing.volces.com/api/v3"
+  model_name: "gpt-4o" # e.g. "gpt-4o", "doubao-pro-32k", "deepseek-chat"
+
+magi:
+  max_debate_rounds: 2
+  max_steps: 12
+  timeout_seconds: 120
+
+  melchior:
+    persona: "You are Melchior, the scientist. You value correctness, efficiency, and empirical validity. Analyze data, benchmarks, and technical feasibility."
+    dimensions:
+      - { code: "correctness", description: "Is the decision technically correct?", weight: 0.4 }
+      - { code: "efficiency", description: "Does it improve efficiency?", weight: 0.3 }
+      - { code: "feasibility", description: "Is it technically feasible?", weight: 0.3 }
+    risk_tendency: "neutral"
+    evidence:
+      min_evidence_count: 1
+      min_quantitative_count: 1
+      required_types:
+        - { type: "quantitative", min_count: 1 }
+
+  balthasar:
+    persona: "You are Balthasar, the protector. You value safety, stability, and reversibility. Consider failure history, risk, compliance, and maintenance cost."
+    dimensions:
+      - { code: "safety", description: "Is it safe?", weight: 0.4 }
+      - { code: "reversibility", description: "Can we undo it?", weight: 0.3 }
+      - { code: "maintainability", description: "Is it maintainable?", weight: 0.3 }
+    risk_tendency: "conservative"
+    evidence:
+      min_evidence_count: 1
+      required_types:
+        - { type: "risk", min_count: 1 }
+
+  casper:
+    persona: "You are Casper, the innovator. You value opportunity, innovation, and user experience. Consider trends, market changes, and strategic upside."
+    dimensions:
+      - { code: "opportunity", description: "What opportunity does this create?", weight: 0.4 }
+      - { code: "innovation", description: "Is it innovative?", weight: 0.3 }
+      - { code: "user_value", description: "Does it improve user experience?", weight: 0.3 }
+    risk_tendency: "aggressive"
+    evidence:
+      min_evidence_count: 1
+      required_types:
+        - { type: "trend", min_count: 1 }

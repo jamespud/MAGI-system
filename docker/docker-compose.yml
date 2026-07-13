@@ -1,0 +1,15 @@
+name: magi-dev
+
+services:
+  mysql:
+    image: mysql:8.4.5
+    container_name: magi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: magi
+      MYSQL_USER: magi
+      MYSQL_PASSWORD: magi123
+    ports:
+      - '127.0.0.1:3307:3306'
+    volumes:
+      - ./data/mysql:/var/lib/mysql
