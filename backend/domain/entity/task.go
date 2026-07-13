@@ -23,16 +23,16 @@ const (
 )
 
 type DecisionDimension struct {
-	Code        string
-	Description string
+	Code        string `json:"code"`
+	Description string `json:"description"`
 }
 
 type InformationNeed struct {
-	Topic     string
-	Rationale string
+	Topic     string `json:"topic"`
+	Rationale string `json:"rationale"`
 }
 
 type Criterion struct {
-	Code        string
-	Description string
+	Code        string `json:"code"`
+	Description string `json:"description"`
 }
