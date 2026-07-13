@@ -49,8 +49,8 @@ Normalize this decision question into a DecisionTask JSON. You MUST include ALL 
 - decision_type: the type of decision (adopt/migrate/launch/strategic/generic)
 - background: relevant context for understanding the decision
 - dimensions: key decision dimensions, each with code + description (at least 2)
-- information_needs: what information is needed to make this decision
-- success_criteria: how to evaluate whether the decision was good
+- information_needs: information gaps to fill, each with topic + rationale
+- success_criteria: how to evaluate the decision, each with code + description
 - unknowns: what is currently unknown or uncertain
 
 Question: %s
