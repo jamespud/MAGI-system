@@ -51,14 +51,20 @@ type DimensionSpec struct {
 }
 
 type EvidenceSpec struct {
-	MinEvidenceCount     int                `yaml:"min_evidence_count"`
-	MinQuantitativeCount int                `yaml:"min_quantitative_count"`
-	RequiredTypes        []TypeReqSpec      `yaml:"required_types"`
+	MinEvidenceCount     int           `yaml:"min_evidence_count"`
+	MinQuantitativeCount int           `yaml:"min_quantitative_count"`
+	RequiredClaimCount   int           `yaml:"required_claim_count"`
+	RequiredTypes        []TypeReqSpec `yaml:"required_types"`
+	CustomRules          []RuleSpec    `yaml:"custom_rules"`
 }
 
 type TypeReqSpec struct {
 	Type     string `yaml:"type"`
 	MinCount int    `yaml:"min_count"`
+}
+
+type RuleSpec struct {
+	Code string `yaml:"code"`
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -91,6 +97,10 @@ func (s *MagiSpec) toConfig(code string, cfg *Config) *entity.MagiConfig {
 	for i, t := range s.Evidence.RequiredTypes {
 		reqTypes[i] = entity.EvidenceTypeRequirement{Type: t.Type, MinCount: t.MinCount}
 	}
+	customRules := make([]entity.EvidenceRule, len(s.Evidence.CustomRules))
+	for i, r := range s.Evidence.CustomRules {
+		customRules[i] = entity.EvidenceRule{Code: r.Code}
+	}
 	return &entity.MagiConfig{
 		Code:         code,
 		Persona:      s.Persona,
@@ -99,7 +109,9 @@ func (s *MagiSpec) toConfig(code string, cfg *Config) *entity.MagiConfig {
 		EvidenceStandard: entity.EvidenceStandard{
 			MinEvidenceCount:     s.Evidence.MinEvidenceCount,
 			MinQuantitativeCount: s.Evidence.MinQuantitativeCount,
+			RequiredClaimCount:   s.Evidence.RequiredClaimCount,
 			RequiredTypes:        reqTypes,
+			CustomRules:          customRules,
 		},
 		Model: entity.ModelRef{
 			APIKey:    cfg.Model.APIKey,
