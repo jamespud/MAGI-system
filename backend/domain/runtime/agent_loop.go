@@ -27,6 +27,7 @@ type AgentLoop struct {
 	summaryVal *validation.TypedValidator[entity.EvidenceSummary]
 	voteVal    *validation.TypedValidator[entity.Vote]
 	claimVal   *validation.TypedValidator[entity.ClaimSubmission]
+	eventPub   port.EventPublisher
 }
 
 type AgentLoopDeps struct {
@@ -37,6 +38,7 @@ type AgentLoopDeps struct {
 	Gen       validation.SchemaGenerator
 	Adapter   *evidence.EvidenceAdapterRegistry
 	Gate      *evidence.EvidenceGate
+	EventPub  port.EventPublisher
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -69,7 +71,22 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
+		eventPub: d.EventPub,
 	}, nil
+}
+
+func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, et entity.EventType) {
+	if l.eventPub == nil {
+		return
+	}
+	ac := agentCode
+	_ = l.eventPub.Publish(ctx, entity.MagiEvent{
+		CaseID:    caseID,
+		RunID:     runID,
+		AgentCode: &ac,
+		Type:      et,
+		Timestamp: time.Now(),
+	})
 }
 
 func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *AgentContext) (*LoopResult, error) {
@@ -146,6 +163,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		phase = "reconsider_gather"
 	}
 	ts := &terminationState{}
+	agentCode := entity.MagiCode(cfg.Code)
 
 	for step := 1; step <= maxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -156,6 +174,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		}
 		stepStart := time.Now()
 		resp, err := bound.Generate(ctx, messages)
+		l.publish(ctx, actx.CaseID, "", agentCode, entity.EventModelResponded)
 		st := &Step{Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {
 			result.Status = LoopStatusError
@@ -210,10 +229,12 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				if execErr != nil {
 					tcr.Err = execErr.Error()
 					ts.consecToolFail++
+					l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallFailed)
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, execErr.Error()), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
+				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallCompleted)
 				ts.consecToolFail = 0
 				tcr.Valid = true
 				tcr.Result = execRes.Output
@@ -223,6 +244,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
 					if ev != nil {
 						tcr.EvidenceID = ev.ID
+							l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceCreated)
 					}
 				}
 				messages = append(messages, schema.ToolMessage(execRes.Output, tc.ID))
@@ -260,6 +282,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		case ResponseEvidenceSummary:
 			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
 			if !gateRes.Passed {
+				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGateFailed)
 				ts.gateFail++
 				messages = append(messages, resp)
 				messages = append(messages, schema.UserMessage("Evidence gate failed: "+gateViolationsMsg(gateRes)+"; gather more evidence or fix your EvidenceSummary."))
@@ -271,6 +294,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			// Gate passed
+			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGatePassed)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
 				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
@@ -289,6 +313,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			result.Vote = pr.Vote
+			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventVoteSubmitted)
 			result.Status = LoopStatusCompleted
 			st.IsFinal = true
 			trace.Steps = append(trace.Steps, st)
@@ -296,6 +321,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, nil
 
 		default: // invalid
+			ts.validationFail++
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Invalid response. In gather phase output EvidenceSummary JSON; in vote phase output Vote JSON."))
 			trace.Steps = append(trace.Steps, st)

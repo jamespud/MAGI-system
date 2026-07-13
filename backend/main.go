@@ -173,6 +173,7 @@ func main() {
 	agentLoop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelAdapter, ToolReg: toolReg, ToolExec: toolExec,
 		Validator: val, Gen: gen,
+		EventPub: eventPub,
 	})
 	if err != nil {
 		fmt.Printf("Failed to create agent loop: %v\n", err)

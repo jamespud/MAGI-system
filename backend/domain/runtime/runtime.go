@@ -28,7 +28,8 @@ const (
 	LoopStatusError          LoopStatus = "error"
 	LoopStatusGateFailed     LoopStatus = "gate_failed"
 	LoopStatusTokenBudget    LoopStatus = "token_budget_exceeded"
-	LoopStatusToolFailures   LoopStatus = "tool_failures"
+	LoopStatusToolFailures      LoopStatus = "tool_failures"
+	LoopStatusValidationFailed  LoopStatus = "validation_failed"
 )
 
 type LoopResult struct {

@@ -143,11 +143,12 @@ const (
 
 // LoopPolicy bounds a single agent run.
 type LoopPolicy struct {
-	MaxSteps                   int
-	Timeout                    time.Duration
-	MaxGateFailures            int
-	MaxConsecutiveToolFailures int
-	TokenBudget                int
+	MaxSteps                        int
+	Timeout                         time.Duration
+	MaxGateFailures                 int
+	MaxConsecutiveToolFailures      int
+	MaxConsecutiveValidationFailures int
+	TokenBudget                     int
 }
 
 // ReflectionPolicy bounds the debate/reflection phase.

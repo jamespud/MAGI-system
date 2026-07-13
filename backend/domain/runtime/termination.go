@@ -3,9 +3,10 @@ package runtime
 import "github.com/jamespud/magi/backend/domain/entity"
 
 type terminationState struct {
-	gateFail       int
-	consecToolFail int
-	tokenUsed      int64
+	gateFail        int
+	consecToolFail  int
+	tokenUsed       int64
+	validationFail  int
 }
 
 // checkTermination returns true if the loop should terminate, setting status+err.
@@ -20,6 +21,10 @@ func checkTermination(ts *terminationState, policy entity.LoopPolicy, status *Lo
 	}
 	if policy.TokenBudget > 0 && ts.tokenUsed >= int64(policy.TokenBudget) {
 		*status = LoopStatusTokenBudget
+		return true
+	}
+	if policy.MaxConsecutiveValidationFailures > 0 && ts.validationFail >= policy.MaxConsecutiveValidationFailures {
+		*status = LoopStatusValidationFailed
 		return true
 	}
 	return false
