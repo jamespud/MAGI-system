@@ -2,9 +2,11 @@
 # Copy to conf/magi.yaml and fill in your model API key.
 
 model:
-  api_key: "sk-54069be92eb449b381cb87b1294b9be9"          # e.g. "sk-xxx" for OpenAI, Ark API key for Doubao
-  base_url: "https://api.deepseek.com"         # e.g. "https://api.openai.com/v1", "https://ark.cn-beijing.volces.com/api/v3"
-  model_name: "deepseek-v4-flash" # e.g. "gpt-4o", "doubao-pro-32k", "deepseek-chat"
+  api_key: "sk-your-api-key-here"          # e.g. "sk-xxx" for OpenAI, Ark API key for Doubao
+  base_url: "https://api.deepseek.com"     # e.g. "https://api.openai.com/v1", "https://ark.cn-beijing.volces.com/api/v3"
+  model_name: "deepseek-v4-flash"          # e.g. "gpt-4o", "doubao-pro-32k", "deepseek-chat"
+
+
 
 magi:
   max_debate_rounds: 2
