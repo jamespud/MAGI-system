@@ -224,6 +224,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				}
 				// Execute
 				toolStart := time.Now()
+				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallStarted)
 				execRes, execErr := l.toolExec.Execute(ctx, port.ToolExecutionRequest{ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments})
 				tcr.Duration = time.Since(toolStart)
 				if execErr != nil {
@@ -272,6 +273,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					}
 					if validEVs {
 						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
+							l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
 					}
 				}
 			}
@@ -297,7 +299,9 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGatePassed)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
+				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
 				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
+				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
 			}
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
