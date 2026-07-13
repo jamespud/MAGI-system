@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/cloudwego/eino/schema"
 
@@ -62,11 +63,18 @@ Constraints: %v`,
 			schema.UserMessage("Output the DecisionTask JSON now."),
 		})
 		if err != nil {
+			log.Printf("commander: normalize attempt %d: model generate error: %v", attempt+1, err)
 			continue
 		}
 		task, vr := c.taskVal.ValidateAndUnmarshal([]byte(resp.Content))
 		if vr != nil && vr.Valid {
 			return task, nil
+		}
+		if vr != nil {
+			log.Printf("commander: normalize attempt %d: validation failed with %d violations", attempt+1, len(vr.Violations))
+			for i, v := range vr.Violations {
+				log.Printf("  violation %d: [%s] %s field=%s", i+1, v.Code, v.Message, v.Field)
+			}
 		}
 	}
 	return nil, fmt.Errorf("commander: normalize failed after retries")
