@@ -48,7 +48,7 @@ type CasePhase string
 
 // Constraint is a user-supplied decision constraint.
 type Constraint struct {
-	Key   string
-	Value string
-	Hard  bool
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Hard  bool   `json:"hard"`
 }
