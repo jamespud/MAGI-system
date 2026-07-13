@@ -3,6 +3,7 @@ package magi
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	crossplugin "github.com/coze-dev/coze-studio/backend/crossdomain/plugin"
 	pluginmodel "github.com/coze-dev/coze-studio/backend/crossdomain/plugin/model"
@@ -14,11 +15,24 @@ import (
 // S1 skeleton: List resolves tool names; full ArgsSchema extraction (OpenAPI3 -> JSON Schema)
 // is filled in S2 when the runtime consumes it.
 type PluginAdapter struct {
-	svc crossplugin.PluginService
+	svc          crossplugin.PluginService
+	activated    bool
+	activateOnce sync.Once
+	activateErr  error
 }
 
 func NewPluginAdapter(svc crossplugin.PluginService) *PluginAdapter {
 	return &PluginAdapter{svc: svc}
+}
+
+func (a *PluginAdapter) activate(ctx context.Context) error {
+	a.activateOnce.Do(func() {
+		_, a.activateErr = a.svc.MGetOnlineTools(ctx, []int64{})
+		if a.activateErr == nil {
+			a.activated = true
+		}
+	})
+	return a.activateErr
 }
 
 func (a *PluginAdapter) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
@@ -52,7 +66,8 @@ func (a *PluginAdapter) List(ctx context.Context, bindings []entity.ToolBinding)
 }
 
 func (a *PluginAdapter) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
-	// Binding lookup is the runtime's responsibility; here Execute requires the binding
-	// carried via ToolDefinition. S2 will thread the binding through.
-	return nil, fmt.Errorf("plugin execute: binding resolution not yet wired in S1 skeleton")
+	if err := a.activate(ctx); err != nil {
+		return nil, fmt.Errorf("plugin adapter: Coze plugin API unavailable: %w", err)
+	}
+	return nil, fmt.Errorf("plugin execute: binding resolution pending; Coze API confirmed available")
 }
