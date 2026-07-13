@@ -37,3 +37,29 @@ func TestValidateReflection_RequireNewEvidence_Disabled(t *testing.T) {
 		t.Fatalf("expected valid: maintain without evidence should pass when requireNewEvidence=false: %v", err)
 	}
 }
+
+func TestValidateReflection_UtilityDimensionReevaluation(t *testing.T) {
+	r := &entity.Reflection{
+		PositionChange: entity.PositionChangeChange,
+		UtilityDimensionReevaluation: &entity.UtilityDimensionReevaluation{
+			DimensionsReEvaluated: []string{"safety"},
+			ScoreChanges: []entity.DimensionScoreChange{
+				{DimensionCode: "safety", PreviousScore: 0.3, NewScore: 0.7, Reason: "new risk evidence"},
+			},
+		},
+	}
+	err := debate.ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("expected valid: utility dimension re-evaluation should satisfy four-of-one rule: %v", err)
+	}
+}
+
+func TestValidateReflection_NoCriterionMet(t *testing.T) {
+	r := &entity.Reflection{
+		PositionChange: entity.PositionChangeChange,
+	}
+	err := debate.ValidateReflection(r, &entity.Vote{}, evidence.NewEvidenceLedger("c", "r", "m"), map[string]bool{}, false)
+	if err == nil {
+		t.Fatal("expected error: no four-of-one criterion met")
+	}
+}

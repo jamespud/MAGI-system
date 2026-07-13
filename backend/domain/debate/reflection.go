@@ -38,8 +38,9 @@ func ValidateReflection(
 		hasNew := len(r.NewEvidenceIDs) > 0
 		hasAccept := len(r.AcceptedClaims) > 0
 		hasReject := len(r.RejectedClaims) > 0
-		if !hasNew && !hasAccept && !hasReject {
-			return errors.New("position change requires new evidence, accepted claim, or rejected claim")
+		hasReevaluate := r.UtilityDimensionReevaluation != nil && len(r.UtilityDimensionReevaluation.DimensionsReEvaluated) > 0
+		if !hasNew && !hasAccept && !hasReject && !hasReevaluate {
+			return errors.New("position change requires new evidence, accepted claim, rejected claim, or utility dimension re-evaluation")
 		}
 		// Verify all referenced EV-IDs exist in the ledger.
 		for _, evID := range r.NewEvidenceIDs {
