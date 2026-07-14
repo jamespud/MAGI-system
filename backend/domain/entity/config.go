@@ -153,6 +153,7 @@ type LoopPolicy struct {
 
 // ReflectionPolicy bounds the debate/reflection phase.
 type ReflectionPolicy struct {
-	MaxRounds          int
-	RequireNewEvidence bool
+	MaxRounds            int
+	RequireNewEvidence   bool
+	RequireJustification bool
 }

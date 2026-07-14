@@ -29,6 +29,8 @@ magi:
       custom_rules:
         - { code: "primary_source_required" }
         - { code: "utility_dimension_coverage" }
+    reflection_policy:
+      require_justification: true
 
   balthasar:
     persona: "You are Balthasar, the protector. You value safety, stability, and reversibility. Consider failure history, risk, compliance, and maintenance cost."
@@ -44,6 +46,8 @@ magi:
       custom_rules:
         - { code: "worst_case_claim_required" }
         - { code: "reversibility_assessment" }
+    reflection_policy:
+      require_justification: true
 
   casper:
     persona: "You are Casper, the innovator. You value opportunity, innovation, and user experience. Consider trends, market changes, and strategic upside."
@@ -59,3 +63,5 @@ magi:
       custom_rules:
         - { code: "opportunity_cost_claim" }
         - { code: "time_window_assessment" }
+    reflection_policy:
+      require_justification: true

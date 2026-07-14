@@ -38,10 +38,16 @@ type Config struct {
 }
 
 type MagiSpec struct {
-	Persona      string             `yaml:"persona"`
-	Dimensions   []DimensionSpec    `yaml:"dimensions"`
-	RiskTendency string             `yaml:"risk_tendency"`
-	Evidence     EvidenceSpec       `yaml:"evidence"`
+	Persona          string               `yaml:"persona"`
+	Dimensions       []DimensionSpec      `yaml:"dimensions"`
+	RiskTendency     string               `yaml:"risk_tendency"`
+	Evidence         EvidenceSpec         `yaml:"evidence"`
+	ReflectionPolicy ReflectionPolicySpec `yaml:"reflection_policy"`
+}
+
+type ReflectionPolicySpec struct {
+	RequireJustification bool `yaml:"require_justification"`
+	RequireNewEvidence   bool `yaml:"require_new_evidence"`
 }
 
 type DimensionSpec struct {
@@ -117,6 +123,10 @@ func (s *MagiSpec) toConfig(code string, cfg *Config) *entity.MagiConfig {
 			APIKey:    cfg.Model.APIKey,
 			BaseURL:   cfg.Model.BaseURL,
 			ModelName: cfg.Model.ModelName,
+		},
+		ReflectionPolicy: entity.ReflectionPolicy{
+			RequireJustification: s.ReflectionPolicy.RequireJustification,
+			RequireNewEvidence:   s.ReflectionPolicy.RequireNewEvidence,
 		},
 		LoopPolicy: entity.LoopPolicy{
 			MaxSteps:                         cfg.Magi.MaxSteps,

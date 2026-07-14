@@ -145,7 +145,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 		case entity.CaseStatusRevoting:
 			o.publish(ctx, case_, entity.EventRevoteSubmitted)
-			votes = o.extractVotes(results)
+			newVotes := o.extractVotes(results)
+			EnforceReflectionRule(votes, newVotes, results, o.configs, round)
+			votes = newVotes
 			round++
 			status = entity.CaseStatusConsensusCheck
 
@@ -268,6 +270,40 @@ func (o *Orchestrator) shouldDebate(round int, maxDebate int) bool {
 		return true
 	}
 	return round < maxDebate
+}
+
+// EnforceReflectionRule applies the design §17 four-of-one rule to vote changes
+// between rounds. For each agent whose config requires justification and whose
+// vote decision changed, it infers a Reflection from the vote diff and validates
+// it; an unjustified change is reverted to the previous vote.
+func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtime.LoopResult, configs []*entity.MagiConfig, round int) {
+	for i := 0; i < len(newVotes) && i < len(prevVotes); i++ {
+		pv, nv := prevVotes[i], newVotes[i]
+		if pv == nil || nv == nil || pv.Decision == nv.Decision {
+			continue
+		}
+		if i >= len(configs) || !configs[i].ReflectionPolicy.RequireJustification {
+			continue
+		}
+		r := debate.InferReflection(pv, nv, round)
+		if r == nil {
+			continue
+		}
+		var ledger *evidence.EvidenceLedger
+		claimIDs := map[string]bool{}
+		if i < len(results) && results[i] != nil && results[i].Ledger != nil {
+			ledger = results[i].Ledger
+			for _, c := range ledger.ListClaims() {
+				claimIDs[c.ID] = true
+			}
+		} else {
+			ledger = evidence.NewEvidenceLedger("", "", "")
+		}
+		requireNew := configs[i].ReflectionPolicy.RequireNewEvidence
+		if err := debate.ValidateReflection(r, pv, ledger, claimIDs, requireNew); err != nil {
+			newVotes[i] = pv // revert unjustified change
+		}
+	}
 }
 
 func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType) {

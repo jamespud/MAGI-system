@@ -260,3 +260,40 @@ func TestOrchestrate_FirstRoundSplitMaxDebateOne(t *testing.T) {
 		t.Fatalf("expected round 2 (debate+revote), got %d", res.Consensus.Round)
 	}
 }
+
+func TestEnforceReflectionRule_RevertsUnjustifiedChange(t *testing.T) {
+	ledger := evidence.NewEvidenceLedger("c", "r", "m")
+	ev := ledger.Record("tc", "tool", "local", "", "obs", entity.ReliabilityScore{Final: 0.9})
+	prev := []*entity.Vote{{Decision: entity.VoteDecisionReject, EvidenceIDs: []string{ev.ID}}}
+	newVotes := []*entity.Vote{{Decision: entity.VoteDecisionApprove, EvidenceIDs: []string{ev.ID}}}
+	results := []*runtime.LoopResult{{Ledger: ledger}}
+	configs := []*entity.MagiConfig{{ReflectionPolicy: entity.ReflectionPolicy{RequireJustification: true}}}
+	orchestration.EnforceReflectionRule(prev, newVotes, results, configs, 1)
+	if newVotes[0].Decision != entity.VoteDecisionReject {
+		t.Fatalf("unjustified change should revert to reject, got %s", newVotes[0].Decision)
+	}
+}
+
+func TestEnforceReflectionRule_AllowsJustifiedChange(t *testing.T) {
+	ledger := evidence.NewEvidenceLedger("c", "r", "m")
+	ev1 := ledger.Record("tc1", "tool", "local", "", "obs1", entity.ReliabilityScore{Final: 0.9})
+	ev2 := ledger.Record("tc2", "tool", "local", "", "obs2", entity.ReliabilityScore{Final: 0.9})
+	prev := []*entity.Vote{{Decision: entity.VoteDecisionReject, EvidenceIDs: []string{ev1.ID}}}
+	newVotes := []*entity.Vote{{Decision: entity.VoteDecisionApprove, EvidenceIDs: []string{ev1.ID, ev2.ID}}}
+	results := []*runtime.LoopResult{{Ledger: ledger}}
+	configs := []*entity.MagiConfig{{ReflectionPolicy: entity.ReflectionPolicy{RequireJustification: true}}}
+	orchestration.EnforceReflectionRule(prev, newVotes, results, configs, 1)
+	if newVotes[0].Decision != entity.VoteDecisionApprove {
+		t.Fatalf("justified change should be kept, got %s", newVotes[0].Decision)
+	}
+}
+
+func TestEnforceReflectionRule_DisabledNoRevert(t *testing.T) {
+	prev := []*entity.Vote{{Decision: entity.VoteDecisionReject}}
+	newVotes := []*entity.Vote{{Decision: entity.VoteDecisionApprove}}
+	configs := []*entity.MagiConfig{{ReflectionPolicy: entity.ReflectionPolicy{RequireJustification: false}}}
+	orchestration.EnforceReflectionRule(prev, newVotes, nil, configs, 1)
+	if newVotes[0].Decision != entity.VoteDecisionApprove {
+		t.Fatalf("disabled policy should not revert, got %s", newVotes[0].Decision)
+	}
+}
