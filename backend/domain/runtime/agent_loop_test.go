@@ -264,3 +264,38 @@ func TestAgentLoop_GateFailLimit(t *testing.T) {
 	res, _ := loop.Run(context.Background(), cfg, &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
 	if res.Status != runtime.LoopStatusGateFailed { t.Fatalf("status: %v", res.Status) }
 }
+
+func TestRelaxEvidenceStandard_PreservesCustomRules(t *testing.T) {
+	std := entity.EvidenceStandard{
+		MinEvidenceCount:   3,
+		RequiredClaimCount: 2,
+		CustomRules:        []entity.EvidenceRule{{Code: "worst_case_claim_required"}},
+	}
+	relaxed := runtime.RelaxEvidenceStandard(std, false)
+	if relaxed.MinEvidenceCount != 0 {
+		t.Fatalf("MinEvidenceCount should be zeroed, got %d", relaxed.MinEvidenceCount)
+	}
+	if relaxed.RequiredClaimCount != 0 {
+		t.Fatalf("RequiredClaimCount should be zeroed, got %d", relaxed.RequiredClaimCount)
+	}
+	if len(relaxed.CustomRules) != 1 {
+		t.Fatalf("CustomRules should be preserved, got %d", len(relaxed.CustomRules))
+	}
+	if relaxed.CustomRules[0].Code != "worst_case_claim_required" {
+		t.Fatalf("preserved rule code: %s", relaxed.CustomRules[0].Code)
+	}
+}
+
+func TestRelaxEvidenceStandard_WithToolsUnchanged(t *testing.T) {
+	std := entity.EvidenceStandard{
+		MinEvidenceCount: 3,
+		CustomRules:      []entity.EvidenceRule{{Code: "primary_source_required"}},
+	}
+	got := runtime.RelaxEvidenceStandard(std, true)
+	if got.MinEvidenceCount != 3 {
+		t.Fatalf("with tools should be unchanged, got MinEvidenceCount=%d", got.MinEvidenceCount)
+	}
+	if len(got.CustomRules) != 1 {
+		t.Fatalf("with tools CustomRules unchanged, got %d", len(got.CustomRules))
+	}
+}

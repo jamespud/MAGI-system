@@ -16,6 +16,16 @@ import (
 
 var ErrMaxSteps = errors.New("magi agent loop: max steps exceeded")
 
+// RelaxEvidenceStandard drops count/type requirements when no tools are bound
+// (the agent reasons from intrinsic knowledge), but preserves CustomRules so
+// semantic claim rules (e.g. worst-case claim) remain enforced without tools.
+func RelaxEvidenceStandard(std entity.EvidenceStandard, hasTools bool) entity.EvidenceStandard {
+	if hasTools {
+		return std
+	}
+	return entity.EvidenceStandard{CustomRules: std.CustomRules}
+}
+
 type AgentLoop struct {
 	modelPort  port.ModelPort
 	toolReg    port.ToolRegistryPort
@@ -124,10 +134,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 	// In standalone/knowledge-only mode, relax evidence requirements so the
 	// agent can reason from intrinsic knowledge and produce a valid vote.
-	evidenceStd := cfg.EvidenceStandard
-	if !hasTools {
-		evidenceStd = entity.EvidenceStandard{} // zero = no requirements
-	}
+	evidenceStd := RelaxEvidenceStandard(cfg.EvidenceStandard, hasTools)
 	nameToDef := make(map[string]port.ToolDefinition)
 	infos := make([]*schema.ToolInfo, 0, len(defs))
 	for _, d := range defs {
