@@ -367,3 +367,38 @@ func TestAgentLoop_GatePassSingleClaimCreatedEvent(t *testing.T) {
 		t.Fatalf("expected exactly 1 EventClaimCreated (1 claim in summary), got %d", count)
 	}
 }
+
+func TestAgentLoop_EventsCarryRunID(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		EventPub:  rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	actx := &runtime.AgentContext{CaseID: "c1", RunID: "c1-melchior-r1-investigate", Task: entity.DecisionTask{CanonicalQuestion: "compute"}}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), actx)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(rec.events) == 0 {
+		t.Fatal("expected events to be published")
+	}
+	for _, e := range rec.events {
+		if e.RunID != "c1-melchior-r1-investigate" {
+			t.Fatalf("event RunID=%q want=%q (type=%s)", e.RunID, "c1-melchior-r1-investigate", e.Type)
+		}
+	}
+}

@@ -101,7 +101,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 		case entity.CaseStatusInvestigating:
 			o.publish(ctx, case_, entity.EventAgentStarted)
-			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs)
+			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs, round)
 			status = entity.CaseStatusEvidenceGating
 
 		case entity.CaseStatusEvidenceGating:
@@ -136,7 +136,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			allClaims := o.collectClaims(results)
 			allEvidence := o.collectEvidence(results)
 			packet := o.debate.BuildPacket(derefVotes(votes), allClaims, round, allEvidence)
-			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs)
+			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs, round)
 			status = entity.CaseStatusReflecting
 
 		case entity.CaseStatusReflecting:

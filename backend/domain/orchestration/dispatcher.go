@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -21,6 +22,7 @@ func (d *Dispatcher) Dispatch(
 	case_ *entity.DecisionCase,
 	task *entity.DecisionTask,
 	configs []*entity.MagiConfig,
+	round int,
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	var wg sync.WaitGroup
@@ -30,7 +32,11 @@ func (d *Dispatcher) Dispatch(
 			defer wg.Done()
 			// Per-Magi AgentContext: each Magi gets its own context with its
 			// specific config (persona/objective/tools) via cfg in agent_loop.Run.
-			actx := &runtime.AgentContext{CaseID: case_.ID, Task: derefTask(task)}
+			actx := &runtime.AgentContext{
+				CaseID: case_.ID,
+				RunID:  fmt.Sprintf("%s-%s-r%d-investigate", case_.ID, c.Code, round),
+				Task:   derefTask(task),
+			}
 			r, _ := d.agentLoop.Run(ctx, c, actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
@@ -49,6 +55,7 @@ func (d *Dispatcher) DispatchReconsider(
 	packet entity.DebatePacket,
 	prevResults []*runtime.LoopResult,
 	configs []*entity.MagiConfig,
+	round int,
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	var wg sync.WaitGroup
@@ -61,8 +68,9 @@ func (d *Dispatcher) DispatchReconsider(
 				prevVote = prevResults[idx].Vote
 			}
 			actx := &runtime.AgentContext{
-				CaseID: case_.ID,
-				Task:   derefTask(task),
+				CaseID:        case_.ID,
+				RunID:         fmt.Sprintf("%s-%s-r%d-reconsider", case_.ID, c.Code, round),
+				Task:          derefTask(task),
 				DebateContext: &runtime.DebateContext{Packet: packet, PreviousVote: prevVote},
 			}
 			r, _ := d.agentLoop.Run(ctx, c, actx)

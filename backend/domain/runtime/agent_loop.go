@@ -181,7 +181,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		}
 		stepStart := time.Now()
 		resp, err := bound.Generate(ctx, messages)
-		l.publish(ctx, actx.CaseID, "", agentCode, entity.EventModelResponded)
+		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded)
 		st := &Step{Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {
 			result.Status = LoopStatusError
@@ -231,18 +231,18 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				}
 				// Execute
 				toolStart := time.Now()
-				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallStarted)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted)
 				execRes, execErr := l.toolExec.Execute(ctx, port.ToolExecutionRequest{ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments})
 				tcr.Duration = time.Since(toolStart)
 				if execErr != nil {
 					tcr.Err = execErr.Error()
 					ts.consecToolFail++
-					l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallFailed)
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed)
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, execErr.Error()), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventToolCallCompleted)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted)
 				ts.consecToolFail = 0
 				tcr.Valid = true
 				tcr.Result = execRes.Output
@@ -252,7 +252,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
 					if ev != nil {
 						tcr.EvidenceID = ev.ID
-							l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceCreated)
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated)
 					}
 				}
 				messages = append(messages, schema.ToolMessage(execRes.Output, tc.ID))
@@ -280,7 +280,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					}
 					if validEVs {
 						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-							l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
 					}
 				}
 			}
@@ -291,7 +291,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		case ResponseEvidenceSummary:
 			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
 			if !gateRes.Passed {
-				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGateFailed)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed)
 				ts.gateFail++
 				messages = append(messages, resp)
 				messages = append(messages, schema.UserMessage("Evidence gate failed: "+gateViolationsMsg(gateRes)+"; gather more evidence or fix your EvidenceSummary."))
@@ -303,11 +303,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			// Gate passed
-			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGatePassed)
+			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGatePassed)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
 				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
 			}
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
@@ -323,7 +323,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			result.Vote = pr.Vote
-			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventVoteSubmitted)
+			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventVoteSubmitted)
 			result.Status = LoopStatusCompleted
 			st.IsFinal = true
 			trace.Steps = append(trace.Steps, st)
