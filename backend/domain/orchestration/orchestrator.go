@@ -117,7 +117,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			consResult = o.consensus.Evaluate(derefVotes(votes), round, o.policy)
 			o.publish(ctx, case_, entity.EventConsensusEvaluated)
 			switch consResult.Outcome {
-			case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection:
+			case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection, entity.ConsensusConditional:
 				status = entity.CaseStatusResolving
 			case entity.ConsensusMajorityApprovalDissent, entity.ConsensusMajorityRejectionDissent:
 				if o.shouldDebate(round, maxDebate) {
@@ -325,6 +325,8 @@ func finalDecision(c entity.ConsensusResult) entity.VoteDecision {
 		return entity.VoteDecisionApprove
 	case entity.ConsensusStrongRejection, entity.ConsensusMajorityRejectionDissent:
 		return entity.VoteDecisionReject
+	case entity.ConsensusConditional:
+		return entity.VoteDecisionConditionalApprove
 	default:
 		return entity.VoteDecisionAbstain
 	}

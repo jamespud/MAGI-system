@@ -127,6 +127,13 @@ func newCommander(t *testing.T) *service.Commander {
 
 func approve() *entity.Vote { return &entity.Vote{Decision: entity.VoteDecisionApprove, Confidence: 90, EvidenceIDs: []string{"EV-001"}} }
 func reject() *entity.Vote  { return &entity.Vote{Decision: entity.VoteDecisionReject, Confidence: 70, EvidenceIDs: []string{"EV-001"}} }
+func conditionalApprove() *entity.Vote {
+	return &entity.Vote{
+		Decision:   entity.VoteDecisionConditionalApprove,
+		Confidence: 80,
+		Conditions: []entity.DecisionCondition{{Statement: "must have 2+ Rust engineers", MustHold: true}},
+	}
+}
 
 // --- tests ---
 
@@ -295,5 +302,34 @@ func TestEnforceReflectionRule_DisabledNoRevert(t *testing.T) {
 	orchestration.EnforceReflectionRule(prev, newVotes, nil, configs, 1)
 	if newVotes[0].Decision != entity.VoteDecisionApprove {
 		t.Fatalf("disabled policy should not revert, got %s", newVotes[0].Decision)
+	}
+}
+
+func TestOrchestrate_ConditionalConsensusResolves(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{conditionalApprove()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "q", MaxDebateRounds: 1})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if res == nil || res.Consensus.Outcome != entity.ConsensusConditional {
+		t.Fatalf("expected ConsensusConditional, got: %+v", res)
+	}
+	if res.FinalDecision != entity.VoteDecisionConditionalApprove {
+		t.Fatalf("expected final decision conditional_approve, got %s", res.FinalDecision)
+	}
+	if len(res.Consensus.Conditions) != 1 {
+		t.Fatalf("expected 1 condition carried to resolution, got %d", len(res.Consensus.Conditions))
 	}
 }
