@@ -40,3 +40,34 @@ func BuildReport(resolution *entity.Resolution, votes []*entity.Vote, evidence [
 	}
 	return b.String()
 }
+
+// RenderReport renders a validated FinalReportData into a markdown report.
+// Empty list sections are omitted. A nil input returns "".
+func RenderReport(d *entity.FinalReportData) string {
+	if d == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Decision Report\n\n")
+	fmt.Fprintf(&b, "## Decision\n%s\n\n", d.Decision)
+	fmt.Fprintf(&b, "## Summary\n%s\n", d.Summary)
+	if len(d.KeyReasons) > 0 {
+		b.WriteString("\n## Key Reasons\n")
+		for _, r := range d.KeyReasons {
+			fmt.Fprintf(&b, "- %s\n", r)
+		}
+	}
+	if len(d.Risks) > 0 {
+		b.WriteString("\n## Risks\n")
+		for _, r := range d.Risks {
+			fmt.Fprintf(&b, "- %s\n", r)
+		}
+	}
+	if len(d.NextSteps) > 0 {
+		b.WriteString("\n## Next Steps\n")
+		for _, s := range d.NextSteps {
+			fmt.Fprintf(&b, "- %s\n", s)
+		}
+	}
+	return b.String()
+}
