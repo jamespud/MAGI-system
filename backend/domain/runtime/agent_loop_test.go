@@ -199,10 +199,11 @@ func TestAgentLoop_ReliabilityFromBinding(t *testing.T) {
 		finalMsg(summaryJSON("EV-001")),
 		finalMsg(voteJSON("correctness")),
 	}, &rel)
-	res, err := loop.Run(context.Background(), evidenceCfg(1, 0.9), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0.7), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
 	if err != nil { t.Fatalf("run: %v", err) }
 	ev, ok := res.Ledger.Get("EV-001")
-	if !ok || ev.Reliability.Final != 0.95 { t.Fatalf("reliability: %+v", ev) }
+	if !ok || ev.Reliability.Base != 0.95 { t.Fatalf("reliability base should reflect binding override: %+v", ev) }
+	if ev.Reliability.Final == ev.Reliability.Base { t.Fatalf("Final should be a weighted average, not == Base: %+v", ev) }
 }
 
 func TestAgentLoop_MaxSteps(t *testing.T) {
@@ -297,5 +298,28 @@ func TestRelaxEvidenceStandard_WithToolsUnchanged(t *testing.T) {
 	}
 	if len(got.CustomRules) != 1 {
 		t.Fatalf("with tools CustomRules unchanged, got %d", len(got.CustomRules))
+	}
+}
+
+func TestAgentLoop_UsesFullReliabilityResolver(t *testing.T) {
+	rel := 0.9
+	loop := newAgentLoop(t, []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}, &rel)
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	ev, ok := res.Ledger.Get("EV-001")
+	if !ok || ev == nil {
+		t.Fatalf("evidence EV-001 not found")
+	}
+	if ev.Reliability.Final == ev.Reliability.Base {
+		t.Fatalf("Final==Base (%v): FullReliabilityResolver not wired; expected weighted average", ev.Reliability.Final)
+	}
+	if ev.Reliability.Directness == 0 || ev.Reliability.Extraction == 0 {
+		t.Fatalf("modifiers should be non-zero with FullReliabilityResolver: %+v", ev.Reliability)
 	}
 }
