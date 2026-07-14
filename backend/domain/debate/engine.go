@@ -55,6 +55,9 @@ func (e *DebateEngine) BuildPacket(
 	}
 
 	conflicts := e.finder.Find(claims)
+	if len(conflicts) == 0 && len(majority) > 0 && len(minority) > 0 {
+		conflicts = synthesizeConflicts(majority, minority)
+	}
 
 	shared := make([]entity.EvidenceRecord, len(sharedEvidence))
 	for i, e := range sharedEvidence {
@@ -70,4 +73,30 @@ func (e *DebateEngine) BuildPacket(
 		ConflictingClaims: conflicts,
 		SharedEvidence:    shared,
 	}
+}
+
+// synthesizeConflicts builds deterministic ClaimConflict pairs from the vote
+// split when agents assert no explicit contradictions. It pairs majority
+// KeyClaimIDs with minority KeyClaimIDs by index, capped at 3 pairs, so the
+// debate has concrete claims to target (design §16).
+func synthesizeConflicts(majority, minority []entity.Vote) []entity.ClaimConflict {
+	var out []entity.ClaimConflict
+	for _, maj := range majority {
+		for _, min := range minority {
+			for i := 0; i < len(maj.KeyClaimIDs) && i < len(min.KeyClaimIDs); i++ {
+				out = append(out, entity.ClaimConflict{
+					ClaimA: maj.KeyClaimIDs[i],
+					ClaimB: min.KeyClaimIDs[i],
+					Reason: "opposing-vote",
+				})
+				if len(out) >= 3 {
+					return out
+				}
+			}
+			if len(out) >= 3 {
+				return out
+			}
+		}
+	}
+	return out
 }

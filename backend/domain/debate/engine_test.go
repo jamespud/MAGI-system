@@ -114,3 +114,50 @@ func TestInferReflection_Maintain(t *testing.T) {
 		t.Fatalf("position: %s", r.PositionChange)
 	}
 }
+
+func TestBuildPacket_SynthesizesConflictsWhenNoAssertion(t *testing.T) {
+	votes := []entity.Vote{
+		{Decision: entity.VoteDecisionApprove, KeyClaimIDs: []string{"C-major-1"}},
+		{Decision: entity.VoteDecisionApprove, KeyClaimIDs: []string{"C-major-2"}},
+		{Decision: entity.VoteDecisionReject, KeyClaimIDs: []string{"C-minor-1"}},
+	}
+	claims := []*entity.Claim{
+		{ID: "C-major-1", Statement: "rust is faster"},
+		{ID: "C-major-2", Statement: "rust is safer"},
+		{ID: "C-minor-1", Statement: "rewrite is risky"},
+	}
+	eng := NewDebateEngine(nil)
+	pkt := eng.BuildPacket(votes, claims, 1, nil)
+	if len(pkt.ConflictingClaims) == 0 {
+		t.Fatalf("expected synthesized conflicts when no agent-asserted contradictions, got 0")
+	}
+	for _, c := range pkt.ConflictingClaims {
+		if c.Reason != "opposing-vote" {
+			t.Fatalf("synthesized conflict reason should be opposing-vote, got %q", c.Reason)
+		}
+	}
+	if len(pkt.ConflictingClaims) > 3 {
+		t.Fatalf("synthesized conflicts should be capped at 3, got %d", len(pkt.ConflictingClaims))
+	}
+}
+
+func TestBuildPacket_PrefersAgentAssertedConflicts(t *testing.T) {
+	votes := []entity.Vote{
+		{Decision: entity.VoteDecisionApprove, KeyClaimIDs: []string{"C-major-1"}},
+		{Decision: entity.VoteDecisionReject, KeyClaimIDs: []string{"C-minor-1"}},
+	}
+	claims := []*entity.Claim{
+		{ID: "C-major-1", Statement: "a", Contradicts: []string{"C-minor-1"}},
+		{ID: "C-minor-1", Statement: "b"},
+	}
+	eng := NewDebateEngine(nil)
+	pkt := eng.BuildPacket(votes, claims, 1, nil)
+	if len(pkt.ConflictingClaims) == 0 {
+		t.Fatalf("expected agent-asserted conflicts")
+	}
+	for _, c := range pkt.ConflictingClaims {
+		if c.Reason == "opposing-vote" {
+			t.Fatalf("should use agent-asserted conflicts, not synthesized ones")
+		}
+	}
+}
