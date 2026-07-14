@@ -8,8 +8,8 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
@@ -207,6 +207,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			messages = append(messages, resp)
 			for _, tc := range resp.ToolCalls {
 				tcr := ToolCallRecord{ToolCallID: tc.ID, ToolName: tc.Function.Name, Arguments: tc.Function.Arguments}
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested)
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to
 				// cfg.ToolBindings. nameToDef only contains permitted tools. A tool call
 				// to a non-permitted tool falls into the !ok branch below (tool not found).
@@ -229,6 +230,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated)
 				// Execute
 				toolStart := time.Now()
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted)
@@ -252,7 +254,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
 					if ev != nil {
 						tcr.EvidenceID = ev.ID
-							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated)
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated)
 					}
 				}
 				messages = append(messages, schema.ToolMessage(execRes.Output, tc.ID))
@@ -280,7 +282,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					}
 					if validEVs {
 						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
 					}
 				}
 			}

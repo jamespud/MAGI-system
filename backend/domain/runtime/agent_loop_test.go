@@ -35,7 +35,9 @@ func (s *scriptedChatModel) Generate(ctx context.Context, input []*schema.Messag
 func (s *scriptedChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) { return s, nil }
+func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return s, nil
+}
 
 type stubModelPort struct{ m model.ToolCallingChatModel }
 
@@ -84,8 +86,8 @@ func evidenceCfg(minQ, minRel float64) *entity.MagiConfig {
 			MinEvidenceCount: 1, MinQuantitativeCount: int(minQ), MinReliability: minRel,
 			RequireOwnCollected: true, RequiredTypes: []entity.EvidenceTypeRequirement{{Type: "quantitative", MinCount: 1}},
 		},
-		Model: entity.ModelRef{ModelID: 1},
-		Tools: []entity.ToolBinding{{Source: entity.ToolSourceLocal, ToolName: "calc"}},
+		Model:      entity.ModelRef{ModelID: 1},
+		Tools:      []entity.ToolBinding{{Source: entity.ToolSourceLocal, ToolName: "calc"}},
 		LoopPolicy: entity.LoopPolicy{MaxSteps: 12},
 	}
 }
@@ -111,7 +113,9 @@ func newAgentLoop(t *testing.T, responses []*schema.Message, bindingRel *float64
 
 func summaryJSON(ids ...string) string {
 	q := make([]string, len(ids))
-	for i, id := range ids { q[i] = `"` + id + `"` }
+	for i, id := range ids {
+		q[i] = `"` + id + `"`
+	}
 	return fmt.Sprintf(`{"evidence_by_type":{"quantitative":[%s]},"claims":[],"ready":true}`, strings.Join(q, ","))
 }
 func summaryJSONWithClaim(supports string) string {
@@ -133,10 +137,18 @@ func TestAgentLoop_FullFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if res.Vote == nil || res.Vote.Decision != entity.VoteDecisionApprove { t.Fatalf("vote: %+v", res.Vote) }
-	if ev, ok := res.Ledger.Get("EV-001"); !ok || ev.Observation != "3" { t.Fatalf("evidence: %+v", ev) }
-	if len(res.Trace.Steps) != 3 || !res.Trace.Steps[2].IsFinal { t.Fatalf("trace: %d", len(res.Trace.Steps)) }
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if res.Vote == nil || res.Vote.Decision != entity.VoteDecisionApprove {
+		t.Fatalf("vote: %+v", res.Vote)
+	}
+	if ev, ok := res.Ledger.Get("EV-001"); !ok || ev.Observation != "3" {
+		t.Fatalf("evidence: %+v", ev)
+	}
+	if len(res.Trace.Steps) != 3 || !res.Trace.Steps[2].IsFinal {
+		t.Fatalf("trace: %d", len(res.Trace.Steps))
+	}
 }
 
 func TestAgentLoop_GateFailSelfHeal(t *testing.T) {
@@ -148,9 +160,15 @@ func TestAgentLoop_GateFailSelfHeal(t *testing.T) {
 		finalMsg(voteJSON("correctness")),
 	}, nil)
 	res, err := loop.Run(context.Background(), evidenceCfg(2, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err != nil { t.Fatalf("run: %v", err) }
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if len(res.Trace.Steps) != 5 { t.Fatalf("steps: %d", len(res.Trace.Steps)) }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if len(res.Trace.Steps) != 5 {
+		t.Fatalf("steps: %d", len(res.Trace.Steps))
+	}
 }
 
 func TestAgentLoop_SummaryInvalidSelfHeal(t *testing.T) {
@@ -161,9 +179,15 @@ func TestAgentLoop_SummaryInvalidSelfHeal(t *testing.T) {
 		finalMsg(voteJSON("correctness")),
 	}, nil)
 	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err != nil { t.Fatalf("run: %v", err) }
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if len(res.Trace.Steps) != 4 { t.Fatalf("steps: %d", len(res.Trace.Steps)) }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if len(res.Trace.Steps) != 4 {
+		t.Fatalf("steps: %d", len(res.Trace.Steps))
+	}
 }
 
 func TestAgentLoop_VoteDimensionInvalid(t *testing.T) {
@@ -174,9 +198,15 @@ func TestAgentLoop_VoteDimensionInvalid(t *testing.T) {
 		finalMsg(voteJSON("correctness")),
 	}, nil)
 	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err != nil { t.Fatalf("run: %v", err) }
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if len(res.Trace.Steps) != 4 { t.Fatalf("steps: %d", len(res.Trace.Steps)) }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if len(res.Trace.Steps) != 4 {
+		t.Fatalf("steps: %d", len(res.Trace.Steps))
+	}
 }
 
 func TestAgentLoop_ClaimUnsupported(t *testing.T) {
@@ -187,9 +217,15 @@ func TestAgentLoop_ClaimUnsupported(t *testing.T) {
 		finalMsg(voteJSON("correctness")),
 	}, nil)
 	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err != nil { t.Fatalf("run: %v", err) }
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if len(res.Trace.Steps) != 4 { t.Fatalf("steps: %d", len(res.Trace.Steps)) }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if len(res.Trace.Steps) != 4 {
+		t.Fatalf("steps: %d", len(res.Trace.Steps))
+	}
 }
 
 func TestAgentLoop_ReliabilityFromBinding(t *testing.T) {
@@ -200,10 +236,16 @@ func TestAgentLoop_ReliabilityFromBinding(t *testing.T) {
 		finalMsg(voteJSON("correctness")),
 	}, &rel)
 	res, err := loop.Run(context.Background(), evidenceCfg(1, 0.7), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err != nil { t.Fatalf("run: %v", err) }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
 	ev, ok := res.Ledger.Get("EV-001")
-	if !ok || ev.Reliability.Base != 0.95 { t.Fatalf("reliability base should reflect binding override: %+v", ev) }
-	if ev.Reliability.Final == ev.Reliability.Base { t.Fatalf("Final should be a weighted average, not == Base: %+v", ev) }
+	if !ok || ev.Reliability.Base != 0.95 {
+		t.Fatalf("reliability base should reflect binding override: %+v", ev)
+	}
+	if ev.Reliability.Final == ev.Reliability.Base {
+		t.Fatalf("Final should be a weighted average, not == Base: %+v", ev)
+	}
 }
 
 func TestAgentLoop_MaxSteps(t *testing.T) {
@@ -215,8 +257,12 @@ func TestAgentLoop_MaxSteps(t *testing.T) {
 	cfg := evidenceCfg(2, 0)
 	cfg.LoopPolicy.MaxSteps = 3
 	res, err := loop.Run(context.Background(), cfg, &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if !errors.Is(err, runtime.ErrMaxSteps) { t.Fatalf("err: %v", err) }
-	if res.Status != runtime.LoopStatusMaxSteps { t.Fatalf("status: %v", res.Status) }
+	if !errors.Is(err, runtime.ErrMaxSteps) {
+		t.Fatalf("err: %v", err)
+	}
+	if res.Status != runtime.LoopStatusMaxSteps {
+		t.Fatalf("status: %v", res.Status)
+	}
 }
 
 func TestAgentLoop_Cancellation(t *testing.T) {
@@ -224,8 +270,12 @@ func TestAgentLoop_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	res, err := loop.Run(ctx, evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if err == nil { t.Fatalf("expected error") }
-	if res.Status != runtime.LoopStatusCancelled { t.Fatalf("status: %v", res.Status) }
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if res.Status != runtime.LoopStatusCancelled {
+		t.Fatalf("status: %v", res.Status)
+	}
 }
 
 func TestAgentLoop_Reconsider(t *testing.T) {
@@ -240,9 +290,15 @@ func TestAgentLoop_Reconsider(t *testing.T) {
 		DebateContext: &runtime.DebateContext{PreviousVote: prevVote},
 	}
 	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), actx)
-	if err != nil { t.Fatalf("run: %v", err) }
-	if res.Status != runtime.LoopStatusCompleted { t.Fatalf("status: %v", res.Status) }
-	if res.Vote == nil { t.Fatalf("no vote") }
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if res.Vote == nil {
+		t.Fatalf("no vote")
+	}
 }
 
 func TestAgentLoop_TokenBudget(t *testing.T) {
@@ -252,7 +308,9 @@ func TestAgentLoop_TokenBudget(t *testing.T) {
 	cfg := evidenceCfg(1, 0)
 	cfg.LoopPolicy.TokenBudget = 1
 	res, _ := loop.Run(context.Background(), cfg, &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if res.Status != runtime.LoopStatusTokenBudget { t.Fatalf("status: %v", res.Status) }
+	if res.Status != runtime.LoopStatusTokenBudget {
+		t.Fatalf("status: %v", res.Status)
+	}
 }
 
 func TestAgentLoop_GateFailLimit(t *testing.T) {
@@ -263,7 +321,9 @@ func TestAgentLoop_GateFailLimit(t *testing.T) {
 	cfg := evidenceCfg(2, 0)
 	cfg.LoopPolicy.MaxGateFailures = 1
 	res, _ := loop.Run(context.Background(), cfg, &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
-	if res.Status != runtime.LoopStatusGateFailed { t.Fatalf("status: %v", res.Status) }
+	if res.Status != runtime.LoopStatusGateFailed {
+		t.Fatalf("status: %v", res.Status)
+	}
 }
 
 func TestRelaxEvidenceStandard_PreservesCustomRules(t *testing.T) {
@@ -348,7 +408,7 @@ func TestAgentLoop_GatePassSingleClaimCreatedEvent(t *testing.T) {
 		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
 		ToolExec:  &stubToolExec{},
 		Validator: v, Gen: gen,
-		EventPub:  rec,
+		EventPub: rec,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -383,7 +443,7 @@ func TestAgentLoop_EventsCarryRunID(t *testing.T) {
 		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
 		ToolExec:  &stubToolExec{},
 		Validator: v, Gen: gen,
-		EventPub:  rec,
+		EventPub: rec,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -400,5 +460,46 @@ func TestAgentLoop_EventsCarryRunID(t *testing.T) {
 		if e.RunID != "c1-melchior-r1-investigate" {
 			t.Fatalf("event RunID=%q want=%q (type=%s)", e.RunID, "c1-melchior-r1-investigate", e.Type)
 		}
+	}
+}
+
+func TestAgentLoop_ToolCallRequestedAndValidatedEvents(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		EventPub: rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	count := func(et entity.EventType) int {
+		n := 0
+		for _, e := range rec.events {
+			if e.Type == et {
+				n++
+			}
+		}
+		return n
+	}
+	if count(entity.EventToolCallRequested) != 1 {
+		t.Fatalf("expected 1 EventToolCallRequested, got %d", count(entity.EventToolCallRequested))
+	}
+	if count(entity.EventToolCallValidated) != 1 {
+		t.Fatalf("expected 1 EventToolCallValidated, got %d", count(entity.EventToolCallValidated))
 	}
 }
