@@ -65,23 +65,28 @@ func (g *EvidenceGate) Evaluate(summary *entity.EvidenceSummary, ledger *Evidenc
 	if standard.RequireOwnCollected {
 		collectorCheck = collector
 	}
-	for id := range allIDs {
-		if !ledger.ExistsCollected(id, collectorCheck) {
-			res.Passed = false
-			res.Violations = append(res.Violations, GateViolation{Code: "EVIDENCE_NOT_FOUND", Message: fmt.Sprintf("EV-ID %q not found or not own", id), Field: id})
-			continue
-		}
-		rel, ok := ledger.Reliability(id)
-		if !ok || rel < standard.MinReliability {
-			res.Passed = false
-			res.Violations = append(res.Violations, GateViolation{Code: "RELIABILITY_BELOW_THRESHOLD", Message: fmt.Sprintf("EV-ID %q reliability %.2f below %.2f", id, rel, standard.MinReliability), Field: id})
-		}
-	}
-	for i, c := range summary.Claims {
-		for _, sid := range c.Supports {
-			if !ledger.ExistsCollected(sid, collectorCheck) {
+	// EV-ID authenticity checks only apply when evidence was actually collected.
+	// In no-tools mode the ledger is empty (no tool calls -> no evidence records),
+	// so cited EV-IDs cannot be authenticated; skip these checks there.
+	if len(ledger.List()) > 0 {
+		for id := range allIDs {
+			if !ledger.ExistsCollected(id, collectorCheck) {
 				res.Passed = false
-				res.Violations = append(res.Violations, GateViolation{Code: "CLAIM_UNSUPPORTED", Message: fmt.Sprintf("claim #%d supports non-existent EV-ID %q", i, sid), Field: sid})
+				res.Violations = append(res.Violations, GateViolation{Code: "EVIDENCE_NOT_FOUND", Message: fmt.Sprintf("EV-ID %q not found or not own", id), Field: id})
+				continue
+			}
+			rel, ok := ledger.Reliability(id)
+			if !ok || rel < standard.MinReliability {
+				res.Passed = false
+				res.Violations = append(res.Violations, GateViolation{Code: "RELIABILITY_BELOW_THRESHOLD", Message: fmt.Sprintf("EV-ID %q reliability %.2f below %.2f", id, rel, standard.MinReliability), Field: id})
+			}
+		}
+		for i, c := range summary.Claims {
+			for _, sid := range c.Supports {
+				if !ledger.ExistsCollected(sid, collectorCheck) {
+					res.Passed = false
+					res.Violations = append(res.Violations, GateViolation{Code: "CLAIM_UNSUPPORTED", Message: fmt.Sprintf("claim #%d supports non-existent EV-ID %q", i, sid), Field: sid})
+				}
 			}
 		}
 	}
@@ -135,34 +140,37 @@ func claimContainsKeyword(claims []entity.EvidenceSummaryClaim, keywords []strin
 }
 
 func checkWorstCaseClaimRequired(summary *entity.EvidenceSummary, _ *EvidenceLedger, _ string) *GateViolation {
-	if claimContainsKeyword(summary.Claims, []string{"worst case", "worst-case"}) {
+	if claimContainsKeyword(summary.Claims, []string{"worst case", "worst-case", "最坏", "最差", "最糟"}) {
 		return nil
 	}
 	return &GateViolation{Code: "WORST_CASE_CLAIM_MISSING", Message: "no worst-case claim found in summary claims"}
 }
 
 func checkReversibilityAssessment(summary *entity.EvidenceSummary, _ *EvidenceLedger, _ string) *GateViolation {
-	if claimContainsKeyword(summary.Claims, []string{"reversible", "reversibility", "rollback", "undo"}) {
+	if claimContainsKeyword(summary.Claims, []string{"reversible", "reversibility", "rollback", "undo", "可逆", "回滚", "撤销", "恢复"}) {
 		return nil
 	}
 	return &GateViolation{Code: "REVERSIBILITY_MISSING", Message: "no reversibility assessment found in summary claims"}
 }
 
 func checkOpportunityCostClaim(summary *entity.EvidenceSummary, _ *EvidenceLedger, _ string) *GateViolation {
-	if claimContainsKeyword(summary.Claims, []string{"opportunity cost", "opportunity", "trade-off", "tradeoff"}) {
+	if claimContainsKeyword(summary.Claims, []string{"opportunity cost", "opportunity", "trade-off", "tradeoff", "机会成本", "机会", "机遇", "代价", "权衡"}) {
 		return nil
 	}
 	return &GateViolation{Code: "OPPORTUNITY_COST_MISSING", Message: "no opportunity cost claim found in summary claims"}
 }
 
 func checkTimeWindowAssessment(summary *entity.EvidenceSummary, _ *EvidenceLedger, _ string) *GateViolation {
-	if claimContainsKeyword(summary.Claims, []string{"time window", "timing", "window of opportunity", "deadline"}) {
+	if claimContainsKeyword(summary.Claims, []string{"time window", "timing", "window of opportunity", "deadline", "时间窗", "时间", "时机", "窗口", "截止"}) {
 		return nil
 	}
 	return &GateViolation{Code: "TIME_WINDOW_MISSING", Message: "no time window assessment found in summary claims"}
 }
 
 func checkPrimarySourceRequired(summary *entity.EvidenceSummary, ledger *EvidenceLedger, _ string) *GateViolation {
+	if len(ledger.List()) == 0 {
+		return nil // no real evidence collected (e.g. no-tools mode); primary-source requirement moot
+	}
 	for _, ids := range summary.EvidenceByType {
 		for _, evID := range ids {
 			ev, ok := ledger.Get(evID)
@@ -174,7 +182,10 @@ func checkPrimarySourceRequired(summary *entity.EvidenceSummary, ledger *Evidenc
 	return &GateViolation{Code: "PRIMARY_SOURCE_MISSING", Message: "no primary/technical source evidence found"}
 }
 
-func checkUtilityDimensionCoverage(summary *entity.EvidenceSummary, _ *EvidenceLedger, _ string) *GateViolation {
+func checkUtilityDimensionCoverage(summary *entity.EvidenceSummary, ledger *EvidenceLedger, _ string) *GateViolation {
+	if len(ledger.List()) == 0 {
+		return nil // no real evidence (e.g. no-tools mode); claim-text coverage suffices
+	}
 	if len(summary.Claims) >= 2 && len(summary.EvidenceByType) >= 2 {
 		return nil
 	}

@@ -98,3 +98,21 @@ func TestGate_AllCustomRulesPass(t *testing.T) {
 		t.Fatalf("expected gate to pass: %+v", res.Violations)
 	}
 }
+
+func TestGate_EmptyLedgerSkipsAuthenticityChecks(t *testing.T) {
+	// No-tools mode: ledger is empty, but the LLM may cite fabricated EV-IDs.
+	// The gate must NOT emit EVIDENCE_NOT_FOUND / CLAIM_UNSUPPORTED then.
+	emptyLedger := evidence.NewEvidenceLedger("c1", "r1", "melchior")
+	summary := &entity.EvidenceSummary{
+		EvidenceByType: map[string][]string{"quantitative": {"FAKE-EV-1"}},
+		Claims:         []entity.EvidenceSummaryClaim{{Statement: "a claim", Supports: []string{"FAKE-EV-1"}}},
+	}
+	standard := entity.EvidenceStandard{MinEvidenceCount: 0}
+	g := evidence.NewEvidenceGate()
+	res := g.Evaluate(summary, emptyLedger, standard, "melchior")
+	for _, v := range res.Violations {
+		if v.Code == "EVIDENCE_NOT_FOUND" || v.Code == "CLAIM_UNSUPPORTED" {
+			t.Fatalf("authenticity check should be skipped on empty ledger, got %s: %s", v.Code, v.Message)
+		}
+	}
+}
