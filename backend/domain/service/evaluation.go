@@ -7,28 +7,8 @@ import (
 	"github.com/jamespud/magi/backend/domain/runtime"
 )
 
-type Evaluation struct {
-	ToolSuccessRate    float64
-	AvgToolCalls       float64
-	ToolParamFailures  int
-	EvidenceCount      int
-	AvgReliability     float64
-	UniqueSourceTypes  int
-	GateFailures       int
-	MaxStepsExceeded   int
-	ValidationFailures int
-	FirstRoundConsensus     bool
-	ConsensusRound          int
-	ConsensusOutcome        entity.ConsensusOutcome
-	TotalTokens             int64
-	AvgTokensPerAgent       float64
-	TotalSteps              int
-	TotalToolCalls          int
-	CounterfactualStability float64
-}
-
-func Evaluate(results []*runtime.LoopResult, consensusRound int, consensusOutcome entity.ConsensusOutcome) *Evaluation {
-	ev := &Evaluation{
+func Evaluate(results []*runtime.LoopResult, consensusRound int, consensusOutcome entity.ConsensusOutcome) *entity.Evaluation {
+	ev := &entity.Evaluation{
 		ConsensusRound:   consensusRound,
 		ConsensusOutcome: consensusOutcome,
 	}

@@ -118,7 +118,14 @@ func (s *MagiSpec) toConfig(code string, cfg *Config) *entity.MagiConfig {
 			BaseURL:   cfg.Model.BaseURL,
 			ModelName: cfg.Model.ModelName,
 		},
-		LoopPolicy: entity.LoopPolicy{MaxSteps: cfg.Magi.MaxSteps, Timeout: time.Duration(cfg.Magi.TimeoutSeconds) * time.Second},
+		LoopPolicy: entity.LoopPolicy{
+			MaxSteps:                         cfg.Magi.MaxSteps,
+			Timeout:                          time.Duration(cfg.Magi.TimeoutSeconds) * time.Second,
+			MaxGateFailures:                  3,
+			MaxConsecutiveToolFailures:       5,
+			MaxConsecutiveValidationFailures: 5,
+			TokenBudget:                      50000,
+		},
 	}
 }
 

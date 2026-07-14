@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
 )
 
@@ -41,5 +42,28 @@ func TestCounterfactualStability_Mixed(t *testing.T) {
 		&entity.DecisionCase{ID: "c1"}, orch, 3)
 	if stab != 2.0/3.0 {
 		t.Fatalf("expected 0.667, got %v", stab)
+	}
+}
+
+func TestEvaluate_PopulatesAllCategories(t *testing.T) {
+	results := []*runtime.LoopResult{
+		{Status: runtime.LoopStatusGateFailed},
+		{Status: runtime.LoopStatusCompleted, Usage: &entity.Usage{TotalTokens: 100}},
+	}
+	ev := service.Evaluate(results, 2, entity.ConsensusMajorityApprovalDissent)
+	if ev == nil {
+		t.Fatal("nil evaluation")
+	}
+	if ev.GateFailures != 1 {
+		t.Fatalf("GateFailures: got %d, want 1", ev.GateFailures)
+	}
+	if ev.TotalTokens != 100 {
+		t.Fatalf("TotalTokens: got %d, want 100", ev.TotalTokens)
+	}
+	if ev.ConsensusRound != 2 {
+		t.Fatalf("ConsensusRound: got %d, want 2", ev.ConsensusRound)
+	}
+	if ev.FirstRoundConsensus {
+		t.Fatal("round 2 should not be first-round consensus")
 	}
 }

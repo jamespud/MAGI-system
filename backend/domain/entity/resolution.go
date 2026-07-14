@@ -12,6 +12,7 @@ type Resolution struct {
 	KeyEvidenceIDs []string
 	KeyClaimIDs    []string
 	VoteIDs        []string
+	Evaluation     *Evaluation
 	CreatedAt      time.Time
 }
 

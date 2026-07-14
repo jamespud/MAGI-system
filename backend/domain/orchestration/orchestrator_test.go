@@ -152,6 +152,9 @@ func TestOrchestrate_UnanimousApprove(t *testing.T) {
 	if res == nil || res.Consensus.Outcome != entity.ConsensusStrongApproval {
 		t.Fatalf("resolution: %+v", res)
 	}
+	if res.Evaluation == nil {
+		t.Fatalf("resolution should carry Evaluation (Evaluate result must not be discarded)")
+	}
 	if res.FinalReport != "decision report" {
 		t.Fatalf("report: %s", res.FinalReport)
 	}

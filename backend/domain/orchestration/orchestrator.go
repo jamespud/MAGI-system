@@ -176,7 +176,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusEvaluating
 
 		case entity.CaseStatusEvaluating:
-			service.Evaluate(results, round, consResult.Outcome)
+			resolution.Evaluation = service.Evaluate(results, round, consResult.Outcome)
 			status = entity.CaseStatusResolved
 
 		case entity.CaseStatusResolved:
