@@ -323,3 +323,47 @@ func TestAgentLoop_UsesFullReliabilityResolver(t *testing.T) {
 		t.Fatalf("modifiers should be non-zero with FullReliabilityResolver: %+v", ev.Reliability)
 	}
 }
+
+type recordingEventPub struct {
+	events []entity.MagiEvent
+}
+
+func (r *recordingEventPub) Publish(ctx context.Context, e entity.MagiEvent) error {
+	r.events = append(r.events, e)
+	return nil
+}
+
+func TestAgentLoop_GatePassSingleClaimCreatedEvent(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSONWithClaim(`"EV-001"`)),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		EventPub:  rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	count := 0
+	for _, e := range rec.events {
+		if e.Type == entity.EventClaimCreated {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 EventClaimCreated (1 claim in summary), got %d", count)
+	}
+}

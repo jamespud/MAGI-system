@@ -306,7 +306,6 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			l.publish(ctx, actx.CaseID, "", agentCode, entity.EventEvidenceGatePassed)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
-				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
 				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
 				l.publish(ctx, actx.CaseID, "", agentCode, entity.EventClaimCreated)
 			}
