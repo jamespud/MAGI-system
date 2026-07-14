@@ -27,15 +27,16 @@ type Orchestrator struct {
 }
 
 type OrchestratorDeps struct {
-	AgentLoop  runtime.MagiRuntime
-	Consensus  *consensus.ConsensusEngine
-	Debate     *debate.DebateEngine
-	Commander  *service.Commander
-	EventPub   port.EventPublisher
-	CaseRepo   port.CaseRepository
-	Configs    []*entity.MagiConfig
-	Policy     consensus.ConsensusPolicy
-	FailPolicy FailurePolicy
+	AgentLoop      runtime.MagiRuntime
+	Consensus      *consensus.ConsensusEngine
+	Debate         *debate.DebateEngine
+	Commander      *service.Commander
+	EventPub       port.EventPublisher
+	CaseRepo       port.CaseRepository
+	ContextBuilder *memory.ContextBuilder
+	Configs        []*entity.MagiConfig
+	Policy         consensus.ConsensusPolicy
+	FailPolicy     FailurePolicy
 }
 
 func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
@@ -44,7 +45,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		fp = DefaultFailurePolicy()
 	}
 	return &Orchestrator{
-		dispatcher: NewDispatcher(d.AgentLoop),
+		dispatcher: NewDispatcher(d.AgentLoop, d.ContextBuilder),
 		consensus:  d.Consensus,
 		debate:     d.Debate,
 		commander:  d.Commander,
