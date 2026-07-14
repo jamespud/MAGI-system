@@ -21,6 +21,7 @@ type Orchestrator struct {
 	commander  *service.Commander
 	eventPub   port.EventPublisher
 	caseRepo   port.CaseRepository
+	knowledge  port.KnowledgePort
 	policy     consensus.ConsensusPolicy
 	failPolicy FailurePolicy
 	configs    []*entity.MagiConfig
@@ -34,6 +35,7 @@ type OrchestratorDeps struct {
 	EventPub       port.EventPublisher
 	CaseRepo       port.CaseRepository
 	ContextBuilder *memory.ContextBuilder
+	Knowledge      port.KnowledgePort
 	Configs        []*entity.MagiConfig
 	Policy         consensus.ConsensusPolicy
 	FailPolicy     FailurePolicy
@@ -51,6 +53,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		commander:  d.Commander,
 		eventPub:   d.EventPub,
 		caseRepo:   d.CaseRepo,
+		knowledge:  d.Knowledge,
 		policy:     d.Policy,
 		failPolicy: fp,
 		configs:    d.Configs,
@@ -174,7 +177,10 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 		case entity.CaseStatusSavingMemory:
 			ledger := o.mergeLedgers(results)
-			memory.BuildProjection(case_, resolution, ledger, votes)
+			proj := memory.BuildProjection(case_, resolution, ledger, votes)
+			if o.knowledge != nil {
+				_ = o.knowledge.Store(ctx, proj)
+			}
 			o.publish(ctx, case_, entity.EventMemoryIndexed)
 			status = entity.CaseStatusEvaluating
 

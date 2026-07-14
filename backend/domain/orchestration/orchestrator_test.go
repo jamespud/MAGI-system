@@ -334,3 +334,31 @@ func TestOrchestrate_ConditionalConsensusResolves(t *testing.T) {
 		t.Fatalf("expected 1 condition carried to resolution, got %d", len(res.Consensus.Conditions))
 	}
 }
+
+func TestOrchestrate_StoresProjection(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	kp := &mockKnowledgePort{}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Knowledge: kp,
+	})
+	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "q", MaxDebateRounds: 1})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(kp.stored) != 1 {
+		t.Fatalf("expected 1 projection stored, got %d", len(kp.stored))
+	}
+	if kp.stored[0] == nil {
+		t.Fatal("stored projection is nil")
+	}
+}
