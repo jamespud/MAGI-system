@@ -19,9 +19,13 @@ func (e *ConsensusEngine) Evaluate(votes []entity.Vote, round int, policy Consen
 	}
 
 	approve, reject, abstain := 0, 0, 0
+	condCount := 0
+	var conditions []entity.DecisionCondition
 	for _, v := range votes {
 		d := v.Decision
 		if d == entity.VoteDecisionConditionalApprove {
+			condCount++
+			conditions = append(conditions, v.Conditions...)
 			if policy.ConditionalAsApprove {
 				d = entity.VoteDecisionApprove
 			} else {
@@ -43,6 +47,18 @@ func (e *ConsensusEngine) Evaluate(votes []entity.Vote, round int, policy Consen
 		return entity.ConsensusResult{
 			Outcome: entity.ConsensusInsufficientQuorum, Votes: votes, Round: round,
 			Detail: fmt.Sprintf("effective %d < quorum %d", effective, policy.Quorum),
+		}
+	}
+
+	// ConsensusConditional: an approval majority that includes conditional votes
+	// surfaces the conditions instead of a plain approval (design §15).
+	if policy.ConditionalAsApprove && condCount > 0 && approve >= 2 && approve > reject {
+		return entity.ConsensusResult{
+			Outcome:    entity.ConsensusConditional,
+			Votes:      votes,
+			Round:      round,
+			Detail:     fmt.Sprintf("conditional approval, %d condition(s)", len(conditions)),
+			Conditions: conditions,
 		}
 	}
 

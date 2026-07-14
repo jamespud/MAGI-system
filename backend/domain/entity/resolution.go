@@ -18,10 +18,11 @@ type Resolution struct {
 
 // ConsensusResult is the deterministic consensus outcome.
 type ConsensusResult struct {
-	Outcome ConsensusOutcome
-	Votes   []Vote
-	Round   int
-	Detail  string
+	Outcome    ConsensusOutcome
+	Votes      []Vote
+	Round      int
+	Detail     string
+	Conditions []DecisionCondition
 }
 
 type ConsensusOutcome string
