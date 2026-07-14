@@ -19,11 +19,12 @@ type CommanderConfig struct {
 
 // Commander makes validated structured-output LLM calls (no loop, no tools).
 type Commander struct {
-	cfg     CommanderConfig
-	model   port.ModelPort
-	gen     validation.SchemaGenerator
-	val     validation.Validator
-	taskVal *validation.TypedValidator[entity.DecisionTask]
+	cfg       CommanderConfig
+	model     port.ModelPort
+	gen       validation.SchemaGenerator
+	val       validation.Validator
+	taskVal   *validation.TypedValidator[entity.DecisionTask]
+	reportVal *validation.TypedValidator[entity.FinalReportData]
 }
 
 func NewCommander(cfg CommanderConfig, model port.ModelPort, gen validation.SchemaGenerator, val validation.Validator) (*Commander, error) {
@@ -31,7 +32,11 @@ func NewCommander(cfg CommanderConfig, model port.ModelPort, gen validation.Sche
 	if err != nil {
 		return nil, fmt.Errorf("commander: task validator: %w", err)
 	}
-	return &Commander{cfg: cfg, model: model, gen: gen, val: val, taskVal: tv}, nil
+	rv, err := validation.NewTypedValidator[entity.FinalReportData](gen, val)
+	if err != nil {
+		return nil, fmt.Errorf("commander: report validator: %w", err)
+	}
+	return &Commander{cfg: cfg, model: model, gen: gen, val: val, taskVal: tv, reportVal: rv}, nil
 }
 
 func (c *Commander) Normalize(ctx context.Context, case_ *entity.DecisionCase) (*entity.DecisionTask, error) {
@@ -85,14 +90,36 @@ func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCa
 	if err != nil {
 		return "", fmt.Errorf("commander: build model: %w", err)
 	}
-	prompt := fmt.Sprintf("%s\n\nGenerate a human-readable decision report. Question: %s. Consensus: %s. Votes: %d.",
+	prompt := fmt.Sprintf(`%s
+
+Generate a FinalReportData JSON for this decision. You MUST include ALL fields:
+- decision: the final decision (approve/reject/conditional_approve)
+- summary: a one-paragraph summary of the decision
+- key_reasons: main reasoning points (array of strings)
+- risks: risks or dissenting points (array of strings)
+- next_steps: recommended next steps (array of strings)
+
+Question: %s. Consensus: %s. Votes: %d.`,
 		c.cfg.Persona, case_.Question, resolution.Consensus.Outcome, len(votes))
-	resp, err := cm.Generate(ctx, []*schema.Message{
-		schema.SystemMessage(prompt),
-		schema.UserMessage("Output the report now."),
-	})
-	if err != nil {
-		return "", err
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err := cm.Generate(ctx, []*schema.Message{
+			schema.SystemMessage(prompt),
+			schema.UserMessage("Output the FinalReportData JSON now."),
+		})
+		if err != nil {
+			log.Printf("commander: report attempt %d: model generate error: %v", attempt+1, err)
+			continue
+		}
+		data, vr := c.reportVal.ValidateAndUnmarshal([]byte(resp.Content))
+		if vr != nil && vr.Valid {
+			return RenderReport(data), nil
+		}
+		if vr != nil {
+			log.Printf("commander: report attempt %d: validation failed with %d violations", attempt+1, len(vr.Violations))
+			for i, v := range vr.Violations {
+				log.Printf("  violation %d: [%s] %s field=%s", i+1, v.Code, v.Message, v.Field)
+			}
+		}
 	}
-	return resp.Content, nil
+	return "", fmt.Errorf("commander: report generation failed after retries")
 }

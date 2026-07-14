@@ -3,6 +3,7 @@ package orchestration_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -116,7 +117,7 @@ func newCommander(t *testing.T) *service.Commander {
 	val := validation.NewJSONSchemaValidator()
 	cm := &scriptedChatModel{responses: []*schema.Message{
 		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
-		schema.AssistantMessage("decision report", nil),
+		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[]}`, nil),
 	}}
 	cmd, err := service.NewCommander(service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"}, &stubModelPort{m: cm}, gen, val)
 	if err != nil {
@@ -162,7 +163,7 @@ func TestOrchestrate_UnanimousApprove(t *testing.T) {
 	if res.Evaluation == nil {
 		t.Fatalf("resolution should carry Evaluation (Evaluate result must not be discarded)")
 	}
-	if res.FinalReport != "decision report" {
+	if !strings.Contains(res.FinalReport, "decision report summary") {
 		t.Fatalf("report: %s", res.FinalReport)
 	}
 }
