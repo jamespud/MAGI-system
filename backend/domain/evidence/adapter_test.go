@@ -10,7 +10,7 @@ import (
 )
 
 func TestNativeAdapter_StructuredOutput(t *testing.T) {
-	a := evidence.NewNativeAdapter(evidence.DefaultReliabilityResolver())
+	a := evidence.NewNativeAdapter()
 	tool := port.ToolDefinition{Binding: entity.ToolBinding{Source: entity.ToolSourceLocal}}
 	result := &port.ToolExecutionResult{Output: "raw", Structured: map[string]any{"score": 42}}
 	candidates, err := a.Extract(context.Background(), tool, result)
@@ -26,7 +26,7 @@ func TestNativeAdapter_StructuredOutput(t *testing.T) {
 }
 
 func TestNativeAdapter_FallbackToRaw(t *testing.T) {
-	a := evidence.NewNativeAdapter(evidence.DefaultReliabilityResolver())
+	a := evidence.NewNativeAdapter()
 	tool := port.ToolDefinition{Binding: entity.ToolBinding{Source: entity.ToolSourceLocal}}
 	result := &port.ToolExecutionResult{Output: "raw output", Structured: nil}
 	candidates, err := a.Extract(context.Background(), tool, result)
@@ -35,5 +35,31 @@ func TestNativeAdapter_FallbackToRaw(t *testing.T) {
 	}
 	if candidates[0].Observation != "raw output" {
 		t.Fatalf("expected raw fallback, got: %s", candidates[0].Observation)
+	}
+}
+
+func TestNativeAdapter_ExtractionConfidence(t *testing.T) {
+	a := evidence.NewNativeAdapter()
+	tool := port.ToolDefinition{Binding: entity.ToolBinding{Source: entity.ToolSourceLocal}}
+	result := &port.ToolExecutionResult{Output: "raw", Structured: map[string]any{"score": 42}}
+	candidates, _ := a.Extract(context.Background(), tool, result)
+	if candidates[0].Reliability.Extraction != 1.0 {
+		t.Fatalf("native adapter Extraction: got %v want 1.0", candidates[0].Reliability.Extraction)
+	}
+	if candidates[0].Reliability.Directness != 1.0 {
+		t.Fatalf("native adapter Directness for Local: got %v want 1.0", candidates[0].Reliability.Directness)
+	}
+}
+
+func TestRawObservationAdapter_ExtractionConfidence(t *testing.T) {
+	a := evidence.NewRawObservationAdapter()
+	tool := port.ToolDefinition{Binding: entity.ToolBinding{Source: entity.ToolSourceKnowledge}}
+	result := &port.ToolExecutionResult{Output: "raw output"}
+	candidates, _ := a.Extract(context.Background(), tool, result)
+	if candidates[0].Reliability.Extraction != 0.3 {
+		t.Fatalf("raw adapter Extraction: got %v want 0.3", candidates[0].Reliability.Extraction)
+	}
+	if candidates[0].Reliability.Directness != 0.6 {
+		t.Fatalf("raw adapter Directness for Knowledge: got %v want 0.6", candidates[0].Reliability.Directness)
 	}
 }

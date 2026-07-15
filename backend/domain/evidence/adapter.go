@@ -47,21 +47,19 @@ func (r *EvidenceAdapterRegistry) Extract(ctx context.Context, tool port.ToolDef
 
 // NativeAdapter checks for structured tool output first; falls back to raw.
 // Priority: above RawObservationAdapter in the registry.
-type NativeAdapter struct {
-	resolver ReliabilityResolver
-}
+type NativeAdapter struct{}
 
-func NewNativeAdapter(resolver ReliabilityResolver) *NativeAdapter {
-	if resolver == nil {
-		resolver = DefaultReliabilityResolver()
-	}
-	return &NativeAdapter{resolver: resolver}
-}
+func NewNativeAdapter() *NativeAdapter { return &NativeAdapter{} }
 
 func (a *NativeAdapter) Supports(tool port.ToolDefinition) bool { return true }
 
 func (a *NativeAdapter) Extract(ctx context.Context, tool port.ToolDefinition, result *port.ToolExecutionResult) ([]EvidenceCandidate, error) {
-	rel := a.resolver(tool.Binding)
+	rel := ComputeReliability(ReliabilityInput{
+		SourceType:           tool.Binding.Source,
+		ExplicitReliability:  tool.Binding.Reliability,
+		Directness:           DirectnessFromSource(tool.Binding.Source),
+		ExtractionConfidence: 1.0, // native = deterministic structured extraction
+	})
 	obs := result.Output
 	if result.Structured != nil {
 		obs = fmt.Sprintf("%+v", result.Structured)
@@ -70,20 +68,18 @@ func (a *NativeAdapter) Extract(ctx context.Context, tool port.ToolDefinition, r
 }
 
 // RawObservationAdapter always supports; wraps the whole output as one candidate.
-type RawObservationAdapter struct {
-	resolver ReliabilityResolver
-}
+type RawObservationAdapter struct{}
 
-func NewRawObservationAdapter(resolver ReliabilityResolver) *RawObservationAdapter {
-	if resolver == nil {
-		resolver = DefaultReliabilityResolver()
-	}
-	return &RawObservationAdapter{resolver: resolver}
-}
+func NewRawObservationAdapter() *RawObservationAdapter { return &RawObservationAdapter{} }
 
 func (a *RawObservationAdapter) Supports(tool port.ToolDefinition) bool { return true }
 
 func (a *RawObservationAdapter) Extract(ctx context.Context, tool port.ToolDefinition, result *port.ToolExecutionResult) ([]EvidenceCandidate, error) {
-	rel := a.resolver(tool.Binding)
+	rel := ComputeReliability(ReliabilityInput{
+		SourceType:           tool.Binding.Source,
+		ExplicitReliability:  tool.Binding.Reliability,
+		Directness:           DirectnessFromSource(tool.Binding.Source),
+		ExtractionConfidence: 0.3, // raw = unstructured fallback
+	})
 	return []EvidenceCandidate{{Observation: result.Output, Reliability: rel}}, nil
 }

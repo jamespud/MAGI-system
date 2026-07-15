@@ -79,8 +79,8 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	adapter := d.Adapter
 	if adapter == nil {
 		adapter = evidence.NewEvidenceAdapterRegistry(evidence.FullReliabilityResolver(),
-			evidence.NewNativeAdapter(evidence.FullReliabilityResolver()),
-			evidence.NewRawObservationAdapter(evidence.FullReliabilityResolver()))
+			evidence.NewNativeAdapter(),
+			evidence.NewRawObservationAdapter())
 	}
 	return &AgentLoop{
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,

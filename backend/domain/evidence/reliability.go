@@ -108,10 +108,28 @@ func FullReliabilityResolver() ReliabilityResolver {
 		return ComputeReliability(ReliabilityInput{
 			SourceType:          b.Source,
 			ExplicitReliability: b.Reliability,
-			Directness:          0.7,
+			Directness:          DirectnessFromSource(b.Source),
 			Recency:             0.5,
 			CorroborationCount:  0,
 			ExtractionConfidence: 0.8,
 		})
+	}
+}
+
+// DirectnessFromSource maps a tool source type to a directness score:
+// primary/technical sources (local, coderunner) are most direct;
+// knowledge (secondary) is least.
+func DirectnessFromSource(source entity.ToolSource) float64 {
+	switch source {
+	case entity.ToolSourceLocal, entity.ToolSourceCodeRunner:
+		return 1.0
+	case entity.ToolSourcePlugin:
+		return 0.8
+	case entity.ToolSourceWorkflow:
+		return 0.7
+	case entity.ToolSourceKnowledge:
+		return 0.6
+	default:
+		return 0.7
 	}
 }

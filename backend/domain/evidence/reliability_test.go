@@ -99,3 +99,22 @@ func TestFullReliabilityResolver(t *testing.T) {
 		t.Fatalf("final should be non-zero: %v", s.Final)
 	}
 }
+
+func TestDirectnessFromSource(t *testing.T) {
+	cases := []struct {
+		source entity.ToolSource
+		want   float64
+	}{
+		{entity.ToolSourceLocal, 1.0},
+		{entity.ToolSourceCodeRunner, 1.0},
+		{entity.ToolSourcePlugin, 0.8},
+		{entity.ToolSourceWorkflow, 0.7},
+		{entity.ToolSourceKnowledge, 0.6},
+	}
+	for _, c := range cases {
+		got := evidence.DirectnessFromSource(c.source)
+		if got != c.want {
+			t.Errorf("DirectnessFromSource(%s)=%v want=%v", c.source, got, c.want)
+		}
+	}
+}
