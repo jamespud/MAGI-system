@@ -513,3 +513,91 @@ func TestAgentLoop_ToolCallRequestedAndValidatedEvents(t *testing.T) {
 		t.Fatalf("expected 1 EventToolCallValidated, got %d", count(entity.EventToolCallValidated))
 	}
 }
+
+type mockCheckpointRepo struct {
+	saved []*entity.AgentState
+	load  *entity.AgentState
+}
+
+func (m *mockCheckpointRepo) Save(ctx context.Context, s *entity.AgentState) error {
+	m.saved = append(m.saved, s)
+	return nil
+}
+func (m *mockCheckpointRepo) Load(ctx context.Context, runID string) (*entity.AgentState, error) {
+	return m.load, nil
+}
+
+func TestAgentLoop_CheckpointSaved(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	repo := &mockCheckpointRepo{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg: &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec: &stubToolExec{}, Validator: v, Gen: gen,
+		CheckpointRepo: repo,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	actx := &runtime.AgentContext{CaseID: "c1", RunID: "c1-melchior-r1-investigate", Task: entity.DecisionTask{CanonicalQuestion: "compute"}}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), actx)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(repo.saved) == 0 {
+		t.Fatal("expected checkpoint saves")
+	}
+	if repo.saved[0].RunID != "c1-melchior-r1-investigate" {
+		t.Fatalf("RunID: %s", repo.saved[0].RunID)
+	}
+	if repo.saved[0].MessagesJSON == "" {
+		t.Fatal("expected non-empty MessagesJSON")
+	}
+}
+
+func TestAgentLoop_ResumeFromCheckpoint(t *testing.T) {
+	msgs := []*schema.Message{
+		schema.SystemMessage("system"),
+		schema.UserMessage("compute"),
+		schema.AssistantMessage(summaryJSON("EV-001"), nil),
+		schema.UserMessage("Evidence gate passed. Now output the Vote JSON."),
+	}
+	msgsJSON, _ := json.Marshal(msgs)
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	repo := &mockCheckpointRepo{load: &entity.AgentState{
+		RunID:        "c1-melchior-r1-investigate",
+		MessagesJSON: string(msgsJSON),
+		StepCount:    1,
+		Phase:        "vote",
+	}}
+	sm := &scriptedChatModel{responses: []*schema.Message{finalMsg(voteJSON("correctness"))}}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: sm}, Validator: v, Gen: gen,
+		CheckpointRepo: repo,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	actx := &runtime.AgentContext{CaseID: "c1", RunID: "c1-melchior-r1-investigate", Task: entity.DecisionTask{CanonicalQuestion: "compute"}}
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), actx)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v (resume failed?)", res.Status)
+	}
+	if res.Vote == nil {
+		t.Fatal("no vote")
+	}
+	if sm.calls != 1 {
+		t.Fatalf("expected 1 model call (resumed at step 2), got %d", sm.calls)
+	}
+}

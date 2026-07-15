@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -38,7 +39,8 @@ type AgentLoop struct {
 	voteVal      *validation.TypedValidator[entity.Vote]
 	claimVal     *validation.TypedValidator[entity.ClaimSubmission]
 	reflectionVal *validation.TypedValidator[entity.Reflection]
-	eventPub     port.EventPublisher
+	eventPub      port.EventPublisher
+	checkpointRepo port.CheckpointRepository
 }
 
 type AgentLoopDeps struct {
@@ -47,9 +49,10 @@ type AgentLoopDeps struct {
 	ToolExec  port.ToolExecutorPort
 	Validator validation.Validator
 	Gen       validation.SchemaGenerator
-	Adapter   *evidence.EvidenceAdapterRegistry
-	Gate      *evidence.EvidenceGate
-	EventPub  port.EventPublisher
+	Adapter       *evidence.EvidenceAdapterRegistry
+	Gate          *evidence.EvidenceGate
+	EventPub      port.EventPublisher
+	CheckpointRepo port.CheckpointRepository
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -87,7 +90,8 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal: rv,
-		eventPub: d.EventPub,
+		eventPub:      d.EventPub,
+		checkpointRepo: d.CheckpointRepo,
 	}, nil
 }
 
@@ -102,6 +106,25 @@ func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode
 		AgentCode: &ac,
 		Type:      et,
 		Timestamp: time.Now(),
+	})
+}
+
+// saveCheckpoint persists the working-memory snapshot for resume (§18).
+// Nil-safe: no-op when checkpointRepo is nil or runID is empty.
+func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *terminationState, phase string) {
+	if l.checkpointRepo == nil || runID == "" {
+		return
+	}
+	msgsJSON, err := json.Marshal(messages)
+	if err != nil {
+		return
+	}
+	_ = l.checkpointRepo.Save(ctx, &entity.AgentState{
+		RunID:        runID,
+		MessagesJSON: string(msgsJSON),
+		StepCount:    step,
+		TokenUsed:    int(ts.tokenUsed),
+		Phase:        phase,
 	})
 }
 
@@ -179,7 +202,22 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	ts := &terminationState{}
 	agentCode := entity.MagiCode(cfg.Code)
 
-	for step := 1; step <= maxSteps; step++ {
+	// Resume from checkpoint if available (§18).
+	startStep := 1
+	if l.checkpointRepo != nil && actx.RunID != "" {
+		if cp, err := l.checkpointRepo.Load(ctx, actx.RunID); err == nil && cp != nil && cp.MessagesJSON != "" {
+			var restored []*schema.Message
+			if json.Unmarshal([]byte(cp.MessagesJSON), &restored) == nil && len(restored) > 0 {
+				messages = restored
+				ts.tokenUsed = int64(cp.TokenUsed)
+				phase = cp.Phase
+				startStep = cp.StepCount + 1
+			}
+		}
+	}
+
+	for step := startStep; step <= maxSteps; step++ {
+		l.saveCheckpoint(ctx, actx.RunID, messages, step-1, ts, phase)
 		if err := ctx.Err(); err != nil {
 			result.Status = LoopStatusCancelled
 			result.Err = err

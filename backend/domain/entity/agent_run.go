@@ -29,11 +29,12 @@ const (
 
 // AgentState is a working-memory snapshot for checkpoint/resume.
 type AgentState struct {
-	RunID      string
-	Messages   []MessageRef
-	StepCount  int
-	TokenUsed  int
-	Phase      string
+	RunID        string
+	Messages     []MessageRef
+	MessagesJSON string // full []*schema.Message JSON for non-lossy resume
+	StepCount    int
+	TokenUsed    int
+	Phase        string
 }
 
 type MessageRef struct {
