@@ -11,7 +11,7 @@ import (
 // evidence/vote schemas + optional debate context (Reconsider mode).
 // hasTools indicates whether the agent has tools available; when false, the prompt
 // instructs the agent to reason from intrinsic knowledge instead of tool calls.
-func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []byte, debate *DebateContext, hasTools bool) string {
+func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, reflectionSchema []byte, debate *DebateContext, hasTools bool) string {
 	if cfg == nil {
 		return ""
 	}
@@ -48,8 +48,12 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema []
 	if debate != nil {
 		b.WriteString("\n\n--- RECONSIDERATION ---\n")
 		b.WriteString("You are in reconsideration mode. Review the debate context and the majority/minority arguments.")
-		b.WriteString(" You may gather new evidence via tool calls, then output a new EvidenceSummary, then a new Vote.")
+		b.WriteString(" You may gather new evidence via tool calls, then output a new EvidenceSummary, then a Reflection, then a new Vote.")
 		b.WriteString(" Your previous vote is included for reference. You must cite new EV-IDs or accept/reject specific claims to justify any position change.")
+		b.WriteString("\n\nAfter your EvidenceSummary passes the gate, output a Reflection JSON describing your position change, then a Vote JSON.")
+		b.WriteString(" The Reflection must justify any position change with at least one of: new EV-ID, accepted claim, rejected claim, or utility dimension re-evaluation.")
+		b.WriteString("\nReflection JSON schema:\n")
+		b.Write(reflectionSchema)
 		if debate.PreviousVote != nil {
 			fmt.Fprintf(&b, "\nYour previous vote: decision=%s, confidence=%.0f.", debate.PreviousVote.Decision, debate.PreviousVote.Confidence)
 		}

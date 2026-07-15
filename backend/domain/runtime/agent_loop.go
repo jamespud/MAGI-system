@@ -34,10 +34,11 @@ type AgentLoop struct {
 	gen        validation.SchemaGenerator
 	adapter    *evidence.EvidenceAdapterRegistry
 	gate       *evidence.EvidenceGate
-	summaryVal *validation.TypedValidator[entity.EvidenceSummary]
-	voteVal    *validation.TypedValidator[entity.Vote]
-	claimVal   *validation.TypedValidator[entity.ClaimSubmission]
-	eventPub   port.EventPublisher
+	summaryVal   *validation.TypedValidator[entity.EvidenceSummary]
+	voteVal      *validation.TypedValidator[entity.Vote]
+	claimVal     *validation.TypedValidator[entity.ClaimSubmission]
+	reflectionVal *validation.TypedValidator[entity.Reflection]
+	eventPub     port.EventPublisher
 }
 
 type AgentLoopDeps struct {
@@ -67,6 +68,10 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent loop: claim validator: %w", err)
 	}
+	rv, err := validation.NewTypedValidator[entity.Reflection](d.Gen, d.Validator)
+	if err != nil {
+		return nil, fmt.Errorf("agent loop: reflection validator: %w", err)
+	}
 	gate := d.Gate
 	if gate == nil {
 		gate = evidence.NewEvidenceGate()
@@ -81,6 +86,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
+		reflectionVal: rv,
 		eventPub: d.EventPub,
 	}, nil
 }
@@ -154,13 +160,14 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	ledger := evidence.NewEvidenceLedger(actx.CaseID, "", cfg.Code)
 	summarySchema, _ := l.gen.FromStruct(entity.EvidenceSummary{})
 	voteSchema, _ := l.gen.FromStruct(entity.Vote{})
+	reflectionSchema, _ := l.gen.FromStruct(entity.Reflection{})
 
 	// Messages
 	question := actx.Task.CanonicalQuestion
 	if question == "" {
 		question = ""
 	}
-	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPrompt(cfg, summarySchema, voteSchema, actx.DebateContext, hasTools))}
+	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPrompt(cfg, summarySchema, voteSchema, reflectionSchema, actx.DebateContext, hasTools))}
 	messages = append(messages, schema.UserMessage(question))
 
 	trace := &LoopTrace{StartedAt: time.Now()}
@@ -200,7 +207,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, result.Err
 		}
 
-		pr := parseResponse(resp, phase, l.summaryVal, l.voteVal, l.claimVal)
+		pr := parseResponse(resp, phase, l.summaryVal, l.voteVal, l.claimVal, l.reflectionVal)
 
 		switch pr.Type {
 		case ResponseToolCall:
@@ -312,7 +319,20 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
 			}
 			messages = append(messages, resp)
-			messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
+			if actx.DebateContext != nil {
+				messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Reflection JSON."))
+				phase = "reconsider_reflect"
+			} else {
+				messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
+				phase = "vote"
+			}
+			trace.Steps = append(trace.Steps, st)
+			continue
+
+		case ResponseReflection:
+			result.Reflection = pr.Reflection
+			messages = append(messages, resp)
+			messages = append(messages, schema.UserMessage("Reflection recorded. Now output the Vote JSON."))
 			phase = "vote"
 			trace.Steps = append(trace.Steps, st)
 			continue

@@ -15,16 +15,18 @@ const (
 	ResponseToolCall        ResponseType = "tool_call"
 	ResponseClaimSubmission ResponseType = "claim_submission"
 	ResponseEvidenceSummary ResponseType = "evidence_summary"
-	ResponseVote             ResponseType = "vote"
-	ResponseInvalid          ResponseType = "invalid"
+	ResponseReflection      ResponseType = "reflection"
+	ResponseVote            ResponseType = "vote"
+	ResponseInvalid         ResponseType = "invalid"
 )
 
 type ParsedResponse struct {
-	Type     ResponseType
-	Summary  *entity.EvidenceSummary
-	Vote     *entity.Vote
-	Claims   *entity.ClaimSubmission
-	Raw      *schema.Message
+	Type       ResponseType
+	Summary    *entity.EvidenceSummary
+	Vote       *entity.Vote
+	Claims     *entity.ClaimSubmission
+	Reflection *entity.Reflection
+	Raw        *schema.Message
 }
 
 func parseResponse(
@@ -33,6 +35,7 @@ func parseResponse(
 	sumVal *validation.TypedValidator[entity.EvidenceSummary],
 	voteVal *validation.TypedValidator[entity.Vote],
 	claimVal *validation.TypedValidator[entity.ClaimSubmission],
+	reflectionVal *validation.TypedValidator[entity.Reflection],
 ) *ParsedResponse {
 	pr := &ParsedResponse{Raw: resp}
 	if len(resp.ToolCalls) > 0 {
@@ -83,6 +86,13 @@ func parseResponse(
 		if vr != nil && vr.Valid {
 			pr.Type = ResponseEvidenceSummary
 			pr.Summary = summary
+			return pr
+		}
+	case "reconsider_reflect":
+		reflection, vr := reflectionVal.ValidateAndUnmarshal([]byte(resp.Content))
+		if vr != nil && vr.Valid {
+			pr.Type = ResponseReflection
+			pr.Reflection = reflection
 			return pr
 		}
 	case "vote":

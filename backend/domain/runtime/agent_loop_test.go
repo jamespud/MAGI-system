@@ -124,6 +124,9 @@ func summaryJSONWithClaim(supports string) string {
 func voteJSON(dim string) string {
 	return fmt.Sprintf(`{"decision":"approve","confidence":80,"utility_scores":[{"dimension_code":%q,"score":90,"evidence_ids":["EV-001"],"reasoning":"r"}],"evidence_ids":["EV-001"]}`, dim)
 }
+func reflectionJSON(posChange string) string {
+	return fmt.Sprintf(`{"position_change":%q,"new_evidence_ids":["EV-001"],"reasoning":"changed based on debate","ready_to_revote":true}`, posChange)
+}
 
 // --- tests ---
 
@@ -282,6 +285,7 @@ func TestAgentLoop_Reconsider(t *testing.T) {
 	loop := newAgentLoop(t, []*schema.Message{
 		callMsg("c1", "calc", `{"a":1,"b":2}`),
 		finalMsg(summaryJSON("EV-001")),
+		finalMsg(reflectionJSON("change")),
 		finalMsg(voteJSON("correctness")),
 	}, nil)
 	prevVote := &entity.Vote{Decision: entity.VoteDecisionReject, Confidence: 60}
@@ -298,6 +302,12 @@ func TestAgentLoop_Reconsider(t *testing.T) {
 	}
 	if res.Vote == nil {
 		t.Fatalf("no vote")
+	}
+	if res.Reflection == nil {
+		t.Fatalf("expected Reflection produced in reconsider")
+	}
+	if res.Reflection.PositionChange != entity.PositionChangeChange {
+		t.Fatalf("position change: %s", res.Reflection.PositionChange)
 	}
 }
 

@@ -36,6 +36,7 @@ type LoopResult struct {
 	FinalAnswer string
 	Vote        *entity.Vote
 	Summary     *entity.EvidenceSummary
+	Reflection  *entity.Reflection
 	Trace       *LoopTrace
 	Ledger      *evidence.EvidenceLedger
 	Usage       *entity.Usage
