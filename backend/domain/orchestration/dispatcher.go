@@ -3,11 +3,11 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/runtime"
+	"golang.org/x/sync/errgroup"
 )
 
 type Dispatcher struct {
@@ -19,9 +19,6 @@ func NewDispatcher(agentLoop runtime.MagiRuntime, contextBuilder *memory.Context
 	return &Dispatcher{agentLoop: agentLoop, contextBuilder: contextBuilder}
 }
 
-// buildBase returns the shared AgentContext for one dispatch, optionally
-// retrieving RAG knowledge via the ContextBuilder. When contextBuilder is
-// nil (standalone CLI without knowledge), it falls back to a minimal context.
 func (d *Dispatcher) buildBase(ctx context.Context, case_ *entity.DecisionCase, task *entity.DecisionTask) *runtime.AgentContext {
 	if d.contextBuilder != nil {
 		if actx, err := d.contextBuilder.Build(ctx, case_, task, nil, nil); err == nil && actx != nil {
@@ -52,21 +49,21 @@ func (d *Dispatcher) Dispatch(
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
-	var wg sync.WaitGroup
+	g, gctx := errgroup.WithContext(ctx)
 	for i, cfg := range configs {
-		wg.Add(1)
-		go func(idx int, c *entity.MagiConfig) {
-			defer wg.Done()
+		i, c := i, cfg
+		g.Go(func() error {
 			actx := *base
 			actx.RunID = fmt.Sprintf("%s-%s-r%d-investigate", case_.ID, c.Code, round)
-			r, _ := d.agentLoop.Run(ctx, c, &actx)
+			r, _ := d.agentLoop.Run(gctx, c, &actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
 			}
-			results[idx] = r
-		}(i, cfg)
+			results[i] = r
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 	return results
 }
 
@@ -81,26 +78,26 @@ func (d *Dispatcher) DispatchReconsider(
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
-	var wg sync.WaitGroup
+	g, gctx := errgroup.WithContext(ctx)
 	for i, cfg := range configs {
-		wg.Add(1)
-		go func(idx int, c *entity.MagiConfig) {
-			defer wg.Done()
+		i, c := i, cfg
+		g.Go(func() error {
 			var prevVote *entity.Vote
-			if idx < len(prevResults) && prevResults[idx] != nil {
-				prevVote = prevResults[idx].Vote
+			if i < len(prevResults) && prevResults[i] != nil {
+				prevVote = prevResults[i].Vote
 			}
 			actx := *base
 			actx.RunID = fmt.Sprintf("%s-%s-r%d-reconsider", case_.ID, c.Code, round)
 			actx.DebateContext = &runtime.DebateContext{Packet: packet, PreviousVote: prevVote}
-			r, _ := d.agentLoop.Run(ctx, c, &actx)
+			r, _ := d.agentLoop.Run(gctx, c, &actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
 			}
-			results[idx] = r
-		}(i, cfg)
+			results[i] = r
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 	return results
 }
 

@@ -58,6 +58,7 @@ func (a *NativeAdapter) Extract(ctx context.Context, tool port.ToolDefinition, r
 		SourceType:           tool.Binding.Source,
 		ExplicitReliability:  tool.Binding.Reliability,
 		Directness:           DirectnessFromSource(tool.Binding.Source),
+		Recency:              1.0, // freshly collected
 		ExtractionConfidence: 1.0, // native = deterministic structured extraction
 	})
 	obs := result.Output
@@ -79,6 +80,7 @@ func (a *RawObservationAdapter) Extract(ctx context.Context, tool port.ToolDefin
 		SourceType:           tool.Binding.Source,
 		ExplicitReliability:  tool.Binding.Reliability,
 		Directness:           DirectnessFromSource(tool.Binding.Source),
+		Recency:              1.0, // freshly collected
 		ExtractionConfidence: 0.3, // raw = unstructured fallback
 	})
 	return []EvidenceCandidate{{Observation: result.Output, Reliability: rel}}, nil

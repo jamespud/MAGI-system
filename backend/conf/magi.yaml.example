@@ -23,6 +23,8 @@ magi:
     evidence:
       min_evidence_count: 3
       min_quantitative_count: 1
+      min_reliability: 0.7
+      require_own_collected: true
       required_claim_count: 2
       required_types:
         - { type: "quantitative", min_count: 1 }

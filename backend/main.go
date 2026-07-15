@@ -39,10 +39,21 @@ type Config struct {
 
 type MagiSpec struct {
 	Persona          string               `yaml:"persona"`
+	PersonaDef       PersonaDefSpec       `yaml:"persona_def"`
 	Dimensions       []DimensionSpec      `yaml:"dimensions"`
 	RiskTendency     string               `yaml:"risk_tendency"`
+	RiskPolicy       RiskPolicySpec       `yaml:"risk_policy"`
 	Evidence         EvidenceSpec         `yaml:"evidence"`
 	ReflectionPolicy ReflectionPolicySpec `yaml:"reflection_policy"`
+}
+
+type PersonaDefSpec struct {
+	SystemPrompt string `yaml:"system_prompt"`
+	Voice        string `yaml:"voice"`
+}
+
+type RiskPolicySpec struct {
+	MaxAcceptableRisk float64 `yaml:"max_acceptable_risk"`
 }
 
 type ReflectionPolicySpec struct {
@@ -59,6 +70,8 @@ type DimensionSpec struct {
 type EvidenceSpec struct {
 	MinEvidenceCount     int           `yaml:"min_evidence_count"`
 	MinQuantitativeCount int           `yaml:"min_quantitative_count"`
+	MinReliability       float64       `yaml:"min_reliability"`
+	RequireOwnCollected  bool          `yaml:"require_own_collected"`
 	RequiredClaimCount   int           `yaml:"required_claim_count"`
 	RequiredTypes        []TypeReqSpec `yaml:"required_types"`
 	CustomRules          []RuleSpec    `yaml:"custom_rules"`
@@ -107,14 +120,25 @@ func (s *MagiSpec) toConfig(code string, cfg *Config) *entity.MagiConfig {
 	for i, r := range s.Evidence.CustomRules {
 		customRules[i] = entity.EvidenceRule{Code: r.Code}
 	}
+	var personaDef *entity.PersonaDefinition
+	if s.PersonaDef.SystemPrompt != "" || s.PersonaDef.Voice != "" {
+		personaDef = &entity.PersonaDefinition{SystemPrompt: s.PersonaDef.SystemPrompt, Voice: s.PersonaDef.Voice}
+	}
 	return &entity.MagiConfig{
 		Code:         code,
 		Persona:      s.Persona,
+		PersonaDef:   personaDef,
 		Objective:    entity.ObjectiveFunction{Dimensions: dims},
 		RiskTendency: entity.RiskTendency(s.RiskTendency),
+		RiskPolicy: entity.RiskPolicy{
+			Tendency:          entity.RiskTendency(s.RiskTendency),
+			MaxAcceptableRisk: s.RiskPolicy.MaxAcceptableRisk,
+		},
 		EvidenceStandard: entity.EvidenceStandard{
 			MinEvidenceCount:     s.Evidence.MinEvidenceCount,
 			MinQuantitativeCount: s.Evidence.MinQuantitativeCount,
+			MinReliability:       s.Evidence.MinReliability,
+			RequireOwnCollected:  s.Evidence.RequireOwnCollected,
 			RequiredClaimCount:   s.Evidence.RequiredClaimCount,
 			RequiredTypes:        reqTypes,
 			CustomRules:          customRules,
