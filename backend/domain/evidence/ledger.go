@@ -99,6 +99,33 @@ func (l *EvidenceLedger) List() []*entity.EvidenceRecord {
 	return out
 }
 
+// RecomputeCorroboration updates each evidence record's Corroboration modifier
+// based on how many claims (already recorded + summary claims not yet recorded)
+// support it, then recomputes Final. Called before the evidence gate so
+// MinReliability checks use real corroboration (§12).
+func (l *EvidenceLedger) RecomputeCorroboration(summaryClaims []entity.EvidenceSummaryClaim) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	counts := make(map[string]int)
+	for _, c := range l.claims {
+		for _, evID := range c.Supports {
+			counts[evID]++
+		}
+	}
+	for _, c := range summaryClaims {
+		for _, evID := range c.Supports {
+			counts[evID]++
+		}
+	}
+	for _, ev := range l.records {
+		ev.Reliability.Corroboration = 0.5 + float64(counts[ev.ID])*0.1
+		if ev.Reliability.Corroboration > 1.0 {
+			ev.Reliability.Corroboration = 1.0
+		}
+		RecomputeFinal(&ev.Reliability)
+	}
+}
+
 func (l *EvidenceLedger) ListClaims() []*entity.Claim {
 	l.mu.Lock()
 	defer l.mu.Unlock()

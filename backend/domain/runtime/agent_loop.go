@@ -336,6 +336,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			continue
 
 		case ResponseEvidenceSummary:
+			ledger.RecomputeCorroboration(pr.Summary.Claims)
 			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
 			if !gateRes.Passed {
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed)

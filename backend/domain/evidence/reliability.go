@@ -133,3 +133,17 @@ func DirectnessFromSource(source entity.ToolSource) float64 {
 		return 0.7
 	}
 }
+
+// RecomputeFinal recalculates Final from the five modifiers using the weighted
+// average, clamped to [0, 1]. Used when a modifier is updated post-extraction
+// (e.g., Corroboration after claims form).
+func RecomputeFinal(s *entity.ReliabilityScore) {
+	final := s.Base*weightBase + s.Directness*weightDirectness + s.Recency*weightRecency + s.Corroboration*weightCorroboration + s.Extraction*weightExtraction
+	if final > 1.0 {
+		final = 1.0
+	}
+	if final < 0.0 {
+		final = 0.0
+	}
+	s.Final = final
+}

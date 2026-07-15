@@ -118,3 +118,27 @@ func TestDirectnessFromSource(t *testing.T) {
 		}
 	}
 }
+
+func TestRecomputeCorroboration(t *testing.T) {
+	ledger := evidence.NewEvidenceLedger("c", "r", "m")
+	ledger.Record("tc1", "tool", "local", "", "obs1", entity.ReliabilityScore{Base: 0.9, Final: 0.9})
+	ledger.Record("tc2", "tool", "local", "", "obs2", entity.ReliabilityScore{Base: 0.8, Final: 0.8})
+	evs := ledger.List()
+	ev1, ev2 := evs[0].ID, evs[1].ID
+	summaryClaims := []entity.EvidenceSummaryClaim{
+		{Statement: "c1", Supports: []string{ev1}},
+		{Statement: "c2", Supports: []string{ev1}},
+	}
+	ledger.RecomputeCorroboration(summaryClaims)
+	ev1Updated, _ := ledger.Get(ev1)
+	ev2Updated, _ := ledger.Get(ev2)
+	if ev1Updated.Reliability.Corroboration != 0.7 {
+		t.Fatalf("ev1 Corroboration: got %v want 0.7", ev1Updated.Reliability.Corroboration)
+	}
+	if ev2Updated.Reliability.Corroboration != 0.5 {
+		t.Fatalf("ev2 Corroboration: got %v want 0.5", ev2Updated.Reliability.Corroboration)
+	}
+	if ev1Updated.Reliability.Final == 0.9 {
+		t.Fatal("ev1 Final should be recomputed, not == original Base")
+	}
+}
