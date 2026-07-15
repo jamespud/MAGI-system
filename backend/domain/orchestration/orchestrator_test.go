@@ -362,3 +362,27 @@ func TestOrchestrate_StoresProjection(t *testing.T) {
 		t.Fatal("stored projection is nil")
 	}
 }
+
+func TestEnforceReflectionRule_LLMReflectionUnjustifiedReverts(t *testing.T) {
+	prev := []*entity.Vote{{Decision: entity.VoteDecisionReject}}
+	newVotes := []*entity.Vote{{Decision: entity.VoteDecisionApprove}}
+	results := []*runtime.LoopResult{{Reflection: &entity.Reflection{PositionChange: entity.PositionChangeChange}}}
+	configs := []*entity.MagiConfig{{ReflectionPolicy: entity.ReflectionPolicy{RequireJustification: true}}}
+	orchestration.EnforceReflectionRule(prev, newVotes, results, configs, 1)
+	if newVotes[0].Decision != entity.VoteDecisionReject {
+		t.Fatalf("unjustified LLM reflection should revert to reject, got %s", newVotes[0].Decision)
+	}
+}
+
+func TestEnforceReflectionRule_LLMReflectionJustifiedKept(t *testing.T) {
+	ledger := evidence.NewEvidenceLedger("c", "r", "m")
+	ev := ledger.Record("tc", "tool", "local", "", "obs", entity.ReliabilityScore{Final: 0.9})
+	prev := []*entity.Vote{{Decision: entity.VoteDecisionReject, EvidenceIDs: []string{ev.ID}}}
+	newVotes := []*entity.Vote{{Decision: entity.VoteDecisionApprove, EvidenceIDs: []string{ev.ID}}}
+	results := []*runtime.LoopResult{{Ledger: ledger, Reflection: &entity.Reflection{PositionChange: entity.PositionChangeChange, NewEvidenceIDs: []string{ev.ID}}}}
+	configs := []*entity.MagiConfig{{ReflectionPolicy: entity.ReflectionPolicy{RequireJustification: true}}}
+	orchestration.EnforceReflectionRule(prev, newVotes, results, configs, 1)
+	if newVotes[0].Decision != entity.VoteDecisionApprove {
+		t.Fatalf("justified LLM reflection should be kept, got %s", newVotes[0].Decision)
+	}
+}

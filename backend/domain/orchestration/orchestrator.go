@@ -292,7 +292,12 @@ func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtim
 		if i >= len(configs) || !configs[i].ReflectionPolicy.RequireJustification {
 			continue
 		}
-		r := debate.InferReflection(pv, nv, round)
+		var r *entity.Reflection
+		if i < len(results) && results[i] != nil && results[i].Reflection != nil {
+			r = results[i].Reflection
+		} else {
+			r = debate.InferReflection(pv, nv, round)
+		}
 		if r == nil {
 			continue
 		}
