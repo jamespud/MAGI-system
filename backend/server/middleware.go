@@ -32,3 +32,19 @@ func Recovery() app.HandlerFunc {
 		c.Next(ctx)
 	}
 }
+
+// Logger logs each request with RequestID, method, path, status, and duration.
+func Logger() app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		start := time.Now()
+		c.Next(ctx)
+		rid := string(c.GetHeader("X-Request-ID"))
+		fmt.Printf("[HTTP] %s %s %d %s %s\n",
+			string(c.Method()),
+			string(c.Request.URI().Path()),
+			c.Response.StatusCode(),
+			time.Since(start),
+			rid,
+		)
+	}
+}

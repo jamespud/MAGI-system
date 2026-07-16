@@ -32,8 +32,7 @@ var Module = fx.Options(
 
 		// Adapters (standalone mode; Coze mode replaces these)
 		magi.NewModelAdapter,
-		magi.NewInMemoryEventRepo,
-		magi.NewEventPublisherAdapter,
+		appserver.NewEventBroker,
 		func() *StubToolRegistry { return &StubToolRegistry{} },
 		func() *StubToolExecutor { return &StubToolExecutor{} },
 
@@ -60,6 +59,7 @@ var Module = fx.Options(
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		toolSvc *tool.Service,
+		broker *appserver.EventBroker,
 	) {
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
 			Decision:   decSvc,
@@ -67,6 +67,7 @@ var Module = fx.Options(
 			Evaluation: evalSvc,
 			Memory:     memSvc,
 			Tool:       toolSvc,
+			Broker:     broker,
 		})
 	}),
 	fx.Invoke(registerLifecycle),
@@ -78,11 +79,11 @@ func provideAgentLoop(
 	toolExec *StubToolExecutor,
 	val validation.Validator,
 	gen validation.SchemaGenerator,
-	eventPub *magi.EventPublisherAdapter,
+	broker *appserver.EventBroker,
 ) (*runtime.AgentLoop, error) {
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub,
+		Validator: val, Gen: gen, EventPub: broker,
 	})
 }
 
@@ -112,7 +113,7 @@ func provideMagiConfigs(cfg *Config) []*entity.MagiConfig {
 func provideOrchestrator(
 	agentLoop *runtime.AgentLoop,
 	commander *service.Commander,
-	eventPub *magi.EventPublisherAdapter,
+	broker *appserver.EventBroker,
 	configs []*entity.MagiConfig,
 ) *orchestration.Orchestrator {
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
@@ -120,7 +121,7 @@ func provideOrchestrator(
 		Consensus: consensus.NewConsensusEngine(),
 		Debate:    debate.NewDebateEngine(nil),
 		Commander: commander,
-		EventPub:  eventPub,
+		EventPub:  broker,
 		Configs:   configs,
 		Policy:    consensus.DefaultConsensusPolicy(),
 	})
@@ -135,8 +136,8 @@ func provideDecisionService(
 	})
 }
 
-func provideReplayService() *replay.Service {
-	return replay.NewService(nil)
+func provideReplayService(broker *appserver.EventBroker) *replay.Service {
+	return replay.NewService(broker)
 }
 
 func provideMemoryService() *memory.Service {
