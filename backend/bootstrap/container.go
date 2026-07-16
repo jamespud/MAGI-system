@@ -1,0 +1,143 @@
+package bootstrap
+
+import (
+	"context"
+
+	hzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"go.uber.org/fx"
+
+	magi "github.com/jamespud/magi/backend/adapter"
+	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/domain/consensus"
+	"github.com/jamespud/magi/backend/domain/debate"
+	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/orchestration"
+	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/runtime"
+	"github.com/jamespud/magi/backend/domain/service"
+	"github.com/jamespud/magi/backend/domain/validation"
+	appserver "github.com/jamespud/magi/backend/server"
+)
+
+// Module is the Uber Fx module that wires all MAGI dependencies.
+var Module = fx.Options(
+	fx.Provide(
+		// Validation
+		validation.NewReflectSchemaGenerator,
+		validation.NewJSONSchemaValidator,
+
+		// Adapters (standalone mode; Coze mode replaces these)
+		magi.NewModelAdapter,
+		magi.NewInMemoryEventRepo,
+		magi.NewEventPublisherAdapter,
+		func() *StubToolRegistry { return &StubToolRegistry{} },
+		func() *StubToolExecutor { return &StubToolExecutor{} },
+
+		// Agent runtime
+		provideAgentLoop,
+		provideCommander,
+		provideMagiConfigs,
+		provideOrchestrator,
+
+		// Application
+		provideDecisionService,
+
+		// Server
+		provideServer,
+	),
+	fx.Invoke(appserver.RegisterRoutes),
+	fx.Invoke(registerLifecycle),
+)
+
+func provideAgentLoop(
+	modelPort *magi.ModelAdapter,
+	toolReg *StubToolRegistry,
+	toolExec *StubToolExecutor,
+	val validation.Validator,
+	gen validation.SchemaGenerator,
+	eventPub *magi.EventPublisherAdapter,
+) (*runtime.AgentLoop, error) {
+	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
+		Validator: val, Gen: gen, EventPub: eventPub,
+	})
+}
+
+func provideCommander(
+	cfg *Config,
+	modelPort *magi.ModelAdapter,
+	gen validation.SchemaGenerator,
+	val validation.Validator,
+) (*service.Commander, error) {
+	return service.NewCommander(
+		service.CommanderConfig{
+			Model:   entity.ModelRef{APIKey: cfg.Model.APIKey, BaseURL: cfg.Model.BaseURL, ModelName: cfg.Model.ModelName},
+			Persona: "commander",
+		},
+		modelPort, gen, val,
+	)
+}
+
+func provideMagiConfigs(cfg *Config) []*entity.MagiConfig {
+	return []*entity.MagiConfig{
+		cfg.Magi.Melchior.ToConfig("melchior", cfg),
+		cfg.Magi.Balthasar.ToConfig("balthasar", cfg),
+		cfg.Magi.Casper.ToConfig("casper", cfg),
+	}
+}
+
+func provideOrchestrator(
+	agentLoop *runtime.AgentLoop,
+	commander *service.Commander,
+	eventPub *magi.EventPublisherAdapter,
+	configs []*entity.MagiConfig,
+) *orchestration.Orchestrator {
+	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: agentLoop,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: commander,
+		EventPub:  eventPub,
+		Configs:   configs,
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+}
+
+func provideDecisionService(
+	orch *orchestration.Orchestrator,
+	cfg *Config,
+) *decision.Service {
+	return decision.NewService(orch, decision.ServiceConfig{
+		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
+	})
+}
+
+func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
+	h := hzserver.Default(hzserver.WithHostPorts(":8080"))
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			go h.Spin()
+			return nil
+		},
+	})
+	return h
+}
+
+func registerLifecycle(h *hzserver.Hertz) {
+	// Routes are registered via fx.Invoke(appserver.RegisterRoutes).
+	// This function ensures the server is created; lifecycle is in provideServer.
+}
+
+// StubToolRegistry is a no-op tool registry for standalone mode.
+type StubToolRegistry struct{}
+
+func (s *StubToolRegistry) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
+	return nil, nil
+}
+
+// StubToolExecutor is a no-op tool executor for standalone mode.
+type StubToolExecutor struct{}
+
+func (s *StubToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
+	return &port.ToolExecutionResult{Output: "stub result"}, nil
+}
