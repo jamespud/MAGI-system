@@ -8,6 +8,10 @@ import (
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/evaluation"
+	"github.com/jamespud/magi/backend/application/memory"
+	"github.com/jamespud/magi/backend/application/replay"
+	"github.com/jamespud/magi/backend/application/tool"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -41,11 +45,30 @@ var Module = fx.Options(
 
 		// Application
 		provideDecisionService,
+		provideReplayService,
+		evaluation.NewService,
+		provideMemoryService,
+		provideToolService,
 
 		// Server
 		provideServer,
 	),
-	fx.Invoke(appserver.RegisterRoutes),
+	fx.Invoke(func(
+		h *hzserver.Hertz,
+		decSvc *decision.Service,
+		repSvc *replay.Service,
+		evalSvc *evaluation.Service,
+		memSvc *memory.Service,
+		toolSvc *tool.Service,
+	) {
+		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
+			Decision:   decSvc,
+			Replay:     repSvc,
+			Evaluation: evalSvc,
+			Memory:     memSvc,
+			Tool:       toolSvc,
+		})
+	}),
 	fx.Invoke(registerLifecycle),
 )
 
@@ -110,6 +133,18 @@ func provideDecisionService(
 	return decision.NewService(orch, decision.ServiceConfig{
 		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
 	})
+}
+
+func provideReplayService() *replay.Service {
+	return replay.NewService(nil)
+}
+
+func provideMemoryService() *memory.Service {
+	return memory.NewService(nil, nil)
+}
+
+func provideToolService(toolReg *StubToolRegistry) *tool.Service {
+	return tool.NewService(toolReg)
 }
 
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
