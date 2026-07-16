@@ -18,11 +18,12 @@ type RouteDeps struct {
 	Evaluation *evaluation.Service
 	Memory     *memory.Service
 	Tool       *tool.Service
+	Broker     *EventBroker
 }
 
 // RegisterRoutesWithDeps registers all HTTP routes with injected services.
 func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
-	h.Use(RequestID(), Recovery())
+	h.Use(RequestID(), Logger(), Recovery())
 
 	healthH := handler.NewHealthHandler()
 	h.GET("/health", healthH.Health)
@@ -43,6 +44,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/cases/:id/events", repH.Events)
 	v1.GET("/cases/:id/timeline", repH.Timeline)
 	v1.GET("/cases/:id/trace", nopHandler("trace"))
+	v1.GET("/cases/:id/stream", SSEHandler(deps.Broker))
 
 	memH := handler.NewMemoryHandler(deps.Memory)
 	v1.GET("/memory/:id", memH.Get)
