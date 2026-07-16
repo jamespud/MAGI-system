@@ -7,8 +7,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/evaluation"
-	"github.com/jamespud/magi/backend/domain/entity"
-	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -21,7 +19,7 @@ func NewEvaluationHandler(svc *evaluation.Service) *EvaluationHandler {
 }
 
 func (h *EvaluationHandler) Evaluate(ctx context.Context, c *app.RequestContext) {
-	ev, err := h.svc.Evaluate(ctx, []*runtime.LoopResult{}, 0, entity.ConsensusOutcome(""))
+	ev, err := h.svc.EvaluateCase(ctx, "")
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return

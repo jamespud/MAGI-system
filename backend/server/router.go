@@ -38,12 +38,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/cases/:id/cancel", decH.Cancel)
 	v1.GET("/cases/:id", decH.Get)
 	v1.GET("/cases/:id/report", decH.Report)
-	v1.GET("/cases", nopHandler("list cases"))
+	v1.GET("/cases", decH.List)
 
 	repH := handler.NewReplayHandler(deps.Replay)
 	v1.GET("/cases/:id/events", repH.Events)
 	v1.GET("/cases/:id/timeline", repH.Timeline)
-	v1.GET("/cases/:id/trace", nopHandler("trace"))
+	v1.GET("/cases/:id/trace", repH.Timeline)
 	v1.GET("/cases/:id/stream", SSEHandler(deps.Broker))
 
 	memH := handler.NewMemoryHandler(deps.Memory)
@@ -51,7 +51,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 
 	evalH := handler.NewEvaluationHandler(deps.Evaluation)
 	v1.POST("/evaluation", evalH.Evaluate)
-	v1.POST("/benchmark", nopHandler("benchmark"))
+	v1.POST("/benchmark", evalH.Evaluate)
 
 	toolH := handler.NewToolHandler(deps.Tool)
 	v1.GET("/tools", toolH.List)
