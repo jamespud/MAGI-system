@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 // Orchestrator is the domain orchestrator interface (satisfied by
@@ -19,15 +20,28 @@ type ServiceConfig struct {
 	MaxDebateRounds int
 }
 
+// Option configures a Service.
+type Option func(*Service)
+
+// WithCaseRepo injects a CaseRepository for persistence.
+func WithCaseRepo(repo port.CaseRepository) Option {
+	return func(s *Service) { s.caseRepo = repo }
+}
+
 // Service is the application-layer service for decision cases.
 type Service struct {
-	orch Orchestrator
-	cfg  ServiceConfig
+	orch     Orchestrator
+	cfg      ServiceConfig
+	caseRepo port.CaseRepository
 }
 
 // NewService creates a DecisionService.
-func NewService(orch Orchestrator, cfg ServiceConfig) *Service {
-	return &Service{orch: orch, cfg: cfg}
+func NewService(orch Orchestrator, cfg ServiceConfig, opts ...Option) *Service {
+	s := &Service{orch: orch, cfg: cfg}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Create creates a new DecisionCase from a question.
@@ -44,4 +58,28 @@ func (s *Service) Create(ctx context.Context, question string) (*entity.Decision
 // Run executes the orchestrator on a DecisionCase.
 func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
 	return s.orch.Orchestrate(ctx, case_)
+}
+
+// Get retrieves a DecisionCase by ID.
+func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	if s.caseRepo != nil {
+		return s.caseRepo.Get(ctx, id)
+	}
+	return nil, fmt.Errorf("case repository not configured")
+}
+
+// Cancel cancels a DecisionCase by setting its status to CANCELLED.
+func (s *Service) Cancel(ctx context.Context, id string) error {
+	if s.caseRepo != nil {
+		return s.caseRepo.UpdateStatus(ctx, id, entity.CaseStatusCancelled)
+	}
+	return fmt.Errorf("case repository not configured")
+}
+
+// Report returns the final report for a resolved case.
+func (s *Service) Report(ctx context.Context, case_ *entity.DecisionCase, resolution *entity.Resolution) string {
+	if resolution != nil {
+		return resolution.FinalReport
+	}
+	return ""
 }
