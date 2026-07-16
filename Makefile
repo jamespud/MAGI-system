@@ -1,18 +1,18 @@
 .PHONY: debug server middleware sync_db test build_server clean help
 
-MAGI_BIN := ./bin/magi
+MAGI_BIN := ./bin/magi-server
 COMPOSE_FILE := docker/docker-compose.yml
 BACKEND := backend
 
 debug: middleware server
 
 server:
-	@echo "Building and running MAGI..."
-	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) . && ../$(MAGI_BIN) $(ARGS)
+	@echo "Building and running MAGI server..."
+	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) ./cmd/magi-server && ../$(MAGI_BIN) $(ARGS)
 
 build_server:
 	@echo "Building MAGI server..."
-	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) .
+	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) ./cmd/magi-server
 
 middleware:
 	@echo "Starting middleware (MySQL)..."
@@ -26,23 +26,21 @@ sync_db:
 	@echo "Done."
 
 test:
-	@cd $(BACKEND) && go test ./domain/... ./adapter/...
+	@cd $(BACKEND) && go test ./domain/... ./adapter/... ./bootstrap/... ./application/... ./server/...
 
 clean:
 	@rm -f $(MAGI_BIN)
 	@docker compose -f $(COMPOSE_FILE) down 2>/dev/null || true
 
 help:
-	@echo "MAGI Multi-Agent Decision Engine"
+	@echo "MAGI Multi-Agent Decision Engine (v2 Server)"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make debug              Start middleware + server"
-	@echo "  make server ARGS='...'  Build and run with a decision question"
+	@echo "  make server             Build and run the HTTP server"
 	@echo "  make build_server       Build binary only"
 	@echo "  make middleware         Start MySQL via docker-compose"
 	@echo "  make sync_db            Apply MAGI table migrations"
 	@echo "  make test               Run all tests"
 	@echo "  make clean              Stop middleware + remove binary"
 	@echo ""
-	@echo "Example:"
-	@echo "  make server ARGS='是否应该把后端从 Java 重构成 Rust？'"
+	@echo "The server listens on :8080 with GET /health endpoint."
