@@ -70,6 +70,17 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("status", string(status)).Error
 }
+func (r *caseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
+	var models []CaseModel
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	cases := make([]*entity.DecisionCase, len(models))
+	for i, m := range models {
+		cases[i] = caseFromModel(&m)
+	}
+	return cases, nil
+}
 
 func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{

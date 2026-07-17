@@ -29,6 +29,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	h.GET("/health", healthH.Health)
 	h.GET("/ready", healthH.Ready)
 	h.GET("/version", healthH.Version)
+	h.GET("/openapi.json", OpenAPIHandler)
 
 	v1 := h.Group("/api/v1")
 
@@ -43,7 +44,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	repH := handler.NewReplayHandler(deps.Replay)
 	v1.GET("/cases/:id/events", repH.Events)
 	v1.GET("/cases/:id/timeline", repH.Timeline)
-	v1.GET("/cases/:id/trace", repH.Timeline)
+	v1.GET("/cases/:id/trace", repH.Trace)
 	v1.GET("/cases/:id/stream", SSEHandler(deps.Broker))
 
 	memH := handler.NewMemoryHandler(deps.Memory)

@@ -26,6 +26,12 @@ func (s *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error
 func (s *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	return s.case_, nil
 }
+func (s *stubCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
+	if s.case_ == nil {
+		return nil, nil
+	}
+	return []*entity.DecisionCase{s.case_}, nil
+}
 func (s *stubCaseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
 	s.cancelledID = id
 	return nil

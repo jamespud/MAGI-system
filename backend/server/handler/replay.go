@@ -45,3 +45,17 @@ func (h *ReplayHandler) Timeline(ctx context.Context, c *app.RequestContext) {
 	}
 	c.JSON(consts.StatusOK, out)
 }
+
+func (h *ReplayHandler) Trace(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	events, err := h.svc.Trace(ctx, id)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.ReplayEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, dto.FromEvent(e))
+	}
+	c.JSON(consts.StatusOK, out)
+}

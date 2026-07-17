@@ -155,6 +155,11 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 			go h.Spin()
 			return nil
 		},
+		OnStop: func(ctx context.Context) error {
+			// Graceful shutdown: stop accepting new connections,
+			// drain in-flight requests + SSE streams, then exit.
+			return h.Shutdown(ctx)
+		},
 	})
 	return h
 }

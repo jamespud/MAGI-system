@@ -60,6 +60,14 @@ func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.
 	return s.orch.Orchestrate(ctx, case_)
 }
 
+// List returns all decision cases (requires CaseRepository).
+func (s *Service) List(ctx context.Context) ([]*entity.DecisionCase, error) {
+	if s.caseRepo != nil {
+		return s.caseRepo.List(ctx)
+	}
+	return nil, nil
+}
+
 // Get retrieves a DecisionCase by ID.
 func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	if s.caseRepo != nil {

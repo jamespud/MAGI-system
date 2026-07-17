@@ -28,3 +28,9 @@ func (s *Service) Replay(ctx context.Context, caseID string) ([]*entity.MagiEven
 func (s *Service) Timeline(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
 	return s.Replay(ctx, caseID)
 }
+
+// Trace returns the full execution trace for a case (same as Replay;
+// future versions may add more detailed trace data).
+func (s *Service) Trace(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
+	return s.Replay(ctx, caseID)
+}

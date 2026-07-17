@@ -86,7 +86,14 @@ func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
 }
 
 func (h *DecisionHandler) List(ctx context.Context, c *app.RequestContext) {
-	// Phase 5: list requires a CaseRepository with List method.
-	// Return empty list for now (standalone mode has no DB).
-	c.JSON(consts.StatusOK, []dto.CaseResponse{})
+	cases, err := h.svc.List(ctx)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.CaseResponse, 0, len(cases))
+	for _, cs := range cases {
+		out = append(out, dto.FromCase(cs))
+	}
+	c.JSON(consts.StatusOK, out)
 }

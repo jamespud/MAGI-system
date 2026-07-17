@@ -24,6 +24,7 @@ type Repository interface {
 type CaseRepository interface {
 	Create(ctx context.Context, c *entity.DecisionCase) error
 	Get(ctx context.Context, id string) (*entity.DecisionCase, error)
+	List(ctx context.Context) ([]*entity.DecisionCase, error)
 	UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error
 }
 
