@@ -26,6 +26,9 @@ Thumbs.db
 # Worktrees
 .worktrees/
 
+# Vendored dependencies
+**/vendor/
+
 # Config (keep template, ignore local overrides)
 backend/conf/magi.yaml
 backend/conf/magi.local.yaml

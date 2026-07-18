@@ -1,0 +1,12 @@
+frontend/
+docker/
+docs/
+bin/
+.tasks/
+.worktrees/
+.git/
+.vscode/
+.claude/
+.superpowers/
+backend/.git/
+*.md
