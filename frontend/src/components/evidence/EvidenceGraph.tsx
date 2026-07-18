@@ -116,9 +116,9 @@ export default function EvidenceGraph() {
       .attr('font-size', '9px')
       .attr('font-family', 'JetBrains Mono, monospace');
 
-    node.call(d3.drag<SVGGElement, GraphNode>()
-      .on('start', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
+    const dragBehavior = d3.drag<SVGGElement, GraphNode>()
+      .on('start', (_event, d) => {
+        simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
@@ -126,12 +126,13 @@ export default function EvidenceGraph() {
         d.fx = event.x;
         d.fy = event.y;
       })
-      .on('end', (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
+      .on('end', (_event, d) => {
+        simulation.alphaTarget(0);
         d.fx = null;
         d.fy = null;
-      })
-    );
+      });
+
+    node.call(dragBehavior as any);
 
     simulation.on('tick', () => {
       link

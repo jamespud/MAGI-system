@@ -4,7 +4,6 @@ import { useAgentStore, useUiStore } from '@/stores';
 import { GlowBorder, ScanLine, StatusBadge, MonoText } from '@/components/shared';
 import { Card } from '@/components/ui';
 import { Wrench, FileSearch, Lightbulb, Vote } from 'lucide-react';
-import type { TouchEvent, MouseEvent } from 'react';
 
 interface AgentPanelProps {
   agentId: AgentId;
@@ -17,7 +16,7 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
   const color = AGENT_COLORS[agentId];
   const isExpanded = expandedAgent === agentId;
 
-  const handleClick = (_e: MouseEvent | TouchEvent) => {
+  const handleClick = () => {
     setExpandedAgent(isExpanded ? null : agentId);
   };
 
@@ -42,7 +41,7 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
       active={isRunning}
       className={`flex-1 min-w-0 cursor-pointer transition-all duration-300 overflow-hidden relative ${isExpanded ? 'flex-[2]' : 'flex-1'}`}
     >
-      <div onClick={handleClick} className="h-full" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') handleClick(e); }}>
+      <div onClick={handleClick} className="h-full" role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') handleClick(); }}>
         {isRunning && <ScanLine />}
 
         <div className="px-4 pt-3 pb-2 border-b border-border-dim">
