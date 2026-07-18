@@ -1,0 +1,33 @@
+:root {
+  /* Background layers */
+  --bg-base:       #0B0F14;
+  --bg-elevated:   #131820;
+  --bg-raised:     #1A2130;
+  --bg-overlay:    #202B3B;
+
+  /* Agent identity colors */
+  --melchior:      #4A9EFF;
+  --balthasar:     #E5A93D;
+  --casper:        #C77DFF;
+
+  /* Semantic colors */
+  --accent:        #2DD4BF;
+  --warning:       #F59E0B;
+  --error:         #EF4444;
+  --success:       #22C55E;
+
+  /* Text hierarchy */
+  --text-primary:  #F1F5F9;
+  --text-secondary:#94A3B8;
+  --text-muted:    #64748B;
+
+  /* Borders */
+  --border-dim:    #1E293B;
+  --border-glow:   rgba(74, 158, 255, 0.15);
+  --border-active: rgba(74, 158, 255, 0.3);
+
+  /* Shadows */
+  --shadow-glow-melchior: 0 0 12px rgba(74, 158, 255, 0.15);
+  --shadow-glow-balthasar: 0 0 12px rgba(229, 169, 61, 0.15);
+  --shadow-glow-casper:    0 0 12px rgba(199, 125, 255, 0.15);
+}
