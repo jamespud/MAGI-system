@@ -1,6 +1,8 @@
 import { Outlet } from 'react-router-dom';
 import TopNav from './TopNav';
 import LeftNav from './LeftNav';
+import RightInspector from './RightInspector';
+import BottomTimeline from './BottomTimeline';
 import { useCaseStore } from '@/stores';
 
 export default function AppShell() {
@@ -14,7 +16,9 @@ export default function AppShell() {
         <main className="flex-1 overflow-y-auto bg-base">
           <Outlet />
         </main>
+        <RightInspector />
       </div>
+      <BottomTimeline />
     </div>
   );
 }
