@@ -4,10 +4,8 @@ import { MonoText } from '@/components/shared';
 import { Check, X, Minus } from 'lucide-react';
 
 export default function ConsensusPanel() {
-  const { consensus, confidence } = useCaseStore((s) => ({
-    consensus: s.case?.consensus,
-    confidence: s.case?.confidence,
-  }));
+  const consensus = useCaseStore((s) => s.case?.consensus ?? null);
+  const confidence = useCaseStore((s) => s.case?.confidence ?? 0);
   const agents = useAgentStore((s) => s.agents);
 
   const renderVoteIcon = (stance: string | undefined) => {
