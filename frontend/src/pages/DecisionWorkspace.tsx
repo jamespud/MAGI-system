@@ -1,37 +1,29 @@
-import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
 import { createMockCase, createMockAgents, createMockEvents, createMockCaseList } from '@/mock/data';
 import CaseHeader from '@/components/workspace/CaseHeader';
 import AgentTrio from '@/components/workspace/AgentTrio';
 import ConsensusPanel from '@/components/workspace/ConsensusPanel';
-import DecisionInput from '@/components/workspace/DecisionInput';
 import { EvidenceGraph } from '@/components/evidence';
 
 export default function DecisionWorkspace() {
-  const { caseId } = useParams<{ caseId: string }>();
-  const loadCase = useCaseStore((s) => s.loadCase);
-  const loadCaseList = useCaseStore((s) => s.loadCaseList);
-  const loadAgents = useAgentStore((s) => s.loadAgents);
-  const loadEvents = useEventStore((s) => s.loadEvents);
   const currentCase = useCaseStore((s) => s.case);
+  const loaded = useRef(false);
 
   useEffect(() => {
-    const caseData = createMockCase();
-    const agents = createMockAgents();
-    const events = createMockEvents();
-    const caseList = createMockCaseList();
+    if (loaded.current) return;
+    loaded.current = true;
 
-    loadCase(caseData);
-    loadAgents(agents);
-    loadEvents(events);
-    loadCaseList(caseList);
-  }, [caseId, loadCase, loadAgents, loadEvents, loadCaseList]);
+    useCaseStore.getState().loadCase(createMockCase());
+    useCaseStore.getState().loadCaseList(createMockCaseList());
+    useAgentStore.getState().loadAgents(createMockAgents());
+    useEventStore.getState().loadEvents(createMockEvents());
+  }, []);
 
   if (!currentCase) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <span className="font-mono text-text-muted animate-pulse-glow">Loading case data...</span>
+      <div className="flex h-full items-center justify-center p-8">
+        <span className="font-mono text-text-muted">Loading...</span>
       </div>
     );
   }
@@ -39,7 +31,6 @@ export default function DecisionWorkspace() {
   return (
     <div className="h-full overflow-y-auto">
       <CaseHeader />
-      <DecisionInput />
       <AgentTrio />
       <ConsensusPanel />
       <EvidenceGraph />

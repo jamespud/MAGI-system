@@ -18,7 +18,6 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
 
 export default function EvidenceGraph() {
   const svgRef = useRef<SVGSVGElement>(null);
-  const select = useUiStore((s) => s.select);
 
   useEffect(() => {
     const evidence = createMockEvidence();
@@ -99,7 +98,7 @@ export default function EvidenceGraph() {
       .join('g')
       .style('cursor', 'pointer')
       .on('click', (_e, d) => {
-        select({ type: d.type === 'vote' ? 'vote' : 'evidence', id: d.id });
+        useUiStore.getState().select({ type: d.type === 'vote' ? 'vote' : 'evidence', id: d.id });
       });
 
     node.append('circle')
@@ -145,7 +144,7 @@ export default function EvidenceGraph() {
     });
 
     return () => { simulation.stop(); };
-  }, [select]);
+  }, []);
 
   return (
     <Card className="mx-4 mb-4" padded={false}>

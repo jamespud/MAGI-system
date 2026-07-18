@@ -25,6 +25,7 @@ run_server:
 
 server: fe
 	@echo "Starting MAGI (containerized)..."
+	@docker compose -f $(COMPOSE_FILE) --profile server down 2>/dev/null || true
 	@docker compose -f $(COMPOSE_FILE) --profile server up -d --build
 	@echo ""
 	@echo "MAGI running at http://localhost:$${WEB_PORT:-80}"
