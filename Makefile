@@ -1,115 +1,127 @@
-.PHONY: debug server down_server run_server build_server middleware sync_db test clean help fe fe_dev fe_test fe_lint
+# =============================================================================
+# MAGI Makefile — Engineering Entry Point
+# =============================================================================
 
-MAGI_BIN := ./bin/magi-server
-COMPOSE_FILE := docker/docker-compose.yml
-BACKEND := backend
-FRONTEND_DIR := ./frontend
-FRONTEND_STATIC := ./bin/resources/static
+.DEFAULT_GOAL := help
 
-# ── Local Development ──────────────────────────────────────────────
+SCRIPTS_DIR := scripts
 
-debug: middleware run_server
-	@echo ""
-	@echo "MAGI running at http://localhost:8080"
-	@echo "Start frontend dev server: make fe_dev"
+.PHONY: help prepare backend frontend debug server build \
+        test lint fmt vet tidy \
+        migrate seed reset-db \
+        docker-up docker-down docker-logs \
+        clean
 
-run_server:
-	@if [ ! -d "$(FRONTEND_STATIC)" ] || [ -z "$$(ls -A $(FRONTEND_STATIC) 2>/dev/null)" ]; then \
-		echo "Static files missing, building frontend..."; \
-		$(MAKE) fe; \
-	fi
-	@echo "Building and running MAGI server..."
-	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) ./cmd/magi-server && ../$(MAGI_BIN) $(ARGS)
-
-# ── Containerized ──────────────────────────────────────────────────
-
-server: fe
-	@echo "Starting MAGI (containerized)..."
-	@docker compose -f $(COMPOSE_FILE) --profile server down 2>/dev/null || true
-	@docker compose -f $(COMPOSE_FILE) --profile server up -d --build
-	@echo ""
-	@echo "MAGI running at http://localhost:$${WEB_PORT:-80}"
-
-down_server:
-	@echo "Stopping MAGI containers..."
-	@docker compose -f $(COMPOSE_FILE) --profile server down
-
-# ── Build ──────────────────────────────────────────────────────────
-
-build_server:
-	@echo "Building MAGI server..."
-	@cd $(BACKEND) && go build -o ../$(MAGI_BIN) ./cmd/magi-server
-
-fe:
-	@echo "Building frontend..."
-	@cd $(FRONTEND_DIR) && npm ci && npm run build
-	@rm -rf $(FRONTEND_STATIC)
-	@mkdir -p $(FRONTEND_STATIC)
-	@cp -r $(FRONTEND_DIR)/dist/* $(FRONTEND_STATIC)/
-	@echo "Frontend built and copied to $(FRONTEND_STATIC)"
-
-fe_dev:
-	@echo "Starting frontend dev server (HMR)..."
-	@cd $(FRONTEND_DIR) && npm run dev
-
-fe_test:
-	@echo "Running frontend tests..."
-	@cd $(FRONTEND_DIR) && npm run test
-
-fe_lint:
-	@echo "Linting frontend..."
-	@cd $(FRONTEND_DIR) && npm run lint
-
-# ── Database ───────────────────────────────────────────────────────
-
-middleware:
-	@echo "Starting middleware (MySQL)..."
-	@docker compose -f $(COMPOSE_FILE) --profile debug up -d
-
-sync_db:
-	@echo "Applying MAGI table migrations..."
-	@docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -u root -proot magi < docker/atlas/migrations/magi_s6_tables.sql
-	@docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -u root -proot magi < docker/atlas/migrations/magi_s7_tables.sql
-	@docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -u root -proot magi < docker/atlas/migrations/magi_s8_tables.sql
-	@echo "Done."
-
-# ── Test ───────────────────────────────────────────────────────────
-
-test:
-	@cd $(BACKEND) && go test ./domain/... ./adapter/... ./bootstrap/... ./application/... ./server/...
-
-# ── Cleanup ────────────────────────────────────────────────────────
-
-clean:
-	@rm -f $(MAGI_BIN)
-	@docker compose -f $(COMPOSE_FILE) --profile '*' down 2>/dev/null || true
-
-# ── Help ───────────────────────────────────────────────────────────
+# =============================================================================
+# Environment
+# =============================================================================
 
 help:
-	@echo "MAGI Multi-Agent Decision Engine"
 	@echo ""
-	@echo "Local Development:"
-	@echo "  make debug              Start MySQL + local Go server (then: make fe_dev)"
-	@echo "  make fe_dev             Start frontend Vite HMR dev server"
+	@echo "========================== MAGI =========================="
 	@echo ""
-	@echo "Containerized:"
-	@echo "  make server             Build frontend + start all containers"
-	@echo "  make down_server        Stop MAGI containers"
+	@echo "Environment"
+	@echo "  make prepare          Bootstrap environment (deps, env, dirs)"
 	@echo ""
-	@echo "Build:"
-	@echo "  make fe                 Build frontend to bin/resources/static/"
-	@echo "  make build_server       Build Go binary only"
+	@echo "Development"
+	@echo "  make backend          Start Go server"
+	@echo "  make frontend         Start React dev server"
+	@echo "  make debug            Start backend + frontend in parallel"
+	@echo "  make server           Start production server"
 	@echo ""
-	@echo "Database:"
-	@echo "  make middleware         Start MySQL (debug profile)"
-	@echo "  make sync_db            Apply MAGI table migrations"
+	@echo "Build"
+	@echo "  make build            Build backend + frontend"
+	@echo "  make clean            Remove build artifacts"
 	@echo ""
-	@echo "Test:"
-	@echo "  make test               Run backend Go tests"
-	@echo "  make fe_test            Run frontend tests"
+	@echo "Quality (backend)"
+	@echo "  make test             Run Go tests"
+	@echo "  make lint             Run golangci-lint"
+	@echo "  make fmt              Run gofmt"
+	@echo "  make vet              Run go vet"
+	@echo "  make tidy             Run go mod tidy"
 	@echo ""
-	@echo "Cleanup:"
-	@echo "  make clean              Stop all containers + remove binary"
+	@echo "Database"
+	@echo "  make migrate          Apply Atlas migrations"
+	@echo "  make seed             Seed database (TODO)"
+	@echo "  make reset-db         Reset database (TODO)"
 	@echo ""
-	@echo "The server listens on :8080."
+	@echo "Docker"
+	@echo "  make docker-up        Start MySQL middleware"
+	@echo "  make docker-down      Stop MySQL middleware"
+	@echo "  make docker-logs      Tail middleware logs"
+	@echo ""
+	@echo "=========================================================="
+
+prepare:
+	bash $(SCRIPTS_DIR)/env.sh
+
+# =============================================================================
+# Development
+# =============================================================================
+
+backend:
+	bash $(SCRIPTS_DIR)/dev.sh backend
+
+frontend:
+	bash $(SCRIPTS_DIR)/dev.sh frontend
+
+debug:
+	bash $(SCRIPTS_DIR)/dev.sh debug
+
+server:
+	bash $(SCRIPTS_DIR)/dev.sh server
+
+# =============================================================================
+# Build
+# =============================================================================
+
+build:
+	bash $(SCRIPTS_DIR)/build.sh all
+
+clean:
+	bash $(SCRIPTS_DIR)/build.sh clean
+
+# =============================================================================
+# Quality
+# =============================================================================
+
+test:
+	bash $(SCRIPTS_DIR)/tools.sh test
+
+lint:
+	bash $(SCRIPTS_DIR)/tools.sh lint
+
+fmt:
+	bash $(SCRIPTS_DIR)/tools.sh fmt
+
+vet:
+	bash $(SCRIPTS_DIR)/tools.sh vet
+
+tidy:
+	bash $(SCRIPTS_DIR)/tools.sh tidy
+
+# =============================================================================
+# Database
+# =============================================================================
+
+migrate:
+	bash $(SCRIPTS_DIR)/db.sh migrate
+
+seed:
+	bash $(SCRIPTS_DIR)/db.sh seed
+
+reset-db:
+	bash $(SCRIPTS_DIR)/db.sh reset
+
+# =============================================================================
+# Docker
+# =============================================================================
+
+docker-up:
+	bash $(SCRIPTS_DIR)/docker.sh up
+
+docker-down:
+	bash $(SCRIPTS_DIR)/docker.sh down
+
+docker-logs:
+	bash $(SCRIPTS_DIR)/docker.sh logs
