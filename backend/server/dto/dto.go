@@ -8,15 +8,36 @@ import (
 )
 
 type CreateCaseRequest struct {
-	Question string `json:"question"`
+	Question    string          `json:"question"`
+	Background  string          `json:"background,omitempty"`
+	Constraints []ConstraintDTO `json:"constraints,omitempty"`
 }
 
 type CaseResponse struct {
-	ID            string `json:"id"`
-	Question      string `json:"question"`
-	Status        string `json:"status"`
-	FinalDecision string `json:"final_decision,omitempty"`
-	Round         int    `json:"round,omitempty"`
+	ID          string          `json:"id"`
+	Question    string          `json:"question"`
+	Background  string          `json:"background"`
+	Constraints []ConstraintDTO `json:"constraints"`
+	Status      string          `json:"status"`
+	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
+	FinalDecision string          `json:"final_decision,omitempty"`
+	Confidence    float64         `json:"confidence"`
+	Round         int             `json:"round"`
+	CreatedAt     string          `json:"created_at"`
+	UpdatedAt   string          `json:"updated_at"`
+}
+
+type ConstraintDTO struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+type ConsensusDTO struct {
+	Approve        int    `json:"approve"`
+	Reject         int    `json:"reject"`
+	Abstain        int    `json:"abstain"`
+	Majority       string `json:"majority"`
+	NeedReflection bool   `json:"need_reflection"`
 }
 
 type DecisionReport struct {
@@ -48,10 +69,19 @@ type ErrorResponse struct {
 }
 
 func FromCase(c *entity.DecisionCase) CaseResponse {
+	constraints := make([]ConstraintDTO, len(c.Constraints))
+	for i, ct := range c.Constraints {
+		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
+	}
 	return CaseResponse{
-		ID:       c.ID,
-		Question: c.Question,
-		Status:   string(c.Status),
+		ID:          c.ID,
+		Question:    c.Question,
+		Background:  c.Context,
+		Constraints: constraints,
+		Status:      string(c.Status),
+		Round:       0,
+		CreatedAt:   c.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   c.UpdatedAt.Format(time.RFC3339),
 	}
 }
 

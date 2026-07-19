@@ -9,10 +9,38 @@ import (
 )
 
 func TestFromCase(t *testing.T) {
-	c := &entity.DecisionCase{ID: "c1", Question: "q", Status: entity.CaseStatusDraft}
+	now := time.Now()
+	c := &entity.DecisionCase{
+		ID:          "c1",
+		Question:    "Should we adopt Rust?",
+		Context:     "Java backend team of 5",
+		Constraints: []entity.Constraint{{Key: "Budget", Value: "3 months", Hard: false}},
+		Status:      entity.CaseStatusDraft,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
 	got := FromCase(c)
-	if got.ID != "c1" || got.Question != "q" || got.Status != "DRAFT" {
-		t.Fatalf("FromCase: %+v", got)
+
+	if got.ID != "c1" {
+		t.Fatalf("ID: got %q", got.ID)
+	}
+	if got.Question != "Should we adopt Rust?" {
+		t.Fatalf("Question: got %q", got.Question)
+	}
+	if got.Background != "Java backend team of 5" {
+		t.Fatalf("Background: got %q", got.Background)
+	}
+	if len(got.Constraints) != 1 || got.Constraints[0].Label != "Budget" || got.Constraints[0].Value != "3 months" {
+		t.Fatalf("Constraints: got %+v", got.Constraints)
+	}
+	if got.Status != "DRAFT" {
+		t.Fatalf("Status: got %q", got.Status)
+	}
+	if got.CreatedAt != now.Format(time.RFC3339) {
+		t.Fatalf("CreatedAt: got %q", got.CreatedAt)
+	}
+	if got.UpdatedAt != now.Format(time.RFC3339) {
+		t.Fatalf("UpdatedAt: got %q", got.UpdatedAt)
 	}
 }
 
