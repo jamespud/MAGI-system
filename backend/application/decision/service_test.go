@@ -39,7 +39,7 @@ func (s *stubCaseRepo) UpdateStatus(ctx context.Context, id string, status entit
 
 func TestService_Create(t *testing.T) {
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 2})
-	c, err := svc.Create(context.Background(), "test question")
+	c, err := svc.Create(context.Background(), "test question", "", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -54,10 +54,32 @@ func TestService_Create(t *testing.T) {
 	}
 }
 
+func TestService_Create_WithBackgroundAndConstraints(t *testing.T) {
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 3})
+	c, err := svc.Create(context.Background(), "Should we adopt Rust?",
+		"Java backend team of 5",
+		[]entity.Constraint{{Key: "Budget", Value: "3 months", Hard: false}})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if c.Question != "Should we adopt Rust?" {
+		t.Fatalf("question: got %q", c.Question)
+	}
+	if c.Context != "Java backend team of 5" {
+		t.Fatalf("context/background: got %q", c.Context)
+	}
+	if len(c.Constraints) != 1 || c.Constraints[0].Key != "Budget" || c.Constraints[0].Value != "3 months" {
+		t.Fatalf("constraints: got %+v", c.Constraints)
+	}
+	if c.Status != entity.CaseStatusDraft {
+		t.Fatalf("status: got %s", c.Status)
+	}
+}
+
 func TestService_Run(t *testing.T) {
 	want := &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}
 	svc := decision.NewService(&stubOrchestrator{result: want}, decision.ServiceConfig{MaxDebateRounds: 2})
-	c, _ := svc.Create(context.Background(), "q")
+	c, _ := svc.Create(context.Background(), "q", "", nil)
 	got, err := svc.Run(context.Background(), c)
 	if err != nil {
 		t.Fatalf("run: %v", err)

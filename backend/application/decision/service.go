@@ -44,15 +44,23 @@ func NewService(orch Orchestrator, cfg ServiceConfig, opts ...Option) *Service {
 	return s
 }
 
-// Create creates a new DecisionCase from a question.
-func (s *Service) Create(ctx context.Context, question string) (*entity.DecisionCase, error) {
-	return &entity.DecisionCase{
+// Create creates a new DecisionCase from a question, optional background, and constraints.
+func (s *Service) Create(ctx context.Context, question, background string, constraints []entity.Constraint) (*entity.DecisionCase, error) {
+	case_ := &entity.DecisionCase{
 		ID:              fmt.Sprintf("case-%d", time.Now().Unix()),
 		Question:        question,
+		Context:         background,
+		Constraints:     constraints,
 		MaxDebateRounds: s.cfg.MaxDebateRounds,
 		Status:          entity.CaseStatusDraft,
 		CreatedAt:       time.Now(),
-	}, nil
+	}
+	if s.caseRepo != nil {
+		if err := s.caseRepo.Create(ctx, case_); err != nil {
+			return nil, fmt.Errorf("failed to persist case: %w", err)
+		}
+	}
+	return case_, nil
 }
 
 // Run executes the orchestrator on a DecisionCase.

@@ -7,6 +7,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -24,7 +25,11 @@ func (h *DecisionHandler) Create(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid request: " + err.Error()})
 		return
 	}
-	case_, err := h.svc.Create(ctx, req.Question)
+	constraints := make([]entity.Constraint, len(req.Constraints))
+	for i, ct := range req.Constraints {
+		constraints[i] = entity.Constraint{Key: ct.Label, Value: ct.Value}
+	}
+	case_, err := h.svc.Create(ctx, req.Question, req.Background, constraints)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
