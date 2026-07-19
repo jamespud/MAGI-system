@@ -2,9 +2,12 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"go.uber.org/fx"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
@@ -35,6 +38,10 @@ var Module = fx.Options(
 		appserver.NewEventBroker,
 		func() *StubToolRegistry { return &StubToolRegistry{} },
 		func() *StubToolExecutor { return &StubToolExecutor{} },
+
+		// Database
+		provideDB,
+		provideRepository,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -129,11 +136,12 @@ func provideOrchestrator(
 
 func provideDecisionService(
 	orch *orchestration.Orchestrator,
+	repo port.Repository,
 	cfg *Config,
 ) *decision.Service {
 	return decision.NewService(orch, decision.ServiceConfig{
 		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
-	})
+	}, decision.WithCaseRepo(repo.CaseRepo()))
 }
 
 func provideReplayService(broker *appserver.EventBroker) *replay.Service {
@@ -181,4 +189,19 @@ type StubToolExecutor struct{}
 
 func (s *StubToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
 	return &port.ToolExecutionResult{Output: "stub result"}, nil
+}
+
+func provideDB(cfg *Config) (*gorm.DB, error) {
+	db, err := gorm.Open(mysql.Open(cfg.Database.DSN), &gorm.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect database: %w", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}); err != nil {
+		return nil, fmt.Errorf("failed to migrate: %w", err)
+	}
+	return db, nil
+}
+
+func provideRepository(db *gorm.DB) port.Repository {
+	return magi.NewRepository(db)
 }

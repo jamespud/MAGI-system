@@ -24,6 +24,10 @@ type Config struct {
 		Balthasar       MagiSpec `yaml:"balthasar"`
 		Casper          MagiSpec `yaml:"casper"`
 	} `yaml:"magi"`
+	Database struct {
+		Driver string `yaml:"driver"`
+		DSN    string `yaml:"dsn"`
+	} `yaml:"database"`
 }
 
 type MagiSpec struct {
