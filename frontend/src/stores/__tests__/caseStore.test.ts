@@ -81,4 +81,40 @@ describe('caseStore', () => {
     expect(useCaseStore.getState().error).toBe('network error');
     expect(useCaseStore.getState().loading).toBe(false);
   });
+
+  it('fetchCase loads a single case from API', async () => {
+    const apiCase = {
+      id: 'case-001', question: 'Rust?', background: 'Java team',
+      constraints: [{ label: 'Budget', value: '3m' }],
+      status: 'INVESTIGATING', consensus: null, confidence: 0, round: 1,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    vi.mocked(api.getCase).mockResolvedValueOnce(apiCase);
+
+    await useCaseStore.getState().fetchCase('case-001');
+
+    const c = useCaseStore.getState().case;
+    expect(c?.id).toBe('case-001');
+    expect(c?.question).toBe('Rust?');
+    expect(c?.background).toBe('Java team');
+    expect(c?.constraints).toEqual([{ label: 'Budget', value: '3m' }]);
+    expect(c?.status).toBe('INVESTIGATING');
+    expect(c?.createdAt).toBe('2026-01-01T00:00:00Z');
+    expect(useCaseStore.getState().loading).toBe(false);
+  });
+
+  it('createCase posts and returns API response', async () => {
+    const apiCase = {
+      id: 'case-new', question: 'New Q?', background: '',
+      constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 0,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    vi.mocked(api.createCase).mockResolvedValueOnce(apiCase);
+
+    const result = await useCaseStore.getState().createCase('New Q?');
+
+    expect(result.id).toBe('case-new');
+    expect(api.createCase).toHaveBeenCalledWith('New Q?', undefined);
+    expect(useCaseStore.getState().loading).toBe(false);
+  });
 });
