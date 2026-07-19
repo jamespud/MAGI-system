@@ -31,4 +31,28 @@ if [ "$missing" -eq 1 ]; then
 fi
 
 echo ""
-echo "=== All dependencies found ==="
+echo "=== Environment setup ==="
+
+if [ ! -f "$PROJECT_ROOT/.env.local" ]; then
+  if [ -f "$PROJECT_ROOT/.env.example" ]; then
+    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env.local"
+    echo "Created .env.local from .env.example — edit for local overrides"
+  else
+    echo "WARNING: .env.example not found, skipping .env.local creation"
+  fi
+else
+  echo ".env.local already exists"
+fi
+
+mkdir -p "$PROJECT_ROOT/bin"
+
+echo ""
+echo "=== Installing Go dependencies ==="
+go -C "$PROJECT_ROOT/backend" mod download
+
+echo ""
+echo "=== Installing frontend dependencies ==="
+npm -C "$PROJECT_ROOT/frontend" install
+
+echo ""
+echo "=== Environment ready ==="

@@ -32,3 +32,6 @@ Thumbs.db
 # Config (keep template, ignore local overrides)
 backend/conf/magi.yaml
 backend/conf/magi.local.yaml
+
+# Environment (local overrides)
+.env.local
