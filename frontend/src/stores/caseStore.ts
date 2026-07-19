@@ -1,5 +1,17 @@
 import { create } from 'zustand';
-import type { Case, CaseSummary } from '@/types/case';
+import type { Case, CaseStatus, CaseSummary } from '@/types/case';
+import { api, type ApiCaseResponse } from '@/api/client';
+
+function mapToSummary(c: ApiCaseResponse): CaseSummary {
+  return {
+    id: c.id,
+    question: c.question,
+    status: c.status as CaseStatus,
+    round: c.round,
+    createdAt: c.created_at,
+    pinned: false,
+  };
+}
 
 interface CaseState {
   case: Case | null;
@@ -12,6 +24,7 @@ interface CaseState {
   updateConsensus: (consensus: Case['consensus'], confidence: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  fetchCases: () => Promise<void>;
 }
 
 export const useCaseStore = create<CaseState>((set) => ({
@@ -33,4 +46,14 @@ export const useCaseStore = create<CaseState>((set) => ({
   setLoading: (loading) => set({ loading }),
 
   setError: (error) => set({ error }),
+
+  fetchCases: async () => {
+    set({ loading: true, error: null });
+    try {
+      const list = await api.getCases();
+      set({ cases: list.map(mapToSummary), loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
 }));

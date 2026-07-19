@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Pin, Play, CheckCircle, Archive, FileText, FlaskConical, Database, History } from 'lucide-react';
 import { MonoText } from '@/components/shared';
+import { useCaseStore } from '@/stores';
 import type { CaseSummary } from '@/types/case';
 
 interface LeftNavProps {
@@ -22,6 +24,10 @@ const FOOTER_ITEMS = [
 ];
 
 export default function LeftNav({ cases = [] }: LeftNavProps) {
+  useEffect(() => {
+    useCaseStore.getState().fetchCases();
+  }, []);
+
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-border-dim bg-base">
       <div className="border-b border-border-dim px-4 py-3">
