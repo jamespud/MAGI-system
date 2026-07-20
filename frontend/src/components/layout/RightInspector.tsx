@@ -1,14 +1,29 @@
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useUiStore, useAgentStore, useEventStore } from '@/stores';
 import { MonoText, AgentAvatar } from '@/components/shared';
 import { Globe, Link2, Shield, Clock, FileText } from 'lucide-react';
-import { createMockEvidence } from '@/mock/data';
-
-const MOCK_EVIDENCE_MAP = new Map(createMockEvidence().map((e) => [e.id, e]));
+import { api } from '@/api/client';
+import type { ApiEvidence } from '@/api/client';
+import type { AgentId } from '@/types/agent';
 
 export default function RightInspector() {
   const selected = useUiStore((s) => s.selected);
   const agents = useAgentStore((s) => s.agents);
   const events = useEventStore((s) => s.events);
+  const { caseId } = useParams<{ caseId: string }>();
+  const [evidenceMap, setEvidenceMap] = useState<Record<string, ApiEvidence>>({});
+
+  useEffect(() => {
+    if (!caseId) return;
+    api.getEvidence(caseId)
+      .then((evs) => {
+        const m: Record<string, ApiEvidence> = {};
+        for (const e of evs) m[e.id] = e;
+        setEvidenceMap(m);
+      })
+      .catch(() => setEvidenceMap({}));
+  }, [caseId]);
 
   if (!selected) {
     return (
@@ -23,7 +38,7 @@ export default function RightInspector() {
   }
 
   const renderEvidenceDetail = () => {
-    const ev = MOCK_EVIDENCE_MAP.get(selected.id);
+    const ev = evidenceMap[selected.id];
     if (!ev) return <MonoText muted>Evidence {selected.id} not found</MonoText>;
     return (
       <div className="space-y-4">
@@ -58,8 +73,8 @@ export default function RightInspector() {
           <div>
             <MonoText size="sm" muted>Collected By</MonoText>
             <div className="flex items-center gap-1.5 mt-1">
-              <AgentAvatar agentId={ev.collectedBy} size={18} />
-              <span className="text-sm text-text-secondary">{ev.collectedBy}</span>
+              <AgentAvatar agentId={ev.collected_by as AgentId} size={18} />
+              <span className="text-sm text-text-secondary">{ev.collected_by}</span>
             </div>
           </div>
         </div>

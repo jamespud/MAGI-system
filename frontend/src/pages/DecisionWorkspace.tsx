@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
-import { createMockAgents, createMockEvents } from '@/mock/data';
+import { api } from '@/api/client';
+import { subscribeCaseStream } from '@/api/stream';
+import { mapBackendEvent } from '@/api/eventMapper';
 import CaseHeader from '@/components/workspace/CaseHeader';
 import AgentTrio from '@/components/workspace/AgentTrio';
 import ConsensusPanel from '@/components/workspace/ConsensusPanel';
@@ -15,21 +17,25 @@ export default function DecisionWorkspace() {
   const currentCase = useCaseStore((s) => s.case);
   const loading = useCaseStore((s) => s.loading);
   const error = useCaseStore((s) => s.error);
-  const initAgents = useRef(false);
+  const [running, setRunning] = useState(false);
+  const unsubRef = useRef<(() => void) | null>(null);
 
-  // Load mock agents/events once
+  // Load real data + subscribe to SSE when a case is opened.
   useEffect(() => {
-    if (initAgents.current) return;
-    initAgents.current = true;
-    useAgentStore.getState().loadAgents(createMockAgents());
-    useEventStore.getState().loadEvents(createMockEvents());
-  }, []);
-
-  // Fetch case when navigating to a case route
-  useEffect(() => {
-    if (caseId) {
-      useCaseStore.getState().fetchCase(caseId);
-    }
+    if (!caseId) return;
+    useCaseStore.getState().fetchCase(caseId);
+    useEventStore.getState().clearEvents();
+    api.getAgents(caseId)
+      .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
+      .catch(() => {});
+    api.getEvents(caseId)
+      .then((evs) => evs.forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
+      .catch(() => {});
+    unsubRef.current = subscribeCaseStream(caseId);
+    return () => {
+      unsubRef.current?.();
+      unsubRef.current = null;
+    };
   }, [caseId]);
 
   const handleCreate = async (question: string) => {
@@ -38,6 +44,18 @@ export default function DecisionWorkspace() {
       navigate(`/case/${c.id}`);
     } catch {
       // error already set in store
+    }
+  };
+
+  const handleRun = async () => {
+    if (!caseId) return;
+    setRunning(true);
+    try {
+      await useCaseStore.getState().runCase(caseId);
+    } catch {
+      // 409 or error already set in store
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -80,9 +98,17 @@ export default function DecisionWorkspace() {
     );
   }
 
+  const resolved = currentCase.status === 'RESOLVED';
+
   return (
     <div className="h-full overflow-y-auto">
       <DecisionInput />
+      <div className="px-4 mb-4">
+        <Button onClick={handleRun} disabled={running || resolved}>
+          {running ? 'Running...' : resolved ? 'Resolved' : 'Run Decision'}
+        </Button>
+        {error && <span className="ml-3 text-red-400 text-xs font-mono">{error}</span>}
+      </div>
       <CaseHeader />
       <AgentTrio />
       <ConsensusPanel />
