@@ -50,6 +50,7 @@ var Module = fx.Options(
 		provideOrchestrator,
 
 		// Application
+		provideRunManager,
 		provideDecisionService,
 		provideReplayService,
 		evaluation.NewService,
@@ -137,14 +138,19 @@ func provideOrchestrator(
 	})
 }
 
+func provideRunManager(orch *orchestration.Orchestrator) *decision.RunManager {
+	return decision.NewRunManager(orch)
+}
+
 func provideDecisionService(
 	orch *orchestration.Orchestrator,
 	repo port.Repository,
 	cfg *Config,
+	rm *decision.RunManager,
 ) *decision.Service {
 	return decision.NewService(orch, decision.ServiceConfig{
 		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
-	}, decision.WithCaseRepo(repo.CaseRepo()))
+	}, decision.WithCaseRepo(repo.CaseRepo()), decision.WithRunManager(rm))
 }
 
 func provideReplayService(broker *appserver.EventBroker) *replay.Service {

@@ -28,11 +28,26 @@ func WithCaseRepo(repo port.CaseRepository) Option {
 	return func(s *Service) { s.caseRepo = repo }
 }
 
+// RunController is the async-run lifecycle interface satisfied by RunManager.
+// Defined as an interface so tests can inject a fake without constructing a
+// real RunManager + Orchestrator.
+type RunController interface {
+	Start(ctx context.Context, c *entity.DecisionCase) error
+	Cancel(caseID string) bool
+}
+
+// WithRunManager injects an async run controller. When set, StartRun delegates
+// to it (async); otherwise StartRun falls back to synchronous Run.
+func WithRunManager(rm RunController) Option {
+	return func(s *Service) { s.runs = rm }
+}
+
 // Service is the application-layer service for decision cases.
 type Service struct {
 	orch     Orchestrator
 	cfg      ServiceConfig
 	caseRepo port.CaseRepository
+	runs     RunController
 }
 
 // NewService creates a DecisionService.
@@ -66,6 +81,25 @@ func (s *Service) Create(ctx context.Context, question, background string, const
 // Run executes the orchestrator on a DecisionCase.
 func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
 	return s.orch.Orchestrate(ctx, case_)
+}
+
+// StartRun launches an async orchestration for the case. Returns
+// ErrAlreadyRunning if the case already has an active run. When no RunManager
+// is configured, falls back to synchronous Run.
+func (s *Service) StartRun(ctx context.Context, case_ *entity.DecisionCase) error {
+	if s.runs == nil {
+		_, err := s.Run(ctx, case_)
+		return err
+	}
+	return s.runs.Start(ctx, case_)
+}
+
+// CancelRun cancels an active run. Returns true if a run was active.
+func (s *Service) CancelRun(caseID string) bool {
+	if s.runs == nil {
+		return false
+	}
+	return s.runs.Cancel(caseID)
 }
 
 // List returns all decision cases (requires CaseRepository).
