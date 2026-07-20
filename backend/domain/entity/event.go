@@ -2,6 +2,7 @@ package entity
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -45,3 +46,23 @@ const (
 	EventCaseCompleted       EventType = "CASE_COMPLETED"
 	EventCaseFailed          EventType = "CASE_FAILED"
 )
+
+// NewEvent constructs a MagiEvent with a unique ID and JSON-serialized payload.
+// ID is "<caseID>-<unixNano>" -- monotonic enough for broker catch-up dedup.
+// A nil payload yields a nil RawMessage (no empty `{}`).
+func NewEvent(caseID, runID string, agentCode *MagiCode, et EventType, payload any) MagiEvent {
+	ev := MagiEvent{
+		ID:        fmt.Sprintf("%s-%d", caseID, time.Now().UnixNano()),
+		CaseID:    caseID,
+		RunID:     runID,
+		AgentCode: agentCode,
+		Type:      et,
+		Timestamp: time.Now(),
+	}
+	if payload != nil {
+		if b, err := json.Marshal(payload); err == nil {
+			ev.Payload = b
+		}
+	}
+	return ev
+}
