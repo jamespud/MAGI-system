@@ -49,6 +49,8 @@ interface CaseState {
   fetchCases: () => Promise<void>;
   fetchCase: (id: string) => Promise<void>;
   createCase: (question: string, background?: string) => Promise<ApiCaseResponse>;
+  runCase: (id: string) => Promise<void>;
+  cancelCase: (id: string) => Promise<void>;
 }
 
 export const useCaseStore = create<CaseState>((set) => ({
@@ -100,6 +102,29 @@ export const useCaseStore = create<CaseState>((set) => ({
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
       throw e;
+    }
+  },
+
+  runCase: async (id: string) => {
+    set({ loading: true, error: null });
+    try {
+      const res = await api.runCase(id);
+      set((s) => ({
+        case: s.case ? { ...s.case, status: res.status as Case['status'] } : null,
+        loading: false,
+      }));
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+      throw e;
+    }
+  },
+
+  cancelCase: async (id: string) => {
+    set({ error: null });
+    try {
+      await api.cancelCase(id);
+    } catch (e) {
+      set({ error: (e as Error).message });
     }
   },
 }));

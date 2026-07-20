@@ -8,6 +8,8 @@ vi.mock('@/api/client', () => ({
     getCases: vi.fn(),
     getCase: vi.fn(),
     createCase: vi.fn(),
+    runCase: vi.fn(),
+    cancelCase: vi.fn(),
   },
 }));
 
@@ -119,5 +121,42 @@ describe('caseStore', () => {
     expect(result.id).toBe('case-new');
     expect(api.createCase).toHaveBeenCalledWith('New Q?', undefined);
     expect(useCaseStore.getState().loading).toBe(false);
+  });
+});
+
+describe('caseStore.runCase', () => {
+  it('posts run and updates case status from response', async () => {
+    useCaseStore.getState().loadCase(mockCase);
+    vi.mocked(api.runCase).mockResolvedValueOnce({ id: 'test-1', status: 'INVESTIGATING' });
+
+    await useCaseStore.getState().runCase('test-1');
+
+    expect(api.runCase).toHaveBeenCalledWith('test-1');
+    expect(useCaseStore.getState().case?.status).toBe('INVESTIGATING');
+    expect(useCaseStore.getState().loading).toBe(false);
+  });
+
+  it('sets error and rethrows on failure', async () => {
+    useCaseStore.getState().loadCase(mockCase);
+    vi.mocked(api.runCase).mockRejectedValueOnce(new Error('already running'));
+
+    await expect(useCaseStore.getState().runCase('test-1')).rejects.toThrow('already running');
+    expect(useCaseStore.getState().error).toBe('already running');
+  });
+});
+
+describe('caseStore.cancelCase', () => {
+  it('posts cancel without throwing', async () => {
+    vi.mocked(api.cancelCase).mockResolvedValueOnce({ id: 'test-1', status: 'CANCELLED' });
+
+    await useCaseStore.getState().cancelCase('test-1');
+
+    expect(api.cancelCase).toHaveBeenCalledWith('test-1');
+  });
+
+  it('sets error on failure', async () => {
+    vi.mocked(api.cancelCase).mockRejectedValueOnce(new Error('no active run'));
+    await useCaseStore.getState().cancelCase('test-1');
+    expect(useCaseStore.getState().error).toBe('no active run');
   });
 });
