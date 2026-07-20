@@ -44,6 +44,7 @@ export interface Case {
   round: number;
   consensus: ConsensusState | null;
   confidence: number;
+  finalDecision: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -20,6 +20,7 @@ const mockCase: Case = {
   round: 1,
   consensus: null,
   confidence: 0,
+  finalDecision: '',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -58,8 +59,8 @@ describe('caseStore', () => {
 
   it('fetchCases populates case list from API', async () => {
     const mockApiCases = [
-      { id: 'c1', question: 'Q1?', background: '', constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
-      { id: 'c2', question: 'Q2?', background: '', constraints: [], status: 'RESOLVED', consensus: null, confidence: 0, round: 2, created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
+      { id: 'c1', question: 'Q1?', background: '', constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 1, final_decision: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+      { id: 'c2', question: 'Q2?', background: '', constraints: [], status: 'RESOLVED', consensus: null, confidence: 0, round: 2, final_decision: 'approve', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
     ];
     vi.mocked(api.getCases).mockResolvedValueOnce(mockApiCases);
 
@@ -87,6 +88,7 @@ describe('caseStore', () => {
       id: 'case-001', question: 'Rust?', background: 'Java team',
       constraints: [{ label: 'Budget', value: '3m' }],
       status: 'INVESTIGATING', consensus: null, confidence: 0, round: 1,
+      final_decision: 'approve',
       created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
     };
     vi.mocked(api.getCase).mockResolvedValueOnce(apiCase);
@@ -99,6 +101,7 @@ describe('caseStore', () => {
     expect(c?.background).toBe('Java team');
     expect(c?.constraints).toEqual([{ label: 'Budget', value: '3m' }]);
     expect(c?.status).toBe('INVESTIGATING');
+    expect(c?.finalDecision).toBe('approve');
     expect(c?.createdAt).toBe('2026-01-01T00:00:00Z');
     expect(useCaseStore.getState().loading).toBe(false);
   });
@@ -106,7 +109,7 @@ describe('caseStore', () => {
   it('createCase posts and returns API response', async () => {
     const apiCase = {
       id: 'case-new', question: 'New Q?', background: '',
-      constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 0,
+      constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 0, final_decision: '',
       created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
     };
     vi.mocked(api.createCase).mockResolvedValueOnce(apiCase);

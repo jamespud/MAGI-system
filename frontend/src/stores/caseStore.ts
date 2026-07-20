@@ -29,6 +29,7 @@ function mapToCase(c: ApiCaseResponse): Case {
       needReflection: c.consensus.need_reflection,
     } : null,
     confidence: c.confidence,
+    finalDecision: c.final_decision ?? '',
     createdAt: c.created_at,
     updatedAt: c.updated_at,
   };

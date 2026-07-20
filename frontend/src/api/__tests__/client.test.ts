@@ -8,6 +8,7 @@ const MOCK_CASE: ApiCaseResponse = {
   constraints: [{ label: 'Budget', value: '3 months' }],
   status: 'DRAFT',
   consensus: null,
+  final_decision: '',
   confidence: 0,
   round: 0,
   created_at: '2026-07-19T10:00:00Z',
@@ -75,5 +76,103 @@ describe('api.createCase', () => {
       body: JSON.stringify({ question: 'Test question?', background: 'Test background' }),
     });
     expect(result).toEqual(MOCK_CASE);
+  });
+});
+
+describe('api.runCase', () => {
+  it('posts to /cases/:id/run and returns 202 body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      json: () => Promise.resolve({ id: 'case-001', status: 'INVESTIGATING' }),
+    } as Response);
+
+    const result = await api.runCase('case-001');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result).toEqual({ id: 'case-001', status: 'INVESTIGATING' });
+  });
+});
+
+describe('api.cancelCase', () => {
+  it('posts to /cases/:id/cancel', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ id: 'case-001', status: 'CANCELLED' }),
+    } as Response);
+
+    const result = await api.cancelCase('case-001');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result.status).toBe('CANCELLED');
+  });
+});
+
+describe('api.getEvidence', () => {
+  it('fetches evidence array for a case', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'EV-1', source: 'local', observation: 'obs', reliability: 0.9, collected_by: 'melchior', timestamp: 't' },
+      ]),
+    } as Response);
+
+    const result = await api.getEvidence('case-001');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/evidence', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result[0].collected_by).toBe('melchior');
+  });
+});
+
+describe('api.getAgents', () => {
+  it('fetches agent snapshot map', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        melchior: { agent_code: 'melchior', status: 'completed', round: 1, evidence_count: 2, claim_count: 1 },
+      }),
+    } as Response);
+
+    const result = await api.getAgents('case-001');
+
+    expect(result.melchior.evidence_count).toBe(2);
+  });
+});
+
+describe('api.getEvents', () => {
+  it('fetches events with id + message + payload', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'e1', type: 'VOTE_SUBMITTED', message: 'Votes submitted', payload: { round: 1 }, timestamp: 't' },
+      ]),
+    } as Response);
+
+    const result = await api.getEvents('case-001');
+
+    expect(result[0].id).toBe('e1');
+    expect(result[0].message).toBe('Votes submitted');
+  });
+});
+
+describe('api.getCases wrapper', () => {
+  it('unwraps {cases: [...]} envelope', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ cases: [{ ...MOCK_CASE, final_decision: 'approve' }] }),
+    } as Response);
+
+    const result = await api.getCases();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('case-001');
   });
 });

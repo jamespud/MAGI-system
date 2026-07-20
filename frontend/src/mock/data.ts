@@ -20,6 +20,7 @@ export function createMockCase(): Case {
     round: 1,
     consensus: null,
     confidence: 0,
+    finalDecision: '',
     createdAt: '2026-07-18T10:00:00Z',
     updatedAt: '2026-07-18T10:05:00Z',
   };
