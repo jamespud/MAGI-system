@@ -1,0 +1,123 @@
+package handler
+
+import (
+	"context"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
+
+	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/server/dto"
+)
+
+// ArtifactHandler serves the derived artifact endpoints: /agents, /evidence,
+// /claims, /votes for a case.
+type ArtifactHandler struct {
+	svc *decision.Service
+}
+
+func NewArtifactHandler(svc *decision.Service) *ArtifactHandler {
+	return &ArtifactHandler{svc: svc}
+}
+
+func (h *ArtifactHandler) Evidence(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	evs, err := h.svc.Evidence(ctx, id)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.EvidenceDTO, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, dto.FromEvidence(e))
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
+func (h *ArtifactHandler) Claims(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	cls, err := h.svc.Claims(ctx, id)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.ClaimDTO, 0, len(cls))
+	for _, cl := range cls {
+		out = append(out, dto.FromClaim(cl))
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
+func (h *ArtifactHandler) Votes(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	vs, err := h.svc.Votes(ctx, id)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.VoteDTO, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, dto.FromVote(v))
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
+// Agents returns a per-agent snapshot aggregating run status + evidence/claim
+// counts + the agent's latest vote.
+func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	runs, _ := h.svc.AgentRuns(ctx, id)
+	evs, _ := h.svc.Evidence(ctx, id)
+	cls, _ := h.svc.Claims(ctx, id)
+	vs, _ := h.svc.Votes(ctx, id)
+
+	evByAgent := map[string]int{}
+	for _, e := range evs {
+		evByAgent[string(e.CollectedBy)]++
+	}
+	clByAgent := map[string]int{}
+	for _, cl := range cls {
+		clByAgent[string(cl.CreatedBy)]++
+	}
+	// latest vote per agent (by round)
+	voteByAgent := map[string]*entity.Vote{}
+	for _, v := range vs {
+		key := agentCodeFromRun(runs, v)
+		if key == "" {
+			continue
+		}
+		if cur, ok := voteByAgent[key]; !ok || v.Round >= cur.Round {
+			voteByAgent[key] = v
+		}
+	}
+
+	out := make(map[string]dto.AgentSnapshotDTO, len(runs))
+	for _, r := range runs {
+		code := string(r.MagiCode)
+		snap := dto.AgentSnapshotDTO{
+			AgentCode:     code,
+			Status:        string(r.Status),
+			Round:         r.Round,
+			EvidenceCount: evByAgent[code],
+			ClaimCount:    clByAgent[code],
+		}
+		if v, ok := voteByAgent[code]; ok {
+			vv := dto.FromVote(v)
+			snap.Vote = &vv
+		}
+		out[code] = snap
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
+// agentCodeFromRun resolves the agent code for a vote by joining on AgentRunID
+// when available; votes persisted with a known agent code carry it directly.
+func agentCodeFromRun(runs []*entity.AgentRun, v *entity.Vote) string {
+	for _, r := range runs {
+		if r.ID == v.AgentRunID {
+			return string(r.MagiCode)
+		}
+	}
+	return ""
+}

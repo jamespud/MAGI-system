@@ -28,6 +28,26 @@ func WithCaseRepo(repo port.CaseRepository) Option {
 	return func(s *Service) { s.caseRepo = repo }
 }
 
+// WithEvidenceRepo injects an EvidenceRepository for the /evidence endpoint.
+func WithEvidenceRepo(repo port.EvidenceRepository) Option {
+	return func(s *Service) { s.evidenceRepo = repo }
+}
+
+// WithClaimRepo injects a ClaimRepository for the /claims endpoint.
+func WithClaimRepo(repo port.ClaimRepository) Option {
+	return func(s *Service) { s.claimRepo = repo }
+}
+
+// WithVoteRepo injects a VoteRepository for the /votes endpoint.
+func WithVoteRepo(repo port.VoteRepository) Option {
+	return func(s *Service) { s.voteRepo = repo }
+}
+
+// WithAgentRunRepo injects an AgentRunRepository for the /agents endpoint.
+func WithAgentRunRepo(repo port.AgentRunRepository) Option {
+	return func(s *Service) { s.agentRunRepo = repo }
+}
+
 // RunController is the async-run lifecycle interface satisfied by RunManager.
 // Defined as an interface so tests can inject a fake without constructing a
 // real RunManager + Orchestrator.
@@ -50,11 +70,15 @@ func WithResolutionRepo(repo port.ResolutionRepository) Option {
 
 // Service is the application-layer service for decision cases.
 type Service struct {
-	orch     Orchestrator
-	cfg      ServiceConfig
-	caseRepo port.CaseRepository
-	resRepo  port.ResolutionRepository
-	runs     RunController
+	orch         Orchestrator
+	cfg          ServiceConfig
+	caseRepo     port.CaseRepository
+	resRepo      port.ResolutionRepository
+	evidenceRepo port.EvidenceRepository
+	claimRepo    port.ClaimRepository
+	voteRepo     port.VoteRepository
+	agentRunRepo port.AgentRunRepository
+	runs         RunController
 }
 
 // NewService creates a DecisionService.
@@ -135,6 +159,38 @@ func (s *Service) Resolution(ctx context.Context, caseID string) (*entity.Resolu
 		return nil, nil // not-found is non-fatal
 	}
 	return res, nil
+}
+
+// Evidence returns all evidence records for a case.
+func (s *Service) Evidence(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) {
+	if s.evidenceRepo == nil {
+		return nil, nil
+	}
+	return s.evidenceRepo.ListByCase(ctx, caseID)
+}
+
+// Claims returns all claims for a case.
+func (s *Service) Claims(ctx context.Context, caseID string) ([]*entity.Claim, error) {
+	if s.claimRepo == nil {
+		return nil, nil
+	}
+	return s.claimRepo.ListByCase(ctx, caseID)
+}
+
+// Votes returns all votes for a case.
+func (s *Service) Votes(ctx context.Context, caseID string) ([]*entity.Vote, error) {
+	if s.voteRepo == nil {
+		return nil, nil
+	}
+	return s.voteRepo.ListByCase(ctx, caseID)
+}
+
+// AgentRuns returns all agent runs for a case.
+func (s *Service) AgentRuns(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
+	if s.agentRunRepo == nil {
+		return nil, nil
+	}
+	return s.agentRunRepo.ListByCase(ctx, caseID)
 }
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.

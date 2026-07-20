@@ -45,6 +45,42 @@ type CaseListResponse struct {
 	Cases []CaseResponse `json:"cases"`
 }
 
+type AgentSnapshotDTO struct {
+	AgentCode     string   `json:"agent_code"`
+	Status        string   `json:"status"`
+	Round         int      `json:"round"`
+	EvidenceCount int      `json:"evidence_count"`
+	ClaimCount    int      `json:"claim_count"`
+	Vote          *VoteDTO `json:"vote,omitempty"`
+}
+
+type EvidenceDTO struct {
+	ID          string  `json:"id"`
+	Source      string  `json:"source"`
+	URL         string  `json:"url,omitempty"`
+	Observation string  `json:"observation"`
+	Reliability float64 `json:"reliability"`
+	CollectedBy string  `json:"collected_by"`
+	Timestamp   string  `json:"timestamp"`
+}
+
+type ClaimDTO struct {
+	ID          string   `json:"id"`
+	Text        string   `json:"text"`
+	Supports    []string `json:"supports"`
+	Contradicts []string `json:"contradicts"`
+	CreatedBy   string   `json:"created_by"`
+}
+
+type VoteDTO struct {
+	ID         string  `json:"id"`
+	AgentCode  string  `json:"agent_code"`
+	Stance     string  `json:"stance"`
+	Confidence float64 `json:"confidence"`
+	Reasoning  string  `json:"reasoning"`
+	Round      int     `json:"round"`
+}
+
 type DecisionReport struct {
 	Report string `json:"report"`
 }
@@ -221,5 +257,41 @@ func FromEvaluation(e *entity.Evaluation) EvaluationResponse {
 		TotalTokens:         e.TotalTokens,
 		FirstRoundConsensus: e.FirstRoundConsensus,
 		ConsensusRound:      e.ConsensusRound,
+	}
+}
+
+func FromEvidence(e *entity.EvidenceRecord) EvidenceDTO {
+	url := ""
+	if e.SourceURI != nil {
+		url = *e.SourceURI
+	}
+	return EvidenceDTO{
+		ID:          e.ID,
+		Source:      string(e.SourceType),
+		URL:         url,
+		Observation: e.Observation,
+		Reliability: e.Reliability.Final,
+		CollectedBy: string(e.CollectedBy),
+		Timestamp:   e.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func FromClaim(c *entity.Claim) ClaimDTO {
+	return ClaimDTO{
+		ID:          c.ID,
+		Text:        c.Statement,
+		Supports:    c.Supports,
+		Contradicts: c.Contradicts,
+		CreatedBy:   string(c.CreatedBy),
+	}
+}
+
+func FromVote(v *entity.Vote) VoteDTO {
+	return VoteDTO{
+		ID:         v.ID,
+		Stance:     string(v.Decision),
+		Confidence: v.Confidence,
+		Reasoning:  v.ReasoningSummary,
+		Round:      v.Round,
 	}
 }

@@ -41,6 +41,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/cases/:id/report", decH.Report)
 	v1.GET("/cases", decH.List)
 
+	artH := handler.NewArtifactHandler(deps.Decision)
+	v1.GET("/cases/:id/agents", artH.Agents)
+	v1.GET("/cases/:id/evidence", artH.Evidence)
+	v1.GET("/cases/:id/claims", artH.Claims)
+	v1.GET("/cases/:id/votes", artH.Votes)
+
 	repH := handler.NewReplayHandler(deps.Replay)
 	v1.GET("/cases/:id/events", repH.Events)
 	v1.GET("/cases/:id/timeline", repH.Timeline)
