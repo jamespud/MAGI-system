@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -599,5 +600,61 @@ func TestAgentLoop_ResumeFromCheckpoint(t *testing.T) {
 	}
 	if sm.calls != 1 {
 		t.Fatalf("expected 1 model call (resumed at step 2), got %d", sm.calls)
+	}
+}
+
+func TestAgentLoop_EventsCarryIDAndPayload(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		EventPub:  rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	actx := &runtime.AgentContext{CaseID: "c1", RunID: "c1-melchior-r1-investigate", Task: entity.DecisionTask{CanonicalQuestion: "compute"}}
+	if _, err := loop.Run(context.Background(), evidenceCfg(1, 0), actx); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(rec.events) == 0 {
+		t.Fatal("no events published")
+	}
+	var gotToolReq, gotEvidence bool
+	for _, ev := range rec.events {
+		if ev.ID == "" {
+			t.Fatalf("event %s has empty ID", ev.Type)
+		}
+		if !strings.HasPrefix(ev.ID, "c1-") {
+			t.Fatalf("event ID should be prefixed with caseID, got %s", ev.ID)
+		}
+		if ev.Type == entity.EventToolCallRequested {
+			if !bytes.Contains(ev.Payload, []byte(`"tool_name"`)) || !bytes.Contains(ev.Payload, []byte(`"calc"`)) {
+				t.Fatalf("TOOL_CALL_REQUESTED payload missing tool_name=calc: %s", string(ev.Payload))
+			}
+			gotToolReq = true
+		}
+		if ev.Type == entity.EventEvidenceCreated {
+			if !bytes.Contains(ev.Payload, []byte(`"evidence_id"`)) {
+				t.Fatalf("EVIDENCE_CREATED payload missing evidence_id: %s", string(ev.Payload))
+			}
+			gotEvidence = true
+		}
+	}
+	if !gotToolReq {
+		t.Fatal("no TOOL_CALL_REQUESTED event")
+	}
+	if !gotEvidence {
+		t.Fatal("no EVIDENCE_CREATED event")
 	}
 }

@@ -95,18 +95,12 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	}, nil
 }
 
-func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, et entity.EventType) {
+func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, et entity.EventType, payload any) {
 	if l.eventPub == nil {
 		return
 	}
 	ac := agentCode
-	_ = l.eventPub.Publish(ctx, entity.MagiEvent{
-		CaseID:    caseID,
-		RunID:     runID,
-		AgentCode: &ac,
-		Type:      et,
-		Timestamp: time.Now(),
-	})
+	_ = l.eventPub.Publish(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
 }
 
 // saveCheckpoint persists the working-memory snapshot for resume (§18).
@@ -226,7 +220,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		}
 		stepStart := time.Now()
 		resp, err := bound.Generate(ctx, messages)
-		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded)
+		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
 		st := &Step{Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {
 			result.Status = LoopStatusError
@@ -252,7 +246,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			messages = append(messages, resp)
 			for _, tc := range resp.ToolCalls {
 				tcr := ToolCallRecord{ToolCallID: tc.ID, ToolName: tc.Function.Name, Arguments: tc.Function.Arguments}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "arguments": tc.Function.Arguments})
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to
 				// cfg.ToolBindings. nameToDef only contains permitted tools. A tool call
 				// to a non-permitted tool falls into the !ok branch below (tool not found).
@@ -275,21 +269,21 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
 				// Execute
 				toolStart := time.Now()
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
 				execRes, execErr := l.toolExec.Execute(ctx, port.ToolExecutionRequest{ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments})
 				tcr.Duration = time.Since(toolStart)
 				if execErr != nil {
 					tcr.Err = execErr.Error()
 					ts.consecToolFail++
-					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed)
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": execErr.Error()})
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, execErr.Error()), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds()})
 				ts.consecToolFail = 0
 				tcr.Valid = true
 				tcr.Result = execRes.Output
@@ -299,7 +293,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
 					if ev != nil {
 						tcr.EvidenceID = ev.ID
-						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated)
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated, map[string]any{"evidence_id": ev.ID, "reliability": ev.Reliability.Final, "observation": ev.Observation, "tool_name": tc.Function.Name})
 					}
 				}
 				messages = append(messages, schema.ToolMessage(execRes.Output, tc.ID))
@@ -327,7 +321,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					}
 					if validEVs {
 						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
 					}
 				}
 			}
@@ -339,7 +333,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			ledger.RecomputeCorroboration(pr.Summary.Claims)
 			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
 			if !gateRes.Passed {
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed, map[string]any{"violations": gateViolationsMsg(gateRes)})
 				ts.gateFail++
 				messages = append(messages, resp)
 				messages = append(messages, schema.UserMessage("Evidence gate failed: "+gateViolationsMsg(gateRes)+"; gather more evidence or fix your EvidenceSummary."))
@@ -351,11 +345,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			// Gate passed
-			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGatePassed)
+			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGatePassed, nil)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
 				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
 			}
 			messages = append(messages, resp)
 			if actx.DebateContext != nil {
@@ -384,7 +378,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			result.Vote = pr.Vote
-			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventVoteSubmitted)
+			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventVoteSubmitted, map[string]any{"stance": string(pr.Vote.Decision), "confidence": pr.Vote.Confidence, "reasoning": pr.Vote.ReasoningSummary})
 			result.Status = LoopStatusCompleted
 			st.IsFinal = true
 			trace.Steps = append(trace.Steps, st)
