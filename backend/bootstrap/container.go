@@ -199,7 +199,7 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
-	if err := db.AutoMigrate(&magi.CaseModel{}); err != nil {
+	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
 	return db, nil
