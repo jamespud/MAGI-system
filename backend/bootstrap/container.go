@@ -6,7 +6,6 @@ import (
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"go.uber.org/fx"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -207,7 +206,7 @@ func (s *StubToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRe
 }
 
 func provideDB(cfg *Config) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(cfg.Database.DSN), &gorm.Config{})
+	db, err := gorm.Open(MysqlDialector(cfg.Database.DSN), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
