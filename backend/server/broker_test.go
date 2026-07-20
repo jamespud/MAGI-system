@@ -61,3 +61,41 @@ func TestEventBroker_NoSubscriberNonBlocking(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 }
+
+func TestEventBroker_SubscribeWithReplay_ReturnsHistory(t *testing.T) {
+	b := server.NewEventBroker()
+	b.Publish(context.Background(), entity.MagiEvent{ID: "c1-1", CaseID: "c1", Type: entity.EventCaseCreated})
+	b.Publish(context.Background(), entity.MagiEvent{ID: "c1-2", CaseID: "c1", Type: entity.EventAgentStarted})
+
+	ch, history := b.SubscribeWithReplay("c1")
+	defer b.Unsubscribe("c1", ch)
+
+	if len(history) != 2 {
+		t.Fatalf("expected 2 history events, got %d", len(history))
+	}
+	if history[0].ID != "c1-1" || history[1].ID != "c1-2" {
+		t.Fatalf("history order wrong: %s, %s", history[0].ID, history[1].ID)
+	}
+}
+
+func TestEventBroker_SubscribeWithReplay_LiveEventAfterHistory(t *testing.T) {
+	b := server.NewEventBroker()
+	b.Publish(context.Background(), entity.MagiEvent{ID: "c1-1", CaseID: "c1", Type: entity.EventCaseCreated})
+	ch, history := b.SubscribeWithReplay("c1")
+	defer b.Unsubscribe("c1", ch)
+
+	if len(history) != 1 {
+		t.Fatalf("expected 1 history event, got %d", len(history))
+	}
+
+	b.Publish(context.Background(), entity.MagiEvent{ID: "c1-2", CaseID: "c1", Type: entity.EventAgentStarted})
+
+	select {
+	case ev := <-ch:
+		if ev.ID != "c1-2" {
+			t.Fatalf("live event id: %s", ev.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for live event")
+	}
+}

@@ -45,6 +45,21 @@ func (b *EventBroker) Subscribe(caseID string) chan *entity.MagiEvent {
 	return ch
 }
 
+// SubscribeWithReplay returns a live subscriber channel plus the snapshot of
+// events already stored for caseID at subscribe time. Callers should flush the
+// snapshot to the client first, then consume the channel, skipping any live
+// event whose ID already appears in the snapshot (race protection against an
+// event that is both in the history snapshot and the live channel buffer).
+func (b *EventBroker) SubscribeWithReplay(caseID string) (chan *entity.MagiEvent, []*entity.MagiEvent) {
+	ch := b.Subscribe(caseID)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	stored := b.stored[caseID]
+	history := make([]*entity.MagiEvent, len(stored))
+	copy(history, stored)
+	return ch, history
+}
+
 func (b *EventBroker) Unsubscribe(caseID string, ch chan *entity.MagiEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
