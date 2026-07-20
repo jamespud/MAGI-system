@@ -122,6 +122,7 @@ func provideOrchestrator(
 	commander *service.Commander,
 	broker *appserver.EventBroker,
 	configs []*entity.MagiConfig,
+	repo port.Repository,
 ) *orchestration.Orchestrator {
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop: agentLoop,
@@ -129,6 +130,8 @@ func provideOrchestrator(
 		Debate:    debate.NewDebateEngine(nil),
 		Commander: commander,
 		EventPub:  broker,
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
 		Configs:   configs,
 		Policy:    consensus.DefaultConsensusPolicy(),
 	})

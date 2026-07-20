@@ -15,6 +15,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/orchestration"
+	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/validation"
@@ -390,5 +391,123 @@ func TestEnforceReflectionRule_LLMReflectionJustifiedKept(t *testing.T) {
 	orchestration.EnforceReflectionRule(prev, newVotes, results, configs, 1)
 	if newVotes[0].Decision != entity.VoteDecisionApprove {
 		t.Fatalf("justified LLM reflection should be kept, got %s", newVotes[0].Decision)
+	}
+}
+
+// --- stub aggregate repository (records Creates) ---
+
+type stubRepo struct {
+	mu         sync.Mutex
+	cases      []*entity.DecisionCase
+	statuses   map[string]entity.CaseStatus
+	agentRuns  []*entity.AgentRun
+	evidence   []*entity.EvidenceRecord
+	claims     []*entity.Claim
+	votes      []*entity.Vote
+	resolutions []*entity.Resolution
+}
+
+func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
+
+func (s *stubRepo) CaseRepo() port.CaseRepository             { return &stubCaseRepo{s: s} }
+func (s *stubRepo) AgentRunRepo() port.AgentRunRepository     { return &stubAgentRunRepo{s: s} }
+func (s *stubRepo) EvidenceRepo() port.EvidenceRepository     { return &stubEvidenceRepo{s: s} }
+func (s *stubRepo) ClaimRepo() port.ClaimRepository           { return &stubClaimRepo{s: s} }
+func (s *stubRepo) VoteRepo() port.VoteRepository             { return &stubVoteRepo{s: s} }
+func (s *stubRepo) DebateRepo() port.DebateRepository         { return &stubDebateRepo{} }
+func (s *stubRepo) ReflectionRepo() port.ReflectionRepository { return &stubReflRepo{} }
+func (s *stubRepo) ResolutionRepo() port.ResolutionRepository { return &stubResRepo{s: s} }
+func (s *stubRepo) EventRepo() port.EventRepository           { return &stubEventRepo{} }
+func (s *stubRepo) CheckpointRepo() port.CheckpointRepository { return &stubCpRepo{} }
+func (s *stubRepo) MemoryRepo() port.MemoryRepository         { return &stubMemRepo{} }
+
+type stubCaseRepo struct{ s *stubRepo }
+func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.cases = append(r.s.cases, c); return nil }
+func (r *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) { return nil, nil }
+func (r *stubCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
+func (r *stubCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.statuses[id] = st; return nil }
+
+type stubAgentRunRepo struct{ s *stubRepo }
+func (r *stubAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.agentRuns = append(r.s.agentRuns, a); return nil }
+func (r *stubAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, error) { return nil, nil }
+func (r *stubAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) { return nil, nil }
+
+type stubEvidenceRepo struct{ s *stubRepo }
+func (r *stubEvidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.evidence = append(r.s.evidence, e); return nil }
+func (r *stubEvidenceRepo) Get(ctx context.Context, id string) (*entity.EvidenceRecord, error) { return nil, nil }
+func (r *stubEvidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) { return nil, nil }
+
+type stubClaimRepo struct{ s *stubRepo }
+func (r *stubClaimRepo) Create(ctx context.Context, c *entity.Claim) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.claims = append(r.s.claims, c); return nil }
+func (r *stubClaimRepo) Get(ctx context.Context, id string) (*entity.Claim, error) { return nil, nil }
+func (r *stubClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) { return nil, nil }
+
+type stubVoteRepo struct{ s *stubRepo }
+func (r *stubVoteRepo) Create(ctx context.Context, v *entity.Vote) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.votes = append(r.s.votes, v); return nil }
+func (r *stubVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) { return nil, nil }
+
+type stubDebateRepo struct{}
+func (stubDebateRepo) Create(ctx context.Context, d *entity.DebateRound) error { return nil }
+func (stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.DebateRound, error) { return nil, nil }
+
+type stubReflRepo struct{}
+func (stubReflRepo) Create(ctx context.Context, r *entity.Reflection) error { return nil }
+func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) { return nil, nil }
+
+type stubResRepo struct{ s *stubRepo }
+func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.resolutions = append(r.s.resolutions, res); return nil }
+func (r *stubResRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) { return nil, nil }
+
+type stubEventRepo struct{}
+func (stubEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error { return nil }
+func (stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) { return nil, nil }
+
+type stubCpRepo struct{}
+func (stubCpRepo) Save(context.Context, *entity.AgentState) error            { return nil }
+func (stubCpRepo) Load(context.Context, string) (*entity.AgentState, error)  { return nil, nil }
+
+type stubMemRepo struct{}
+func (stubMemRepo) Get(context.Context, string) (*entity.CaseMemoryProjection, error) { return nil, nil }
+func (stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error          { return nil }
+
+func TestOrchestrate_PersistsArtifacts(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.evidence) == 0 {
+		t.Fatal("no evidence persisted")
+	}
+	if len(repo.votes) != 3 {
+		t.Fatalf("expected 3 votes persisted, got %d", len(repo.votes))
+	}
+	if len(repo.agentRuns) != 3 {
+		t.Fatalf("expected 3 agent runs persisted, got %d", len(repo.agentRuns))
+	}
+	if len(repo.resolutions) != 1 {
+		t.Fatalf("expected 1 resolution persisted, got %d", len(repo.resolutions))
+	}
+	if repo.statuses["c1"] != entity.CaseStatusResolved {
+		t.Fatalf("expected case status RESOLVED, got %s", repo.statuses["c1"])
 	}
 }

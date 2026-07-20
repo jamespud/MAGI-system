@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
@@ -21,6 +22,7 @@ type Orchestrator struct {
 	commander  *service.Commander
 	eventPub   port.EventPublisher
 	caseRepo   port.CaseRepository
+	repo       port.Repository
 	knowledge  port.KnowledgePort
 	policy     consensus.ConsensusPolicy
 	failPolicy FailurePolicy
@@ -34,6 +36,7 @@ type OrchestratorDeps struct {
 	Commander      *service.Commander
 	EventPub       port.EventPublisher
 	CaseRepo       port.CaseRepository
+	Repo           port.Repository
 	ContextBuilder *memory.ContextBuilder
 	Knowledge      port.KnowledgePort
 	Configs        []*entity.MagiConfig
@@ -53,6 +56,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		commander:  d.Commander,
 		eventPub:   d.EventPub,
 		caseRepo:   d.CaseRepo,
+		repo:       d.Repo,
 		knowledge:  d.Knowledge,
 		policy:     d.Policy,
 		failPolicy: fp,
@@ -96,30 +100,31 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusContextBuilding
 
 		case entity.CaseStatusContextBuilding:
-			o.publish(ctx, case_, entity.EventTaskNormalized)
+			o.publish(ctx, case_, entity.EventTaskNormalized, map[string]any{"canonical_question": task.CanonicalQuestion})
 			status = entity.CaseStatusRetrievingMemory
 
 		case entity.CaseStatusRetrievingMemory:
-			o.publish(ctx, case_, entity.EventMemoryRetrieved)
+			o.publish(ctx, case_, entity.EventMemoryRetrieved, nil)
 			status = entity.CaseStatusInvestigating
 
 		case entity.CaseStatusInvestigating:
-			o.publish(ctx, case_, entity.EventAgentStarted)
+			o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": round})
 			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs, round)
 			status = entity.CaseStatusEvidenceGating
 
 		case entity.CaseStatusEvidenceGating:
-			o.publish(ctx, case_, entity.EventEvidenceGatePassed)
+			o.publish(ctx, case_, entity.EventEvidenceGatePassed, nil)
 			status = entity.CaseStatusCollectingVotes
 
 		case entity.CaseStatusCollectingVotes:
 			votes = o.extractVotes(results)
-			o.publish(ctx, case_, entity.EventVoteSubmitted)
+			o.persistArtifacts(ctx, case_, results, votes, round)
+			o.publish(ctx, case_, entity.EventVoteSubmitted, map[string]any{"round": round, "votes": len(votes)})
 			status = entity.CaseStatusConsensusCheck
 
 		case entity.CaseStatusConsensusCheck:
 			consResult = o.consensus.Evaluate(derefVotes(votes), round, o.policy)
-			o.publish(ctx, case_, entity.EventConsensusEvaluated)
+			o.publish(ctx, case_, entity.EventConsensusEvaluated, map[string]any{"outcome": string(consResult.Outcome), "round": round})
 			switch consResult.Outcome {
 			case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection, entity.ConsensusConditional:
 				status = entity.CaseStatusResolving
@@ -136,7 +141,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			}
 
 		case entity.CaseStatusDebating:
-			o.publish(ctx, case_, entity.EventDebateStarted)
+			o.publish(ctx, case_, entity.EventDebateStarted, map[string]any{"round": round})
 			allClaims := o.collectClaims(results)
 			allEvidence := o.collectEvidence(results)
 			packet := o.debate.BuildPacket(derefVotes(votes), allClaims, round, allEvidence)
@@ -144,13 +149,14 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusReflecting
 
 		case entity.CaseStatusReflecting:
-			o.publish(ctx, case_, entity.EventReflectionSubmitted)
+			o.publish(ctx, case_, entity.EventReflectionSubmitted, nil)
 			status = entity.CaseStatusRevoting
 
 		case entity.CaseStatusRevoting:
-			o.publish(ctx, case_, entity.EventRevoteSubmitted)
+			o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": round})
 			newVotes := o.extractVotes(results)
 			EnforceReflectionRule(votes, newVotes, results, o.configs, round)
+			o.persistArtifacts(ctx, case_, results, newVotes, round)
 			votes = newVotes
 			round++
 			status = entity.CaseStatusConsensusCheck
@@ -164,6 +170,12 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 				KeyClaimIDs:    o.collectClaimIDs(results),
 				VoteIDs:        voteIDs(votes),
 			}
+			resolution.ID = fmt.Sprintf("res-%s", case_.ID)
+			resolution.CaseID = case_.ID
+			resolution.CreatedAt = time.Now()
+			if o.repo != nil {
+				_ = o.repo.ResolutionRepo().Create(ctx, resolution)
+			}
 			status = entity.CaseStatusGeneratingReport
 
 		case entity.CaseStatusGeneratingReport:
@@ -172,7 +184,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 				report = "report generation failed"
 			}
 			resolution.FinalReport = report
-			o.publish(ctx, case_, entity.EventResolutionCreated)
+			o.publish(ctx, case_, entity.EventResolutionCreated, map[string]any{"final_decision": string(resolution.FinalDecision)})
 			status = entity.CaseStatusSavingMemory
 
 		case entity.CaseStatusSavingMemory:
@@ -181,7 +193,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			if o.knowledge != nil {
 				_ = o.knowledge.Store(ctx, proj)
 			}
-			o.publish(ctx, case_, entity.EventMemoryIndexed)
+			o.publish(ctx, case_, entity.EventMemoryIndexed, nil)
 			status = entity.CaseStatusEvaluating
 
 		case entity.CaseStatusEvaluating:
@@ -189,12 +201,12 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusResolved
 
 		case entity.CaseStatusResolved:
-			o.publish(ctx, case_, entity.EventCaseCompleted)
+			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status)})
 			case_.Status = status
 			return resolution, nil
 
 		default:
-			o.publish(ctx, case_, entity.EventCaseFailed)
+			o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"status": string(status)})
 			case_.Status = status
 			return resolution, fmt.Errorf("case ended: %s", status)
 		}
@@ -215,6 +227,91 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 		votes[i] = o.failPolicy.HandleFailure(r, cfg)
 	}
 	return votes
+}
+
+// persistArtifacts writes agent runs, evidence, claims, and votes for one
+// dispatch round. Nil-safe: no-op when Repo is unset (back-compat for tests).
+func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int) {
+	if o.repo == nil {
+		return
+	}
+	now := time.Now()
+	for i, r := range results {
+		cfg := o.configAt(i)
+		code := codeOf(cfg)
+		run := &entity.AgentRun{
+			ID:        fmt.Sprintf("%s-%s-r%d", case_.ID, code, round),
+			CaseID:    case_.ID,
+			MagiCode:  code,
+			Round:     round,
+			Status:    agentRunStatus(r),
+			StartedAt: now,
+			CompletedAt: &now,
+			Usage:     r.Usage,
+			Err:       errStr(r.Err),
+		}
+		_ = o.repo.AgentRunRepo().Create(ctx, run)
+		if r.Ledger != nil {
+			for _, ev := range r.Ledger.List() {
+				ev.CaseID = case_.ID
+				ev.AgentRunID = run.ID
+				_ = o.repo.EvidenceRepo().Create(ctx, ev)
+			}
+			for _, cl := range r.Ledger.ListClaims() {
+				cl.CaseID = case_.ID
+				cl.AgentRunID = run.ID
+				_ = o.repo.ClaimRepo().Create(ctx, cl)
+			}
+		}
+	}
+	for i, v := range votes {
+		if v == nil {
+			continue
+		}
+		cfg := o.configAt(i)
+		if v.ID == "" {
+			v.ID = fmt.Sprintf("vote-%s-%s-r%d", case_.ID, codeOf(cfg), round)
+		}
+		v.CaseID = case_.ID
+		v.Round = round
+		_ = o.repo.VoteRepo().Create(ctx, v)
+	}
+}
+
+func (o *Orchestrator) configAt(i int) *entity.MagiConfig {
+	if i < len(o.configs) {
+		return o.configs[i]
+	}
+	return nil
+}
+
+func codeOf(c *entity.MagiConfig) entity.MagiCode {
+	if c == nil {
+		return ""
+	}
+	return entity.MagiCode(c.Code)
+}
+
+func agentRunStatus(r *runtime.LoopResult) entity.AgentRunStatus {
+	switch r.Status {
+	case runtime.LoopStatusCompleted:
+		return entity.AgentRunStatusCompleted
+	case runtime.LoopStatusError:
+		return entity.AgentRunStatusFailed
+	case runtime.LoopStatusMaxSteps:
+		return entity.AgentRunStatusMaxSteps
+	case runtime.LoopStatusCancelled:
+		return entity.AgentRunStatusCancelled
+	default:
+		return entity.AgentRunStatusCompleted
+	}
+}
+
+func errStr(e error) string {
+	if e == nil {
+		return ""
+	}
+	return e.Error()
 }
 
 func (o *Orchestrator) collectClaims(results []*runtime.LoopResult) []*entity.Claim {
@@ -318,15 +415,15 @@ func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtim
 	}
 }
 
-func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType) {
+func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType, payload any) {
 	if o.eventPub == nil {
 		return
 	}
-	_ = o.eventPub.Publish(ctx, entity.MagiEvent{CaseID: case_.ID, Type: et})
+	_ = o.eventPub.Publish(ctx, entity.NewEvent(case_.ID, "", nil, et, payload))
 }
 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
-	o.publish(ctx, case_, entity.EventCaseFailed)
+	o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"error": msg})
 	case_.Status = entity.CaseStatusFailed
 	return nil, fmt.Errorf("%s", msg)
 }
