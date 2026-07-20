@@ -6,10 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -19,6 +21,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/validation"
+	"github.com/jamespud/magi/backend/server"
 )
 
 // --- mocks ---
@@ -509,5 +512,84 @@ func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 	}
 	if repo.statuses["c1"] != entity.CaseStatusResolved {
 		t.Fatalf("expected case status RESOLVED, got %s", repo.statuses["c1"])
+	}
+}
+
+// --- end-to-end async integration ---
+
+func TestIntegration_AsyncRunPersistsAndStreamsEvents(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	repo := newStubRepo()
+	broker := server.NewEventBroker()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	rm := decision.NewRunManager(orch)
+	case_ := &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+
+	if err := rm.Start(context.Background(), case_); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !rm.IsRunning("c1") {
+		t.Fatal("should be running immediately after start")
+	}
+
+	// Wait for the async run to complete (bounded).
+	deadline := time.Now().Add(5 * time.Second)
+	for rm.IsRunning("c1") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rm.IsRunning("c1") {
+		t.Fatal("run did not complete within 5s")
+	}
+
+	// Assert events were published with non-empty IDs.
+	events, err := broker.ListByCase(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("no events published")
+	}
+	var sawCompleted bool
+	for _, ev := range events {
+		if ev.ID == "" {
+			t.Fatalf("event %s has empty ID", ev.Type)
+		}
+		if ev.Type == entity.EventCaseCompleted {
+			sawCompleted = true
+		}
+	}
+	if !sawCompleted {
+		t.Fatal("no CASE_COMPLETED event")
+	}
+
+	// Assert artifacts were persisted.
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.votes) != 3 {
+		t.Fatalf("expected 3 votes, got %d", len(repo.votes))
+	}
+	if len(repo.evidence) == 0 {
+		t.Fatal("no evidence persisted")
+	}
+	if len(repo.resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(repo.resolutions))
+	}
+	if repo.statuses["c1"] != entity.CaseStatusResolved {
+		t.Fatalf("case status: %s", repo.statuses["c1"])
 	}
 }
