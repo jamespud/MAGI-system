@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -8,7 +9,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
-func TestFromCase(t *testing.T) {
+func TestFromCase_NilResolution(t *testing.T) {
 	now := time.Now()
 	c := &entity.DecisionCase{
 		ID:          "c1",
@@ -19,7 +20,7 @@ func TestFromCase(t *testing.T) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	got := FromCase(c)
+	got := FromCase(c, nil)
 
 	if got.ID != "c1" {
 		t.Fatalf("ID: got %q", got.ID)
@@ -36,30 +37,70 @@ func TestFromCase(t *testing.T) {
 	if got.Status != "DRAFT" {
 		t.Fatalf("Status: got %q", got.Status)
 	}
+	if got.Consensus != nil {
+		t.Fatalf("Consensus should be nil without resolution, got %+v", got.Consensus)
+	}
+	if got.Round != 0 {
+		t.Fatalf("Round should be 0 without resolution, got %d", got.Round)
+	}
 	if got.CreatedAt != now.Format(time.RFC3339) {
 		t.Fatalf("CreatedAt: got %q", got.CreatedAt)
 	}
-	if got.UpdatedAt != now.Format(time.RFC3339) {
-		t.Fatalf("UpdatedAt: got %q", got.UpdatedAt)
+}
+
+func TestFromCase_WithResolutionSetsConsensusAndRound(t *testing.T) {
+	now := time.Now()
+	c := &entity.DecisionCase{ID: "c1", Status: entity.CaseStatusResolved, CreatedAt: now, UpdatedAt: now}
+	res := &entity.Resolution{
+		FinalDecision: entity.VoteDecisionApprove,
+		Consensus: entity.ConsensusResult{
+			Outcome: entity.ConsensusStrongApproval, Round: 2,
+			Votes: []entity.Vote{
+				{Decision: entity.VoteDecisionApprove, Confidence: 90},
+				{Decision: entity.VoteDecisionApprove, Confidence: 80},
+				{Decision: entity.VoteDecisionAbstain, Confidence: 50},
+			},
+		},
+	}
+	out := FromCase(c, res)
+	if out.Round != 2 {
+		t.Fatalf("round: %d", out.Round)
+	}
+	if out.Consensus == nil || out.Consensus.Approve != 2 || out.Consensus.Abstain != 1 {
+		t.Fatalf("consensus: %+v", out.Consensus)
+	}
+	if out.FinalDecision != "approve" {
+		t.Fatalf("final decision: %s", out.FinalDecision)
+	}
+	if out.Confidence == 0 {
+		t.Fatal("confidence should be averaged from votes, got 0")
 	}
 }
 
-func TestFromResolution(t *testing.T) {
-	r := &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}
-	r.Consensus.Round = 3
-	got := FromResolution(r)
-	if got.FinalDecision != "approve" || got.Round != 3 {
-		t.Fatalf("FromResolution: %+v", got)
-	}
-}
-
-func TestFromEvent(t *testing.T) {
+func TestFromEvent_DerivesMessageAndPassesPayload(t *testing.T) {
 	ts := time.Now()
 	code := entity.MagiCode("melchior")
-	e := &entity.MagiEvent{Type: entity.EventVoteSubmitted, AgentCode: &code, RunID: "r1", Timestamp: ts}
-	got := FromEvent(e)
-	if got.Type != "VOTE_SUBMITTED" || got.AgentCode != "melchior" || got.RunID != "r1" {
-		t.Fatalf("FromEvent: %+v", got)
+	ev := &entity.MagiEvent{ID: "e1", Type: entity.EventVoteSubmitted, AgentCode: &code, RunID: "r1", Timestamp: ts, Payload: json.RawMessage(`{"round":1}`)}
+	out := FromEvent(ev)
+	if out.ID != "e1" {
+		t.Fatalf("id: %s", out.ID)
+	}
+	if out.Type != "VOTE_SUBMITTED" || out.AgentCode != "melchior" || out.RunID != "r1" {
+		t.Fatalf("FromEvent: %+v", out)
+	}
+	if out.Message == "" {
+		t.Fatal("message should be derived, not empty")
+	}
+	if string(out.Payload) != `{"round":1}` {
+		t.Fatalf("payload passthrough: %s", string(out.Payload))
+	}
+}
+
+func TestFromEvent_UnknownTypeHasMessage(t *testing.T) {
+	ev := &entity.MagiEvent{ID: "e2", Type: "SOMETHING_NEW"}
+	out := FromEvent(ev)
+	if out.Message == "" {
+		t.Fatal("unknown event type should still have a message (the type itself)")
 	}
 }
 

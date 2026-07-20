@@ -35,7 +35,7 @@ func (h *DecisionHandler) Create(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(consts.StatusCreated, dto.FromCase(case_))
+	c.JSON(consts.StatusCreated, dto.FromCase(case_, nil))
 }
 
 func (h *DecisionHandler) Run(ctx context.Context, c *app.RequestContext) {
@@ -77,7 +77,8 @@ func (h *DecisionHandler) Get(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
 		return
 	}
-	c.JSON(consts.StatusOK, dto.FromCase(case_))
+	res, _ := h.svc.Resolution(ctx, id)
+	c.JSON(consts.StatusOK, dto.FromCase(case_, res))
 }
 
 func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
@@ -99,7 +100,7 @@ func (h *DecisionHandler) List(ctx context.Context, c *app.RequestContext) {
 	}
 	out := make([]dto.CaseResponse, 0, len(cases))
 	for _, cs := range cases {
-		out = append(out, dto.FromCase(cs))
+		out = append(out, dto.FromCase(cs, nil))
 	}
-	c.JSON(consts.StatusOK, out)
+	c.JSON(consts.StatusOK, dto.CaseListResponse{Cases: out})
 }

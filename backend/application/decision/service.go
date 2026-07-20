@@ -42,11 +42,18 @@ func WithRunManager(rm RunController) Option {
 	return func(s *Service) { s.runs = rm }
 }
 
+// WithResolutionRepo injects a ResolutionRepository so Get can enrich the
+// case response with consensus/round/confidence.
+func WithResolutionRepo(repo port.ResolutionRepository) Option {
+	return func(s *Service) { s.resRepo = repo }
+}
+
 // Service is the application-layer service for decision cases.
 type Service struct {
 	orch     Orchestrator
 	cfg      ServiceConfig
 	caseRepo port.CaseRepository
+	resRepo  port.ResolutionRepository
 	runs     RunController
 }
 
@@ -116,6 +123,18 @@ func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, err
 		return s.caseRepo.Get(ctx, id)
 	}
 	return nil, fmt.Errorf("case repository not configured")
+}
+
+// Resolution returns the persisted resolution for a case, or nil if none.
+func (s *Service) Resolution(ctx context.Context, caseID string) (*entity.Resolution, error) {
+	if s.resRepo == nil {
+		return nil, nil
+	}
+	res, err := s.resRepo.Get(ctx, caseID)
+	if err != nil {
+		return nil, nil // not-found is non-fatal
+	}
+	return res, nil
 }
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.

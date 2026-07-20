@@ -150,7 +150,7 @@ func provideDecisionService(
 ) *decision.Service {
 	return decision.NewService(orch, decision.ServiceConfig{
 		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
-	}, decision.WithCaseRepo(repo.CaseRepo()), decision.WithRunManager(rm))
+	}, decision.WithCaseRepo(repo.CaseRepo()), decision.WithResolutionRepo(repo.ResolutionRepo()), decision.WithRunManager(rm))
 }
 
 func provideReplayService(broker *appserver.EventBroker) *replay.Service {
