@@ -88,7 +88,7 @@ func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
 		return
 	}
-	report := h.svc.Report(ctx, case_, nil)
+	report := h.svc.Report(ctx, id)
 	c.JSON(consts.StatusOK, dto.DecisionReport{Report: report})
 }
 

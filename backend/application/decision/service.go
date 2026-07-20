@@ -201,10 +201,12 @@ func (s *Service) Cancel(ctx context.Context, id string) error {
 	return fmt.Errorf("case repository not configured")
 }
 
-// Report returns the final report for a resolved case.
-func (s *Service) Report(ctx context.Context, case_ *entity.DecisionCase, resolution *entity.Resolution) string {
-	if resolution != nil {
-		return resolution.FinalReport
+// Report returns the final report for a resolved case, loading the resolution
+// by caseID. Returns "" if no resolution is persisted yet.
+func (s *Service) Report(ctx context.Context, caseID string) string {
+	res, _ := s.Resolution(ctx, caseID)
+	if res != nil {
+		return res.FinalReport
 	}
 	return ""
 }

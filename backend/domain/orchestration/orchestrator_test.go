@@ -90,6 +90,7 @@ func (m *mockMagiRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx 
 
 	ledger := evidence.NewEvidenceLedger(actx.CaseID, "", code)
 	ledger.Record("tc", "tool", "local", "", "observation", entity.ReliabilityScore{Final: 0.9})
+	ledger.RecordClaim("claim by "+code, nil, nil) // each agent produces CL-001 -- collides without namespacing
 
 	return &runtime.LoopResult{
 		Vote:   vote,
@@ -458,7 +459,16 @@ func (stubReflRepo) Create(ctx context.Context, r *entity.Reflection) error { re
 func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) { return nil, nil }
 
 type stubResRepo struct{ s *stubRepo }
-func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.resolutions = append(r.s.resolutions, res); return nil }
+func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	// Snapshot like a real DB INSERT: later mutations of the in-memory resolution
+	// (e.g. FinalReport set in GeneratingReport) must NOT be visible in the
+	// persisted record. This catches bugs where persistence happens too early.
+	cp := *res
+	r.s.resolutions = append(r.s.resolutions, &cp)
+	return nil
+}
 func (r *stubResRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) { return nil, nil }
 
 type stubEventRepo struct{}
@@ -510,8 +520,35 @@ func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 	if len(repo.resolutions) != 1 {
 		t.Fatalf("expected 1 resolution persisted, got %d", len(repo.resolutions))
 	}
+	if repo.resolutions[0].FinalReport == "" {
+		t.Fatal("persisted resolution must have a non-empty FinalReport (persist after report generation, not before)")
+	}
 	if repo.statuses["c1"] != entity.CaseStatusResolved {
 		t.Fatalf("expected case status RESOLVED, got %s", repo.statuses["c1"])
+	}
+	// Each agent produced a claim with the same in-memory ID (CL-001); persisted
+	// IDs must be namespaced so they don't collide on the claim table's PK.
+	if len(repo.claims) != 3 {
+		t.Fatalf("expected 3 claims persisted, got %d", len(repo.claims))
+	}
+	seenClaims := map[string]bool{}
+	for _, cl := range repo.claims {
+		if seenClaims[cl.ID] {
+			t.Fatalf("duplicate persisted claim ID: %s", cl.ID)
+		}
+		seenClaims[cl.ID] = true
+		// ID must include the case ID so claims across different cases don't
+		// collide on the shared claim table's primary key.
+		if !strings.Contains(cl.ID, "c1-") {
+			t.Fatalf("persisted claim ID must include case ID, got %q", cl.ID)
+		}
+	}
+	seenEvidence := map[string]bool{}
+	for _, ev := range repo.evidence {
+		if seenEvidence[ev.ID] {
+			t.Fatalf("duplicate persisted evidence ID: %s", ev.ID)
+		}
+		seenEvidence[ev.ID] = true
 	}
 }
 
@@ -592,4 +629,53 @@ func TestIntegration_AsyncRunPersistsAndStreamsEvents(t *testing.T) {
 	if repo.statuses["c1"] != entity.CaseStatusResolved {
 		t.Fatalf("case status: %s", repo.statuses["c1"])
 	}
+}
+
+func TestOrchestrate_DebatePersistsUniqueClaimIDs(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{reject(), approve()} // round 1 split -> debate -> round 2 approve
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 2})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+
+	// Both the investigate dispatch and the reconsider dispatch happen in
+	// round 1; each agent's ledger generates CL-001 in both. Persisted IDs
+	// must distinguish the two phases or the reconsider claims collide.
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	seen := map[string]bool{}
+	for _, cl := range repo.claims {
+		if seen[cl.ID] {
+			t.Fatalf("duplicate persisted claim ID across investigate/reconsider: %s", cl.ID)
+		}
+		seen[cl.ID] = true
+	}
+	// 3 agents x 1 claim x 2 phases (investigate + reconsider) = 6 distinct claims.
+	if len(repo.claims) != 6 {
+		t.Fatalf("expected 6 persisted claims (3 agents x 2 phases), got %d: %v", len(repo.claims), claimIDs(repo.claims))
+	}
+}
+
+func claimIDs(cls []*entity.Claim) []string {
+	out := make([]string, len(cls))
+	for i, c := range cls {
+		out[i] = c.ID
+	}
+	return out
 }

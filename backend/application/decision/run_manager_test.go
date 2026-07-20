@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -99,4 +100,30 @@ func TestRunManager_CanRestartAfterCompletion(t *testing.T) {
 		t.Fatalf("restart after completion: %v", err)
 	}
 	rm.Cancel("c1")
+}
+
+// stubResRepo is a minimal ResolutionRepository for Service tests.
+type stubResRepo struct{ res *entity.Resolution }
+
+func (s *stubResRepo) Create(ctx context.Context, r *entity.Resolution) error { return nil }
+func (s *stubResRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) {
+	if s.res != nil && s.res.CaseID == caseID {
+		return s.res, nil
+	}
+	return nil, fmt.Errorf("record not found")
+}
+
+func TestService_ReportLoadsResolution(t *testing.T) {
+	res := &entity.Resolution{CaseID: "c1", FinalReport: "the final report text"}
+	svc := decision.NewService(nil, decision.ServiceConfig{}, decision.WithResolutionRepo(&stubResRepo{res: res}))
+
+	got := svc.Report(context.Background(), "c1")
+	if got != "the final report text" {
+		t.Fatalf("Report should load resolution.FinalReport, got %q", got)
+	}
+
+	// Unknown case -> empty string, no panic.
+	if svc.Report(context.Background(), "unknown") != "" {
+		t.Fatal("Report for unknown case should be empty string")
+	}
 }

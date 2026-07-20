@@ -118,7 +118,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 		case entity.CaseStatusCollectingVotes:
 			votes = o.extractVotes(results)
-			o.persistArtifacts(ctx, case_, results, votes, round)
+			o.persistArtifacts(ctx, case_, results, votes, round, "investigate")
 			o.publish(ctx, case_, entity.EventVoteSubmitted, map[string]any{"round": round, "votes": len(votes)})
 			status = entity.CaseStatusConsensusCheck
 
@@ -156,7 +156,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": round})
 			newVotes := o.extractVotes(results)
 			EnforceReflectionRule(votes, newVotes, results, o.configs, round)
-			o.persistArtifacts(ctx, case_, results, newVotes, round)
+			o.persistArtifacts(ctx, case_, results, newVotes, round, "reconsider")
 			votes = newVotes
 			round++
 			status = entity.CaseStatusConsensusCheck
@@ -173,9 +173,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			resolution.ID = fmt.Sprintf("res-%s", case_.ID)
 			resolution.CaseID = case_.ID
 			resolution.CreatedAt = time.Now()
-			if o.repo != nil {
-				_ = o.repo.ResolutionRepo().Create(ctx, resolution)
-			}
 			status = entity.CaseStatusGeneratingReport
 
 		case entity.CaseStatusGeneratingReport:
@@ -201,6 +198,12 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusResolved
 
 		case entity.CaseStatusResolved:
+			// Persist the resolution here, after FinalReport (GeneratingReport) and
+			// Evaluation (Evaluating) are set. Persisting earlier would snapshot
+			// an empty FinalReport.
+			if o.repo != nil && resolution != nil {
+				_ = o.repo.ResolutionRepo().Create(ctx, resolution)
+			}
 			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status)})
 			case_.Status = status
 			return resolution, nil
@@ -231,7 +234,17 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 
 // persistArtifacts writes agent runs, evidence, claims, and votes for one
 // dispatch round. Nil-safe: no-op when Repo is unset (back-compat for tests).
-func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int) {
+//
+// phase is "investigate" or "reconsider"; both occur within the same round
+// (round only increments after revote), so the phase is part of the persisted
+// ID prefix to keep investigate vs reconsider artifacts distinct.
+//
+// Evidence/claim IDs are namespaced per agent+round+phase ("<code>-r<round>-<phase>-<id>")
+// before persistence: each agent's ledger independently generates EV-001/CL-001,
+// which would collide on the shared table's primary key. Supports/contradicts/
+// evidence_ids references are rewritten to the namespaced IDs so intra-agent
+// links stay consistent. The in-memory ledger is not mutated (copies persisted).
+func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int, phase string) {
 	if o.repo == nil {
 		return
 	}
@@ -240,28 +253,53 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		cfg := o.configAt(i)
 		code := codeOf(cfg)
 		run := &entity.AgentRun{
-			ID:        fmt.Sprintf("%s-%s-r%d", case_.ID, code, round),
-			CaseID:    case_.ID,
-			MagiCode:  code,
-			Round:     round,
-			Status:    agentRunStatus(r),
-			StartedAt: now,
+			ID:          fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase),
+			CaseID:      case_.ID,
+			MagiCode:    code,
+			Round:       round,
+			Status:      agentRunStatus(r),
+			StartedAt:   now,
 			CompletedAt: &now,
-			Usage:     r.Usage,
-			Err:       errStr(r.Err),
+			Usage:       r.Usage,
+			Err:         errStr(r.Err),
 		}
 		_ = o.repo.AgentRunRepo().Create(ctx, run)
+
+		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
+		// persist copies so the ledger is left untouched for any later use.
+		evRemap := map[string]string{}
+		clRemap := map[string]string{}
 		if r.Ledger != nil {
-			for _, ev := range r.Ledger.List() {
-				ev.CaseID = case_.ID
-				ev.AgentRunID = run.ID
-				_ = o.repo.EvidenceRepo().Create(ctx, ev)
+			prefix := fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase)
+			evidence := r.Ledger.List()
+			for _, ev := range evidence {
+				newID := prefix + "-" + ev.ID
+				evRemap[ev.ID] = newID
+				cp := *ev
+				cp.ID = newID
+				cp.CaseID = case_.ID
+				cp.AgentRunID = run.ID
+				_ = o.repo.EvidenceRepo().Create(ctx, &cp)
 			}
-			for _, cl := range r.Ledger.ListClaims() {
-				cl.CaseID = case_.ID
-				cl.AgentRunID = run.ID
-				_ = o.repo.ClaimRepo().Create(ctx, cl)
+			claims := r.Ledger.ListClaims()
+			for _, cl := range claims {
+				newID := prefix + "-" + cl.ID
+				clRemap[cl.ID] = newID
 			}
+			for _, cl := range claims {
+				cp := *cl
+				cp.ID = clRemap[cl.ID]
+				cp.CaseID = case_.ID
+				cp.AgentRunID = run.ID
+				cp.Supports = remapRefs(cl.Supports, evRemap)
+				cp.Contradicts = remapRefs(cl.Contradicts, clRemap)
+				_ = o.repo.ClaimRepo().Create(ctx, &cp)
+			}
+		}
+		// Remap this agent's vote evidence/claim references too.
+		if i < len(votes) && votes[i] != nil {
+			votes[i].EvidenceIDs = remapRefs(votes[i].EvidenceIDs, evRemap)
+			votes[i].KeyClaimIDs = remapRefs(votes[i].KeyClaimIDs, clRemap)
 		}
 	}
 	for i, v := range votes {
@@ -270,7 +308,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		}
 		cfg := o.configAt(i)
 		if v.ID == "" {
-			v.ID = fmt.Sprintf("vote-%s-%s-r%d", case_.ID, codeOf(cfg), round)
+			v.ID = fmt.Sprintf("vote-%s-%s-r%d-%s", case_.ID, codeOf(cfg), round, phase)
 		}
 		v.CaseID = case_.ID
 		v.Round = round
@@ -312,6 +350,23 @@ func errStr(e error) string {
 		return ""
 	}
 	return e.Error()
+}
+
+// remapRefs rewrites a slice of ID references through a remap table. Unknown
+// refs (cross-agent or non-EV-ID strings) are left unchanged.
+func remapRefs(refs []string, remap map[string]string) []string {
+	if len(refs) == 0 {
+		return refs
+	}
+	out := make([]string, len(refs))
+	for i, ref := range refs {
+		if newID, ok := remap[ref]; ok {
+			out[i] = newID
+		} else {
+			out[i] = ref
+		}
+	}
+	return out
 }
 
 func (o *Orchestrator) collectClaims(results []*runtime.LoopResult) []*entity.Claim {
