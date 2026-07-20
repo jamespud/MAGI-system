@@ -14,8 +14,8 @@ import (
 // Retrieve: via Coze crossknowledge (RAG). Store: via MemoryRepository (DB).
 // crossknowledge.Store (RAG indexing) deferred -- requires MinIO FileURL pipeline.
 type KnowledgeAdapter struct {
-	svc      crossknowledge.Knowledge
-	memRepo  port.MemoryRepository
+	svc     crossknowledge.Knowledge
+	memRepo port.MemoryRepository
 }
 
 func NewKnowledgeAdapter(svc crossknowledge.Knowledge, memRepo port.MemoryRepository) *KnowledgeAdapter {

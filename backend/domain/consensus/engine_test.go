@@ -11,11 +11,11 @@ func vote(d entity.VoteDecision) entity.Vote { return entity.Vote{Decision: d} }
 func TestEvaluate(t *testing.T) {
 	def := DefaultConsensusPolicy()
 	tests := []struct {
-		name     string
-		votes    []entity.Vote
-		round    int
-		policy   ConsensusPolicy
-		want     entity.ConsensusOutcome
+		name   string
+		votes  []entity.Vote
+		round  int
+		policy ConsensusPolicy
+		want   entity.ConsensusOutcome
 	}{
 		{"3 approve -> strong", []entity.Vote{vote(entity.VoteDecisionApprove), vote(entity.VoteDecisionApprove), vote(entity.VoteDecisionApprove)}, 1, def, entity.ConsensusStrongApproval},
 		{"3 reject -> strong", []entity.Vote{vote(entity.VoteDecisionReject), vote(entity.VoteDecisionReject), vote(entity.VoteDecisionReject)}, 1, def, entity.ConsensusStrongRejection},

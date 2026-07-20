@@ -38,17 +38,17 @@ func NewRepository(db *gorm.DB) port.Repository {
 	return &magiRepository{db: db}
 }
 
-func (r *magiRepository) CaseRepo() port.CaseRepository         { return &caseRepo{db: r.db} }
-func (r *magiRepository) AgentRunRepo() port.AgentRunRepository { return &agentRunRepo{db: r.db} }
-func (r *magiRepository) EvidenceRepo() port.EvidenceRepository { return &evidenceRepo{db: r.db} }
-func (r *magiRepository) ClaimRepo() port.ClaimRepository       { return &claimRepo{db: r.db} }
-func (r *magiRepository) VoteRepo() port.VoteRepository         { return &voteRepo{db: r.db} }
-func (r *magiRepository) DebateRepo() port.DebateRepository     { return &debateRepo{db: r.db} }
+func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
+func (r *magiRepository) AgentRunRepo() port.AgentRunRepository     { return &agentRunRepo{db: r.db} }
+func (r *magiRepository) EvidenceRepo() port.EvidenceRepository     { return &evidenceRepo{db: r.db} }
+func (r *magiRepository) ClaimRepo() port.ClaimRepository           { return &claimRepo{db: r.db} }
+func (r *magiRepository) VoteRepo() port.VoteRepository             { return &voteRepo{db: r.db} }
+func (r *magiRepository) DebateRepo() port.DebateRepository         { return &debateRepo{db: r.db} }
 func (r *magiRepository) ReflectionRepo() port.ReflectionRepository { return &reflectionRepo{db: r.db} }
 func (r *magiRepository) ResolutionRepo() port.ResolutionRepository { return &resolutionRepo{db: r.db} }
-func (r *magiRepository) EventRepo() port.EventRepository       { return &eventRepo{db: r.db} }
+func (r *magiRepository) EventRepo() port.EventRepository           { return &eventRepo{db: r.db} }
 func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{} }
-func (r *magiRepository) MemoryRepo() port.MemoryRepository     { return &memoryRepo{db: r.db} }
+func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
 
 var _ port.Repository = (*magiRepository)(nil)
 
@@ -370,7 +370,7 @@ func (r *reflectionRepo) ListByCase(ctx context.Context, caseID string) ([]*enti
 
 type checkpointRepo struct{}
 
-func (checkpointRepo) Save(context.Context, *entity.AgentState) error { return nil }
+func (checkpointRepo) Save(context.Context, *entity.AgentState) error           { return nil }
 func (checkpointRepo) Load(context.Context, string) (*entity.AgentState, error) { return nil, nil }
 
 // --- MemoryRepository (DB) ---

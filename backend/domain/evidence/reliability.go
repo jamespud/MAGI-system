@@ -106,11 +106,11 @@ func ComputeReliability(input ReliabilityInput) entity.ReliabilityScore {
 func FullReliabilityResolver() ReliabilityResolver {
 	return func(b entity.ToolBinding) entity.ReliabilityScore {
 		return ComputeReliability(ReliabilityInput{
-			SourceType:          b.Source,
-			ExplicitReliability: b.Reliability,
-			Directness:          DirectnessFromSource(b.Source),
-			Recency:             0.5,
-			CorroborationCount:  0,
+			SourceType:           b.Source,
+			ExplicitReliability:  b.Reliability,
+			Directness:           DirectnessFromSource(b.Source),
+			Recency:              0.5,
+			CorroborationCount:   0,
 			ExtractionConfidence: 0.8,
 		})
 	}

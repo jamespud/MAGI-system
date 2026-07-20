@@ -15,11 +15,11 @@ type DecisionTask struct {
 type DecisionType string
 
 const (
-	DecisionTypeAdopt      DecisionType = "adopt"
-	DecisionTypeMigrate    DecisionType = "migrate"
-	DecisionTypeLaunch     DecisionType = "launch"
-	DecisionTypeStrategic  DecisionType = "strategic"
-	DecisionTypeGeneric    DecisionType = "generic"
+	DecisionTypeAdopt     DecisionType = "adopt"
+	DecisionTypeMigrate   DecisionType = "migrate"
+	DecisionTypeLaunch    DecisionType = "launch"
+	DecisionTypeStrategic DecisionType = "strategic"
+	DecisionTypeGeneric   DecisionType = "generic"
 )
 
 type DecisionDimension struct {

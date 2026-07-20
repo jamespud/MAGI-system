@@ -22,14 +22,14 @@ type RunInput struct {
 type LoopStatus string
 
 const (
-	LoopStatusCompleted      LoopStatus = "completed"
-	LoopStatusMaxSteps       LoopStatus = "max_steps"
-	LoopStatusCancelled      LoopStatus = "cancelled"
-	LoopStatusError          LoopStatus = "error"
-	LoopStatusGateFailed     LoopStatus = "gate_failed"
-	LoopStatusTokenBudget    LoopStatus = "token_budget_exceeded"
-	LoopStatusToolFailures      LoopStatus = "tool_failures"
-	LoopStatusValidationFailed  LoopStatus = "validation_failed"
+	LoopStatusCompleted        LoopStatus = "completed"
+	LoopStatusMaxSteps         LoopStatus = "max_steps"
+	LoopStatusCancelled        LoopStatus = "cancelled"
+	LoopStatusError            LoopStatus = "error"
+	LoopStatusGateFailed       LoopStatus = "gate_failed"
+	LoopStatusTokenBudget      LoopStatus = "token_budget_exceeded"
+	LoopStatusToolFailures     LoopStatus = "tool_failures"
+	LoopStatusValidationFailed LoopStatus = "validation_failed"
 )
 
 type LoopResult struct {

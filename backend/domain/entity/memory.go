@@ -31,7 +31,7 @@ type MemoryClaim struct {
 }
 
 type MemoryVote struct {
-	MagiCode  MagiCode
-	Decision  VoteDecision
+	MagiCode   MagiCode
+	Decision   VoteDecision
 	Confidence float64
 }

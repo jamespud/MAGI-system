@@ -29,7 +29,9 @@ func (s *reportScriptedModel) Generate(ctx context.Context, in []*schema.Message
 func (s *reportScriptedModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	return nil, nil
 }
-func (s *reportScriptedModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) { return s, nil }
+func (s *reportScriptedModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return s, nil
+}
 
 type reportStubModelPort struct{ m model.ToolCallingChatModel }
 

@@ -41,7 +41,9 @@ func (s *scriptedChatModel) Generate(ctx context.Context, input []*schema.Messag
 func (s *scriptedChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) { return s, nil }
+func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return s, nil
+}
 
 type stubModelPort struct{ m model.ToolCallingChatModel }
 
@@ -126,8 +128,12 @@ func newCommander(t *testing.T) *service.Commander {
 	return cmd
 }
 
-func approve() *entity.Vote { return &entity.Vote{Decision: entity.VoteDecisionApprove, Confidence: 90, EvidenceIDs: []string{"EV-001"}} }
-func reject() *entity.Vote  { return &entity.Vote{Decision: entity.VoteDecisionReject, Confidence: 70, EvidenceIDs: []string{"EV-001"}} }
+func approve() *entity.Vote {
+	return &entity.Vote{Decision: entity.VoteDecisionApprove, Confidence: 90, EvidenceIDs: []string{"EV-001"}}
+}
+func reject() *entity.Vote {
+	return &entity.Vote{Decision: entity.VoteDecisionReject, Confidence: 70, EvidenceIDs: []string{"EV-001"}}
+}
 func conditionalApprove() *entity.Vote {
 	return &entity.Vote{
 		Decision:   entity.VoteDecisionConditionalApprove,

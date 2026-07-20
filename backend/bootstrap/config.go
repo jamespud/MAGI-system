@@ -148,12 +148,12 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			RequireNewEvidence:   s.ReflectionPolicy.RequireNewEvidence,
 		},
 		LoopPolicy: entity.LoopPolicy{
-			MaxSteps:                        cfg.Magi.MaxSteps,
-			Timeout:                         time.Duration(cfg.Magi.TimeoutSeconds) * time.Second,
-			MaxGateFailures:                 3,
-			MaxConsecutiveToolFailures:      5,
+			MaxSteps:                         cfg.Magi.MaxSteps,
+			Timeout:                          time.Duration(cfg.Magi.TimeoutSeconds) * time.Second,
+			MaxGateFailures:                  3,
+			MaxConsecutiveToolFailures:       5,
 			MaxConsecutiveValidationFailures: 5,
-			TokenBudget:                     50000,
+			TokenBudget:                      50000,
 		},
 	}
 }

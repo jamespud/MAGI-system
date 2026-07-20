@@ -3,10 +3,10 @@ package runtime
 import "github.com/jamespud/magi/backend/domain/entity"
 
 type terminationState struct {
-	gateFail        int
-	consecToolFail  int
-	tokenUsed       int64
-	validationFail  int
+	gateFail       int
+	consecToolFail int
+	tokenUsed      int64
+	validationFail int
 }
 
 // checkTermination returns true if the loop should terminate, setting status+err.

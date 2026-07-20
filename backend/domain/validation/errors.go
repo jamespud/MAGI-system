@@ -1,7 +1,3 @@
-
-
-
-
 // Package validation implements the unified schema-first Runtime Validation
 // IR. JSON Schema is the single validation contract for both plugin tools
 // (schema derived from OpenAPI3) and local Go tools (schema generated from

@@ -123,17 +123,17 @@ type DebateRoundModel struct {
 func (DebateRoundModel) TableName() string { return "debate_round" }
 
 type ReflectionModel struct {
-	ID                  string `gorm:"primaryKey"`
-	AgentRunID          string `gorm:"index"`
-	Round               int
-	PreviousVoteID      string
-	PositionChange      string
-	AcceptedClaimsJSON  string `gorm:"type:text"`
-	RejectedClaimsJSON  string `gorm:"type:text"`
-	NewEvidenceIDsJSON  string `gorm:"type:text"`
-	Reasoning           string `gorm:"type:text"`
-	ReadyToRevote       bool
-	CreatedAt           time.Time
+	ID                 string `gorm:"primaryKey"`
+	AgentRunID         string `gorm:"index"`
+	Round              int
+	PreviousVoteID     string
+	PositionChange     string
+	AcceptedClaimsJSON string `gorm:"type:text"`
+	RejectedClaimsJSON string `gorm:"type:text"`
+	NewEvidenceIDsJSON string `gorm:"type:text"`
+	Reasoning          string `gorm:"type:text"`
+	ReadyToRevote      bool
+	CreatedAt          time.Time
 }
 
 func (ReflectionModel) TableName() string { return "reflection" }

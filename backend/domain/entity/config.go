@@ -14,9 +14,9 @@ type MagiConfig struct {
 	Persona    string             // legacy freeform persona (M1/M2 use it); superseded by PersonaDef
 	PersonaDef *PersonaDefinition // structured persona (ADR-002 full)
 
-	Objective       ObjectiveFunction
-	RiskTendency    RiskTendency
-	RiskPolicy      RiskPolicy
+	Objective        ObjectiveFunction
+	RiskTendency     RiskTendency
+	RiskPolicy       RiskPolicy
 	EvidenceStandard EvidenceStandard
 
 	Model ModelRef
@@ -50,9 +50,9 @@ type UtilityDimension struct {
 type RiskTendency string
 
 const (
-	RiskTendencyNeutral           RiskTendency = "neutral"
-	RiskTendencyConservative      RiskTendency = "conservative"
-	RiskTendencyAggressive        RiskTendency = "aggressive"
+	RiskTendencyNeutral            RiskTendency = "neutral"
+	RiskTendencyConservative       RiskTendency = "conservative"
+	RiskTendencyAggressive         RiskTendency = "aggressive"
 	RiskTendencyEvidenceCalibrated RiskTendency = "evidence_calibrated"
 )
 
@@ -143,12 +143,12 @@ const (
 
 // LoopPolicy bounds a single agent run.
 type LoopPolicy struct {
-	MaxSteps                        int
-	Timeout                         time.Duration
-	MaxGateFailures                 int
-	MaxConsecutiveToolFailures      int
+	MaxSteps                         int
+	Timeout                          time.Duration
+	MaxGateFailures                  int
+	MaxConsecutiveToolFailures       int
 	MaxConsecutiveValidationFailures int
-	TokenBudget                     int
+	TokenBudget                      int
 }
 
 // ReflectionPolicy bounds the debate/reflection phase.

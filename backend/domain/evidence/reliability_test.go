@@ -9,10 +9,10 @@ import (
 
 func TestComputeReliability_DefaultWeights(t *testing.T) {
 	input := evidence.ReliabilityInput{
-		SourceType:          entity.ToolSourceLocal,
-		Directness:          1.0,
-		Recency:             1.0,
-		CorroborationCount:  3,
+		SourceType:           entity.ToolSourceLocal,
+		Directness:           1.0,
+		Recency:              1.0,
+		CorroborationCount:   3,
 		ExtractionConfidence: 1.0,
 	}
 	s := evidence.ComputeReliability(input)
@@ -74,10 +74,10 @@ func TestComputeReliability_ExplicitOverride(t *testing.T) {
 
 func TestComputeReliability_ClampsFinal(t *testing.T) {
 	input := evidence.ReliabilityInput{
-		SourceType:          entity.ToolSourceCodeRunner,
-		Directness:          2.0,
-		Recency:             2.0,
-		CorroborationCount:  100,
+		SourceType:           entity.ToolSourceCodeRunner,
+		Directness:           2.0,
+		Recency:              2.0,
+		CorroborationCount:   100,
 		ExtractionConfidence: 2.0,
 	}
 	s := evidence.ComputeReliability(input)

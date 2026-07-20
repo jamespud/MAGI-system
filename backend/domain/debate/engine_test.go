@@ -3,8 +3,8 @@ package debate
 import (
 	"testing"
 
-	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 )
 
 func TestBuildPacket_MajorityMinority(t *testing.T) {

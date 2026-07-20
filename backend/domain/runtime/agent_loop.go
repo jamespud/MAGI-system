@@ -28,30 +28,30 @@ func RelaxEvidenceStandard(std entity.EvidenceStandard, hasTools bool) entity.Ev
 }
 
 type AgentLoop struct {
-	modelPort  port.ModelPort
-	toolReg    port.ToolRegistryPort
-	toolExec   port.ToolExecutorPort
-	validator  validation.Validator
-	gen        validation.SchemaGenerator
-	adapter    *evidence.EvidenceAdapterRegistry
-	gate       *evidence.EvidenceGate
-	summaryVal   *validation.TypedValidator[entity.EvidenceSummary]
-	voteVal      *validation.TypedValidator[entity.Vote]
-	claimVal     *validation.TypedValidator[entity.ClaimSubmission]
-	reflectionVal *validation.TypedValidator[entity.Reflection]
-	eventPub      port.EventPublisher
+	modelPort      port.ModelPort
+	toolReg        port.ToolRegistryPort
+	toolExec       port.ToolExecutorPort
+	validator      validation.Validator
+	gen            validation.SchemaGenerator
+	adapter        *evidence.EvidenceAdapterRegistry
+	gate           *evidence.EvidenceGate
+	summaryVal     *validation.TypedValidator[entity.EvidenceSummary]
+	voteVal        *validation.TypedValidator[entity.Vote]
+	claimVal       *validation.TypedValidator[entity.ClaimSubmission]
+	reflectionVal  *validation.TypedValidator[entity.Reflection]
+	eventPub       port.EventPublisher
 	checkpointRepo port.CheckpointRepository
 }
 
 type AgentLoopDeps struct {
-	ModelPort port.ModelPort
-	ToolReg   port.ToolRegistryPort
-	ToolExec  port.ToolExecutorPort
-	Validator validation.Validator
-	Gen       validation.SchemaGenerator
-	Adapter       *evidence.EvidenceAdapterRegistry
-	Gate          *evidence.EvidenceGate
-	EventPub      port.EventPublisher
+	ModelPort      port.ModelPort
+	ToolReg        port.ToolRegistryPort
+	ToolExec       port.ToolExecutorPort
+	Validator      validation.Validator
+	Gen            validation.SchemaGenerator
+	Adapter        *evidence.EvidenceAdapterRegistry
+	Gate           *evidence.EvidenceGate
+	EventPub       port.EventPublisher
 	CheckpointRepo port.CheckpointRepository
 }
 
@@ -89,8 +89,8 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
-		reflectionVal: rv,
-		eventPub:      d.EventPub,
+		reflectionVal:  rv,
+		eventPub:       d.EventPub,
 		checkpointRepo: d.CheckpointRepo,
 	}, nil
 }

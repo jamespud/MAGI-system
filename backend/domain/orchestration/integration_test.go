@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	magiapp "github.com/jamespud/magi/backend/adapter"
 	"github.com/cloudwego/eino/schema"
+	magiapp "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"

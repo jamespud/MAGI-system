@@ -12,9 +12,9 @@ import (
 
 // Domain errors that map to specific HTTP status codes (§13).
 var (
-	ErrNotFound     = errors.New("not found")
+	ErrNotFound      = errors.New("not found")
 	ErrNotConfigured = errors.New("not configured")
-	ErrInvalidInput = errors.New("invalid input")
+	ErrInvalidInput  = errors.New("invalid input")
 )
 
 // AppError wraps a domain error with an HTTP status code.

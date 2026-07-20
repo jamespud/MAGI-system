@@ -14,17 +14,17 @@ type CreateCaseRequest struct {
 }
 
 type CaseResponse struct {
-	ID          string          `json:"id"`
-	Question    string          `json:"question"`
-	Background  string          `json:"background"`
-	Constraints []ConstraintDTO `json:"constraints"`
-	Status      string          `json:"status"`
+	ID            string          `json:"id"`
+	Question      string          `json:"question"`
+	Background    string          `json:"background"`
+	Constraints   []ConstraintDTO `json:"constraints"`
+	Status        string          `json:"status"`
 	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
 	FinalDecision string          `json:"final_decision,omitempty"`
 	Confidence    float64         `json:"confidence"`
 	Round         int             `json:"round"`
 	CreatedAt     string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	UpdatedAt     string          `json:"updated_at"`
 }
 
 type ConstraintDTO struct {

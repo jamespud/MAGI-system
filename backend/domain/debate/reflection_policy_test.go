@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/domain/debate"
-	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 )
 
 // S7b: RequireNewEvidence=true rejects maintain without new EV-IDs.

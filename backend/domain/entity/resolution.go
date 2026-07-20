@@ -28,11 +28,11 @@ type ConsensusResult struct {
 type ConsensusOutcome string
 
 const (
-	ConsensusStrongApproval          ConsensusOutcome = "strong_approval"
-	ConsensusStrongRejection         ConsensusOutcome = "strong_rejection"
-	ConsensusMajorityApprovalDissent ConsensusOutcome = "majority_approval_with_dissent"
+	ConsensusStrongApproval           ConsensusOutcome = "strong_approval"
+	ConsensusStrongRejection          ConsensusOutcome = "strong_rejection"
+	ConsensusMajorityApprovalDissent  ConsensusOutcome = "majority_approval_with_dissent"
 	ConsensusMajorityRejectionDissent ConsensusOutcome = "majority_rejection_with_dissent"
-	ConsensusDeadlock                ConsensusOutcome = "deadlock"
-	ConsensusInsufficientQuorum      ConsensusOutcome = "insufficient_quorum"
-	ConsensusConditional             ConsensusOutcome = "conditional"
+	ConsensusDeadlock                 ConsensusOutcome = "deadlock"
+	ConsensusInsufficientQuorum       ConsensusOutcome = "insufficient_quorum"
+	ConsensusConditional              ConsensusOutcome = "conditional"
 )

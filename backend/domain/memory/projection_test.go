@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/memory"
 )
 

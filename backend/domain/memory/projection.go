@@ -1,8 +1,8 @@
 package memory
 
 import (
-	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 )
 
 // BuildProjection creates a CaseMemoryProjection from a resolved case for

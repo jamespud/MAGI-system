@@ -19,12 +19,12 @@ type AgentRun struct {
 type AgentRunStatus string
 
 const (
-	AgentRunStatusRunning    AgentRunStatus = "running"
-	AgentRunStatusCompleted  AgentRunStatus = "completed"
-	AgentRunStatusFailed     AgentRunStatus = "failed"
-	AgentRunStatusCancelled  AgentRunStatus = "cancelled"
-	AgentRunStatusMaxSteps   AgentRunStatus = "max_steps"
-	AgentRunStatusTimedOut   AgentRunStatus = "timed_out"
+	AgentRunStatusRunning   AgentRunStatus = "running"
+	AgentRunStatusCompleted AgentRunStatus = "completed"
+	AgentRunStatusFailed    AgentRunStatus = "failed"
+	AgentRunStatusCancelled AgentRunStatus = "cancelled"
+	AgentRunStatusMaxSteps  AgentRunStatus = "max_steps"
+	AgentRunStatusTimedOut  AgentRunStatus = "timed_out"
 )
 
 // AgentState is a working-memory snapshot for checkpoint/resume.

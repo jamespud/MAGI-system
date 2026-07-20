@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/coze-dev/coze-studio/backend/infra/sse"
 	hertzsse "github.com/hertz-contrib/sse"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
-	"github.com/coze-dev/coze-studio/backend/infra/sse"
 )
 
 // EventPublisherAdapter implements port.EventPublisher (ADR-008).
 // Dual-publish: EventStore (persistence) + SSE (real-time push, optional).
 type EventPublisherAdapter struct {
 	store  port.EventRepository
-	sender sse.SSender   // optional, nil = no SSE
+	sender sse.SSender      // optional, nil = no SSE
 	stream *hertzsse.Stream // optional, nil = no SSE
 }
 

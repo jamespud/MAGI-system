@@ -15,7 +15,9 @@ type mockKnowledge struct{ chunks []port.KnowledgeChunk }
 func (m *mockKnowledge) Retrieve(ctx context.Context, query string, ids []int64) ([]port.KnowledgeChunk, error) {
 	return m.chunks, nil
 }
-func (m *mockKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error { return nil }
+func (m *mockKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+	return nil
+}
 
 func TestContextBuilder_WithKnowledge(t *testing.T) {
 	b := memory.NewContextBuilder(&mockKnowledge{chunks: []port.KnowledgeChunk{{Content: "hist", Score: 0.9}}})

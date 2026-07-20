@@ -539,7 +539,7 @@ func TestAgentLoop_CheckpointSaved(t *testing.T) {
 			finalMsg(summaryJSON("EV-001")),
 			finalMsg(voteJSON("correctness")),
 		}}},
-		ToolReg: &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolReg:  &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
 		ToolExec: &stubToolExec{}, Validator: v, Gen: gen,
 		CheckpointRepo: repo,
 	})
