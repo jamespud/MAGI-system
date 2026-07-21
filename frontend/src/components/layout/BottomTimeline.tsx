@@ -2,7 +2,7 @@ import { useEventStore, useUiStore } from '@/stores';
 import { MonoText, AgentAvatar } from '@/components/shared';
 import { Wrench, User, FileSearch, Vote, ChevronUp, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
-import type { EventType, EventFilter } from '@/types/event';
+import type { EventType, EventFilter, MagiEvent } from '@/types/event';
 
 const EVENT_ICONS: Record<EventType, React.ReactNode> = {
   TOOL_CALL: <Wrench size={12} />,
@@ -36,6 +36,30 @@ const EVENT_TO_FILTER: Record<EventType, keyof EventFilter> = {
   RESOLVED: 'vote',
   ERROR: 'agent',
 };
+
+// formatEventMessage derives a specific label from the event type + payload,
+// falling back to the backend's generic message when the payload field is
+// absent. Exported for testing.
+export function formatEventMessage(event: MagiEvent): string {
+  const d = (event.data ?? {}) as Record<string, unknown>;
+  switch (event.type) {
+    case 'TOOL_CALL':
+      if (d.tool_name) return `called ${d.tool_name}`;
+      break;
+    case 'EVIDENCE_CREATED':
+      if (d.evidence_id) return `evidence ${d.evidence_id}`;
+      break;
+    case 'VOTE_SUBMITTED':
+      if (d.stance) return `voted ${d.stance}${d.confidence != null ? ` (${d.confidence}%)` : ''}`;
+      break;
+    case 'CONSENSUS_CHANGED':
+      if (d.outcome) return `consensus: ${d.outcome}`;
+      break;
+    default:
+      break;
+  }
+  return event.message;
+}
 
 export default function BottomTimeline() {
   const events = useEventStore((s) => s.events);
@@ -93,7 +117,7 @@ export default function BottomTimeline() {
               </MonoText>
               <span className="text-text-muted">{EVENT_ICONS[event.type]}</span>
               {event.agentId && <AgentAvatar agentId={event.agentId} size={16} />}
-              <span className="text-text-secondary truncate">{event.message}</span>
+              <span className="text-text-secondary truncate">{formatEventMessage(event)}</span>
             </div>
           ))}
           {filteredEvents.length === 0 && (
