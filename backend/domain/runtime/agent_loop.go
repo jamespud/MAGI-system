@@ -82,6 +82,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	adapter := d.Adapter
 	if adapter == nil {
 		adapter = evidence.NewEvidenceAdapterRegistry(evidence.FullReliabilityResolver(),
+			evidence.NewTavilyAdapter(),
 			evidence.NewNativeAdapter(),
 			evidence.NewRawObservationAdapter())
 	}

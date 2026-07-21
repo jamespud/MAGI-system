@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/validation"
@@ -656,5 +660,59 @@ func TestAgentLoop_EventsCarryIDAndPayload(t *testing.T) {
 	}
 	if !gotEvidence {
 		t.Fatal("no EVIDENCE_CREATED event")
+	}
+}
+
+func TestAgentLoop_WebSearchProducesMultipleEvidence(t *testing.T) {
+	// Stub Tavily server returning 2 results.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(evidence.TavilyResponse{
+			Results: []evidence.TavilyResult{
+				{URL: "https://a.example", Content: "result A content", Score: 0.9},
+				{URL: "https://b.example", Content: "result B content", Score: 0.8},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	gen := validation.NewReflectSchemaGenerator()
+	val := validation.NewJSONSchemaValidator()
+	toolSchema, _ := gen.FromStruct(struct {
+		Query string `json:"query"`
+	}{})
+	toolReg := &stubToolReg{defs: []port.ToolDefinition{{
+		Name: "web_search", Desc: "search", ArgsSchema: toolSchema,
+		Source: entity.ToolSourceLocal, Binding: entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "web_search"},
+	}}}
+	toolExec := magi.NewTavilyToolExecutorWithURL("k", srv.URL)
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "web_search", `{"query":"rust"}`),
+			finalMsg(summaryJSON("EV-001", "EV-002")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   toolReg,
+		ToolExec:  toolExec,
+		Validator: val, Gen: gen,
+		EventPub:  rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{CaseID: "c1", Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Ledger == nil {
+		t.Fatal("no ledger")
+	}
+	evs := res.Ledger.List()
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 evidence records (one per Tavily result), got %d", len(evs))
+	}
+	if evs[0].Observation != "result A content" {
+		t.Fatalf("evidence 0 observation: %s", evs[0].Observation)
 	}
 }
