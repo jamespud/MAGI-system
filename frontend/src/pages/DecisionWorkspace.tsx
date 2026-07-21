@@ -20,22 +20,30 @@ export default function DecisionWorkspace() {
   const [running, setRunning] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
 
+  // refreshCaseData re-fetches the case + all artifacts. Called on open and on
+  // run completion (via the SSE terminal callback) so the UI reflects the final
+  // status/consensus/votes without a manual page refresh.
+  const refreshCaseData = (id: string) => {
+    useCaseStore.getState().fetchCase(id);
+    api.getAgents(id)
+      .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
+      .catch(() => {});
+    api.getEvents(id)
+      .then((evs) => evs.forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
+      .catch(() => {});
+  };
+
   // Load real data + subscribe to SSE when a case is opened.
   useEffect(() => {
     if (!caseId) return;
-    useCaseStore.getState().fetchCase(caseId);
     useEventStore.getState().clearEvents();
-    api.getAgents(caseId)
-      .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
-      .catch(() => {});
-    api.getEvents(caseId)
-      .then((evs) => evs.forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
-      .catch(() => {});
-    unsubRef.current = subscribeCaseStream(caseId);
+    refreshCaseData(caseId);
+    unsubRef.current = subscribeCaseStream(caseId, () => refreshCaseData(caseId));
     return () => {
       unsubRef.current?.();
       unsubRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
   const handleCreate = async (question: string) => {

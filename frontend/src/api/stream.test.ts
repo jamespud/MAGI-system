@@ -71,4 +71,37 @@ describe('subscribeCaseStream', () => {
     expect(useEventStore.getState().events).toHaveLength(0);
     unsub();
   });
+
+  it('calls onTerminal when CASE_COMPLETED arrives', () => {
+    const onTerminal = vi.fn();
+    const unsub = subscribeCaseStream('c1', onTerminal);
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'CASE_COMPLETED', message: 'done', timestamp: 't' }),
+    });
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    unsub();
+  });
+
+  it('calls onTerminal when CASE_FAILED arrives', () => {
+    const onTerminal = vi.fn();
+    const unsub = subscribeCaseStream('c1', onTerminal);
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'CASE_FAILED', message: 'fail', timestamp: 't' }),
+    });
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    unsub();
+  });
+
+  it('does not call onTerminal for non-terminal events', () => {
+    const onTerminal = vi.fn();
+    const unsub = subscribeCaseStream('c1', onTerminal);
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'VOTE_SUBMITTED', message: 'voted', timestamp: 't' }),
+    });
+    expect(onTerminal).not.toHaveBeenCalled();
+    unsub();
+  });
 });

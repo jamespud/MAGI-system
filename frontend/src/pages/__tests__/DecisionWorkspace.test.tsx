@@ -92,7 +92,7 @@ describe('DecisionWorkspace', () => {
     await waitFor(() => {
       expect(mockGetAgents).toHaveBeenCalledWith('case-001');
       expect(mockGetEvents).toHaveBeenCalledWith('case-001');
-      expect(mockSubscribe).toHaveBeenCalledWith('case-001');
+      expect(mockSubscribe).toHaveBeenCalledWith('case-001', expect.any(Function));
       expect(mockClearEvents).toHaveBeenCalled();
     });
   });
