@@ -137,13 +137,16 @@ describe('api.getAgents', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
-        melchior: { agent_code: 'melchior', status: 'completed', round: 1, evidence_count: 2, claim_count: 1 },
+        melchior: {
+          agent_code: 'melchior', status: 'completed', round: 1, step: 2,
+          tool_calls: [], evidence: [], claims: [],
+        },
       }),
     } as Response);
 
     const result = await api.getAgents('case-001');
 
-    expect(result.melchior.evidence_count).toBe(2);
+    expect(result.melchior.step).toBe(2);
   });
 });
 

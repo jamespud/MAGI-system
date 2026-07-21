@@ -27,6 +27,20 @@ function apiStatusToAgentStatus(s: string): AgentStatus {
   }
 }
 
+function safeParseArgs(args: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(args);
+    if (parsed && typeof parsed === 'object') {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) out[k] = String(v);
+      return out;
+    }
+  } catch {
+    // not JSON -- fall through
+  }
+  return args ? { raw: args } : {};
+}
+
 export const useAgentStore = create<AgentState>((set) => ({
   agents: empty,
 
@@ -42,12 +56,17 @@ export const useAgentStore = create<AgentState>((set) => ({
       agents[id] = {
         agentId: id,
         status: apiStatusToAgentStatus(v.status),
-        step: 0,
+        step: v.step ?? 0,
         maxSteps: 12,
         thought: '',
-        toolCalls: [],
-        evidence: [],
-        claims: [],
+        toolCalls: (v.tool_calls ?? []).map((tc) => ({
+          name: tc.tool_name,
+          params: tc.arguments ? safeParseArgs(tc.arguments) : {},
+          result: tc.result || null,
+          timestamp: '',
+        })),
+        evidence: (v.evidence ?? []).map((e) => ({ id: e.id, source: e.source, reliability: e.reliability })),
+        claims: (v.claims ?? []).map((cl) => ({ id: cl.id, text: cl.text, supports: cl.supports, contradicts: cl.contradicts })),
         vote,
       };
     }

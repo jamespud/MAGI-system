@@ -30,12 +30,24 @@ interface ApiRunResponse {
   status: string;
 }
 
+interface ApiToolCall {
+  tool_call_id: string;
+  tool_name: string;
+  arguments: string;
+  result: string;
+  err?: string;
+  evidence_id?: string;
+  duration_ms: number;
+}
+
 interface ApiAgentSnapshot {
   agent_code: string;
   status: string;
   round: number;
-  evidence_count: number;
-  claim_count: number;
+  step: number;
+  tool_calls: ApiToolCall[];
+  evidence: ApiEvidence[];
+  claims: ApiClaim[];
   vote?: ApiVote;
 }
 
@@ -124,6 +136,7 @@ export type {
   ApiConsensus,
   ApiRunResponse,
   ApiAgentSnapshot,
+  ApiToolCall,
   ApiEvidence,
   ApiClaim,
   ApiVote,
