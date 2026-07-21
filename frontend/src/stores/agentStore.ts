@@ -23,7 +23,8 @@ function apiStatusToAgentStatus(s: string): AgentStatus {
     case 'completed': return 'completed';
     case 'failed': return 'error';
     case 'max_steps':
-    case 'timed_out': return 'error';
+    case 'timed_out':
+    case 'cancelled': return 'error';
     default: return 'running';
   }
 }

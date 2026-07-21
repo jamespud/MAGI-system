@@ -50,10 +50,16 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
             <h3 className="font-mono text-sm font-bold tracking-wider" style={{ color }}>
               {AGENT_NAMES[agentId]}
             </h3>
-            <StatusBadge
-              status={agent.status.toUpperCase()}
-              color={isRunning ? color : undefined}
-            />
+            {agent.vote ? (
+              <StatusBadge
+                status={stanceLabel(agent.vote.stance)}
+                color={stanceColor(agent.vote.stance)}
+              />
+            ) : isRunning ? (
+              <StatusBadge status="RUNNING" color={color} />
+            ) : (
+              <StatusBadge status="IDLE" />
+            )}
           </div>
           <p className="text-xs text-text-muted mb-2">{AGENT_ROLES[agentId]}</p>
 
