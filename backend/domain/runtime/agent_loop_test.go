@@ -716,3 +716,49 @@ func TestAgentLoop_WebSearchProducesMultipleEvidence(t *testing.T) {
 		t.Fatalf("evidence 0 observation: %s", evs[0].Observation)
 	}
 }
+
+func TestAgentLoop_MaxToolCallsForcesConvergence(t *testing.T) {
+	gen := validation.NewReflectSchemaGenerator()
+	val := validation.NewJSONSchemaValidator()
+	toolSchema, _ := gen.FromStruct(struct {
+		Query string `json:"query"`
+	}{})
+	toolReg := &stubToolReg{defs: []port.ToolDefinition{{
+		Name: "web_search", Desc: "search", ArgsSchema: toolSchema,
+		Source: entity.ToolSourceLocal, Binding: entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "web_search"},
+	}}}
+	toolExec := &stubToolExec{}
+	rec := &recordingEventPub{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "web_search", `{"query":"a"}`),
+			callMsg("c1", "web_search", `{"query":"b"}`),
+			callMsg("c1", "web_search", `{"query":"c"}`), // over limit -> forced to summarize
+			callMsg("c1", "web_search", `{"query":"d"}`), // over limit -> forced
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg: toolReg, ToolExec: toolExec, Validator: val, Gen: gen, EventPub: rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	cfg := evidenceCfg(1, 0)
+	cfg.LoopPolicy.MaxToolCalls = 2
+	res, err := loop.Run(context.Background(), cfg, &runtime.AgentContext{CaseID: "c1", Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	completed := 0
+	for _, e := range rec.events {
+		if e.Type == entity.EventToolCallCompleted {
+			completed++
+		}
+	}
+	if completed != 2 {
+		t.Fatalf("expected 2 tool-call completions (limit), got %d", completed)
+	}
+	if res.Vote == nil {
+		t.Fatal("expected a vote after forced convergence")
+	}
+}

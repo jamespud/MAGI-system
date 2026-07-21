@@ -160,6 +160,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			MaxConsecutiveToolFailures:       5,
 			MaxConsecutiveValidationFailures: 5,
 			TokenBudget:                      150000,
+			MaxToolCalls:                     5,
 		},
 	}
 }

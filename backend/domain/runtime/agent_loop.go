@@ -245,7 +245,18 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		switch pr.Type {
 		case ResponseToolCall:
 			messages = append(messages, resp)
+			// Force convergence: once MaxToolCalls is reached, refuse further tool
+			// calls and demand an EvidenceSummary. The LLM often ignores soft
+			// prompt limits, so this is a deterministic cutoff.
+			if cfg.LoopPolicy.MaxToolCalls > 0 && ts.toolCalls >= cfg.LoopPolicy.MaxToolCalls {
+				messages = append(messages, schema.UserMessage(fmt.Sprintf(
+					"You have reached the tool-call limit (%d). Stop calling tools and output your EvidenceSummary JSON now, citing the EV-IDs you have gathered.",
+					cfg.LoopPolicy.MaxToolCalls)))
+				trace.Steps = append(trace.Steps, st)
+				continue
+			}
 			for _, tc := range resp.ToolCalls {
+				ts.toolCalls++
 				tcr := ToolCallRecord{ToolCallID: tc.ID, ToolName: tc.Function.Name, Arguments: tc.Function.Arguments}
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "arguments": tc.Function.Arguments})
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to

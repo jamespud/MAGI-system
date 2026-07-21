@@ -7,6 +7,7 @@ type terminationState struct {
 	consecToolFail int
 	tokenUsed      int64
 	validationFail int
+	toolCalls      int
 }
 
 // checkTermination returns true if the loop should terminate, setting status+err.
