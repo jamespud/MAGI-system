@@ -70,6 +70,7 @@ func (e *TavilyToolExecutor) Execute(ctx context.Context, req port.ToolExecution
 		"api_key":        e.apiKey,
 		"query":          args.Query,
 		"include_answer": true,
+		"max_results":    3,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tavily: marshal body: %w", err)

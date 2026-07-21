@@ -159,7 +159,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			MaxGateFailures:                  3,
 			MaxConsecutiveToolFailures:       5,
 			MaxConsecutiveValidationFailures: 5,
-			TokenBudget:                      50000,
+			TokenBudget:                      150000,
 		},
 	}
 }

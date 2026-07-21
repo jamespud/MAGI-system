@@ -56,10 +56,11 @@ func (s *stubModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.T
 }
 
 type mockMagiRuntime struct {
-	mu    sync.Mutex
-	votes map[string][]*entity.Vote // code -> [vote per round]
-	calls map[string]int
-	errOn map[string]bool // code -> return error
+	mu        sync.Mutex
+	votes     map[string][]*entity.Vote // code -> [vote per round]
+	calls     map[string]int
+	errOn     map[string]bool           // code -> return error
+	loopStatus runtime.LoopStatus        // status to return (default Completed); 0 means Completed
 }
 
 func newMockMagiRuntime() *mockMagiRuntime {
@@ -92,9 +93,13 @@ func (m *mockMagiRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx 
 	ledger.Record("tc", "tool", "local", "", "observation", entity.ReliabilityScore{Final: 0.9})
 	ledger.RecordClaim("claim by "+code, nil, nil) // each agent produces CL-001 -- collides without namespacing
 
+	status := m.loopStatus
+	if status == "" {
+		status = runtime.LoopStatusCompleted
+	}
 	return &runtime.LoopResult{
 		Vote:   vote,
-		Status: runtime.LoopStatusCompleted,
+		Status: status,
 		Ledger: ledger,
 		Trace: &runtime.LoopTrace{Steps: []*runtime.Step{{
 			IsFinal: true,
@@ -533,6 +538,16 @@ func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 	if len(repo.votes) != 3 {
 		t.Fatalf("expected 3 votes persisted, got %d", len(repo.votes))
 	}
+	// Each vote must link to its agent run via AgentRunID so /agents can join.
+	runIDs := map[string]bool{}
+	for _, r := range repo.agentRuns {
+		runIDs[r.ID] = true
+	}
+	for _, v := range repo.votes {
+		if v.AgentRunID == "" || !runIDs[v.AgentRunID] {
+			t.Fatalf("vote %s AgentRunID %q does not match any agent run", v.ID, v.AgentRunID)
+		}
+	}
 	if len(repo.agentRuns) != 3 {
 		t.Fatalf("expected 3 agent runs persisted, got %d", len(repo.agentRuns))
 	}
@@ -715,4 +730,35 @@ func claimIDs(cls []*entity.Claim) []string {
 		out[i] = c.ID
 	}
 	return out
+}
+
+func TestOrchestrate_FailureStatusMappedToFailed(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.loopStatus = runtime.LoopStatusTokenBudget // agent hit token budget (a failure)
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	_, _ = orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for _, r := range repo.agentRuns {
+		// Token-budget termination must NOT show as "completed"; it is a failure.
+		if r.Status == entity.AgentRunStatusCompleted {
+			t.Fatalf("agent run %s status should not be completed for a token-budget termination, got %s", r.ID, r.Status)
+		}
+	}
 }

@@ -326,10 +326,12 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				}
 			}
 		}
-		// Remap this agent's vote evidence/claim references too.
+		// Remap this agent's vote evidence/claim references too, and link the
+		// vote to its agent run so /agents can join votes to agents.
 		if i < len(votes) && votes[i] != nil {
 			votes[i].EvidenceIDs = remapRefs(votes[i].EvidenceIDs, evRemap)
 			votes[i].KeyClaimIDs = remapRefs(votes[i].KeyClaimIDs, clRemap)
+			votes[i].AgentRunID = run.ID
 		}
 	}
 	for i, v := range votes {
@@ -364,14 +366,18 @@ func agentRunStatus(r *runtime.LoopResult) entity.AgentRunStatus {
 	switch r.Status {
 	case runtime.LoopStatusCompleted:
 		return entity.AgentRunStatusCompleted
-	case runtime.LoopStatusError:
-		return entity.AgentRunStatusFailed
 	case runtime.LoopStatusMaxSteps:
 		return entity.AgentRunStatusMaxSteps
 	case runtime.LoopStatusCancelled:
 		return entity.AgentRunStatusCancelled
+	case runtime.LoopStatusError,
+		runtime.LoopStatusValidationFailed,
+		runtime.LoopStatusTokenBudget,
+		runtime.LoopStatusToolFailures,
+		runtime.LoopStatusGateFailed:
+		return entity.AgentRunStatusFailed
 	default:
-		return entity.AgentRunStatusCompleted
+		return entity.AgentRunStatusFailed
 	}
 }
 
