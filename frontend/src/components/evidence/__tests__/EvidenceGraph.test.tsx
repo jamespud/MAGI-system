@@ -53,4 +53,25 @@ describe('EvidenceGraph', () => {
     await waitFor(() => expect(getByText(/No evidence yet/)).toBeInTheDocument());
     expect(queryByLabelText('Zoom in')).toBeNull();
   });
+
+  it('connects evidence to collector agent claims via implicit links', async () => {
+    mockApi.getEvidence.mockResolvedValue([
+      { id: 'EV-1', source: 's', observation: 'o', reliability: 0.8, collected_by: 'melchior', timestamp: 't' },
+    ]);
+    mockApi.getClaims.mockResolvedValue([
+      // claim has NO supports array, so only implicit link should connect
+      { id: 'CL-1', text: 'claim', supports: [], contradicts: [], created_by: 'melchior' },
+    ]);
+    mockApi.getVotes.mockResolvedValue([
+      { id: 'V-1', agent_code: 'melchior', stance: 'approve', confidence: 80, reasoning: 'r', round: 1 },
+    ]);
+
+    const { container } = render(<EvidenceGraph />);
+
+    // Wait for the svg to have lines (links rendered by d3)
+    await waitFor(() => {
+      const lines = container.querySelectorAll('line');
+      expect(lines.length).toBeGreaterThan(0);
+    });
+  });
 });

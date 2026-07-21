@@ -57,6 +57,23 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
     const voteId = `vote-${c.created_by}`;
     if (nodeIds.has(voteId)) links.push({ source: c.id, target: voteId, type: 'supports' });
   }
+  // Implicit agent-based links: evidence → collector's claims + vote.
+  // Guarantees a visible graph structure even when LLM omits supports.
+  const agentClaims: Record<string, string[]> = {};
+  for (const c of claims) {
+    (agentClaims[c.created_by] ??= []).push(c.id);
+  }
+  for (const e of evidence) {
+    const voteId = `vote-${e.collected_by}`;
+    if (nodeIds.has(voteId)) {
+      links.push({ source: e.id, target: voteId, type: 'supports' });
+    }
+    for (const clId of agentClaims[e.collected_by] ?? []) {
+      if (nodeIds.has(clId)) {
+        links.push({ source: e.id, target: clId, type: 'supports' });
+      }
+    }
+  }
   return { nodes, links };
 }
 
