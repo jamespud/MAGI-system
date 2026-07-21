@@ -17,6 +17,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/orchestration"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
@@ -35,8 +36,8 @@ var Module = fx.Options(
 		// Adapters (standalone mode; Coze mode replaces these)
 		magi.NewModelAdapter,
 		appserver.NewEventBroker,
-		func() *StubToolRegistry { return &StubToolRegistry{} },
-		func() *StubToolExecutor { return &StubToolExecutor{} },
+		ProvideToolRegistry,
+		ProvideToolExecutor,
 
 		// Database
 		provideDB,
@@ -82,16 +83,40 @@ var Module = fx.Options(
 
 func provideAgentLoop(
 	modelPort *magi.ModelAdapter,
-	toolReg *StubToolRegistry,
-	toolExec *StubToolExecutor,
+	toolReg port.ToolRegistryPort,
+	toolExec port.ToolExecutorPort,
 	val validation.Validator,
 	gen validation.SchemaGenerator,
 	broker *appserver.EventBroker,
 ) (*runtime.AgentLoop, error) {
+	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
+		evidence.FullReliabilityResolver(),
+		evidence.NewTavilyAdapter(),
+		evidence.NewNativeAdapter(),
+		evidence.NewRawObservationAdapter(),
+	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: broker,
+		Validator: val, Gen: gen, EventPub: broker, Adapter: adapterRegistry,
 	})
+}
+
+// ProvideToolRegistry returns a LocalToolRegistry (resolves web_search) when a
+// Tavily key is configured, else the no-op StubToolRegistry (no tools).
+func ProvideToolRegistry(cfg *Config) port.ToolRegistryPort {
+	if cfg.Tavily.APIKey != "" {
+		return magi.NewLocalToolRegistry()
+	}
+	return &StubToolRegistry{}
+}
+
+// ProvideToolExecutor returns a TavilyToolExecutor when a Tavily key is
+// configured, else the no-op StubToolExecutor.
+func ProvideToolExecutor(cfg *Config) port.ToolExecutorPort {
+	if cfg.Tavily.APIKey != "" {
+		return magi.NewTavilyToolExecutor(cfg.Tavily.APIKey)
+	}
+	return &StubToolExecutor{}
 }
 
 func provideCommander(

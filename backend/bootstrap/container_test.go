@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
+	"github.com/jamespud/magi/backend/bootstrap"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -36,3 +37,29 @@ func TestAllModels_IncludesToolCallModel(t *testing.T) {
 	}
 }
 
+
+func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
+	withCfg := &bootstrap.Config{}
+	withCfg.Tavily.APIKey = "k"
+	with := bootstrap.ProvideToolRegistry(withCfg)
+	if _, ok := with.(*magi.LocalToolRegistry); !ok {
+		t.Fatalf("expected LocalToolRegistry when key set, got %T", with)
+	}
+	without := bootstrap.ProvideToolRegistry(&bootstrap.Config{})
+	if _, ok := without.(*bootstrap.StubToolRegistry); !ok {
+		t.Fatalf("expected StubToolRegistry when no key, got %T", without)
+	}
+}
+
+func TestProvideToolExecutor_SelectsByApiKey(t *testing.T) {
+	withCfg := &bootstrap.Config{}
+	withCfg.Tavily.APIKey = "k"
+	with := bootstrap.ProvideToolExecutor(withCfg)
+	if _, ok := with.(*magi.TavilyToolExecutor); !ok {
+		t.Fatalf("expected TavilyToolExecutor when key set, got %T", with)
+	}
+	without := bootstrap.ProvideToolExecutor(&bootstrap.Config{})
+	if _, ok := without.(*bootstrap.StubToolExecutor); !ok {
+		t.Fatalf("expected StubToolExecutor when no key, got %T", without)
+	}
+}
