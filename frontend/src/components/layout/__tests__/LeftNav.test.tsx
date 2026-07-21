@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LeftNav from '../LeftNav';
 
@@ -44,5 +44,22 @@ describe('LeftNav', () => {
     );
 
     expect(getByText('Decision Center')).toBeDefined();
+  });
+
+  it('paginates the Completed section when many cases are resolved', () => {
+    const resolved = Array.from({ length: 12 }, (_, i) => ({
+      id: `c-${i}`, question: `Question ${i}`, status: 'RESOLVED' as const,
+      round: 1, createdAt: 't', pinned: false,
+    }));
+    const { getByText, queryByText, getByLabelText } = render(
+      <MemoryRouter>
+        <LeftNav cases={resolved} />
+      </MemoryRouter>
+    );
+    expect(getByText('1/2')).toBeDefined();
+    expect(getByText('Question 0')).toBeDefined();
+    expect(queryByText('Question 10')).toBeNull();
+    fireEvent.click(getByLabelText('Next Completed page'));
+    expect(getByText('Question 10')).toBeDefined();
   });
 });

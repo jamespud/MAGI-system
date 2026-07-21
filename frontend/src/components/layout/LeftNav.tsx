@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Pin, Play, CheckCircle, Archive, FileText, FlaskConical, Database, History } from 'lucide-react';
 import { MonoText } from '@/components/shared';
+import PaginatedSection from './PaginatedSection';
 import { useCaseStore } from '@/stores';
 import type { CaseSummary } from '@/types/case';
 
@@ -38,6 +39,9 @@ export default function LeftNav({ cases = [] }: LeftNavProps) {
         {SECTIONS.map(({ title, icon: Icon, filter }) => {
           const filtered = cases.filter(filter);
           if (filtered.length === 0 && title !== 'Pinned' && title !== 'Archived') return null;
+          if (title === 'Completed') {
+            return <PaginatedSection key="Completed" title="Completed" icon={Icon} items={filtered} />;
+          }
           return (
             <div key={title} className="border-b border-border-dim last:border-b-0">
               <div className="flex items-center gap-2 px-4 py-2">
