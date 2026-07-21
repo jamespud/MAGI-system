@@ -68,6 +68,11 @@ func WithResolutionRepo(repo port.ResolutionRepository) Option {
 	return func(s *Service) { s.resRepo = repo }
 }
 
+// WithToolCallRepo injects a ToolCallRepository for the /agents endpoint.
+func WithToolCallRepo(repo port.ToolCallRepository) Option {
+	return func(s *Service) { s.toolCallRepo = repo }
+}
+
 // Service is the application-layer service for decision cases.
 type Service struct {
 	orch         Orchestrator
@@ -78,6 +83,7 @@ type Service struct {
 	claimRepo    port.ClaimRepository
 	voteRepo     port.VoteRepository
 	agentRunRepo port.AgentRunRepository
+	toolCallRepo port.ToolCallRepository
 	runs         RunController
 }
 
@@ -191,6 +197,14 @@ func (s *Service) AgentRuns(ctx context.Context, caseID string) ([]*entity.Agent
 		return nil, nil
 	}
 	return s.agentRunRepo.ListByCase(ctx, caseID)
+}
+
+// ToolCalls returns all tool-call records for a case.
+func (s *Service) ToolCalls(ctx context.Context, caseID string) ([]*entity.ToolCall, error) {
+	if s.toolCallRepo == nil {
+		return nil, nil
+	}
+	return s.toolCallRepo.ListByCase(ctx, caseID)
 }
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.

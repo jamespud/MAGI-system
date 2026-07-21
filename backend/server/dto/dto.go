@@ -46,12 +46,24 @@ type CaseListResponse struct {
 }
 
 type AgentSnapshotDTO struct {
-	AgentCode     string   `json:"agent_code"`
-	Status        string   `json:"status"`
-	Round         int      `json:"round"`
-	EvidenceCount int      `json:"evidence_count"`
-	ClaimCount    int      `json:"claim_count"`
-	Vote          *VoteDTO `json:"vote,omitempty"`
+	AgentCode string        `json:"agent_code"`
+	Status    string        `json:"status"`
+	Round     int           `json:"round"`
+	Step      int           `json:"step"`
+	ToolCalls []ToolCallDTO `json:"tool_calls"`
+	Evidence  []EvidenceDTO `json:"evidence"`
+	Claims    []ClaimDTO    `json:"claims"`
+	Vote      *VoteDTO      `json:"vote,omitempty"`
+}
+
+type ToolCallDTO struct {
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Arguments  string `json:"arguments"`
+	Result     string `json:"result"`
+	Err        string `json:"err,omitempty"`
+	EvidenceID string `json:"evidence_id,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 type EvidenceDTO struct {
@@ -293,5 +305,17 @@ func FromVote(v *entity.Vote) VoteDTO {
 		Confidence: v.Confidence,
 		Reasoning:  v.ReasoningSummary,
 		Round:      v.Round,
+	}
+}
+
+func FromToolCall(t *entity.ToolCall) ToolCallDTO {
+	return ToolCallDTO{
+		ToolCallID: t.ToolCallID,
+		ToolName:   t.ToolName,
+		Arguments:  t.Arguments,
+		Result:     t.Result,
+		Err:        t.Err,
+		EvidenceID: t.EvidenceID,
+		DurationMs: t.DurationMs,
 	}
 }

@@ -71,40 +71,72 @@ func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 	evs, _ := h.svc.Evidence(ctx, id)
 	cls, _ := h.svc.Claims(ctx, id)
 	vs, _ := h.svc.Votes(ctx, id)
+	tcs, _ := h.svc.ToolCalls(ctx, id)
 
-	evByAgent := map[string]int{}
+	evByAgent := map[string][]dto.EvidenceDTO{}
 	for _, e := range evs {
-		evByAgent[string(e.CollectedBy)]++
+		code := string(e.CollectedBy)
+		evByAgent[code] = append(evByAgent[code], dto.FromEvidence(e))
 	}
-	clByAgent := map[string]int{}
+	clByAgent := map[string][]dto.ClaimDTO{}
 	for _, cl := range cls {
-		clByAgent[string(cl.CreatedBy)]++
+		code := string(cl.CreatedBy)
+		clByAgent[code] = append(clByAgent[code], dto.FromClaim(cl))
+	}
+	tcByRun := map[string][]dto.ToolCallDTO{}
+	for _, tc := range tcs {
+		tcByRun[tc.AgentRunID] = append(tcByRun[tc.AgentRunID], dto.FromToolCall(tc))
 	}
 	// latest vote per agent (by round)
-	voteByAgent := map[string]*entity.Vote{}
+	voteByAgent := map[string]*dto.VoteDTO{}
 	for _, v := range vs {
 		key := agentCodeFromRun(runs, v)
 		if key == "" {
 			continue
 		}
+		vd := dto.FromVote(v)
 		if cur, ok := voteByAgent[key]; !ok || v.Round >= cur.Round {
-			voteByAgent[key] = v
+			voteByAgent[key] = &vd
+		}
+	}
+	// latest run id per agent code (so tool calls join to the right run)
+	runIDByAgent := map[string]string{}
+	runRoundByAgent := map[string]int{}
+	for _, r := range runs {
+		code := string(r.MagiCode)
+		if _, ok := runIDByAgent[code]; !ok || r.Round >= runRoundByAgent[code] {
+			runIDByAgent[code] = r.ID
+			runRoundByAgent[code] = r.Round
 		}
 	}
 
 	out := make(map[string]dto.AgentSnapshotDTO, len(runs))
 	for _, r := range runs {
 		code := string(r.MagiCode)
+		runID := runIDByAgent[code]
+		toolCalls := tcByRun[runID]
+		if toolCalls == nil {
+			toolCalls = []dto.ToolCallDTO{}
+		}
+		evidence := evByAgent[code]
+		if evidence == nil {
+			evidence = []dto.EvidenceDTO{}
+		}
+		claims := clByAgent[code]
+		if claims == nil {
+			claims = []dto.ClaimDTO{}
+		}
 		snap := dto.AgentSnapshotDTO{
-			AgentCode:     code,
-			Status:        string(r.Status),
-			Round:         r.Round,
-			EvidenceCount: evByAgent[code],
-			ClaimCount:    clByAgent[code],
+			AgentCode: code,
+			Status:    string(r.Status),
+			Round:     r.Round,
+			Step:      len(toolCalls),
+			ToolCalls: toolCalls,
+			Evidence:  evidence,
+			Claims:    claims,
 		}
 		if v, ok := voteByAgent[code]; ok {
-			vv := dto.FromVote(v)
-			snap.Vote = &vv
+			snap.Vote = v
 		}
 		out[code] = snap
 	}

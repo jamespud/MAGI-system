@@ -155,6 +155,7 @@ func provideDecisionService(
 		decision.WithClaimRepo(repo.ClaimRepo()),
 		decision.WithVoteRepo(repo.VoteRepo()),
 		decision.WithAgentRunRepo(repo.AgentRunRepo()),
+		decision.WithToolCallRepo(repo.ToolCallRepo()),
 		decision.WithRunManager(rm))
 }
 
