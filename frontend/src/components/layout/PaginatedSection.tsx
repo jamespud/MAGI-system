@@ -7,7 +7,8 @@ import type { CaseSummary } from '@/types/case';
 
 interface PaginatedSectionProps {
   title: string;
-  icon: ComponentType<{ size?: number; className?: string }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon: ComponentType<any>;
   items: CaseSummary[];
   pageSize?: number;
 }

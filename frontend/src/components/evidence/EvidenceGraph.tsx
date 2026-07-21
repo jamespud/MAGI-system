@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { useParams } from 'react-router-dom';
+import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { useUiStore } from '@/stores';
 import { api } from '@/api/client';
 import type { ApiEvidence, ApiClaim, ApiVote } from '@/api/client';
+import { stanceColor } from '@/lib/stance';
 import { Card } from '@/components/ui';
 import { MonoText } from '@/components/shared';
-import { stanceColor } from '@/lib/stance';
+
+const HEIGHT = 520;
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -25,26 +28,20 @@ function agentColor(code: string): string {
     : 'var(--casper)';
 }
 
-// buildGraph assembles nodes + links from real evidence/claims/votes.
 function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[]) {
   const nodes: GraphNode[] = [
     ...evidence.map((e) => ({
-      id: e.id,
-      label: e.id,
-      type: 'evidence' as const,
-      color: agentColor(e.collected_by),
+      id: e.id, label: e.id, type: 'evidence' as const, color: agentColor(e.collected_by),
     })),
     ...claims.map((c) => ({
       id: c.id,
       label: c.text.slice(0, 30) + (c.text.length > 30 ? '...' : ''),
-      type: 'claim' as const,
-      color: agentColor(c.created_by),
+      type: 'claim' as const, color: agentColor(c.created_by),
     })),
     ...votes.map((v) => ({
       id: `vote-${v.agent_code}`,
       label: `${v.agent_code}: ${v.stance}`,
-      type: 'vote' as const,
-      color: stanceColor(v.stance),
+      type: 'vote' as const, color: stanceColor(v.stance),
     })),
   ];
 
@@ -66,12 +63,15 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
 export default function EvidenceGraph() {
   const { caseId } = useParams<{ caseId: string }>();
   const svgRef = useRef<SVGSVGElement>(null);
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [empty, setEmpty] = useState(false);
+  const [zoomPct, setZoomPct] = useState(100);
 
   useEffect(() => {
     if (!caseId || !svgRef.current) return;
 
     let cancelled = false;
+    setZoomPct(100);
     Promise.all([
       api.getEvidence(caseId).catch(() => [] as ApiEvidence[]),
       api.getClaims(caseId).catch(() => [] as ApiClaim[]),
@@ -86,16 +86,27 @@ export default function EvidenceGraph() {
       svg.selectAll('*').remove();
 
       const width = svgRef.current.clientWidth || 800;
-      const height = 320;
-      svg.attr('viewBox', `0 0 ${width} ${height}`);
+      svg.attr('viewBox', `0 0 ${width} ${HEIGHT}`);
+
+      // All rendered content lives in a zoom layer so one transform scales/pans everything.
+      const zoomLayer = svg.append('g');
+
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.3, 3])
+        .on('zoom', (e) => {
+          zoomLayer.attr('transform', e.transform);
+          setZoomPct(Math.round(e.transform.k * 100));
+        });
+      svg.call(zoom);
+      zoomRef.current = zoom;
 
       const simulation = d3.forceSimulation<GraphNode>(nodes)
         .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(80))
         .force('charge', d3.forceManyBody().strength(-200))
-        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('center', d3.forceCenter(width / 2, HEIGHT / 2))
         .force('collision', d3.forceCollide(20));
 
-      const link = svg.append('g')
+      const link = zoomLayer.append('g')
         .selectAll('line')
         .data(links)
         .join('line')
@@ -104,7 +115,7 @@ export default function EvidenceGraph() {
         .attr('stroke-dasharray', (d) => d.type === 'contradicts' ? '4 2' : 'none')
         .attr('opacity', 0.6);
 
-      const node = svg.append('g')
+      const node = zoomLayer.append('g')
         .selectAll('g')
         .data(nodes)
         .join('g')
@@ -127,20 +138,18 @@ export default function EvidenceGraph() {
         .attr('font-size', '9px')
         .attr('font-family', 'JetBrains Mono, monospace');
 
+      // stopPropagation on drag so panning (zoom) doesn't also fire while dragging a node.
       const dragBehavior = d3.drag<SVGGElement, GraphNode>()
-        .on('start', (_event, d) => {
+        .on('start', (event, d) => {
+          event.sourceEvent?.stopPropagation();
           simulation.alphaTarget(0.3).restart();
-          d.fx = d.x;
-          d.fy = d.y;
+          d.fx = d.x; d.fy = d.y;
         })
-        .on('drag', (event, d) => {
-          d.fx = event.x;
-          d.fy = event.y;
-        })
-        .on('end', (_event, d) => {
+        .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+        .on('end', (event, d) => {
+          event.sourceEvent?.stopPropagation();
           simulation.alphaTarget(0);
-          d.fx = null;
-          d.fy = null;
+          d.fx = null; d.fy = null;
         });
 
       node.call(dragBehavior as any);
@@ -154,7 +163,6 @@ export default function EvidenceGraph() {
         node.attr('transform', (d) => `translate(${d.x},${d.y})`);
       });
 
-      // stop simulation on cleanup
       cancelled = true;
       return () => { simulation.stop(); };
     });
@@ -162,27 +170,57 @@ export default function EvidenceGraph() {
     return () => { cancelled = true; };
   }, [caseId]);
 
+  const zoomBy = (factor: number) => {
+    const z = zoomRef.current;
+    if (!z || !svgRef.current) return;
+    z.scaleBy(d3.select(svgRef.current), factor);
+  };
+
+  const resetZoom = () => {
+    const z = zoomRef.current;
+    if (!z || !svgRef.current) return;
+    z.transform(d3.select(svgRef.current), d3.zoomIdentity);
+  };
+
   return (
     <Card className="mx-4 mb-4" padded={false}>
       <div className="px-4 pt-3 pb-2 border-b border-border-dim">
-        <h3 className="font-mono text-xs font-semibold text-text-secondary uppercase tracking-wider">Evidence Graph</h3>
-        <div className="flex items-center gap-3 mt-1">
-          <div className="flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-border-dim" />
-            <MonoText size="sm" muted>Supports</MonoText>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-mono text-xs font-semibold text-text-secondary uppercase tracking-wider">Evidence Graph</h3>
+            <div className="flex items-center gap-3 mt-1">
+              <div className="flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-border-dim" />
+                <MonoText size="sm" muted>Supports</MonoText>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block bg-error" style={{ width: 8, height: 2 }} />
+                <MonoText size="sm" muted>Contradicts</MonoText>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="inline-block bg-error" style={{ width: 8, height: 2 }} />
-            <MonoText size="sm" muted>Contradicts</MonoText>
-          </div>
+          {!empty && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button type="button" onClick={() => zoomBy(1 / 1.3)} aria-label="Zoom out" className="p-1 text-text-muted hover:text-text-primary cursor-pointer">
+                <ZoomOut size={14} />
+              </button>
+              <MonoText size="sm" muted>{zoomPct}%</MonoText>
+              <button type="button" onClick={() => zoomBy(1.3)} aria-label="Zoom in" className="p-1 text-text-muted hover:text-text-primary cursor-pointer">
+                <ZoomIn size={14} />
+              </button>
+              <button type="button" onClick={resetZoom} aria-label="Reset zoom" className="p-1 text-text-muted hover:text-text-primary cursor-pointer">
+                <Maximize2 size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
       {empty ? (
-        <div className="flex items-center justify-center" style={{ height: 320 }}>
+        <div className="flex items-center justify-center" style={{ height: HEIGHT }}>
           <MonoText size="sm" muted>No evidence yet. Run the decision to populate.</MonoText>
         </div>
       ) : (
-        <svg ref={svgRef} className="w-full cursor-grab active:cursor-grabbing" style={{ height: 320 }} />
+        <svg ref={svgRef} className="w-full cursor-grab active:cursor-grabbing" style={{ height: HEIGHT }} />
       )}
     </Card>
   );
