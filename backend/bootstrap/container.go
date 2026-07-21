@@ -192,7 +192,7 @@ func provideMemoryService() *memory.Service {
 	return memory.NewService(nil, nil)
 }
 
-func provideToolService(toolReg *StubToolRegistry) *tool.Service {
+func provideToolService(toolReg port.ToolRegistryPort) *tool.Service {
 	return tool.NewService(toolReg)
 }
 
