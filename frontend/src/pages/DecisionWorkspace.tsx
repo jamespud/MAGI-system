@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
 import { api } from '@/api/client';
@@ -17,7 +17,6 @@ export default function DecisionWorkspace() {
   const currentCase = useCaseStore((s) => s.case);
   const loading = useCaseStore((s) => s.loading);
   const error = useCaseStore((s) => s.error);
-  const [running, setRunning] = useState(false);
   const unsubRef = useRef<(() => void) | null>(null);
 
   // refreshCaseData re-fetches the case + all artifacts. Called on open and on
@@ -57,15 +56,23 @@ export default function DecisionWorkspace() {
 
   const handleRun = async () => {
     if (!caseId) return;
-    setRunning(true);
     try {
       await useCaseStore.getState().runCase(caseId);
     } catch {
       // 409 or error already set in store
-    } finally {
-      setRunning(false);
     }
   };
+
+  function runButtonState(status: string): { disabled: boolean; label: string } {
+    const active = ['INVESTIGATING','EVIDENCE_GATING','COLLECTING_VOTES','CONSENSUS_CHECK',
+                     'DEBATING','REFLECTING','REVOTING','RESOLVING','GENERATING_REPORT',
+                     'SAVING_MEMORY','EVALUATING','NORMALIZING','CONTEXT_BUILDING','RETRIEVING_MEMORY'];
+    if (active.includes(status)) return { disabled: true, label: 'Running...' };
+    if (status === 'RESOLVED') return { disabled: true, label: 'Resolved' };
+    if (['FAILED','DEADLOCKED','CANCELLED','TIMED_OUT'].includes(status))
+      return { disabled: false, label: 'Re-run' };
+    return { disabled: false, label: 'Run Decision' };
+  }
 
   if (!caseId) {
     return (
@@ -106,14 +113,14 @@ export default function DecisionWorkspace() {
     );
   }
 
-  const resolved = currentCase.status === 'RESOLVED';
+  const btn = runButtonState(currentCase.status);
 
   return (
     <div className="h-full overflow-y-auto">
       <DecisionInput />
       <div className="px-4 mb-4">
-        <Button onClick={handleRun} disabled={running || resolved}>
-          {running ? 'Running...' : resolved ? 'Resolved' : 'Run Decision'}
+        <Button onClick={handleRun} disabled={btn.disabled}>
+          {btn.label}
         </Button>
         {error && <span className="ml-3 text-red-400 text-xs font-mono">{error}</span>}
       </div>

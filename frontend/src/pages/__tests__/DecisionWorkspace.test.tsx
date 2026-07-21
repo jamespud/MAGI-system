@@ -104,4 +104,18 @@ describe('DecisionWorkspace', () => {
     fireEvent.click(btn);
     await waitFor(() => expect(mockRunCase).toHaveBeenCalledWith('case-001'));
   });
+
+  it('shows Running... and disabled during active states', () => {
+    currentCase = { id: 'case-001', question: 'q', status: 'INVESTIGATING' };
+    const { getByText } = renderAt('/case/case-001');
+    const btn = getByText('Running...') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('shows Re-run for failed state', () => {
+    currentCase = { id: 'case-001', question: 'q', status: 'FAILED' };
+    const { getByText } = renderAt('/case/case-001');
+    const btn = getByText('Re-run') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+  });
 });
