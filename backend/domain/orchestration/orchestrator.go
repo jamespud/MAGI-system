@@ -267,10 +267,10 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 
 		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
 		// persist copies so the ledger is left untouched for any later use.
+		prefix := fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase)
 		evRemap := map[string]string{}
 		clRemap := map[string]string{}
 		if r.Ledger != nil {
-			prefix := fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase)
 			evidence := r.Ledger.List()
 			for _, ev := range evidence {
 				newID := prefix + "-" + ev.ID
@@ -294,6 +294,36 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.Supports = remapRefs(cl.Supports, evRemap)
 				cp.Contradicts = remapRefs(cl.Contradicts, clRemap)
 				_ = o.repo.ClaimRepo().Create(ctx, &cp)
+			}
+		}
+		// Persist tool-call records from the run trace. The PK is a namespaced
+		// counter (the LLM's ToolCallID is stored separately and may collide
+		// across agents); evidence_id is remapped to the persisted EV-ID.
+		if r.Trace != nil {
+			toolIdx := 0
+			for _, st := range r.Trace.Steps {
+				for _, tc := range st.ToolCalls {
+					toolIdx++
+					evID := tc.EvidenceID
+					if remapped, ok := evRemap[evID]; ok {
+						evID = remapped
+					}
+					toolCall := &entity.ToolCall{
+						ID:         fmt.Sprintf("%s-tc%d", prefix, toolIdx),
+						CaseID:     case_.ID,
+						AgentRunID: run.ID,
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Arguments:  tc.Arguments,
+						Valid:      tc.Valid,
+						Result:     tc.Result,
+						Err:        tc.Err,
+						EvidenceID: evID,
+						DurationMs: tc.Duration.Milliseconds(),
+						CreatedAt:  now,
+					}
+					_ = o.repo.ToolCallRepo().Create(ctx, toolCall)
+				}
 			}
 		}
 		// Remap this agent's vote evidence/claim references too.

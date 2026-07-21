@@ -96,8 +96,14 @@ func (m *mockMagiRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx 
 		Vote:   vote,
 		Status: runtime.LoopStatusCompleted,
 		Ledger: ledger,
-		Trace:  &runtime.LoopTrace{Steps: []*runtime.Step{{IsFinal: true}}},
-		Usage:  &entity.Usage{TotalTokens: 100},
+		Trace: &runtime.LoopTrace{Steps: []*runtime.Step{{
+			IsFinal: true,
+			ToolCalls: []runtime.ToolCallRecord{{
+				ToolCallID: "call-1", ToolName: "calc", Arguments: `{"a":1,"b":2}`,
+				Valid: true, Result: "3", Duration: 5 * time.Millisecond,
+			}},
+		}}},
+		Usage: &entity.Usage{TotalTokens: 100},
 	}, nil
 }
 
@@ -562,6 +568,24 @@ func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 			t.Fatalf("duplicate persisted evidence ID: %s", ev.ID)
 		}
 		seenEvidence[ev.ID] = true
+	}
+	// Each agent's trace has one tool call; 3 agents -> 3 tool-call records,
+	// with namespaced PKs and the agent_run_id linked.
+	if len(repo.toolCalls) != 3 {
+		t.Fatalf("expected 3 tool calls persisted (1 per agent), got %d", len(repo.toolCalls))
+	}
+	seenTC := map[string]bool{}
+	for _, tc := range repo.toolCalls {
+		if seenTC[tc.ID] {
+			t.Fatalf("duplicate persisted tool call ID: %s", tc.ID)
+		}
+		seenTC[tc.ID] = true
+		if tc.AgentRunID == "" {
+			t.Fatalf("tool call %s missing AgentRunID", tc.ID)
+		}
+		if tc.ToolName != "calc" {
+			t.Fatalf("tool call ToolName: %s", tc.ToolName)
+		}
 	}
 }
 
