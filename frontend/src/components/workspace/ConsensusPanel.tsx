@@ -41,7 +41,33 @@ export default function ConsensusPanel() {
       : (derived.approve === 0 && derived.reject === 0 ? 'Pending' : status === 'RESOLVED' ? 'Resolved' : CASE_STATUS_LABELS[status as CaseStatus]));
 
   const timelineSteps = ['Round 1', 'Debate', 'Reflection', 'Round 2', 'Resolved'];
-  const currentStep = 0;
+  const currentStep = (() => {
+    switch (status) {
+      case 'INVESTIGATING':
+      case 'EVIDENCE_GATING':
+      case 'COLLECTING_VOTES':
+      case 'CONSENSUS_CHECK':
+        return 0;
+      case 'DEBATING':
+        return 1;
+      case 'REFLECTING':
+        return 2;
+      case 'REVOTING':
+        return 3;
+      case 'RESOLVING':
+      case 'GENERATING_REPORT':
+      case 'SAVING_MEMORY':
+      case 'EVALUATING':
+      case 'RESOLVED':
+      case 'DEADLOCKED':
+      case 'FAILED':
+      case 'CANCELLED':
+      case 'TIMED_OUT':
+        return 4;
+      default:
+        return 0;
+    }
+  })();
 
   return (
     <Card className="mx-4 mb-4">

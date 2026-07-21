@@ -64,4 +64,23 @@ describe('ConsensusPanel', () => {
     const { getAllByText } = render(<ConsensusPanel />);
     expect(getAllByText('Pending').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('lights the correct timeline step for INVESTIGATING', () => {
+    setCase(baseCase({ status: 'INVESTIGATING', consensus: null, confidence: 0 }));
+    setAgents({ melchior: null, balthasar: null, casper: null });
+    const { container } = render(<ConsensusPanel />);
+    // Round 1 dot should be lit (accent bg), Debate dot should be dim
+    const dots = container.querySelectorAll('.rounded-full');
+    expect(dots[0].className).toContain('bg-accent');
+    expect(dots[1].className).toContain('bg-border-dim');
+  });
+
+  it('lights all steps for RESOLVED', () => {
+    setCase(baseCase({ status: 'RESOLVED' }));
+    const { container } = render(<ConsensusPanel />);
+    const dots = container.querySelectorAll('.rounded-full');
+    for (const dot of dots) {
+      expect(dot.className).toContain('bg-accent');
+    }
+  });
 });
