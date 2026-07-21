@@ -2,10 +2,12 @@ import { useCaseStore, useAgentStore } from '@/stores';
 import { Card } from '@/components/ui';
 import { MonoText } from '@/components/shared';
 import { Check, X, Minus } from 'lucide-react';
+import { CASE_STATUS_LABELS, type CaseStatus } from '@/types/case';
 
 export default function ConsensusPanel() {
   const consensus = useCaseStore((s) => s.case?.consensus ?? null);
   const confidence = useCaseStore((s) => s.case?.confidence ?? 0);
+  const status = useCaseStore((s) => s.case?.status ?? 'DRAFT');
   const agents = useAgentStore((s) => s.agents);
 
   const renderVoteIcon = (stance: string | undefined) => {
@@ -14,19 +16,48 @@ export default function ConsensusPanel() {
     return <Minus size={14} className="text-text-muted" />;
   };
 
+  // When there is no persisted consensus (e.g. DEADLOCKED cases never reach
+  // RESOLVED so no resolution is stored), derive the vote distribution from
+  // the agents' votes so the panel still reflects what happened.
+  const derived = (() => {
+    if (consensus) return { approve: consensus.approve, reject: consensus.reject, abstain: consensus.abstain };
+    let approve = 0, reject = 0, abstain = 0;
+    for (const id of ['melchior', 'balthasar', 'casper'] as const) {
+      const s = agents[id]?.vote?.stance;
+      if (s === 'Approve') approve++;
+      else if (s === 'Reject') reject++;
+      else if (s === 'Abstain') abstain++;
+    }
+    return { approve, reject, abstain };
+  })();
+
+  const isTerminal = status === 'RESOLVED' || status === 'DEADLOCKED' || status === 'FAILED' || status === 'CANCELLED' || status === 'TIMED_OUT';
+  const majorityLabel = consensus?.majority
+    ?? (status === 'DEADLOCKED' ? 'Deadlocked'
+      : (derived.approve === 0 && derived.reject === 0 ? 'Pending' : status === 'RESOLVED' ? 'Resolved' : CASE_STATUS_LABELS[status as CaseStatus]));
+
   const timelineSteps = ['Round 1', 'Debate', 'Reflection', 'Round 2', 'Resolved'];
   const currentStep = 0;
 
   return (
     <Card className="mx-4 mb-4">
-      <h3 className="font-mono text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Consensus</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-mono text-xs font-semibold text-text-secondary uppercase tracking-wider">Consensus</h3>
+        {isTerminal && (
+          <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+            status === 'RESOLVED' ? 'text-accent border-[var(--accent)]' : 'text-warning border-[var(--warning)]'
+          }`}>
+            {CASE_STATUS_LABELS[status as CaseStatus]}
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-cols-4 gap-4">
         <div>
           <MonoText size="sm" muted>Current</MonoText>
           <div className="mt-1">
             <span className="font-mono text-2xl font-bold text-text-primary">
-              {consensus ? `${consensus.approve} : ${consensus.reject}` : '— : —'}
+              {`${derived.approve} : ${derived.reject}`}
             </span>
           </div>
         </div>
@@ -34,8 +65,8 @@ export default function ConsensusPanel() {
         <div>
           <MonoText size="sm" muted>Majority</MonoText>
           <div className="mt-1">
-            <span className="font-mono text-sm font-semibold" style={{ color: consensus?.majority === 'Approve' ? 'var(--accent)' : 'var(--error)' }}>
-              {consensus?.majority || 'Pending'}
+            <span className="font-mono text-sm font-semibold" style={{ color: majorityLabel === 'Approve' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+              {majorityLabel}
             </span>
           </div>
         </div>
@@ -43,7 +74,7 @@ export default function ConsensusPanel() {
         <div>
           <MonoText size="sm" muted>Confidence</MonoText>
           <div className="mt-1">
-            <span className="font-mono text-sm font-semibold text-accent">{confidence}%</span>
+            <span className="font-mono text-sm font-semibold text-accent">{confidence > 0 ? `${Math.round(confidence * 100)}%` : '-'}</span>
           </div>
         </div>
 

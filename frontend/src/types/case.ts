@@ -14,7 +14,13 @@ export type CaseStatus =
   | 'GENERATING_REPORT'
   | 'SAVING_MEMORY'
   | 'EVALUATING'
-  | 'RESOLVED';
+  | 'RESOLVED'
+  | 'DEADLOCKED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'TIMED_OUT'
+  | 'INSUFFICIENT_EVIDENCE'
+  | 'MEMORY_INDEXED';
 
 export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   DRAFT: 'Draft',
@@ -33,6 +39,12 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   SAVING_MEMORY: 'Saving Memory',
   EVALUATING: 'Evaluating',
   RESOLVED: 'Resolved',
+  DEADLOCKED: 'Deadlocked',
+  FAILED: 'Failed',
+  CANCELLED: 'Cancelled',
+  TIMED_OUT: 'Timed Out',
+  INSUFFICIENT_EVIDENCE: 'Insufficient Evidence',
+  MEMORY_INDEXED: 'Memory Indexed',
 };
 
 export interface Case {
