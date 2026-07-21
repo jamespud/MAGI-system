@@ -22,3 +22,17 @@ func TestAllModels_MigrateWithoutError(t *testing.T) {
 		}
 	}
 }
+
+func TestAllModels_IncludesToolCallModel(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
+		t.Fatalf("auto-migrate: %v", err)
+	}
+	if !db.Migrator().HasTable("magi_tool_call") {
+		t.Fatal("magi_tool_call table not created -- ToolCallModel missing from AllModels")
+	}
+}
+

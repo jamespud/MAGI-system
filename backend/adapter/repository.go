@@ -49,6 +49,7 @@ func (r *magiRepository) ResolutionRepo() port.ResolutionRepository { return &re
 func (r *magiRepository) EventRepo() port.EventRepository           { return &eventRepo{db: r.db} }
 func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{} }
 func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
+func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
 
 var _ port.Repository = (*magiRepository)(nil)
 
@@ -399,5 +400,40 @@ func (r *memoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 	return r.db.WithContext(ctx).Save(&m).Error
 }
 
+// --- ToolCallRepository ---
+
+type toolCallRepo struct{ db *gorm.DB }
+
+func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	m := ToolCallModel{
+		ID: t.ID, AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
+		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err,
+		EvidenceID: t.EvidenceID, DurationMs: t.DurationMs, CreatedAt: t.CreatedAt,
+	}
+	return r.db.WithContext(ctx).Create(&m).Error
+}
+
+func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error) {
+	var models []ToolCallModel
+	err := r.db.WithContext(ctx).
+		Joins("JOIN magi_agent_run ON magi_agent_run.id = magi_tool_call.agent_run_id").
+		Where("magi_agent_run.case_id = ?", caseID).
+		Order("magi_tool_call.created_at ASC").
+		Find(&models).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*entity.ToolCall, len(models))
+	for i, m := range models {
+		out[i] = &entity.ToolCall{
+			ID: m.ID, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+			Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err,
+			EvidenceID: m.EvidenceID, DurationMs: m.DurationMs, CreatedAt: m.CreatedAt,
+		}
+	}
+	return out, nil
+}
+
 var _ port.CaseRepository = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
+var _ port.ToolCallRepository = (*toolCallRepo)(nil)

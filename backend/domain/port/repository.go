@@ -19,6 +19,7 @@ type Repository interface {
 	EventRepo() EventRepository
 	CheckpointRepo() CheckpointRepository
 	MemoryRepo() MemoryRepository
+	ToolCallRepo() ToolCallRepository
 }
 
 type CaseRepository interface {
@@ -79,4 +80,9 @@ type CheckpointRepository interface {
 type MemoryRepository interface {
 	Get(ctx context.Context, caseID string) (*entity.CaseMemoryProjection, error)
 	Save(ctx context.Context, proj *entity.CaseMemoryProjection) error
+}
+
+type ToolCallRepository interface {
+	Create(ctx context.Context, t *entity.ToolCall) error
+	ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error)
 }

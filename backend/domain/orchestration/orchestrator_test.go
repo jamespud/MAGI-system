@@ -401,14 +401,15 @@ func TestEnforceReflectionRule_LLMReflectionJustifiedKept(t *testing.T) {
 // --- stub aggregate repository (records Creates) ---
 
 type stubRepo struct {
-	mu         sync.Mutex
-	cases      []*entity.DecisionCase
-	statuses   map[string]entity.CaseStatus
-	agentRuns  []*entity.AgentRun
-	evidence   []*entity.EvidenceRecord
-	claims     []*entity.Claim
-	votes      []*entity.Vote
+	mu          sync.Mutex
+	cases       []*entity.DecisionCase
+	statuses    map[string]entity.CaseStatus
+	agentRuns   []*entity.AgentRun
+	evidence    []*entity.EvidenceRecord
+	claims      []*entity.Claim
+	votes       []*entity.Vote
 	resolutions []*entity.Resolution
+	toolCalls   []*entity.ToolCall
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
@@ -424,6 +425,7 @@ func (s *stubRepo) ResolutionRepo() port.ResolutionRepository { return &stubResR
 func (s *stubRepo) EventRepo() port.EventRepository           { return &stubEventRepo{} }
 func (s *stubRepo) CheckpointRepo() port.CheckpointRepository { return &stubCpRepo{} }
 func (s *stubRepo) MemoryRepo() port.MemoryRepository         { return &stubMemRepo{} }
+func (s *stubRepo) ToolCallRepo() port.ToolCallRepository     { return &stubToolCallRepo{s: s} }
 
 type stubCaseRepo struct{ s *stubRepo }
 func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.cases = append(r.s.cases, c); return nil }
@@ -457,6 +459,17 @@ func (stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.
 type stubReflRepo struct{}
 func (stubReflRepo) Create(ctx context.Context, r *entity.Reflection) error { return nil }
 func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) { return nil, nil }
+
+type stubToolCallRepo struct{ s *stubRepo }
+func (r *stubToolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	r.s.mu.Lock(); defer r.s.mu.Unlock()
+	cp := *t
+	r.s.toolCalls = append(r.s.toolCalls, &cp)
+	return nil
+}
+func (r *stubToolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error) {
+	return nil, nil
+}
 
 type stubResRepo struct{ s *stubRepo }
 func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error {

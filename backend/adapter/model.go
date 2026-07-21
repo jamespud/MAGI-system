@@ -152,11 +152,28 @@ type MemoryProjectionModel struct {
 
 func (MemoryProjectionModel) TableName() string { return "case_memory_projection" }
 
+type ToolCallModel struct {
+	ID         string `gorm:"primaryKey"`
+	AgentRunID string `gorm:"index"`
+	ToolCallID string
+	ToolName   string
+	Arguments  string `gorm:"type:text"`
+	Valid      bool
+	Result     string `gorm:"type:text"`
+	Err        string `gorm:"type:text"`
+	EvidenceID string
+	DurationMs int64
+	CreatedAt  time.Time
+}
+
+func (ToolCallModel) TableName() string { return "magi_tool_call" }
+
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
 		&CaseModel{}, &AgentRunModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
+		&ToolCallModel{},
 	}
 }
