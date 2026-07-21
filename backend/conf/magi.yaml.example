@@ -67,3 +67,6 @@ magi:
         - { code: "time_window_assessment" }
     reflection_policy:
       require_justification: true
+
+tavily:
+  api_key: ""  # Tavily search API key; leave empty to disable web_search (agents reason from intrinsic knowledge)

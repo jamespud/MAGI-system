@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/bootstrap"
+	"github.com/jamespud/magi/backend/domain/entity"
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
@@ -64,5 +65,34 @@ database:
 	}
 	if cfg.Database.DSN != "user:pass@tcp(127.0.0.1:3306)/testdb?charset=utf8mb4&parseTime=True" {
 		t.Fatalf("Database.DSN: got %q", cfg.Database.DSN)
+	}
+}
+
+func TestConfig_TavilyParsed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+tavily:
+  api_key: "tvly-test-key"
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Tavily.APIKey != "tvly-test-key" {
+		t.Fatalf("Tavily.APIKey: got %q", cfg.Tavily.APIKey)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsWebSearch(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	if len(c.Tools) != 1 || c.Tools[0].ToolName != "web_search" {
+		t.Fatalf("expected web_search bound, got %+v", c.Tools)
+	}
+	if c.Tools[0].Source != entity.ToolSourceLocal {
+		t.Fatalf("expected local source, got %s", c.Tools[0].Source)
 	}
 }

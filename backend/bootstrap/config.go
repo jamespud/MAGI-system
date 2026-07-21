@@ -28,6 +28,9 @@ type Config struct {
 		Driver string `yaml:"driver"`
 		DSN    string `yaml:"dsn"`
 	} `yaml:"database"`
+	Tavily struct {
+		APIKey string `yaml:"api_key"`
+	} `yaml:"tavily"`
 }
 
 type MagiSpec struct {
@@ -146,6 +149,9 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 		ReflectionPolicy: entity.ReflectionPolicy{
 			RequireJustification: s.ReflectionPolicy.RequireJustification,
 			RequireNewEvidence:   s.ReflectionPolicy.RequireNewEvidence,
+		},
+		Tools: []entity.ToolBinding{
+			{Source: entity.ToolSourceLocal, ToolName: "web_search"},
 		},
 		LoopPolicy: entity.LoopPolicy{
 			MaxSteps:                         cfg.Magi.MaxSteps,
