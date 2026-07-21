@@ -1,3 +1,5 @@
+import type { Stance } from '@/lib/stance';
+
 export type AgentId = 'melchior' | 'balthasar' | 'casper';
 
 export const AGENT_NAMES: Record<AgentId, string> = {
@@ -41,7 +43,7 @@ export interface ClaimRef {
 }
 
 export interface AgentVote {
-  stance: 'Approve' | 'Reject' | 'Abstain';
+  stance: Stance;
   confidence: number;
   reasoning: string;
   dimensions?: Record<string, number>;

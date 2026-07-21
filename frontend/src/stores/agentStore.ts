@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AgentId, AgentSnapshot, AgentStatus, AgentVote } from '@/types/agent';
+import { normalizeStance } from '@/lib/stance';
 import type { ApiAgentSnapshot } from '@/api/client';
 
 interface AgentState {
@@ -51,7 +52,7 @@ export const useAgentStore = create<AgentState>((set) => ({
     for (const [k, v] of Object.entries(snap)) {
       const id = k as AgentId;
       const vote: AgentVote | null = v.vote
-        ? { stance: v.vote.stance as AgentVote['stance'], confidence: v.vote.confidence, reasoning: v.vote.reasoning }
+        ? { stance: normalizeStance(v.vote.stance), confidence: v.vote.confidence, reasoning: v.vote.reasoning }
         : null;
       agents[id] = {
         agentId: id,

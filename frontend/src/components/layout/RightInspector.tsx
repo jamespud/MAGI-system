@@ -6,6 +6,7 @@ import { Globe, Link2, Shield, Clock, FileText } from 'lucide-react';
 import { api } from '@/api/client';
 import type { ApiEvidence } from '@/api/client';
 import type { AgentId } from '@/types/agent';
+import { stanceColor, stanceLabel } from '@/lib/stance';
 
 export default function RightInspector() {
   const selected = useUiStore((s) => s.selected);
@@ -102,8 +103,8 @@ export default function RightInspector() {
         <div>
           <MonoText size="sm" muted>Stance</MonoText>
           <div className="mt-1">
-            <span className={`font-mono text-base font-bold ${vote.stance === 'Approve' ? 'text-accent' : 'text-error'}`}>
-              {vote.stance.toUpperCase()}
+            <span className="font-mono text-base font-bold" style={{ color: stanceColor(vote.stance) }}>
+              {stanceLabel(vote.stance)}
             </span>
           </div>
         </div>

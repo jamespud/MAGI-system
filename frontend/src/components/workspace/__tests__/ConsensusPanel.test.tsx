@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import type { AgentSnapshot } from '@/types/agent';
 import type { Case } from '@/types/case';
+import type { Stance } from '@/lib/stance';
 
 let _case: Case | null = null;
 let _agents: Record<string, AgentSnapshot | null> = { melchior: null, balthasar: null, casper: null };
@@ -11,7 +12,6 @@ vi.mock('@/stores', () => ({
   useAgentStore: (sel: (s: { agents: Record<string, AgentSnapshot | null> }) => unknown) => sel({ agents: _agents }),
 }));
 
-// import AFTER vi.mock so it sees the mock
 import ConsensusPanel from '../ConsensusPanel';
 
 const setCase = (c: Case | null) => { _case = c; };
@@ -23,7 +23,7 @@ const baseCase = (overrides: Partial<Case> = {}): Case => ({
   confidence: 80, finalDecision: 'approve', createdAt: 't', updatedAt: 't', ...overrides,
 });
 
-const votedAgent = (id: string, stance: 'Approve' | 'Reject' | 'Abstain', confidence: number): AgentSnapshot => ({
+const votedAgent = (id: string, stance: Stance, confidence: number): AgentSnapshot => ({
   agentId: id as AgentSnapshot['agentId'], status: 'completed', step: 0, maxSteps: 12, thought: '',
   toolCalls: [], evidence: [], claims: [], vote: { stance, confidence, reasoning: 'r' },
 });
@@ -37,16 +37,25 @@ describe('ConsensusPanel', () => {
   it('derives vote counts from agents when consensus is null (deadlocked)', () => {
     setCase(baseCase({ status: 'DEADLOCKED', consensus: null, confidence: 0 }));
     setAgents({
-      melchior: votedAgent('melchior', 'Reject', 85),
-      balthasar: votedAgent('balthasar', 'Abstain', 50),
-      casper: votedAgent('casper', 'Reject', 70),
+      melchior: votedAgent('melchior', 'reject', 85),
+      balthasar: votedAgent('balthasar', 'abstain', 50),
+      casper: votedAgent('casper', 'reject', 70),
     });
 
     const { getByText, getAllByText } = render(<ConsensusPanel />);
-    // Derived approve:reject = 0 : 2
     expect(getByText('0 : 2')).toBeDefined();
-    // Deadlocked status surfaced (badge + majority column)
     expect(getAllByText('Deadlocked').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('counts conditional_approve as neutral (not approve nor reject)', () => {
+    setCase(baseCase({ status: 'DEADLOCKED', consensus: null, confidence: 0 }));
+    setAgents({
+      melchior: votedAgent('melchior', 'approve', 80),
+      balthasar: votedAgent('balthasar', 'conditional_approve', 60),
+      casper: votedAgent('casper', 'reject', 70),
+    });
+    const { getByText } = render(<ConsensusPanel />);
+    expect(getByText('1 : 1')).toBeDefined();
   });
 
   it('shows Pending when no votes and no consensus', () => {

@@ -88,7 +88,7 @@ export function createMockAgents(): Record<AgentId, AgentSnapshot> {
     { id: 'CL-001', text: 'Rust reduces backend latency by 30-40% compared to Java', supports: ['CL-003'], contradicts: [] },
     { id: 'CL-002', text: 'Rust memory safety eliminates null pointer and concurrency bugs', supports: ['CL-003'], contradicts: [] },
   ];
-  base.melchior.vote = { stance: 'Approve', confidence: 78, reasoning: 'Performance gains are substantial and well-documented. The migration is technically sound.', dimensions: { Correctness: 92, Efficiency: 88, Risk: 45 } };
+  base.melchior.vote = { stance: 'approve', confidence: 78, reasoning: 'Performance gains are substantial and well-documented. The migration is technically sound.', dimensions: { Correctness: 92, Efficiency: 88, Risk: 45 } };
 
   base.balthasar.thought = 'Risk assessment underway. The team has no Rust experience — this is the primary risk factor. Migration cost estimates from comparable projects range from 6-12 months. Current Java system is stable. What is the failure mode if the migration goes over budget?';
   base.balthasar.toolCalls = [
@@ -103,7 +103,7 @@ export function createMockAgents(): Record<AgentId, AgentSnapshot> {
     { id: 'CL-003', text: 'Migration is feasible and beneficial with proper planning', supports: [], contradicts: ['CL-004'] },
     { id: 'CL-004', text: 'Team skill gap makes the migration too risky within budget', supports: [], contradicts: ['CL-003'] },
   ];
-  base.balthasar.vote = { stance: 'Reject', confidence: 72, reasoning: 'Risk of timeline overrun and team skill gap outweigh benefits. Recommend incremental Rust adoption instead of full migration.', dimensions: { Correctness: 70, Efficiency: 45, Risk: 85 } };
+  base.balthasar.vote = { stance: 'reject', confidence: 72, reasoning: 'Risk of timeline overrun and team skill gap outweigh benefits. Recommend incremental Rust adoption instead of full migration.', dimensions: { Correctness: 70, Efficiency: 45, Risk: 85 } };
 
   base.casper.thought = 'Exploring opportunity space. Rust opens up WASM edge computing and embedded systems — entirely new product possibilities. What if we use this migration to also modernize the architecture toward event-driven? Could this be a competitive advantage?';
   base.casper.toolCalls = [
@@ -144,8 +144,8 @@ export function createMockEvents(): MagiEvent[] {
     { id: 'evt-007', type: 'TOOL_CALL', timestamp: '2026-07-18T10:02:00Z', agentId: 'balthasar', message: 'Balthasar called web_search: cost overrun statistics', data: { tool: 'web_search' } },
     { id: 'evt-008', type: 'EVIDENCE_CREATED', timestamp: '2026-07-18T10:02:30Z', agentId: 'melchior', message: 'EV-002 created by Melchior (reliability: 0.85)', data: { evidenceId: 'EV-002' } },
     { id: 'evt-009', type: 'EVIDENCE_CREATED', timestamp: '2026-07-18T10:02:45Z', agentId: 'balthasar', message: 'EV-005 created by Balthasar (reliability: 0.88)', data: { evidenceId: 'EV-005' } },
-    { id: 'evt-010', type: 'VOTE_SUBMITTED', timestamp: '2026-07-18T10:05:00Z', agentId: 'melchior', message: 'Melchior voted APPROVE (confidence: 78%)', data: { stance: 'Approve', confidence: 78 } },
-    { id: 'evt-011', type: 'VOTE_SUBMITTED', timestamp: '2026-07-18T10:05:30Z', agentId: 'balthasar', message: 'Balthasar voted REJECT (confidence: 72%)', data: { stance: 'Reject', confidence: 72 } },
+    { id: 'evt-010', type: 'VOTE_SUBMITTED', timestamp: '2026-07-18T10:05:00Z', agentId: 'melchior', message: 'Melchior voted APPROVE (confidence: 78%)', data: { stance: 'approve', confidence: 78 } },
+    { id: 'evt-011', type: 'VOTE_SUBMITTED', timestamp: '2026-07-18T10:05:30Z', agentId: 'balthasar', message: 'Balthasar voted REJECT (confidence: 72%)', data: { stance: 'reject', confidence: 72 } },
     { id: 'evt-012', type: 'CONSENSUS_CHANGED', timestamp: '2026-07-18T10:05:30Z', message: 'Consensus: 1:1 (Casper pending)', data: { approve: 1, reject: 1 } },
     { id: 'evt-013', type: 'DEBATE_START', timestamp: '2026-07-18T10:06:00Z', message: 'Debate initiated between Melchior and Balthasar', data: { claims: ['CL-003', 'CL-004'] } },
     { id: 'evt-014', type: 'AGENT_STEP', timestamp: '2026-07-18T10:06:30Z', agentId: 'casper', message: 'Casper step 5: searching for WASM edge computing use cases', data: { step: 5 } },

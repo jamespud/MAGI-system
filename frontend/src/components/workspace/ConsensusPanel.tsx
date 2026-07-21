@@ -3,6 +3,7 @@ import { Card } from '@/components/ui';
 import { MonoText } from '@/components/shared';
 import { Check, X, Minus } from 'lucide-react';
 import { CASE_STATUS_LABELS, type CaseStatus } from '@/types/case';
+import { normalizeStance, stanceColor } from '@/lib/stance';
 
 export default function ConsensusPanel() {
   const consensus = useCaseStore((s) => s.case?.consensus ?? null);
@@ -11,8 +12,10 @@ export default function ConsensusPanel() {
   const agents = useAgentStore((s) => s.agents);
 
   const renderVoteIcon = (stance: string | undefined) => {
-    if (stance === 'Approve') return <Check size={14} className="text-accent" />;
-    if (stance === 'Reject') return <X size={14} className="text-error" />;
+    const s = normalizeStance(stance);
+    if (s === 'approve') return <Check size={14} className="text-accent" />;
+    if (s === 'reject') return <X size={14} className="text-error" />;
+    if (s === 'conditional_approve') return <Check size={14} className="text-warning" />;
     return <Minus size={14} className="text-text-muted" />;
   };
 
@@ -23,10 +26,11 @@ export default function ConsensusPanel() {
     if (consensus) return { approve: consensus.approve, reject: consensus.reject, abstain: consensus.abstain };
     let approve = 0, reject = 0, abstain = 0;
     for (const id of ['melchior', 'balthasar', 'casper'] as const) {
-      const s = agents[id]?.vote?.stance;
-      if (s === 'Approve') approve++;
-      else if (s === 'Reject') reject++;
-      else if (s === 'Abstain') abstain++;
+      const s = normalizeStance(agents[id]?.vote?.stance);
+      if (s === 'approve') approve++;
+      else if (s === 'reject') reject++;
+      else if (s === 'abstain') abstain++;
+      // conditional_approve is neutral: counted into neither side
     }
     return { approve, reject, abstain };
   })();
@@ -65,7 +69,7 @@ export default function ConsensusPanel() {
         <div>
           <MonoText size="sm" muted>Majority</MonoText>
           <div className="mt-1">
-            <span className="font-mono text-sm font-semibold" style={{ color: majorityLabel === 'Approve' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+            <span className="font-mono text-sm font-semibold" style={{ color: stanceColor(majorityLabel) }}>
               {majorityLabel}
             </span>
           </div>

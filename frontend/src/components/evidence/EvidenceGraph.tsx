@@ -6,6 +6,7 @@ import { api } from '@/api/client';
 import type { ApiEvidence, ApiClaim, ApiVote } from '@/api/client';
 import { Card } from '@/components/ui';
 import { MonoText } from '@/components/shared';
+import { stanceColor } from '@/lib/stance';
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
@@ -43,7 +44,7 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
       id: `vote-${v.agent_code}`,
       label: `${v.agent_code}: ${v.stance}`,
       type: 'vote' as const,
-      color: v.stance === 'approve' ? 'var(--accent)' : 'var(--error)',
+      color: stanceColor(v.stance),
     })),
   ];
 

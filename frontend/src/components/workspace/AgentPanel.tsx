@@ -4,6 +4,7 @@ import { useAgentStore, useUiStore } from '@/stores';
 import { GlowBorder, ScanLine, StatusBadge, MonoText } from '@/components/shared';
 import { Card } from '@/components/ui';
 import { Wrench, FileSearch, Lightbulb, Vote } from 'lucide-react';
+import { stanceColor, stanceLabel } from '@/lib/stance';
 
 interface AgentPanelProps {
   agentId: AgentId;
@@ -85,7 +86,7 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
           </div>
           <div className="flex items-center gap-1.5">
             <Vote size={12} className="text-text-muted" />
-            <MonoText size="sm">{agent.vote?.stance || 'Pending'}</MonoText>
+            <MonoText size="sm">{agent.vote ? stanceLabel(agent.vote.stance) : 'Pending'}</MonoText>
           </div>
         </div>
 
@@ -146,8 +147,8 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
                 <MonoText size="sm" muted>Vote</MonoText>
                 <div className="mt-1 p-2 rounded bg-raised">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className={`font-mono text-xs font-bold ${agent.vote.stance === 'Approve' ? 'text-accent' : 'text-error'}`}>
-                      {agent.vote.stance.toUpperCase()}
+                    <span className="font-mono text-xs font-bold" style={{ color: stanceColor(agent.vote.stance) }}>
+                      {stanceLabel(agent.vote.stance)}
                     </span>
                     <MonoText size="sm" muted>{agent.vote.confidence}% confidence</MonoText>
                   </div>
