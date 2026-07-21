@@ -43,6 +43,11 @@ func parseResponse(
 		return pr
 	}
 
+	// LLMs often emit a "type" discriminator field. The struct schemas use
+	// additionalProperties:false, so the discriminator must be stripped before
+	// validation or the extra "type" key rejects otherwise-valid output.
+	content := stripDiscriminatorType(resp.Content)
+
 	// Try discriminator-based routing first.
 	var discriminator struct {
 		Type string `json:"type"`
@@ -51,6 +56,8 @@ func parseResponse(
 		switch discriminator.Type {
 		case "claim_submission":
 			if phase == "gather" || phase == "reconsider_gather" {
+				// ClaimSubmission has its own "type" field, so validate the
+				// original content (don't strip the discriminator).
 				cs, vr := claimVal.ValidateAndUnmarshal([]byte(resp.Content))
 				if vr != nil && vr.Valid {
 					pr.Type = ResponseClaimSubmission
@@ -60,7 +67,7 @@ func parseResponse(
 			}
 		case "evidence_summary":
 			if phase == "gather" || phase == "reconsider_gather" {
-				summary, vr := sumVal.ValidateAndUnmarshal([]byte(resp.Content))
+				summary, vr := sumVal.ValidateAndUnmarshal([]byte(content))
 				if vr != nil && vr.Valid {
 					pr.Type = ResponseEvidenceSummary
 					pr.Summary = summary
@@ -69,7 +76,7 @@ func parseResponse(
 			}
 		case "vote":
 			if phase == "vote" {
-				vote, vr := voteVal.ValidateAndUnmarshal([]byte(resp.Content))
+				vote, vr := voteVal.ValidateAndUnmarshal([]byte(content))
 				if vr != nil && vr.Valid {
 					pr.Type = ResponseVote
 					pr.Vote = vote
@@ -82,21 +89,21 @@ func parseResponse(
 	// Fallback: phase-based schema try (no discriminator).
 	switch phase {
 	case "gather", "reconsider_gather":
-		summary, vr := sumVal.ValidateAndUnmarshal([]byte(resp.Content))
+		summary, vr := sumVal.ValidateAndUnmarshal([]byte(content))
 		if vr != nil && vr.Valid {
 			pr.Type = ResponseEvidenceSummary
 			pr.Summary = summary
 			return pr
 		}
 	case "reconsider_reflect":
-		reflection, vr := reflectionVal.ValidateAndUnmarshal([]byte(resp.Content))
+		reflection, vr := reflectionVal.ValidateAndUnmarshal([]byte(content))
 		if vr != nil && vr.Valid {
 			pr.Type = ResponseReflection
 			pr.Reflection = reflection
 			return pr
 		}
 	case "vote":
-		vote, vr := voteVal.ValidateAndUnmarshal([]byte(resp.Content))
+		vote, vr := voteVal.ValidateAndUnmarshal([]byte(content))
 		if vr != nil && vr.Valid {
 			pr.Type = ResponseVote
 			pr.Vote = vote
@@ -106,4 +113,20 @@ func parseResponse(
 
 	pr.Type = ResponseInvalid
 	return pr
+}
+
+// stripDiscriminatorType removes a top-level "type" key from a JSON object
+// string so additionalProperties:false schemas don't reject discriminator-
+// tagged output. Returns the original string if it isn't a JSON object.
+func stripDiscriminatorType(s string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(s), &m) != nil {
+		return s
+	}
+	delete(m, "type")
+	b, err := json.Marshal(m)
+	if err != nil {
+		return s
+	}
+	return string(b)
 }

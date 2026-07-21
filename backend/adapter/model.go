@@ -44,7 +44,7 @@ type EvidenceModel struct {
 	ToolCallID      string
 	ToolName        string
 	SourceType      string
-	SourceURI       string
+	SourceURI       string `gorm:"type:varchar(512)"`
 	RawContent      string `gorm:"type:text"`
 	Observation     string `gorm:"type:text"`
 	ReliabilityJSON string `gorm:"type:text"`

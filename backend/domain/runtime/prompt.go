@@ -29,6 +29,18 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 	es := cfg.EvidenceStandard
 	fmt.Fprintf(&b, "\n\nEvidence standard: min evidence=%d, min quantitative=%d, min reliability=%.2f, required claim count=%d.",
 		es.MinEvidenceCount, es.MinQuantitativeCount, es.MinReliability, es.RequiredClaimCount)
+	// Guide the LLM on exactly what the deterministic gate checks, so it can
+	// produce a passing EvidenceSummary on the first try.
+	if len(es.RequiredTypes) > 0 {
+		b.WriteString("\n\nIn your EvidenceSummary's evidence_by_type, you MUST classify evidence under these type keys (the gate requires them):")
+		for _, rt := range es.RequiredTypes {
+			fmt.Fprintf(&b, "\n- %q: at least %d EV-ID(s)", rt.Type, rt.MinCount)
+		}
+	}
+	if guidance := customRuleGuidance(es.CustomRules); guidance != "" {
+		b.WriteString("\n\nYour EvidenceSummary MUST also satisfy these requirements:")
+		b.WriteString(guidance)
+	}
 	if hasTools {
 		b.WriteString("\n\nWorkflow: gather evidence via tool calls; limit yourself to AT MOST 3 tool calls. Once you have gathered enough evidence, STOP calling tools and output an EvidenceSummary JSON (no tool calls) citing real EV-IDs; after the gate passes, output a Vote JSON. Do not keep searching past 3 calls -- converge to a decision.")
 		b.WriteString("\n\nYou may also submit claims incrementally during the gather phase:")
@@ -89,4 +101,26 @@ func ValidateVoteDimensions(vote *entity.Vote, obj entity.ObjectiveFunction) err
 		}
 	}
 	return nil
+}
+
+// customRuleGuidance maps the deterministic gate's custom rule codes to
+// human-readable instructions for the LLM, so it can satisfy them on the
+// first try. Returns "" if no recognized rules.
+var ruleGuidanceMap = map[string]string{
+	"worst_case_claim_required":  "Include at least one claim mentioning a 'worst case' scenario.",
+	"reversibility_assessment":   "Include at least one claim addressing reversibility (use the word 'reversible' or 'reversibility').",
+	"opportunity_cost_claim":     "Include at least one claim discussing opportunity cost or trade-offs (use 'opportunity cost' or 'trade-off').",
+	"time_window_assessment":     "Include at least one claim assessing the time window or timing (use 'time window' or 'timing').",
+	"primary_source_required":    "Cite at least one primary/technical source in your evidence (web_search results count as primary sources).",
+	"utility_dimension_coverage": "Provide at least 2 claims and classify your evidence under at least 2 different type keys in evidence_by_type.",
+}
+
+func customRuleGuidance(rules []entity.EvidenceRule) string {
+	var out strings.Builder
+	for _, r := range rules {
+		if g, ok := ruleGuidanceMap[r.Code]; ok {
+			fmt.Fprintf(&out, "\n- %s", g)
+		}
+	}
+	return out.String()
 }
