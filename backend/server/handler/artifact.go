@@ -56,9 +56,17 @@ func (h *ArtifactHandler) Votes(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
+	// Resolve agent_code per vote by joining on AgentRun (the Vote entity only
+	// carries AgentRunID). Without this, every vote's agent_code is empty and
+	// the Evidence Graph collapses all vote nodes into one.
+	runs, _ := h.svc.AgentRuns(ctx, id)
+	runCode := map[string]string{}
+	for _, r := range runs {
+		runCode[r.ID] = string(r.MagiCode)
+	}
 	out := make([]dto.VoteDTO, 0, len(vs))
 	for _, v := range vs {
-		out = append(out, dto.FromVote(v))
+		out = append(out, dto.FromVote(v, runCode[v.AgentRunID]))
 	}
 	c.JSON(consts.StatusOK, out)
 }
@@ -94,7 +102,7 @@ func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 		if key == "" {
 			continue
 		}
-		vd := dto.FromVote(v)
+		vd := dto.FromVote(v, key)
 		if cur, ok := voteByAgent[key]; !ok || v.Round >= cur.Round {
 			voteByAgent[key] = &vd
 		}

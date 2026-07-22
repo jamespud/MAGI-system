@@ -298,9 +298,10 @@ func FromClaim(c *entity.Claim) ClaimDTO {
 	}
 }
 
-func FromVote(v *entity.Vote) VoteDTO {
+func FromVote(v *entity.Vote, agentCode string) VoteDTO {
 	return VoteDTO{
 		ID:         v.ID,
+		AgentCode:  agentCode,
 		Stance:     string(v.Decision),
 		Confidence: v.Confidence,
 		Reasoning:  v.ReasoningSummary,
