@@ -57,31 +57,18 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
     const voteId = `vote-${c.created_by}`;
     if (nodeIds.has(voteId)) links.push({ source: c.id, target: voteId, type: 'supports' });
   }
-  // Deduplication set: prevent implicit links from doubling explicit ones.
-  const edgeKeys = new Set(links.map((l) => `${l.source}||${l.target}`));
-  // Implicit agent-based links: evidence → collector's claims + vote.
-  // Guarantees a visible graph structure even when LLM omits supports.
-  const agentClaims: Record<string, string[]> = {};
+  // Orphan evidence (not referenced by any claim's supports) links directly
+  // to its collector agent's vote, so no evidence is an isolated node. This
+  // yields a tree per agent (vote <- claims <- evidence) instead of a mesh.
+  const referencedEv = new Set<string>();
   for (const c of claims) {
-    (agentClaims[c.created_by] ??= []).push(c.id);
+    for (const evId of c.supports) referencedEv.add(evId);
   }
   for (const e of evidence) {
+    if (referencedEv.has(e.id)) continue;
     const voteId = `vote-${e.collected_by}`;
     if (nodeIds.has(voteId)) {
-      const key = `${e.id}||${voteId}`;
-      if (!edgeKeys.has(key)) {
-        edgeKeys.add(key);
-        links.push({ source: e.id, target: voteId, type: 'supports' });
-      }
-    }
-    for (const clId of agentClaims[e.collected_by] ?? []) {
-      if (nodeIds.has(clId)) {
-        const key = `${e.id}||${clId}`;
-        if (!edgeKeys.has(key)) {
-          edgeKeys.add(key);
-          links.push({ source: e.id, target: clId, type: 'supports' });
-        }
-      }
+      links.push({ source: e.id, target: voteId, type: 'supports' });
     }
   }
   return { nodes, links };
