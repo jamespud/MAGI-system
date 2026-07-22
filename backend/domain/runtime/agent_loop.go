@@ -249,6 +249,15 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			// calls and demand an EvidenceSummary. The LLM often ignores soft
 			// prompt limits, so this is a deterministic cutoff.
 			if cfg.LoopPolicy.MaxToolCalls > 0 && ts.toolCalls >= cfg.LoopPolicy.MaxToolCalls {
+				// The assistant message above carries tool_calls; the OpenAI-compatible
+				// API requires a tool message for every tool_call_id, else the next
+				// request fails with 400 "insufficient tool messages following
+				// tool_calls message". We do not execute the tools (the limit is a hard
+				// cutoff), but we must answer each pending tool_call so the history
+				// stays valid.
+				for _, tc := range resp.ToolCalls {
+					messages = append(messages, schema.ToolMessage("tool call skipped: tool-call limit reached", tc.ID))
+				}
 				messages = append(messages, schema.UserMessage(fmt.Sprintf(
 					"You have reached the tool-call limit (%d). Stop calling tools and output your EvidenceSummary JSON now, citing the EV-IDs you have gathered.",
 					cfg.LoopPolicy.MaxToolCalls)))

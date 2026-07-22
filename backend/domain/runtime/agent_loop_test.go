@@ -762,3 +762,74 @@ func TestAgentLoop_MaxToolCallsForcesConvergence(t *testing.T) {
 		t.Fatal("expected a vote after forced convergence")
 	}
 }
+
+// validatingScriptedModel wraps scriptedChatModel and asserts every assistant
+// tool_call has a matching tool message in the input history - the rule the
+// real OpenAI-compatible API enforces (400 "insufficient tool messages
+// following tool_calls message" when violated). The plain scriptedChatModel
+// ignores its input, so it cannot catch orphaned tool_calls.
+type validatingScriptedModel struct {
+	inner *scriptedChatModel
+	t     *testing.T
+}
+
+func (v *validatingScriptedModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	pending := map[string]bool{}
+	for _, m := range input {
+		if m.Role == schema.Assistant {
+			for _, tc := range m.ToolCalls {
+				pending[tc.ID] = true
+			}
+		}
+		if m.Role == schema.Tool && m.ToolCallID != "" {
+			delete(pending, m.ToolCallID)
+		}
+	}
+	if len(pending) > 0 {
+		v.t.Fatalf("orphaned assistant tool_calls without matching tool messages: %v", pending)
+	}
+	return v.inner.Generate(ctx, input, opts...)
+}
+func (v *validatingScriptedModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (v *validatingScriptedModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return v, nil
+}
+
+func TestAgentLoop_MaxToolCallsNoOrphanedToolCalls(t *testing.T) {
+	gen := validation.NewReflectSchemaGenerator()
+	val := validation.NewJSONSchemaValidator()
+	toolSchema, _ := gen.FromStruct(struct {
+		Query string `json:"query"`
+	}{})
+	toolReg := &stubToolReg{defs: []port.ToolDefinition{{
+		Name: "web_search", Desc: "search", ArgsSchema: toolSchema,
+		Source: entity.ToolSourceLocal, Binding: entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "web_search"},
+	}}}
+	toolExec := &stubToolExec{}
+	rec := &recordingEventPub{}
+	inner := &scriptedChatModel{responses: []*schema.Message{
+		callMsg("t1", "web_search", `{"query":"a"}`),
+		callMsg("t2", "web_search", `{"query":"b"}`),
+		callMsg("t3", "web_search", `{"query":"c"}`), // over limit -> forced to summarize
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &validatingScriptedModel{inner: inner, t: t}},
+		ToolReg:   toolReg, ToolExec: toolExec, Validator: val, Gen: gen, EventPub: rec,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	cfg := evidenceCfg(1, 0)
+	cfg.LoopPolicy.MaxToolCalls = 2
+	res, err := loop.Run(context.Background(), cfg, &runtime.AgentContext{CaseID: "c1", Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Vote == nil {
+		t.Fatal("expected a vote after forced convergence")
+	}
+}
