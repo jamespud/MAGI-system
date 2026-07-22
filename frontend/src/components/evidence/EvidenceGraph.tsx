@@ -29,16 +29,37 @@ function agentColor(code: string): string {
 }
 
 function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[]) {
+  // Dedup votes: one node per agent (latest round wins). Without this, an
+  // agent that voted in both investigate + reconsider phases renders as two
+  // same-id vote nodes.
+  const voteByAgent = new Map<string, ApiVote>();
+  for (const v of votes) {
+    const cur = voteByAgent.get(v.agent_code);
+    if (!cur || v.round >= cur.round) voteByAgent.set(v.agent_code, v);
+  }
+  const dedupedVotes = [...voteByAgent.values()];
+
+  // Only show evidence that is referenced by at least one claim's supports.
+  // Orphan evidence (collected but never cited in an argument) is noise.
+  const referencedEv = new Set<string>();
+  for (const c of claims) {
+    for (const evId of c.supports) referencedEv.add(evId);
+  }
+  const shownEvidence = evidence.filter((e) => referencedEv.has(e.id));
+
+  // Short EV-NNN label from the namespaced id (case-X-agent-rN-phase-EV-NNN).
+  const evLabel = (id: string) => id.match(/EV-\d+$/)?.[0] ?? id;
+
   const nodes: GraphNode[] = [
-    ...evidence.map((e) => ({
-      id: e.id, label: e.id, type: 'evidence' as const, color: agentColor(e.collected_by),
+    ...shownEvidence.map((e) => ({
+      id: e.id, label: evLabel(e.id), type: 'evidence' as const, color: agentColor(e.collected_by),
     })),
     ...claims.map((c) => ({
       id: c.id,
       label: c.text.slice(0, 30) + (c.text.length > 30 ? '...' : ''),
       type: 'claim' as const, color: agentColor(c.created_by),
     })),
-    ...votes.map((v) => ({
+    ...dedupedVotes.map((v) => ({
       id: `vote-${v.agent_code}`,
       label: `${v.agent_code}: ${v.stance}`,
       type: 'vote' as const, color: stanceColor(v.stance),
@@ -56,20 +77,6 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
     }
     const voteId = `vote-${c.created_by}`;
     if (nodeIds.has(voteId)) links.push({ source: c.id, target: voteId, type: 'supports' });
-  }
-  // Orphan evidence (not referenced by any claim's supports) links directly
-  // to its collector agent's vote, so no evidence is an isolated node. This
-  // yields a tree per agent (vote <- claims <- evidence) instead of a mesh.
-  const referencedEv = new Set<string>();
-  for (const c of claims) {
-    for (const evId of c.supports) referencedEv.add(evId);
-  }
-  for (const e of evidence) {
-    if (referencedEv.has(e.id)) continue;
-    const voteId = `vote-${e.collected_by}`;
-    if (nodeIds.has(voteId)) {
-      links.push({ source: e.id, target: voteId, type: 'supports' });
-    }
   }
   return { nodes, links };
 }
@@ -115,10 +122,14 @@ export default function EvidenceGraph() {
       zoomRef.current = zoom;
 
       const simulation = d3.forceSimulation<GraphNode>(nodes)
-        .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(80))
-        .force('charge', d3.forceManyBody().strength(-200))
-        .force('center', d3.forceCenter(width / 2, HEIGHT / 2))
-        .force('collision', d3.forceCollide(20));
+        .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(70))
+        .force('charge', d3.forceManyBody().strength(-120))
+        .force('radial', d3.forceRadial<GraphNode>(
+          (d) => (d.type === 'vote' ? 50 : d.type === 'claim' ? 170 : 290),
+          width / 2,
+          HEIGHT / 2,
+        ).strength(0.45))
+        .force('collision', d3.forceCollide(22));
 
       const link = zoomLayer.append('g')
         .selectAll('line')
