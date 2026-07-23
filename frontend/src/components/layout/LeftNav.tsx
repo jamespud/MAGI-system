@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Pin, Play, CheckCircle, Archive, FileText, FlaskConical, Database, History } from 'lucide-react';
-import { MonoText } from '@/components/shared';
 import PaginatedSection from './PaginatedSection';
 import { useCaseStore } from '@/stores';
 import type { CaseSummary } from '@/types/case';
@@ -39,32 +38,16 @@ export default function LeftNav({ cases = [] }: LeftNavProps) {
         {SECTIONS.map(({ title, icon: Icon, filter }) => {
           const filtered = cases.filter(filter);
           if (filtered.length === 0 && title !== 'Pinned' && title !== 'Archived') return null;
-          if (title === 'Completed') {
-            return <PaginatedSection key="Completed" title="Completed" icon={Icon} items={filtered} />;
-          }
+
           return (
-            <div key={title} className="border-b border-border-dim last:border-b-0">
-              <div className="flex items-center gap-2 px-4 py-2">
-                <Icon size={12} className="text-text-muted" />
-                <MonoText size="sm" muted>{title}</MonoText>
-              </div>
-              {filtered.map((c) => (
-                <NavLink
-                  key={c.id}
-                  to={`/case/${c.id}`}
-                  className={({ isActive }) =>
-                    `block px-6 py-1.5 text-sm transition-colors truncate ${
-                      isActive ? 'bg-accent/10 text-accent border-r-2 border-accent' : 'text-text-secondary hover:bg-raised hover:text-text-primary'
-                    }`
-                  }
-                >
-                  {c.question.length > 28 ? c.question.slice(0, 28) + '...' : c.question}
-                </NavLink>
-              ))}
-              {filtered.length === 0 && (
-                <p className="px-6 py-1.5 text-xs text-text-muted italic">No cases</p>
-              )}
-            </div>
+            <PaginatedSection
+              key={title}
+              title={title}
+              icon={Icon}
+              items={filtered}
+              collapsible={title === 'Completed'}
+              defaultExpanded={title !== 'Completed'}
+            />
           );
         })}
       </div>

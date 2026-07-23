@@ -42,18 +42,56 @@ describe('PaginatedSection', () => {
     expect(getByLabelText('Next Completed page')).toHaveProperty('disabled', true);
   });
 
-  it('wheel down advances to next page', () => {
-    const { getByText, container } = renderSection(mkCases(12));
-    const listEl = container.querySelector('[data-testid="page-list"]') as HTMLElement;
-    fireEvent.wheel(listEl, { deltaY: 100 });
-    expect(getByText('Question 10')).toBeDefined();
+  it('shows count badge when collapsible and collapsed', () => {
+    const { getByText, queryByTestId } = render(
+      <MemoryRouter>
+        <PaginatedSection title="Completed" icon={CheckCircle} items={mkCases(5)} collapsible defaultExpanded={false} />
+      </MemoryRouter>
+    );
+    expect(getByText('5')).toBeDefined(); // count badge
+    expect(queryByTestId('page-list')).toBeNull(); // list hidden
   });
 
-  it('wheel up goes back to previous page', () => {
-    const { getByText, container } = renderSection(mkCases(12));
-    const listEl = container.querySelector('[data-testid="page-list"]') as HTMLElement;
-    fireEvent.wheel(listEl, { deltaY: 100 }); // page 2
-    fireEvent.wheel(listEl, { deltaY: -100 }); // back to page 1
+  it('expands and shows list on header click', () => {
+    const { getByText, getByTestId, getByRole } = render(
+      <MemoryRouter>
+        <PaginatedSection title="Completed" icon={CheckCircle} items={mkCases(5)} collapsible defaultExpanded={false} />
+      </MemoryRouter>
+    );
+    // Click header to expand
+    fireEvent.click(getByRole('button'));
+    expect(getByTestId('page-list')).toBeDefined();
     expect(getByText('Question 0')).toBeDefined();
+  });
+
+  it('collapses on second header click', () => {
+    const { getByRole, queryByTestId } = render(
+      <MemoryRouter>
+        <PaginatedSection title="Completed" icon={CheckCircle} items={mkCases(5)} collapsible defaultExpanded />
+      </MemoryRouter>
+    );
+    fireEvent.click(getByRole('button')); // collapse
+    expect(queryByTestId('page-list')).toBeNull();
+  });
+
+  it('renders plain (non-clickable) header when collapsible but empty', () => {
+    const { queryByRole, getByText } = render(
+      <MemoryRouter>
+        <PaginatedSection title="Completed" icon={CheckCircle} items={[]} collapsible />
+      </MemoryRouter>
+    );
+    expect(queryByRole('button')).toBeNull();
+    expect(getByText('No cases')).toBeDefined();
+  });
+
+  it('does not render count badge when not collapsible', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <PaginatedSection title="Completed" icon={CheckCircle} items={mkCases(5)} />
+      </MemoryRouter>
+    );
+    // No button rendered, no count badge
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).not.toContain('5');
   });
 });
