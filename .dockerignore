@@ -9,4 +9,6 @@ bin/
 .claude/
 .superpowers/
 backend/.git/
+backend/conf/magi.yaml
+backend/conf/magi.local.yaml
 *.md

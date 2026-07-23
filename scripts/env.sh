@@ -33,15 +33,15 @@ fi
 echo ""
 echo "=== Environment setup ==="
 
-if [ ! -f "$PROJECT_ROOT/.env.local" ]; then
+if [ ! -f "$PROJECT_ROOT/.env" ]; then
   if [ -f "$PROJECT_ROOT/.env.example" ]; then
-    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env.local"
-    echo "Created .env.local from .env.example — edit for local overrides"
+    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
+    echo "Created .env from .env.example — edit for local overrides"
   else
-    echo "WARNING: .env.example not found, skipping .env.local creation"
+    echo "WARNING: .env.example not found, skipping .env creation"
   fi
 else
-  echo ".env.local already exists"
+  echo ".env already exists"
 fi
 
 mkdir -p "$PROJECT_ROOT/bin"

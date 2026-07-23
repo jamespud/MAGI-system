@@ -10,6 +10,7 @@ SCRIPTS_DIR := scripts
         test lint fmt vet tidy \
         migrate seed reset-db \
         docker-up docker-down docker-logs \
+        up down logs ps \
         clean
 
 # =============================================================================
@@ -45,8 +46,14 @@ help:
 	@echo "  make seed             Seed database (TODO)"
 	@echo "  make reset-db         Reset database (TODO)"
 	@echo ""
-	@echo "Docker"
-	@echo "  make docker-up        Start MySQL middleware"
+	@echo "Full stack (containers)"
+	@echo "  make up               Build + start mysql + magi-server + web"
+	@echo "  make down             Stop the full stack"
+	@echo "  make logs             Tail full-stack logs"
+	@echo "  make ps               Show stack container status"
+	@echo ""
+	@echo "Docker (dev middleware)"
+	@echo "  make docker-up        Start MySQL middleware (for make debug)"
 	@echo "  make docker-down      Stop MySQL middleware"
 	@echo "  make docker-logs      Tail middleware logs"
 	@echo ""
@@ -125,3 +132,21 @@ docker-down:
 
 docker-logs:
 	bash $(SCRIPTS_DIR)/docker.sh logs
+
+# =============================================================================
+# Full stack (containerized: mysql + migrate + magi-server + web)
+# =============================================================================
+
+COMPOSE_STACK := docker/docker-compose.stack.yml
+
+up:
+	docker compose --project-directory . -f $(COMPOSE_STACK) up -d --build
+
+down:
+	docker compose --project-directory . -f $(COMPOSE_STACK) down
+
+logs:
+	docker compose --project-directory . -f $(COMPOSE_STACK) logs -f
+
+ps:
+	docker compose --project-directory . -f $(COMPOSE_STACK) ps

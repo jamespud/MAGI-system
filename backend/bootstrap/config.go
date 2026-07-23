@@ -101,7 +101,33 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Magi.TimeoutSeconds == 0 {
 		cfg.Magi.TimeoutSeconds = 120
 	}
+	applyEnvOverrides(&cfg)
 	return &cfg, nil
+}
+
+// applyEnvOverrides overrides config fields from environment variables when set.
+// The containerized deployment injects DSN and secrets this way (12-factor)
+// instead of baking them into the image. Empty vars leave the YAML value intact,
+// so local `make debug` (which sets none of these) behaves unchanged.
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("MAGI_DB_DSN"); v != "" {
+		cfg.Database.DSN = v
+	}
+	if v := os.Getenv("MAGI_DB_DRIVER"); v != "" {
+		cfg.Database.Driver = v
+	}
+	if v := os.Getenv("MAGI_MODEL_API_KEY"); v != "" {
+		cfg.Model.APIKey = v
+	}
+	if v := os.Getenv("MAGI_MODEL_BASE_URL"); v != "" {
+		cfg.Model.BaseURL = v
+	}
+	if v := os.Getenv("MAGI_MODEL_NAME"); v != "" {
+		cfg.Model.ModelName = v
+	}
+	if v := os.Getenv("MAGI_TAVILY_API_KEY"); v != "" {
+		cfg.Tavily.APIKey = v
+	}
 }
 
 // ToConfig converts a MagiSpec to an entity.MagiConfig.

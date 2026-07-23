@@ -96,3 +96,73 @@ func TestMagiSpec_ToConfigBindsWebSearch(t *testing.T) {
 		t.Fatalf("expected local source, got %s", c.Tools[0].Source)
 	}
 }
+
+func TestLoadConfig_EnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "yaml-key"
+  base_url: "http://yaml"
+  model_name: "yaml-model"
+database:
+  driver: mysql
+  dsn: "yaml-dsn"
+tavily:
+  api_key: "yaml-tavily"
+`), 0644)
+
+	t.Setenv("MAGI_DB_DSN", "env-dsn")
+	t.Setenv("MAGI_DB_DRIVER", "env-driver")
+	t.Setenv("MAGI_MODEL_API_KEY", "env-key")
+	t.Setenv("MAGI_MODEL_BASE_URL", "http://env")
+	t.Setenv("MAGI_MODEL_NAME", "env-model")
+	t.Setenv("MAGI_TAVILY_API_KEY", "env-tavily")
+
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Database.DSN != "env-dsn" {
+		t.Fatalf("DSN: got %q want env-dsn", cfg.Database.DSN)
+	}
+	if cfg.Database.Driver != "env-driver" {
+		t.Fatalf("Driver: got %q want env-driver", cfg.Database.Driver)
+	}
+	if cfg.Model.APIKey != "env-key" {
+		t.Fatalf("Model.APIKey: got %q want env-key", cfg.Model.APIKey)
+	}
+	if cfg.Model.BaseURL != "http://env" {
+		t.Fatalf("Model.BaseURL: got %q want http://env", cfg.Model.BaseURL)
+	}
+	if cfg.Model.ModelName != "env-model" {
+		t.Fatalf("Model.ModelName: got %q want env-model", cfg.Model.ModelName)
+	}
+	if cfg.Tavily.APIKey != "env-tavily" {
+		t.Fatalf("Tavily.APIKey: got %q want env-tavily", cfg.Tavily.APIKey)
+	}
+}
+
+func TestLoadConfig_EnvEmptyKeepsYAML(t *testing.T) {
+	t.Setenv("MAGI_DB_DSN", "")
+	t.Setenv("MAGI_MODEL_API_KEY", "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "yaml-key"
+database:
+  dsn: "yaml-dsn"
+`), 0644)
+
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Database.DSN != "yaml-dsn" {
+		t.Fatalf("DSN: got %q want yaml-dsn", cfg.Database.DSN)
+	}
+	if cfg.Model.APIKey != "yaml-key" {
+		t.Fatalf("Model.APIKey: got %q want yaml-key", cfg.Model.APIKey)
+	}
+}

@@ -2,12 +2,14 @@ module github.com/jamespud/magi/backend
 
 go 1.24.0
 
+replace github.com/apache/thrift => github.com/apache/thrift v0.13.0
+
 require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.4.8
 
 	// coze-studio 依赖 (adapter 层引用 crossdomain/bizpkg/infra)
-	github.com/coze-dev/coze-studio/backend v0.0.0-00010101000000-000000000000
+	github.com/coze-dev/coze-studio/backend v0.0.0-20260420092041-22275b1c2661
 	github.com/eino-contrib/jsonschema v1.0.0
 	github.com/hertz-contrib/sse v0.1.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
@@ -140,10 +142,3 @@ require (
 	gorm.io/hints v1.1.0 // indirect
 	gorm.io/plugin/dbresolver v1.5.2 // indirect
 )
-
-// 本地开发: 指向本地 coze-studio/backend
-// 生产环境改为: replace github.com/coze-dev/coze-studio/backend => github.com/jamespud/coze-studio/backend v0.0.0-<commit>
-replace github.com/coze-dev/coze-studio/backend => /home/spud/proj/coze-studio/backend
-
-// coze-studio 的 thrift 版本 replace (必须同步)
-replace github.com/apache/thrift => github.com/apache/thrift v0.13.0

@@ -1,0 +1,8 @@
+# Build context ./backend; this Dockerfile uses -mod=mod (no vendor needed).
+vendor
+# Never bake real secrets into the image.
+conf/magi.yaml
+conf/magi.local.yaml
+# Test/artifact cruft.
+*.test
+*.out

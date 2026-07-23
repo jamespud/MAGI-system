@@ -33,5 +33,6 @@ Thumbs.db
 backend/conf/magi.yaml
 backend/conf/magi.local.yaml
 
-# Environment (local overrides)
+# Environment (local overrides; .env is auto-loaded by docker compose)
+.env
 .env.local

@@ -1,0 +1,74 @@
+# Full-stack containerized MAGI: mysql + magi-server + web (nginx).
+# Used by `make up` / `make down` / `make logs`. Local dev uses `make debug`.
+#
+# Secrets and the container DSN come from .env (compose auto-loads it); the
+# magi-server image itself bakes no secrets (only conf/magi.yaml.example).
+# mysql + magi-server are internal-only; only web exposes a host port, so this
+# stack does not clash with `make debug` (8080/5173) or `make docker-up` (3307).
+# No explicit container_name is set so the stack can run alongside the dev
+# middleware (whose mysql container is named magi-mysql); inter-service DNS uses
+# service names (mysql, magi-server), not container names.
+#
+# Schema migration is automatic: magi-server runs GORM AutoMigrate on all models
+# at startup (see bootstrap.provideDB). The docker/atlas/migrations/*.sql files
+# are not applied here -- they pre-date strict mode and contain TEXT DEFAULT ''
+# clauses that MySQL 8.4 rejects; AutoMigrate is the app's native, sufficient path.
+
+name: magi
+
+services:
+  mysql:
+    image: mysql:8.4.5
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-magi}
+      MYSQL_USER: ${DB_USER:-magi}
+      MYSQL_PASSWORD: ${DB_PASS:-magi123}
+    # Share data with `make debug` (dev middleware MySQL uses the same directory
+    # at docker/data/mysql). Do NOT run `make docker-up` and `make up` at the
+    # same time — two MySQL processes cannot share the data dir.
+    volumes:
+      - ./docker/data/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USER:-magi}", "-p${DB_PASS:-magi123}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  magi-server:
+    build:
+      context: ./backend
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MAGI_DB_DSN: "${DB_USER:-magi}:${DB_PASS:-magi123}@tcp(mysql:3306)/${DB_NAME:-magi}?charset=utf8mb4&parseTime=True"
+      MAGI_DB_DRIVER: mysql
+      MAGI_MODEL_API_KEY: ${MAGI_MODEL_API_KEY:-}
+      MAGI_MODEL_BASE_URL: ${MAGI_MODEL_BASE_URL:-https://api.deepseek.com}
+      MAGI_MODEL_NAME: ${MAGI_MODEL_NAME:-deepseek-v4-flash}
+      MAGI_TAVILY_API_KEY: ${MAGI_TAVILY_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      magi-server:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
