@@ -1,17 +1,15 @@
 # =============================================================================
-# MAGI Makefile — Engineering Entry Point
+# MAGI Makefile
 # =============================================================================
 
 .DEFAULT_GOAL := help
-
 SCRIPTS_DIR := scripts
 
-.PHONY: help prepare backend frontend debug server build \
-        test lint fmt vet tidy \
-        migrate seed reset-db \
-        docker-up docker-down docker-logs \
-        up down logs ps \
-        clean
+.PHONY: help prepare debug backend frontend \
+        db-up db-down db-logs db-reset \
+        build clean \
+        test \
+        web-up web-down web-logs web-ps
 
 # =============================================================================
 # Environment
@@ -19,52 +17,46 @@ SCRIPTS_DIR := scripts
 
 help:
 	@echo ""
-	@echo "========================== MAGI =========================="
+	@echo "============================ MAGI ============================"
 	@echo ""
 	@echo "Environment"
-	@echo "  make prepare          Bootstrap environment (deps, env, dirs)"
+	@echo "  make prepare          Bootstrap: deps, .env, dirs"
 	@echo ""
-	@echo "Development"
-	@echo "  make backend          Start Go server"
-	@echo "  make frontend         Start React dev server"
-	@echo "  make debug            Start backend + frontend in parallel"
-	@echo "  make server           Start production server"
-	@echo ""
-	@echo "Build"
-	@echo "  make build            Build backend + frontend"
-	@echo "  make clean            Remove build artifacts"
-	@echo ""
-	@echo "Quality (backend)"
-	@echo "  make test             Run Go tests"
-	@echo "  make lint             Run golangci-lint"
-	@echo "  make fmt              Run gofmt"
-	@echo "  make vet              Run go vet"
-	@echo "  make tidy             Run go mod tidy"
+	@echo "Dev (local development)"
+	@echo "  make debug            MySQL + backend (go run) + nginx (:80)"
+	@echo "  make backend          Backend only (go run :8080)"
+	@echo "  make frontend         Frontend only (vite dev :5173)"
 	@echo ""
 	@echo "Database"
-	@echo "  make migrate          Apply Atlas migrations"
-	@echo "  make seed             Seed database (TODO)"
-	@echo "  make reset-db         Reset database (TODO)"
+	@echo "  make db-up            Start MySQL middleware"
+	@echo "  make db-down          Stop MySQL middleware"
+	@echo "  make db-logs          MySQL middleware logs"
+	@echo "  make db-reset         Drop all tables (AutoMigrate recreates)"
 	@echo ""
-	@echo "Full stack (containers)"
-	@echo "  make up               Build + start mysql + magi-server + web"
-	@echo "  make down             Stop the full stack"
-	@echo "  make logs             Tail full-stack logs"
-	@echo "  make ps               Show stack container status"
+	@echo "Build"
+	@echo "  make build            Build binary + frontend + Docker images"
+	@echo "  make clean            Remove build artifacts (not images)"
 	@echo ""
-	@echo "Docker (dev middleware)"
-	@echo "  make docker-up        Start MySQL middleware (for make debug)"
-	@echo "  make docker-down      Stop MySQL middleware"
-	@echo "  make docker-logs      Tail middleware logs"
+	@echo "Quality"
+	@echo "  make test             Run all tests (Go + frontend)"
 	@echo ""
-	@echo "=========================================================="
+	@echo "Web (containerized stack)"
+	@echo "  make web-up           Build + start full stack (mysql + server + nginx)"
+	@echo "  make web-down         Stop full stack"
+	@echo "  make web-logs         Full stack logs"
+	@echo "  make web-ps           Full stack status"
+	@echo ""
+	@echo "=============================================================="
 
 prepare:
 	bash $(SCRIPTS_DIR)/env.sh
 
 # =============================================================================
-# Development
+# Dev (local development)
 # =============================================================================
+
+debug:
+	bash $(SCRIPTS_DIR)/dev.sh debug
 
 backend:
 	bash $(SCRIPTS_DIR)/dev.sh backend
@@ -72,11 +64,21 @@ backend:
 frontend:
 	bash $(SCRIPTS_DIR)/dev.sh frontend
 
-debug:
-	bash $(SCRIPTS_DIR)/dev.sh debug
+# =============================================================================
+# Database
+# =============================================================================
 
-server:
-	bash $(SCRIPTS_DIR)/dev.sh server
+db-up:
+	bash $(SCRIPTS_DIR)/docker.sh up
+
+db-down:
+	bash $(SCRIPTS_DIR)/docker.sh down
+
+db-logs:
+	bash $(SCRIPTS_DIR)/docker.sh logs
+
+db-reset:
+	bash $(SCRIPTS_DIR)/db.sh reset
 
 # =============================================================================
 # Build
@@ -93,60 +95,23 @@ clean:
 # =============================================================================
 
 test:
-	bash $(SCRIPTS_DIR)/tools.sh test
-
-lint:
-	bash $(SCRIPTS_DIR)/tools.sh lint
-
-fmt:
-	bash $(SCRIPTS_DIR)/tools.sh fmt
-
-vet:
-	bash $(SCRIPTS_DIR)/tools.sh vet
-
-tidy:
-	bash $(SCRIPTS_DIR)/tools.sh tidy
+	go -C backend test ./...
+	npm -C frontend test
 
 # =============================================================================
-# Database
+# Web (containerized stack)
 # =============================================================================
 
-migrate:
-	bash $(SCRIPTS_DIR)/db.sh migrate
+COMPOSE_DEV := docker/docker-compose-dev.yml
 
-seed:
-	bash $(SCRIPTS_DIR)/db.sh seed
+web-up:
+	docker compose --project-directory . -f $(COMPOSE_DEV) up -d --build
 
-reset-db:
-	bash $(SCRIPTS_DIR)/db.sh reset
+web-down:
+	docker compose --project-directory . -f $(COMPOSE_DEV) down
 
-# =============================================================================
-# Docker
-# =============================================================================
+web-logs:
+	docker compose --project-directory . -f $(COMPOSE_DEV) logs -f
 
-docker-up:
-	bash $(SCRIPTS_DIR)/docker.sh up
-
-docker-down:
-	bash $(SCRIPTS_DIR)/docker.sh down
-
-docker-logs:
-	bash $(SCRIPTS_DIR)/docker.sh logs
-
-# =============================================================================
-# Full stack (containerized: mysql + migrate + magi-server + web)
-# =============================================================================
-
-COMPOSE_STACK := docker/docker-compose.stack.yml
-
-up:
-	docker compose --project-directory . -f $(COMPOSE_STACK) up -d --build
-
-down:
-	docker compose --project-directory . -f $(COMPOSE_STACK) down
-
-logs:
-	docker compose --project-directory . -f $(COMPOSE_STACK) logs -f
-
-ps:
-	docker compose --project-directory . -f $(COMPOSE_STACK) ps
+web-ps:
+	docker compose --project-directory . -f $(COMPOSE_DEV) ps

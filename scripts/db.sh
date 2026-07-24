@@ -10,21 +10,24 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
   set +a
 fi
 
-MIGRATIONS_DIR="file://$PROJECT_ROOT/docker/atlas/migrations"
-DB_URL="mysql://${DB_USER:-magi}:${DB_PASS:-magi123}@${DB_HOST:-127.0.0.1}:${DB_PORT:-3307}/${DB_NAME:-magi}"
+MYSQL_HOST="${DB_HOST:-127.0.0.1}"
+MYSQL_PORT="${DB_PORT:-3307}"
+MYSQL_USER="${DB_USER:-magi}"
+MYSQL_PASS="${DB_PASS:-magi123}"
+MYSQL_DB="${DB_NAME:-magi}"
+MYSQL_CMD="mysql -h $MYSQL_HOST -P $MYSQL_PORT -u $MYSQL_USER -p$MYSQL_PASS $MYSQL_DB"
 
 case "${1:-}" in
-  migrate)
-    atlas migrate apply --dir "$MIGRATIONS_DIR" --url "$DB_URL"
-    ;;
-  seed)
-    echo "TODO: seed not implemented"
-    ;;
   reset)
-    echo "TODO: reset-db not implemented"
+    echo "Dropping all tables in $MYSQL_DB..."
+    $MYSQL_CMD -N -e \
+      "SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') FROM information_schema.tables WHERE table_schema = '$MYSQL_DB' AND table_type = 'BASE TABLE';" \
+      | $MYSQL_CMD
+    echo "Done. Tables will be recreated by AutoMigrate on next startup."
     ;;
   *)
-    echo "Usage: db.sh {migrate|seed|reset}"
+    echo "Usage: db.sh {reset}"
+    echo "  reset   Drop all tables in the MAGI database (AutoMigrate recreates on restart)"
     exit 1
     ;;
 esac

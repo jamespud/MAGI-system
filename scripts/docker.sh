@@ -4,23 +4,21 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-COMPOSE_BASE="$PROJECT_ROOT/docker/docker-compose.yml"
-COMPOSE_DEV="$PROJECT_ROOT/docker/docker-compose.dev.yml"
-COMPOSE_FILES=(-f "$COMPOSE_BASE" -f "$COMPOSE_DEV")
+COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose-mysql.yml"
 
 case "${1:-}" in
   up)
-    docker compose "${COMPOSE_FILES[@]}" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
     ;;
   down)
-    docker compose "${COMPOSE_FILES[@]}" down
+    docker compose -f "$COMPOSE_FILE" down
     ;;
   logs)
-    docker compose "${COMPOSE_FILES[@]}" logs -f
+    docker compose -f "$COMPOSE_FILE" logs -f
     ;;
   restart)
-    docker compose "${COMPOSE_FILES[@]}" down
-    docker compose "${COMPOSE_FILES[@]}" up -d
+    docker compose -f "$COMPOSE_FILE" down
+    docker compose -f "$COMPOSE_FILE" up -d
     ;;
   *)
     echo "Usage: docker.sh {up|down|logs|restart}"

@@ -1,20 +1,18 @@
-# Full-stack containerized MAGI: mysql + magi-server + web (nginx).
-# Used by `make up` / `make down` / `make logs`. Local dev uses `make debug`.
+# Containerized local dev stack: mysql + magi-server + web (nginx).
+# Used by `make web-up / web-down / web-logs / web-ps`.
 #
 # Secrets and the container DSN come from .env (compose auto-loads it); the
 # magi-server image itself bakes no secrets (only conf/magi.yaml.example).
-# mysql + magi-server are internal-only; only web exposes a host port, so this
-# stack does not clash with `make debug` (8080/5173) or `make docker-up` (3307).
+# mysql + magi-server are internal-only; only web exposes a host port (80), so
+# the stack does not clash with `make debug` (go-run:8080 + nginx:80 debug).
 # No explicit container_name is set so the stack can run alongside the dev
 # middleware (whose mysql container is named magi-mysql); inter-service DNS uses
 # service names (mysql, magi-server), not container names.
 #
-# Schema migration is automatic: magi-server runs GORM AutoMigrate on all models
-# at startup (see bootstrap.provideDB). The docker/atlas/migrations/*.sql files
-# are not applied here -- they pre-date strict mode and contain TEXT DEFAULT ''
-# clauses that MySQL 8.4 rejects; AutoMigrate is the app's native, sufficient path.
+# Schema: magi-server runs GORM AutoMigrate on all models at startup
+# (see bootstrap.provideDB).
 
-name: magi
+name: magi-dev
 
 services:
   mysql:
