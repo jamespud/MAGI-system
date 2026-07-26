@@ -138,3 +138,12 @@ func (r *ChunkRepository) Get1800Blocks(ctx context.Context, ids []string) ([]Ch
 	}
 	return rows, nil
 }
+
+// get300Content returns the content of a single 300-level chunk.
+func (r *ChunkRepository) get300Content(ctx context.Context, id string) string {
+	var row Chunk300
+	if err := r.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
+		return ""
+	}
+	return row.Content
+}
