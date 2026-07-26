@@ -39,6 +39,7 @@ var Module = fx.Options(
 		appserver.NewEventBroker,
 		ProvideToolRegistry,
 		ProvideToolExecutor,
+		ProvideKnowledgePort,
 
 		// Database
 		provideDB,
@@ -120,6 +121,39 @@ func ProvideToolExecutor(cfg *Config) port.ToolExecutorPort {
 	return &StubToolExecutor{}
 }
 
+// ProvideKnowledgePort builds the HybridKnowledgeAdapter (with real Milvus/ES
+// when configured, fakes when addresses are empty) wrapped in AsyncIndexer when
+// store_async is enabled. The adapter is Coze-independent: Milvus+ES+MySQL only.
+func ProvideKnowledgePort(cfg *Config, db *gorm.DB) (port.KnowledgePort, error) {
+	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
+	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
+
+	var vec rag.VectorIndex = &rag.FakeVectorIndex{}
+	if cfg.Milvus.Address != "" {
+		if real, err := rag.NewMilvusIndexer(cfg.Milvus.Address, cfg.Milvus.Collection, cfg.Embedding.Dim); err == nil {
+			vec = real
+		}
+	}
+	var lex rag.LexicalIndex = &rag.FakeLexicalIndex{}
+	if len(cfg.Elasticsearch.Addresses) > 0 {
+		if real, err := rag.NewESIndexer(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Index); err == nil {
+			lex = real
+		}
+	}
+
+	repo := rag.NewChunkRepository(db)
+	retriever := rag.NewRetriever(vec, lex, emb, repo, rag.MergeOpts{
+		TopK: cfg.RAG.TopK, RRFK: cfg.RAG.RRFK,
+		Thr900: cfg.RAG.MergeThreshold900, Thr1800: cfg.RAG.MergeThreshold1800,
+		Orphan: cfg.RAG.OrphanStrategy,
+	})
+	adapter := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever)
+	if cfg.RAG.StoreAsync {
+		return rag.NewAsyncIndexer(adapter, nil, cfg.RAG.StoreWorkers), nil
+	}
+	return adapter, nil
+}
+
 func provideCommander(
 	cfg *Config,
 	modelPort *magi.ModelAdapter,
@@ -149,6 +183,7 @@ func provideOrchestrator(
 	broker *appserver.EventBroker,
 	configs []*entity.MagiConfig,
 	repo port.Repository,
+	knowledge port.KnowledgePort,
 ) *orchestration.Orchestrator {
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop: agentLoop,
@@ -158,6 +193,7 @@ func provideOrchestrator(
 		EventPub:  broker,
 		CaseRepo:  repo.CaseRepo(),
 		Repo:      repo,
+		Knowledge: knowledge,
 		Configs:   configs,
 		Policy:    consensus.DefaultConsensusPolicy(),
 	})
@@ -189,8 +225,8 @@ func provideReplayService(broker *appserver.EventBroker) *replay.Service {
 	return replay.NewService(broker)
 }
 
-func provideMemoryService() *memory.Service {
-	return memory.NewService(nil, nil)
+func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository) *memory.Service {
+	return memory.NewService(knowledge, repo.MemoryRepo())
 }
 
 func provideToolService(toolReg port.ToolRegistryPort) *tool.Service {

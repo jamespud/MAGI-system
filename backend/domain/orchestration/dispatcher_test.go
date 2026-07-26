@@ -21,12 +21,12 @@ func (c *captureRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx *
 }
 
 type mockKnowledgePort struct {
-	chunks []port.KnowledgeChunk
+	blocks []port.MergedBlock
 	stored []*entity.CaseMemoryProjection
 }
 
-func (m *mockKnowledgePort) Retrieve(ctx context.Context, query string, knowledgeIDs []int64) ([]port.KnowledgeChunk, error) {
-	return m.chunks, nil
+func (m *mockKnowledgePort) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
+	return port.RetrieveResult{Blocks: m.blocks}, nil
 }
 func (m *mockKnowledgePort) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
 	m.stored = append(m.stored, proj)
@@ -62,7 +62,7 @@ func TestDispatchReconsider_SetsReconsiderRunID(t *testing.T) {
 }
 
 func TestDispatch_ContextBuilderRetrievesKnowledge(t *testing.T) {
-	kp := &mockKnowledgePort{chunks: []port.KnowledgeChunk{{Content: "historical case X"}}}
+	kp := &mockKnowledgePort{blocks: []port.MergedBlock{{Level: 300, Content: "historical case X"}}}
 	cb := memory.NewContextBuilder(kp)
 	cr := &captureRuntime{}
 	d := orchestration.NewDispatcher(cr, cb)

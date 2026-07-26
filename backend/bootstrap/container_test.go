@@ -63,3 +63,20 @@ func TestProvideToolExecutor_SelectsByApiKey(t *testing.T) {
 		t.Fatalf("expected StubToolExecutor when no key, got %T", without)
 	}
 }
+
+func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	cfg := &bootstrap.Config{}
+	cfg.Embedding.Dim = 3
+	// Empty Milvus/ES addresses -> fake indexes; no real connections.
+	kp, err := bootstrap.ProvideKnowledgePort(cfg, db)
+	if err != nil {
+		t.Fatalf("ProvideKnowledgePort: %v", err)
+	}
+	if kp == nil {
+		t.Error("expected non-nil KnowledgePort")
+	}
+}
