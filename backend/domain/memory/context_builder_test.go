@@ -10,17 +10,19 @@ import (
 	"github.com/jamespud/magi/backend/domain/runtime"
 )
 
-type mockKnowledge struct{ chunks []port.KnowledgeChunk }
+type mockKnowledge struct{ blocks []port.MergedBlock }
 
-func (m *mockKnowledge) Retrieve(ctx context.Context, query string, ids []int64) ([]port.KnowledgeChunk, error) {
-	return m.chunks, nil
+func (m *mockKnowledge) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
+	return port.RetrieveResult{Blocks: m.blocks}, nil
 }
 func (m *mockKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
 	return nil
 }
 
 func TestContextBuilder_WithKnowledge(t *testing.T) {
-	b := memory.NewContextBuilder(&mockKnowledge{chunks: []port.KnowledgeChunk{{Content: "hist", Score: 0.9}}})
+	b := memory.NewContextBuilder(&mockKnowledge{blocks: []port.MergedBlock{
+		{Level: 300, Content: "hist", SourceRef: "case-old"},
+	}})
 	actx, err := b.Build(context.Background(),
 		&entity.DecisionCase{ID: "c1", Question: "q"},
 		&entity.DecisionTask{CanonicalQuestion: "compute"},
@@ -33,6 +35,9 @@ func TestContextBuilder_WithKnowledge(t *testing.T) {
 	}
 	if len(actx.KnowledgeCtx) != 1 || actx.KnowledgeCtx[0].Content != "hist" {
 		t.Fatalf("knowledge: %+v", actx.KnowledgeCtx)
+	}
+	if actx.KnowledgeCtx[0].SourceURI != "case-old" {
+		t.Fatalf("source uri: %q", actx.KnowledgeCtx[0].SourceURI)
 	}
 	if actx.Task.CanonicalQuestion != "compute" {
 		t.Fatalf("task: %+v", actx.Task)

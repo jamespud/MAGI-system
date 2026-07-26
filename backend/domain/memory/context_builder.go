@@ -35,9 +35,14 @@ func (b *ContextBuilder) Build(
 
 	var chunks []port.KnowledgeChunk
 	if b.knowledge != nil && query != "" {
-		// Retrieve historical cases + relevant knowledge; failure is non-fatal.
-		if retrieved, err := b.knowledge.Retrieve(ctx, query, nil); err == nil {
-			chunks = retrieved
+		result, err := b.knowledge.Retrieve(ctx, port.RetrieveRequest{Query: query, TopK: 15})
+		if err == nil {
+			for _, blk := range result.Blocks {
+				chunks = append(chunks, port.KnowledgeChunk{
+					Content:   blk.Content,
+					SourceURI: blk.SourceRef,
+				})
+			}
 		}
 	}
 
