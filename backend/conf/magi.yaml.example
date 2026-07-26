@@ -88,3 +88,27 @@ magi:
 
 tavily:
   api_key: ""  # Tavily search API key; leave empty to disable web_search (agents reason from intrinsic knowledge)
+
+# RAG pipeline (HybridKnowledgeAdapter). Leave milvus.address / elasticsearch.addresses
+# empty to use in-memory fake indexes (standalone-safe). The containerized stack
+# (docker-compose-dev.yml) injects MAGI_MILVUS_ADDRESS / MAGI_ES_ADDRESSES via env.
+embedding:
+  base_url: ""              # OpenAI-compatible /embeddings endpoint, e.g. https://api.siliconflow.cn/v1
+  api_key: ""               # set via MAGI_EMBEDDING_API_KEY
+  model_name: "BAAI/bge-m3"
+  dim: 1024                 # must match the embedding model; changing requires re-indexing
+milvus:
+  address: ""               # e.g. localhost:19530; empty -> fake vector index
+  collection: "magi_rag_300"
+elasticsearch:
+  addresses: []             # e.g. ["http://localhost:9200"]; empty -> fake lexical index
+  index: "magi_rag_300"
+rag:
+  levels: [1800, 900, 300]
+  top_k: 15
+  rrf_k: 60
+  merge_threshold_900: 3
+  merge_threshold_1800: 2
+  orphan_strategy: "keep_300"
+  store_async: true
+  store_workers: 4
