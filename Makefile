@@ -8,6 +8,7 @@ SCRIPTS_DIR := scripts
 .PHONY: help prepare debug backend frontend \
         db-up db-down db-logs db-reset \
         rag_up rag_down \
+        stop \
         build clean \
         test \
         web-up web-down web-logs web-ps
@@ -103,22 +104,42 @@ test:
 # Web (containerized stack)
 # =============================================================================
 
-COMPOSE_DEV := docker/docker-compose-dev.yml
+COMPOSE_DEBUG := docker/docker-compose-debug.yml
+COMPOSE_WEB := docker/docker-compose-web.yml
 
 web-up:
-	docker compose --project-directory . -f $(COMPOSE_DEV) up -d --build
+	docker compose --project-directory . -f $(COMPOSE_WEB) up -d --build
 
 web-down:
-	docker compose --project-directory . -f $(COMPOSE_DEV) down
+	docker compose --project-directory . -f $(COMPOSE_WEB) down
 
 rag_up:
-	docker compose --project-directory . -f $(COMPOSE_DEV) up -d milvus-standalone elasticsearch
+	docker compose --project-directory . -f $(COMPOSE_DEBUG) up -d milvus-standalone elasticsearch
 
 rag_down:
-	docker compose --project-directory . -f $(COMPOSE_DEV) stop milvus-standalone elasticsearch
+	docker compose --project-directory . -f $(COMPOSE_DEBUG) stop milvus-standalone elasticsearch
+
+# rag-prepare: create the external named volumes shared by debug + web RAG
+# stacks (Milvus/ES/etcd/minio data). Idempotent; run once before first web-up/debug.
+rag-prepare:
+	docker volume create magi-milvus-data 2>/dev/null || true
+	docker volume create magi-es-data 2>/dev/null || true
+	docker volume create magi-etcd-data 2>/dev/null || true
+	docker volume create magi-minio-data 2>/dev/null || true
+
+web-up:
+	$(MAKE) rag-prepare
+	docker compose --project-directory . -f $(COMPOSE_WEB) up -d --build
 
 web-logs:
-	docker compose --project-directory . -f $(COMPOSE_DEV) logs -f
+	docker compose --project-directory . -f $(COMPOSE_WEB) logs -f
 
 web-ps:
-	docker compose --project-directory . -f $(COMPOSE_DEV) ps
+	docker compose --project-directory . -f $(COMPOSE_WEB) ps
+
+# stop: one-key stop all dev + web containers (both compose projects + debug nginx).
+stop:
+	docker compose --project-directory . -f $(COMPOSE_DEBUG) down 2>/dev/null || true
+	docker compose --project-directory . -f $(COMPOSE_WEB) down 2>/dev/null || true
+	docker rm -f magi-dev-nginx 2>/dev/null || true
+	@echo "All dev/web containers stopped."

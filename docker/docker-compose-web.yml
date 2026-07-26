@@ -1,30 +1,27 @@
-# Containerized local dev stack: mysql + magi-server + web (nginx).
-# Used by `make web-up / web-down / web-logs / web-ps`.
+# Containerized web stack for `make web-up`: MySQL + magi-server + web (nginx)
+# + RAG (Milvus + Elasticsearch + etcd + minio). All services are containers on
+# the magi-web network; only the web nginx exposes a host port (80).
 #
-# Secrets and the container DSN come from .env (compose auto-loads it); the
-# magi-server image itself bakes no secrets (only conf/magi.yaml.example).
-# mysql + magi-server are internal-only; only web exposes a host port (80), so
-# the stack does not clash with `make debug` (go-run:8080 + nginx:80 debug).
-# No explicit container_name is set so the stack can run alongside the dev
-# middleware (whose mysql container is named magi-mysql); inter-service DNS uses
-# service names (mysql, magi-server), not container names.
+# RAG data lives in external named volumes (magi-*-data), shared with
+# docker-compose-debug.yml so indexes persist when switching stacks. Run
+# `make rag-prepare` once to create them (web-up does this automatically).
+# MySQL shares docker/data/mysql with the debug stack - the two MySQL containers
+# CANNOT run simultaneously; run `make stop` first.
 #
-# Schema: magi-server runs GORM AutoMigrate on all models at startup
-# (see bootstrap.provideDB).
+# magi-server depends on MySQL + Milvus + ES all healthy (real backends, no fake).
+# `make stop` tears this down together with the debug stack.
 
-name: magi-dev
+name: magi-web
 
 services:
   mysql:
     image: mysql:8.4.5
+    container_name: magi-web-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${DB_NAME:-magi}
       MYSQL_USER: ${DB_USER:-magi}
       MYSQL_PASSWORD: ${DB_PASS:-magi123}
-    # Share data with `make debug` (dev middleware MySQL uses the same directory
-    # at docker/data/mysql). Do NOT run `make docker-up` and `make up` at the
-    # same time — two MySQL processes cannot share the data dir.
     volumes:
       - ./docker/data/mysql:/var/lib/mysql
     healthcheck:
@@ -36,12 +33,17 @@ services:
     restart: unless-stopped
 
   magi-server:
+    container_name: magi-web-server
     build:
       context: ./backend
       args:
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     depends_on:
       mysql:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     environment:
       MAGI_DB_DSN: "${DB_USER:-magi}:${DB_PASS:-magi123}@tcp(mysql:3306)/${DB_NAME:-magi}?charset=utf8mb4&parseTime=True"
@@ -59,11 +61,12 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
-      retries: 20
-      start_period: 10s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
   web:
+    container_name: magi-web-nginx
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -76,10 +79,10 @@ services:
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
-  # --- RAG infrastructure (Milvus + Elasticsearch) ---
-  # `make rag_up` / `make rag_down` manage these independently of the core stack.
+  # --- RAG infrastructure (shared with docker-compose-debug.yml via external volumes) ---
   etcd:
     image: quay.io/coreos/etcd:v3.5.5
+    container_name: magi-etcd
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -92,6 +95,7 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: magi-minio
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -102,6 +106,7 @@ services:
 
   milvus-standalone:
     image: milvusdb/milvus:v2.4.0
+    container_name: magi-milvus
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -114,10 +119,17 @@ services:
     depends_on:
       - etcd
       - minio
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: magi-es
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -126,10 +138,24 @@ services:
       - es_data:/usr/share/elasticsearch/data
     ports:
       - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
-  etcd_data:
-  minio_data:
   milvus_data:
+    external: true
+    name: magi-milvus-data
   es_data:
+    external: true
+    name: magi-es-data
+  etcd_data:
+    external: true
+    name: magi-etcd-data
+  minio_data:
+    external: true
+    name: magi-minio-data
