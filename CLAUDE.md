@@ -1,0 +1,99 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+MAGI is an evidence-driven multi-agent decision engine (inspired by Evangelion's MAGI). Three agents — **Melchior** (scientist), **Balthasar** (protector), **Casper** (innovator) — each with a distinct objective function, evidence standard, and risk tendency, independently investigate a decision question, then vote, debate, reflect, and re-vote toward a consensus resolution. A **Commander** LLM handles only language tasks. The frozen target architecture is `magi-design.md` (Chinese); all code targets that design.
+
+Go module at `backend/` (`github.com/jamespud/magi/backend`), Go 1.24+.
+
+## Commands
+
+Makefile targets run from repo root:
+
+```bash
+make server ARGS='是否应该把后端从 Java 重构成 Rust？'  # build + run a decision (standalone CLI)
+make debug                # start MySQL (docker-compose) + run server
+make middleware           # start MySQL only (host port 3307 -> 3306)
+make sync_db              # apply SQL migrations (docker/atlas/migrations s6 + s7)
+make build_server         # build ./bin/magi only
+make test                 # go test ./domain/... ./adapter/...
+make clean                # stop middleware + remove binary
+```
+
+Direct Go (from `backend/`):
+
+```bash
+go build -o ../bin/magi .
+go test ./...
+go test ./domain/validation/ -run TestTypedValidator -v   # single test
+go vet ./...
+```
+
+Config: `backend/conf/magi.yaml` (override path with `MAGI_CONFIG` env var; local overrides in `backend/conf/magi.local.yaml`, gitignored). The `model` block points at any OpenAI-compatible endpoint (default DeepSeek).
+
+## Critical: Coze Studio local replace directive
+
+`backend/go.mod` contains:
+
+```
+replace github.com/coze-dev/coze-studio/backend => /home/spud/proj/coze-studio/backend
+```
+
+The build **fails** if that local path is absent. MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox — but only through `adapter/`, never by importing Coze domain types into `domain/`. For production, swap the replace to a published fork (the go.mod comment shows the intended form). There is also a required `replace github.com/apache/thrift => ... v0.13.0` that must stay in sync with coze-studio.
+
+## Architecture
+
+Four layers, strictly one-way dependencies:
+
+```
+Application -> Orchestration -> Agent Runtime -> Port/Adapter -> Coze Infrastructure
+```
+
+`domain/` depends only on `domain/port` interfaces + eino; Coze implementations live in `adapter/`. Reverse dependencies are forbidden (design §2). ADRs are referenced in code comments (ADR-002 … ADR-010) but not stored as files here — `magi-design.md` is authoritative.
+
+### Governing principle: LLM = semantics, code = rules
+
+LLMs: understand the question, propose claims, explain evidence, write reflections, draft reports.
+Deterministic Go: permission checks, schema validation, EV-ID authenticity, evidence gate, utility-dimension legality, vote counting, consensus judgment, state transitions, loop limits, timeouts.
+
+When adding capability, decide first which side it belongs to. The Commander (an LLM) is deliberately not a "god agent" — it must not count votes, judge consensus, bypass the evidence gate, or drive state transitions (see `domain/service/commander.go`, design §6).
+
+### Orchestration is a deterministic FSM
+
+`domain/orchestration/orchestrator.go` drives each case through ~18 `CaseStatus` states (`domain/entity/case.go`): DRAFT → NORMALIZING → CONTEXT_BUILDING → RETRIEVING_MEMORY → INVESTIGATING → EVIDENCE_GATING → COLLECTING_VOTES → CONSENSUS_CHECK → (RESOLVING | DEBATING → REFLECTING → REVOTING → CONSENSUS_CHECK) → GENERATING_REPORT → SAVING_MEMORY → EVALUATING → RESOLVED. Every transition is a `switch` case; nothing is LLM-decided. First-round 2:1 (majority-with-dissent) goes to debate; only post-revote 2:1 may resolve (design §15).
+
+`Dispatcher` (`dispatcher.go`) fans the three agents out concurrently with `sync.WaitGroup` — each gets isolated working memory; the Evidence Ledger is shared append-only. Per-agent errors become `LoopStatusError` results handled by `FailurePolicy`, never panics.
+
+### Agent Runtime is a hand-written loop (not Eino ReAct)
+
+`domain/runtime/agent_loop.go` is MAGI's own loop — do not replace it with Eino ReAct/compose. Each step the model returns one of: tool call, claim submission, evidence summary, or vote. Flow: gather (tools → Evidence Ledger → Claims) → EvidenceSummary → **Evidence Gate** (deterministic) → Vote (structurally validated). Termination is code-enforced: valid vote, max steps, timeout, context cancel, token budget, repeated validation/tool/gate failures (`termination.go`).
+
+When no tools are bound (`cfg.Tools` empty), evidence requirements are relaxed to zero so the agent can reason from intrinsic knowledge and still produce a valid vote — this is how the standalone CLI runs.
+
+### Evidence Ledger is the spine
+
+`domain/evidence/`: Tool result → `EvidenceRecord` → supports → `Claim` → Vote/Reasoning. Reliability is a deterministic modifier formula (base + directness + recency + corroboration + extraction), never a single LLM-emitted number. Each agent has its own `EvidenceStandard` enforced by `EvidenceGate` (Melchior needs quantitative evidence; Balthasar needs a worst-case claim; Casper needs an opportunity-cost claim). `domain/claim/graph.go` tracks supports/contradicts so debate targets specific conflicting claims, not free-form prose.
+
+### Validation = JSON Schema as the runtime contract (ADR-003)
+
+`domain/validation/`: Go struct → `eino-contrib/jsonschema.Reflect()` → JSON Schema → `santhosh-tekuri/jsonschema/v6` validates every LLM structured output (DecisionTask, EvidenceSummary, ClaimSubmission, Vote, Reflection, FinalReport). `TypedValidator[T]` validates then typed-unmarshals.
+
+**Gotcha (recent bug source):** any struct used as an LLM structured-output contract MUST have `json` tags on every field. Without them, `Reflect()` emits PascalCase property names while the LLM emits lowercase; with `additionalProperties: false`, validation fails. When adding a structured-output struct or field: add `json:"..."` tags and update the Commander prompt to describe the exact object shape (e.g. "each with code + description", not just "a list"). See commit history (`fix: add json tags ...`) and `docs/superpowers/plans/`.
+
+### Ports & dual-mode model
+
+`domain/port/` defines `ModelPort`, `ToolRegistryPort`, `ToolExecutorPort`, `KnowledgePort`, `Repository`, `EventPublisher`, etc. `adapter/model_adapter.go` builds models two ways: **direct mode** (APIKey + ModelName → eino-ext openai client; used by the standalone CLI) or **Coze mode** (ModelID > 0 → `modelbuilder.BuildModelByID`; integrated deployment). `main.go` wires stub tool registry/executor and a nil case repo — it exercises the full domain logic standalone; the MySQL path (`docker/`, `docker/atlas/migrations/`) is for the integrated deployment.
+
+### Events, memory, evaluation, replay
+
+`KnowledgePort` is implemented by `adapter/rag/HybridKnowledgeAdapter` (not Coze crossknowledge): case-memory projections are rendered to long text, chunked into a 1800/900/300 parent-child hierarchy, embedded via an OpenAI-compatible endpoint, and indexed into Milvus (300-level vectors) + MySQL (content + hierarchy) + Elasticsearch (300-level BM25). Retrieve fuses Milvus + ES via RRF, then promotes unanimous 300-groups up to 900/1800. Store is async (worker pool). When Milvus/ES addresses are empty, fake indexes are used (standalone-safe). See `docs/superpowers/specs/2026-07-26-rag-pipeline-design.md`.
+
+Every transition publishes a `MagiEvent` (`domain/entity/event.go`, ADR-008) via `EventPublisher` → event store / SSE / replay. `domain/service/replay.go` reconstructs a case from its event stream. `domain/memory/` builds agent context (working/case/long-term) and projects resolved cases for future RAG retrieval. `domain/service/evaluation.go` scores tool/evidence/agent/consensus/system metrics, including counterfactual stability.
+
+## Conventions
+
+- Conventional Commits (`fix:`, `feat:`, `test:`, `chore:`).
+- Larger change plans live under `docs/superpowers/plans/` using `- [ ]` checkbox steps.
+- Code comments and identifiers are English; `magi-design.md` is Chinese.
