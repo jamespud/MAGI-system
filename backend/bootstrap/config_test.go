@@ -159,6 +159,86 @@ tavily:
 	}
 }
 
+func TestLoadConfig_RAGDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+magi:
+  melchior:
+    persona: "test"
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.RAG.TopK != 15 {
+		t.Errorf("RAG.TopK = %d, want 15", cfg.RAG.TopK)
+	}
+	if cfg.RAG.RRFK != 60 {
+		t.Errorf("RAG.RRFK = %d, want 60", cfg.RAG.RRFK)
+	}
+	if cfg.RAG.MergeThreshold900 != 3 {
+		t.Errorf("MergeThreshold900 = %d, want 3", cfg.RAG.MergeThreshold900)
+	}
+	if cfg.RAG.MergeThreshold1800 != 2 {
+		t.Errorf("MergeThreshold1800 = %d, want 2", cfg.RAG.MergeThreshold1800)
+	}
+	if cfg.RAG.OrphanStrategy != "keep_300" {
+		t.Errorf("OrphanStrategy = %q, want keep_300", cfg.RAG.OrphanStrategy)
+	}
+	if cfg.RAG.StoreWorkers != 4 {
+		t.Errorf("StoreWorkers = %d, want 4", cfg.RAG.StoreWorkers)
+	}
+	if len(cfg.RAG.Levels) != 3 || cfg.RAG.Levels[0] != 1800 || cfg.RAG.Levels[2] != 300 {
+		t.Errorf("Levels = %v, want [1800 900 300]", cfg.RAG.Levels)
+	}
+}
+
+func TestLoadConfig_RAGEnvOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "yaml-key"
+embedding:
+  base_url: "http://yaml-emb"
+  model_name: "bge-m3"
+  dim: 1024
+milvus:
+  address: "yaml:19530"
+  collection: "yaml_coll"
+elasticsearch:
+  addresses: ["http://yaml:9200"]
+  index: "yaml_idx"
+`), 0644)
+
+	t.Setenv("MAGI_EMBEDDING_API_KEY", "env-emb-key")
+	t.Setenv("MAGI_MILVUS_ADDRESS", "env:19530")
+	t.Setenv("MAGI_ES_ADDRESSES", "http://env:9200")
+
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Embedding.APIKey != "env-emb-key" {
+		t.Errorf("Embedding.APIKey = %q, want env-emb-key", cfg.Embedding.APIKey)
+	}
+	if cfg.Embedding.BaseURL != "http://yaml-emb" {
+		t.Errorf("Embedding.BaseURL = %q, want http://yaml-emb", cfg.Embedding.BaseURL)
+	}
+	if cfg.Embedding.Dim != 1024 {
+		t.Errorf("Embedding.Dim = %d, want 1024", cfg.Embedding.Dim)
+	}
+	if cfg.Milvus.Address != "env:19530" {
+		t.Errorf("Milvus.Address = %q, want env:19530", cfg.Milvus.Address)
+	}
+	if len(cfg.Elasticsearch.Addresses) != 1 || cfg.Elasticsearch.Addresses[0] != "http://env:9200" {
+		t.Errorf("ES.Addresses = %v, want [http://env:9200]", cfg.Elasticsearch.Addresses)
+	}
+}
+
 func TestLoadConfig_EnvEmptyKeepsYAML(t *testing.T) {
 	t.Setenv("MAGI_DB_DSN", "")
 	t.Setenv("MAGI_MODEL_API_KEY", "")

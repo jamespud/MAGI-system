@@ -31,6 +31,38 @@ type Config struct {
 	Tavily struct {
 		APIKey string `yaml:"api_key"`
 	} `yaml:"tavily"`
+	Embedding     EmbeddingConfig `yaml:"embedding"`
+	Milvus        MilvusConfig    `yaml:"milvus"`
+	Elasticsearch ESConfig        `yaml:"elasticsearch"`
+	RAG           RAGConfig       `yaml:"rag"`
+}
+
+type EmbeddingConfig struct {
+	BaseURL   string `yaml:"base_url"`
+	APIKey    string `yaml:"api_key"`
+	ModelName string `yaml:"model_name"`
+	Dim       int    `yaml:"dim"`
+}
+
+type MilvusConfig struct {
+	Address    string `yaml:"address"`
+	Collection string `yaml:"collection"`
+}
+
+type ESConfig struct {
+	Addresses []string `yaml:"addresses"`
+	Index     string   `yaml:"index"`
+}
+
+type RAGConfig struct {
+	Levels             []int  `yaml:"levels"`
+	TopK               int    `yaml:"top_k"`
+	RRFK               int    `yaml:"rrf_k"`
+	MergeThreshold900  int    `yaml:"merge_threshold_900"`
+	MergeThreshold1800 int    `yaml:"merge_threshold_1800"`
+	OrphanStrategy     string `yaml:"orphan_strategy"`
+	StoreAsync         bool   `yaml:"store_async"`
+	StoreWorkers       int    `yaml:"store_workers"`
 }
 
 type MagiSpec struct {
@@ -112,6 +144,27 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Magi.TimeoutSeconds == 0 {
 		cfg.Magi.TimeoutSeconds = 120
 	}
+	if cfg.RAG.TopK == 0 {
+		cfg.RAG.TopK = 15
+	}
+	if cfg.RAG.RRFK == 0 {
+		cfg.RAG.RRFK = 60
+	}
+	if cfg.RAG.MergeThreshold900 == 0 {
+		cfg.RAG.MergeThreshold900 = 3
+	}
+	if cfg.RAG.MergeThreshold1800 == 0 {
+		cfg.RAG.MergeThreshold1800 = 2
+	}
+	if cfg.RAG.OrphanStrategy == "" {
+		cfg.RAG.OrphanStrategy = "keep_300"
+	}
+	if cfg.RAG.StoreWorkers == 0 {
+		cfg.RAG.StoreWorkers = 4
+	}
+	if len(cfg.RAG.Levels) == 0 {
+		cfg.RAG.Levels = []int{1800, 900, 300}
+	}
 	applyEnvOverrides(&cfg)
 	return &cfg, nil
 }
@@ -138,6 +191,21 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MAGI_TAVILY_API_KEY"); v != "" {
 		cfg.Tavily.APIKey = v
+	}
+	if v := os.Getenv("MAGI_EMBEDDING_API_KEY"); v != "" {
+		cfg.Embedding.APIKey = v
+	}
+	if v := os.Getenv("MAGI_EMBEDDING_BASE_URL"); v != "" {
+		cfg.Embedding.BaseURL = v
+	}
+	if v := os.Getenv("MAGI_EMBEDDING_MODEL_NAME"); v != "" {
+		cfg.Embedding.ModelName = v
+	}
+	if v := os.Getenv("MAGI_MILVUS_ADDRESS"); v != "" {
+		cfg.Milvus.Address = v
+	}
+	if v := os.Getenv("MAGI_ES_ADDRESSES"); v != "" {
+		cfg.Elasticsearch.Addresses = []string{v}
 	}
 }
 
