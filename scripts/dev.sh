@@ -90,14 +90,17 @@ case "${1:-}" in
     echo "--- Building frontend ---"
     npm -C "$PROJECT_ROOT/frontend" run build
 
-    # 4. Nginx container (proxies /api -> host:8080, serves frontend dist)
+    # 4. Nginx container (proxies /api -> host:8080, serves frontend dist).
+    # --network host: the nginx container shares the host network so it can
+    # reach the go-run backend on 127.0.0.1:8080 directly. The host firewall
+    # blocks docker-bridge -> host:8080, so bridged networking + host-gateway
+    # does not work here. debug.conf proxies to 127.0.0.1:8080.
     echo "--- Starting nginx debug container ---"
     docker rm -f magi-nginx-debug 2>/dev/null || true
     docker run -d --name magi-nginx-debug \
-      -p 80:80 \
+      --network host \
       -v "$NGINX_DEBUG_CONF:/etc/nginx/conf.d/default.conf:ro" \
       -v "$FRONTEND_DIST:/usr/share/nginx/html:ro" \
-      --add-host=host.docker.internal:host-gateway \
       nginx:1.27-alpine
 
     # On exit: stop ONLY the nginx debug proxy. MySQL + Milvus + ES are left
