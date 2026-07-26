@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"context"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -41,5 +42,45 @@ func TestChunkModelsMigrateAndCRUD(t *testing.T) {
 	}
 	if got.Parent900ID != "c900_1" {
 		t.Errorf("parent_900_id = %q, want c900_1", got.Parent900ID)
+	}
+}
+
+func TestChunkRepositoryWriteAndQuery(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	doc := ChunkedDoc{
+		Chunks1800: []ChunkBlock{{ID: "c1800_1", Source: "case_memory", SourceRef: "case-1", Content: "top", TokenCount: 1800, Seq: 0}},
+		Chunks900:  []ChunkBlock{{ID: "c900_1", Parent1800ID: "c1800_1", Source: "case_memory", SourceRef: "case-1", Content: "mid", TokenCount: 900, Seq: 0}},
+		Chunks300:  []ChunkBlock{{ID: "c300_1", Parent900ID: "c900_1", Source: "case_memory", SourceRef: "case-1", Content: "leaf", TokenCount: 300, Seq: 0}},
+	}
+	if err := repo.WriteChunks(ctx, doc); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	parents, err := repo.Get300Parents(ctx, []string{"c300_1"})
+	if err != nil {
+		t.Fatalf("get300parents: %v", err)
+	}
+	if parents["c300_1"] != "c900_1" {
+		t.Errorf("parent = %q, want c900_1", parents["c300_1"])
+	}
+
+	c900, err := repo.Get900Blocks(ctx, []string{"c900_1"})
+	if err != nil {
+		t.Fatalf("get900: %v", err)
+	}
+	if len(c900) != 1 || c900[0].Parent1800ID != "c1800_1" {
+		t.Errorf("900 block = %+v", c900)
+	}
+
+	if err := repo.DeleteBySourceRef(ctx, "case_memory", "case-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	var n int64
+	db.Model(&Chunk300{}).Count(&n)
+	if n != 0 {
+		t.Errorf("after delete, 300 count = %d, want 0", n)
 	}
 }
