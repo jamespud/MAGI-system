@@ -121,24 +121,34 @@ func ProvideToolExecutor(cfg *Config) port.ToolExecutorPort {
 	return &StubToolExecutor{}
 }
 
-// ProvideKnowledgePort builds the HybridKnowledgeAdapter (with real Milvus/ES
-// when configured, fakes when addresses are empty) wrapped in AsyncIndexer when
-// store_async is enabled. The adapter is Coze-independent: Milvus+ES+MySQL only.
+// ProvideKnowledgePort builds the HybridKnowledgeAdapter. When milvus.address /
+// elasticsearch.addresses are non-empty, real backends are REQUIRED (no fake
+// fallback) - connection failure returns an error so misconfiguration is
+// visible. When addresses are empty, in-memory fakes are used (tests / pure
+// standalone). Store is async when store_async is enabled.
 func ProvideKnowledgePort(cfg *Config, db *gorm.DB) (port.KnowledgePort, error) {
 	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
 	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
 
-	var vec rag.VectorIndex = &rag.FakeVectorIndex{}
+	var vec rag.VectorIndex
 	if cfg.Milvus.Address != "" {
-		if real, err := rag.NewMilvusIndexer(cfg.Milvus.Address, cfg.Milvus.Collection, cfg.Embedding.Dim); err == nil {
-			vec = real
+		real, err := rag.NewMilvusIndexer(cfg.Milvus.Address, cfg.Milvus.Collection, cfg.Embedding.Dim)
+		if err != nil {
+			return nil, fmt.Errorf("milvus connect %q: %w (set milvus.address empty to use fake index)", cfg.Milvus.Address, err)
 		}
+		vec = real
+	} else {
+		vec = &rag.FakeVectorIndex{}
 	}
-	var lex rag.LexicalIndex = &rag.FakeLexicalIndex{}
+	var lex rag.LexicalIndex
 	if len(cfg.Elasticsearch.Addresses) > 0 {
-		if real, err := rag.NewESIndexer(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Index); err == nil {
-			lex = real
+		real, err := rag.NewESIndexer(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Index)
+		if err != nil {
+			return nil, fmt.Errorf("elasticsearch connect %v: %w (set elasticsearch.addresses empty to use fake index)", cfg.Elasticsearch.Addresses, err)
 		}
+		lex = real
+	} else {
+		lex = &rag.FakeLexicalIndex{}
 	}
 
 	repo := rag.NewChunkRepository(db)
