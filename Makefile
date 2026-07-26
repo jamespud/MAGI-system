@@ -7,6 +7,7 @@ SCRIPTS_DIR := scripts
 
 .PHONY: help prepare debug backend frontend \
         db-up db-down db-logs db-reset \
+        rag_up rag_down \
         build clean \
         test \
         web-up web-down web-logs web-ps
@@ -109,6 +110,12 @@ web-up:
 
 web-down:
 	docker compose --project-directory . -f $(COMPOSE_DEV) down
+
+rag_up:
+	docker compose --project-directory . -f $(COMPOSE_DEV) up -d milvus-standalone elasticsearch
+
+rag_down:
+	docker compose --project-directory . -f $(COMPOSE_DEV) stop milvus-standalone elasticsearch
 
 web-logs:
 	docker compose --project-directory . -f $(COMPOSE_DEV) logs -f
