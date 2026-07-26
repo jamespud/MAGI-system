@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
+	rag "github.com/jamespud/magi/backend/adapter/rag"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/memory"
@@ -236,7 +237,8 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
-	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
+	models := append(magi.AllModels(), rag.AllModels()...)
+	if err := db.AutoMigrate(models...); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
 	return db, nil
