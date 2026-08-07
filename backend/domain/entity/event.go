@@ -3,8 +3,11 @@ package entity
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
+
+var eventSequence uint64
 
 // MagiEvent is the unified domain event for trace/audit/replay/SSE (ADR-008).
 type MagiEvent struct {
@@ -48,16 +51,20 @@ const (
 )
 
 // NewEvent constructs a MagiEvent with a unique ID and JSON-serialized payload.
-// ID is "<caseID>-<unixNano>" -- monotonic enough for broker catch-up dedup.
+// ID is "<caseID>-<unixNano>-<sequence>". UnixNano alone can collide when
+// events are created in the same clock tick; the process-wide sequence makes
+// IDs unique even under concurrent publication.
 // A nil payload yields a nil RawMessage (no empty `{}`).
 func NewEvent(caseID, runID string, agentCode *MagiCode, et EventType, payload any) MagiEvent {
+	now := time.Now()
+	sequence := atomic.AddUint64(&eventSequence, 1)
 	ev := MagiEvent{
-		ID:        fmt.Sprintf("%s-%d", caseID, time.Now().UnixNano()),
+		ID:        fmt.Sprintf("%s-%d-%d", caseID, now.UnixNano(), sequence),
 		CaseID:    caseID,
 		RunID:     runID,
 		AgentCode: agentCode,
 		Type:      et,
-		Timestamp: time.Now(),
+		Timestamp: now,
 	}
 	if payload != nil {
 		if b, err := json.Marshal(payload); err == nil {

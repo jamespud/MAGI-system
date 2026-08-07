@@ -3,6 +3,7 @@ package entity_test
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -55,5 +56,31 @@ func TestNewEvent_IDsAreUnique(t *testing.T) {
 	b := entity.NewEvent("c1", "", nil, entity.EventCaseCreated, nil)
 	if a.ID == b.ID {
 		t.Fatal("two events should have different IDs")
+	}
+}
+
+func TestNewEvent_IDsAreUniqueConcurrently(t *testing.T) {
+	const count = 1000
+	ids := make(chan string, count)
+	var wg sync.WaitGroup
+	wg.Add(count)
+	for i := 0; i < count; i++ {
+		go func() {
+			defer wg.Done()
+			ids <- entity.NewEvent("c1", "", nil, entity.EventCaseCreated, nil).ID
+		}()
+	}
+	wg.Wait()
+	close(ids)
+
+	seen := make(map[string]struct{}, count)
+	for id := range ids {
+		if _, exists := seen[id]; exists {
+			t.Fatalf("duplicate event ID: %s", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if len(seen) != count {
+		t.Fatalf("got %d unique IDs, want %d", len(seen), count)
 	}
 }
