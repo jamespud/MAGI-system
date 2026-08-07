@@ -15,6 +15,7 @@ type EvidenceSummaryClaim struct {
 type EvidenceSummary struct {
 	EvidenceByType map[string][]string    `json:"evidence_by_type"`
 	Claims         []EvidenceSummaryClaim `json:"claims"`
+	RoleAssessment *RoleAssessment        `json:"role_assessment,omitempty"`
 	Ready          bool                   `json:"ready"`
 }
 

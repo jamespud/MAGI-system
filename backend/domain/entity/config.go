@@ -17,6 +17,7 @@ type MagiConfig struct {
 	Objective        ObjectiveFunction
 	RiskTendency     RiskTendency
 	RiskPolicy       RiskPolicy
+	RolePolicy       RolePolicy
 	EvidenceStandard EvidenceStandard
 
 	Model ModelRef
@@ -149,7 +150,7 @@ type LoopPolicy struct {
 	MaxConsecutiveToolFailures       int
 	MaxConsecutiveValidationFailures int
 	TokenBudget                      int
-	MaxToolCalls int // 0 = unlimited; >0 forces convergence to EvidenceSummary after N tool calls
+	MaxToolCalls                     int // 0 = unlimited; >0 forces convergence to EvidenceSummary after N tool calls
 }
 
 // ReflectionPolicy bounds the debate/reflection phase.

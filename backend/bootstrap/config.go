@@ -39,6 +39,7 @@ type MagiSpec struct {
 	Dimensions       []DimensionSpec      `yaml:"dimensions"`
 	RiskTendency     string               `yaml:"risk_tendency"`
 	RiskPolicy       RiskPolicySpec       `yaml:"risk_policy"`
+	RolePolicy       RolePolicySpec       `yaml:"role_policy"`
 	Evidence         EvidenceSpec         `yaml:"evidence"`
 	ReflectionPolicy ReflectionPolicySpec `yaml:"reflection_policy"`
 }
@@ -50,6 +51,16 @@ type PersonaDefSpec struct {
 
 type RiskPolicySpec struct {
 	MaxAcceptableRisk float64 `yaml:"max_acceptable_risk"`
+}
+
+type RolePolicySpec struct {
+	EnforceAssessment       *bool    `yaml:"enforce_assessment"`
+	RequiredAssessment      string   `yaml:"required_assessment"`
+	MaxResidualRisk         *float64 `yaml:"max_residual_risk"`
+	MinTechnicalScore       *float64 `yaml:"min_technical_score"`
+	MinOpportunityScore     *float64 `yaml:"min_opportunity_score"`
+	MinWeightedUtilityScore *float64 `yaml:"min_weighted_utility_score"`
+	DebateDirective         string   `yaml:"debate_directive"`
 }
 
 type ReflectionPolicySpec struct {
@@ -148,6 +159,28 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 	if s.PersonaDef.SystemPrompt != "" || s.PersonaDef.Voice != "" {
 		personaDef = &entity.PersonaDefinition{SystemPrompt: s.PersonaDef.SystemPrompt, Voice: s.PersonaDef.Voice}
 	}
+	rolePolicy := entity.DefaultRolePolicy(code)
+	if s.RolePolicy.EnforceAssessment != nil {
+		rolePolicy.EnforceAssessment = *s.RolePolicy.EnforceAssessment
+	}
+	if s.RolePolicy.RequiredAssessment != "" {
+		rolePolicy.RequiredAssessment = s.RolePolicy.RequiredAssessment
+	}
+	if s.RolePolicy.MaxResidualRisk != nil {
+		rolePolicy.MaxResidualRisk = *s.RolePolicy.MaxResidualRisk
+	}
+	if s.RolePolicy.MinTechnicalScore != nil {
+		rolePolicy.MinTechnicalScore = *s.RolePolicy.MinTechnicalScore
+	}
+	if s.RolePolicy.MinOpportunityScore != nil {
+		rolePolicy.MinOpportunityScore = *s.RolePolicy.MinOpportunityScore
+	}
+	if s.RolePolicy.MinWeightedUtilityScore != nil {
+		rolePolicy.MinWeightedUtilityScore = *s.RolePolicy.MinWeightedUtilityScore
+	}
+	if s.RolePolicy.DebateDirective != "" {
+		rolePolicy.DebateDirective = s.RolePolicy.DebateDirective
+	}
 	return &entity.MagiConfig{
 		Code:         code,
 		Persona:      s.Persona,
@@ -158,6 +191,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			Tendency:          entity.RiskTendency(s.RiskTendency),
 			MaxAcceptableRisk: s.RiskPolicy.MaxAcceptableRisk,
 		},
+		RolePolicy: rolePolicy,
 		EvidenceStandard: entity.EvidenceStandard{
 			MinEvidenceCount:     s.Evidence.MinEvidenceCount,
 			MinQuantitativeCount: s.Evidence.MinQuantitativeCount,

@@ -353,6 +353,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		case ResponseEvidenceSummary:
 			ledger.RecomputeCorroboration(pr.Summary.Claims)
 			gateRes := l.gate.Evaluate(pr.Summary, ledger, evidenceStd, cfg.Code)
+			roleViolations := evidence.ValidateRoleAssessment(pr.Summary, ledger, cfg.RolePolicy, cfg.Objective, cfg.Code, hasTools)
+			if len(roleViolations) > 0 {
+				gateRes.Passed = false
+				gateRes.Violations = append(gateRes.Violations, roleViolations...)
+			}
 			if !gateRes.Passed {
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed, map[string]any{"violations": gateViolationsMsg(gateRes)})
 				ts.gateFail++
@@ -395,6 +400,12 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			if derr := ValidateVoteDimensions(pr.Vote, cfg.Objective); derr != nil {
 				messages = append(messages, resp)
 				messages = append(messages, schema.UserMessage("Vote dimension check failed: "+derr.Error()+"; fix and output a valid Vote JSON."))
+				trace.Steps = append(trace.Steps, st)
+				continue
+			}
+			if derr := evidence.ValidateRoleDecision(pr.Vote, result.Summary, cfg.RolePolicy, cfg.Objective); derr != nil {
+				messages = append(messages, resp)
+				messages = append(messages, schema.UserMessage("Role decision check failed: "+derr.Error()+"; revise the role assessment or output a valid Vote JSON."))
 				trace.Steps = append(trace.Steps, st)
 				continue
 			}

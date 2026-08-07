@@ -129,6 +129,9 @@ func summaryJSONWithClaim(supports string) string {
 func voteJSON(dim string) string {
 	return fmt.Sprintf(`{"decision":"approve","confidence":80,"utility_scores":[{"dimension_code":%q,"score":90,"evidence_ids":["EV-001"],"reasoning":"r"}],"evidence_ids":["EV-001"]}`, dim)
 }
+func riskSummaryJSON(residual float64) string {
+	return fmt.Sprintf(`{"evidence_by_type":{"quantitative":["EV-001"]},"claims":[],"role_assessment":{"dimension_assessments":[{"dimension_code":"correctness","score":80,"evidence_ids":["EV-001"],"reasoning":"supported"}],"risk":{"worst_case":"data loss","residual_risk":%.2f,"reversibility_score":20,"rollback_plan":"restore previous deployment","risk_evidence_ids":["EV-001"]}},"ready":true}`, residual)
+}
 func reflectionJSON(posChange string) string {
 	return fmt.Sprintf(`{"position_change":%q,"new_evidence_ids":["EV-001"],"reasoning":"changed based on debate","ready_to_revote":true}`, posChange)
 }
@@ -156,6 +159,29 @@ func TestAgentLoop_FullFlow(t *testing.T) {
 	}
 	if len(res.Trace.Steps) != 3 || !res.Trace.Steps[2].IsFinal {
 		t.Fatalf("trace: %d", len(res.Trace.Steps))
+	}
+}
+
+func TestAgentLoop_RoleContractAndDecisionBoundary(t *testing.T) {
+	loop := newAgentLoop(t, []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")), // role assessment missing
+		finalMsg(riskSummaryJSON(0.80)), // role assessment passes, approval boundary does not
+		finalMsg(voteJSON("correctness")),
+		finalMsg(strings.Replace(voteJSON("correctness"), `"approve"`, `"reject"`, 1)),
+	}, nil)
+	cfg := evidenceCfg(1, 0)
+	cfg.Code = "balthasar"
+	cfg.RolePolicy = entity.DefaultRolePolicy("balthasar")
+	res, err := loop.Run(context.Background(), cfg, &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "deploy"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted || res.Vote == nil || res.Vote.Decision != entity.VoteDecisionReject {
+		t.Fatalf("role boundary should force a valid conservative dissent, result=%+v", res)
+	}
+	if len(res.Trace.Steps) != 5 {
+		t.Fatalf("expected role gate failure and approval-boundary self-heal, steps=%d", len(res.Trace.Steps))
 	}
 }
 
@@ -622,7 +648,7 @@ func TestAgentLoop_EventsCarryIDAndPayload(t *testing.T) {
 		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
 		ToolExec:  &stubToolExec{},
 		Validator: v, Gen: gen,
-		EventPub:  rec,
+		EventPub: rec,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -696,7 +722,7 @@ func TestAgentLoop_WebSearchProducesMultipleEvidence(t *testing.T) {
 		ToolReg:   toolReg,
 		ToolExec:  toolExec,
 		Validator: val, Gen: gen,
-		EventPub:  rec,
+		EventPub: rec,
 	})
 	if err != nil {
 		t.Fatalf("new: %v", err)

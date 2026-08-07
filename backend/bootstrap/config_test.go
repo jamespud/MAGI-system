@@ -97,6 +97,22 @@ func TestMagiSpec_ToConfigBindsWebSearch(t *testing.T) {
 	}
 }
 
+func TestMagiSpec_ToConfigEnablesRoleContract(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	melchior := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	balthasar := cfg.Magi.Balthasar.ToConfig("balthasar", cfg)
+	casper := cfg.Magi.Casper.ToConfig("casper", cfg)
+	if !melchior.RolePolicy.EnforceAssessment || melchior.RolePolicy.RequiredAssessment != entity.RoleAssessmentTechnical {
+		t.Fatalf("Melchior role policy: %+v", melchior.RolePolicy)
+	}
+	if balthasar.RolePolicy.RequiredAssessment != entity.RoleAssessmentRisk || balthasar.RolePolicy.MaxResidualRisk != 0.35 {
+		t.Fatalf("Balthasar role policy: %+v", balthasar.RolePolicy)
+	}
+	if casper.RolePolicy.RequiredAssessment != entity.RoleAssessmentOpportunity || casper.RolePolicy.MinOpportunityScore != 60 {
+		t.Fatalf("Casper role policy: %+v", casper.RolePolicy)
+	}
+}
+
 func TestLoadConfig_EnvOverrides(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")

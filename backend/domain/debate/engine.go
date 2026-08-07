@@ -72,6 +72,15 @@ func (e *DebateEngine) BuildPacket(
 		MinorityVotes:     minority,
 		ConflictingClaims: conflicts,
 		SharedEvidence:    shared,
+		Questions:         defaultRoleQuestions(),
+	}
+}
+
+func defaultRoleQuestions() []entity.DebateQuestion {
+	return []entity.DebateQuestion{
+		{From: entity.MagiCodeCommander, To: entity.MagiCodeMelchior, Text: "Which quantitative assumption or technical blocker would most change your vote?"},
+		{From: entity.MagiCodeCommander, To: entity.MagiCodeBalthasar, Text: "What is the worst credible failure, how reversible is it, and what residual risk remains after rollback?"},
+		{From: entity.MagiCodeCommander, To: entity.MagiCodeCasper, Text: "What opportunity is time-sensitive, what is the cost of waiting, and what user or market signal supports it?"},
 	}
 }
 

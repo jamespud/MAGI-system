@@ -20,6 +20,12 @@ magi:
       - { code: "efficiency", description: "Does it improve efficiency?", weight: 0.3 }
       - { code: "feasibility", description: "Is it technically feasible?", weight: 0.3 }
     risk_tendency: "neutral"
+    role_policy:
+      enforce_assessment: true
+      required_assessment: "technical"
+      min_technical_score: 60
+      min_weighted_utility_score: 60
+      debate_directive: "Audit disputed claims with quantitative and technical evidence; expose assumptions, benchmarks, and feasibility blockers."
     evidence:
       min_evidence_count: 3
       min_quantitative_count: 1
@@ -41,6 +47,12 @@ magi:
       - { code: "reversibility", description: "Can we undo it?", weight: 0.3 }
       - { code: "maintainability", description: "Is it maintainable?", weight: 0.3 }
     risk_tendency: "conservative"
+    role_policy:
+      enforce_assessment: true
+      required_assessment: "risk"
+      max_residual_risk: 0.35
+      min_weighted_utility_score: 60
+      debate_directive: "Stress-test the worst case, reversibility, rollback path, operational failure modes, and residual risk."
     evidence:
       min_evidence_count: 1
       required_types:
@@ -58,6 +70,12 @@ magi:
       - { code: "innovation", description: "Is it innovative?", weight: 0.3 }
       - { code: "user_value", description: "Does it improve user experience?", weight: 0.3 }
     risk_tendency: "aggressive"
+    role_policy:
+      enforce_assessment: true
+      required_assessment: "opportunity"
+      min_opportunity_score: 60
+      min_weighted_utility_score: 60
+      debate_directive: "Look for the strongest opportunity, timing advantage, user signal, and opportunity cost of waiting."
     evidence:
       min_evidence_count: 1
       required_types:

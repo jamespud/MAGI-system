@@ -28,6 +28,9 @@ func TestBuildPacket_MajorityMinority(t *testing.T) {
 	if len(pkt.ConflictingClaims) == 0 {
 		t.Fatalf("expected conflicts")
 	}
+	if len(pkt.Questions) != 3 {
+		t.Fatalf("expected one role-specific question per Magi, got %d", len(pkt.Questions))
+	}
 }
 
 func TestBuildPacket_AllDifferent(t *testing.T) {

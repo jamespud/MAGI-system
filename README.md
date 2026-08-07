@@ -30,6 +30,7 @@ The Commander (an LLM) is deliberately *not* a "god agent" - it cannot count vot
 ## Features
 
 - **Three adversarial agents with different risk tendencies** - Melchior (neutral, needs quantitative evidence), Balthasar (conservative, needs a worst-case claim), Casper (aggressive, needs an opportunity-cost claim). Each enforces its own `EvidenceStandard`.
+- **Executable role contracts** - each Magi must emit role-specific structured analysis: Melchior's technical feasibility, Balthasar's residual-risk/rollback assessment, or Casper's opportunity/timing assessment. Go gates these fields and blocks approvals outside each role's decision boundary.
 - **Hand-written agent loop** (not Eino ReAct) - gather -> evidence summary -> **evidence gate** (deterministic) -> vote. Termination is code-enforced: valid vote, max steps, timeout, token budget, repeated validation/gate failures.
 - **Evidence Ledger as the spine** - `tool result -> EvidenceRecord -> Claim -> Vote`. Reliability is a deterministic modifier formula (base + directness + recency + corroboration + extraction), never a single LLM-emitted number.
 - **Real tool integration** - Tavily `web_search` returns live web evidence; one search result -> one evidence record.
@@ -108,7 +109,7 @@ curl -s localhost:8080/api/v1/cases/<CASE_ID>/votes     | jq .
 | `backend/conf/magi.local.yaml` | Local overrides (gitignored). Merged on top of `magi.yaml`. |
 | `MAGI_CONFIG` env var | Override the config path (default `conf/magi.yaml`). |
 
-The `magi:` block defines each agent's `persona`, utility `dimensions` (with weights), `risk_tendency`, `evidence` standard (`min_evidence_count`, `required_types`, `custom_rules`), and global `max_debate_rounds` / `max_steps` / `timeout_seconds` / `max_tool_calls`.
+The `magi:` block defines each agent's `persona`/`persona_def`, utility `dimensions` (with weights), `risk_tendency`, executable `role_policy`, `evidence` standard (`min_evidence_count`, `required_types`, `custom_rules`), and global `max_debate_rounds` / `max_steps` / `timeout_seconds` / `max_tool_calls`.
 
 ## Architecture
 

@@ -16,7 +16,22 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(cfg.Persona)
+	persona := cfg.Persona
+	if cfg.PersonaDef != nil {
+		if cfg.PersonaDef.SystemPrompt != "" {
+			persona = cfg.PersonaDef.SystemPrompt
+		}
+		if cfg.PersonaDef.Voice != "" {
+			if persona != "" {
+				persona += "\n\n"
+			}
+			persona += "Communication voice: " + cfg.PersonaDef.Voice
+		}
+	}
+	if persona == "" {
+		persona = "You are the MAGI role " + cfg.Code + "."
+	}
+	b.WriteString(persona)
 	if len(cfg.Objective.Dimensions) > 0 {
 		b.WriteString("\n\nObjective function (your value axes; weigh decisions accordingly):")
 		for _, d := range cfg.Objective.Dimensions {
@@ -25,6 +40,10 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 	}
 	if cfg.RiskTendency != "" {
 		fmt.Fprintf(&b, "\n\nRisk tendency: %s", string(cfg.RiskTendency))
+	}
+	if cfg.RolePolicy.EnforceAssessment {
+		b.WriteString("\n\nRole contract (this is an executable decision boundary, not a style suggestion):")
+		b.WriteString(roleContractGuidance(cfg))
 	}
 	es := cfg.EvidenceStandard
 	fmt.Fprintf(&b, "\n\nEvidence standard: min evidence=%d, min quantitative=%d, min reliability=%.2f, required claim count=%d.",
@@ -62,6 +81,15 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 		b.WriteString("You are in reconsideration mode. Review the debate context and the majority/minority arguments.")
 		b.WriteString(" You may gather new evidence via tool calls, then output a new EvidenceSummary, then a Reflection, then a new Vote.")
 		b.WriteString(" Your previous vote is included for reference. You must cite new EV-IDs or accept/reject specific claims to justify any position change.")
+		if cfg.RolePolicy.DebateDirective != "" {
+			b.WriteString("\n\nYour role-specific reconsideration directive: ")
+			b.WriteString(cfg.RolePolicy.DebateDirective)
+		}
+		for _, q := range debate.Packet.Questions {
+			if q.To == entity.MagiCode(cfg.Code) || q.To == "" {
+				fmt.Fprintf(&b, "\nQuestion for this role [%s -> %s]: %s", q.From, q.To, q.Text)
+			}
+		}
 		b.WriteString("\n\nAfter your EvidenceSummary passes the gate, output a Reflection JSON describing your position change, then a Vote JSON.")
 		b.WriteString(" The Reflection must justify any position change with at least one of: new EV-ID, accepted claim, rejected claim, or utility dimension re-evaluation.")
 		b.WriteString("\nReflection JSON schema:\n")
@@ -69,6 +97,28 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 		if debate.PreviousVote != nil {
 			fmt.Fprintf(&b, "\nYour previous vote: decision=%s, confidence=%.0f.", debate.PreviousVote.Decision, debate.PreviousVote.Confidence)
 		}
+	}
+	return b.String()
+}
+
+func roleContractGuidance(cfg *entity.MagiConfig) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n- Output role_assessment.dimension_assessments for every objective dimension, with a score, reasoning, and the EV-IDs that support that dimension.")
+	fmt.Fprintf(&b, "\n- An approval must also have a weighted utility score of at least %.1f across your objective dimensions.", cfg.RolePolicy.MinWeightedUtilityScore)
+	switch cfg.RolePolicy.RequiredAssessment {
+	case entity.RoleAssessmentTechnical:
+		b.WriteString("\n- You are Melchior's technical assessment: fill role_assessment.technical with feasibility_score [0,100], quantitative_evidence_ids, explicit assumptions, and blockers.")
+		fmt.Fprintf(&b, "\n- Approve only when feasibility_score is at least %.1f; otherwise reject or abstain.", cfg.RolePolicy.MinTechnicalScore)
+	case entity.RoleAssessmentRisk:
+		b.WriteString("\n- You are Balthasar's risk assessment: fill role_assessment.risk with worst_case, residual_risk [0,1], reversibility_score [0,100], rollback_plan, and risk_evidence_ids.")
+		fmt.Fprintf(&b, "\n- Approve only when residual_risk is at or below %.2f; high-risk irreversible proposals must be rejected or conditional.", cfg.RolePolicy.MaxResidualRisk)
+	case entity.RoleAssessmentOpportunity:
+		b.WriteString("\n- You are Casper's opportunity assessment: fill role_assessment.opportunity with opportunity_score [0,100], time_window, opportunity_cost, and user_signal_evidence_ids.")
+		fmt.Fprintf(&b, "\n- Approve only when opportunity_score is at least %.1f and the timing advantage is explicit.", cfg.RolePolicy.MinOpportunityScore)
+	}
+	if cfg.RolePolicy.DebateDirective != "" {
+		b.WriteString("\n- Debate directive: ")
+		b.WriteString(cfg.RolePolicy.DebateDirective)
 	}
 	return b.String()
 }
