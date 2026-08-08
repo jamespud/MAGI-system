@@ -35,6 +35,18 @@ function mapToCase(c: ApiCaseResponse): Case {
   };
 }
 
+function upsertSummary(list: CaseSummary[], c: CaseSummary): CaseSummary[] {
+  const idx = list.findIndex((x) => x.id === c.id);
+  if (idx === -1) return [...list, c];
+  const next = [...list];
+  next[idx] = c;
+  return next;
+}
+
+function patchSummary(list: CaseSummary[], id: string, patch: Partial<CaseSummary>): CaseSummary[] {
+  return list.map((x) => (x.id === id ? { ...x, ...patch } : x));
+}
+
 interface CaseState {
   case: Case | null;
   cases: CaseSummary[];
@@ -64,7 +76,10 @@ export const useCaseStore = create<CaseState>((set) => ({
   loadCaseList: (list) => set({ cases: list }),
 
   updateCaseStatus: (status, round) =>
-    set((s) => ({ case: s.case ? { ...s.case, status, round } : null })),
+    set((s) => ({
+      case: s.case ? { ...s.case, status, round } : null,
+      cases: patchSummary(s.cases, s.case?.id ?? '', { status, round }),
+    })),
 
   updateConsensus: (consensus, confidence) =>
     set((s) => ({ case: s.case ? { ...s.case, consensus, confidence } : null })),
@@ -87,7 +102,11 @@ export const useCaseStore = create<CaseState>((set) => ({
     set({ loading: true, error: null });
     try {
       const c = await api.getCase(id);
-      set({ case: mapToCase(c), loading: false });
+      set((s) => ({
+        case: mapToCase(c),
+        cases: upsertSummary(s.cases, mapToSummary(c)),
+        loading: false,
+      }));
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -97,7 +116,7 @@ export const useCaseStore = create<CaseState>((set) => ({
     set({ loading: true, error: null });
     try {
       const c = await api.createCase(question, background);
-      set({ loading: false });
+      set((s) => ({ cases: upsertSummary(s.cases, mapToSummary(c)), loading: false }));
       return c;
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
@@ -111,6 +130,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       const res = await api.runCase(id);
       set((s) => ({
         case: s.case ? { ...s.case, status: res.status as Case['status'] } : null,
+        cases: patchSummary(s.cases, id, { status: res.status as Case['status'] }),
         loading: false,
       }));
     } catch (e) {

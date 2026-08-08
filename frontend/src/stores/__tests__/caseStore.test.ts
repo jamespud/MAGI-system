@@ -160,3 +160,61 @@ describe('caseStore.cancelCase', () => {
     expect(useCaseStore.getState().error).toBe('no active run');
   });
 });
+
+describe('caseStore sidebar list sync', () => {
+  beforeEach(() => {
+    useCaseStore.setState({ case: null, cases: [], loading: false, error: null });
+  });
+
+  it('runCase patches the list entry so Running appears without refresh', async () => {
+    useCaseStore.getState().loadCaseList([
+      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false },
+    ]);
+    useCaseStore.getState().loadCase(mockCase);
+    vi.mocked(api.runCase).mockResolvedValueOnce({ id: 'test-1', status: 'INVESTIGATING' });
+
+    await useCaseStore.getState().runCase('test-1');
+
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'test-1')?.status).toBe('INVESTIGATING');
+  });
+
+  it('createCase adds the new case to the list', async () => {
+    const apiCase = {
+      id: 'case-new', question: 'New Q?', background: '',
+      constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 0, final_decision: '',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    vi.mocked(api.createCase).mockResolvedValueOnce(apiCase);
+
+    await useCaseStore.getState().createCase('New Q?');
+
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'case-new')?.status).toBe('DRAFT');
+  });
+
+  it('fetchCase upserts the list entry with latest status', async () => {
+    useCaseStore.getState().loadCaseList([
+      { id: 'case-001', question: 'Rust?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false },
+    ]);
+    const apiCase = {
+      id: 'case-001', question: 'Rust?', background: 'Java team',
+      constraints: [], status: 'RESOLVED', consensus: null, confidence: 0, round: 2,
+      final_decision: 'approve',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    vi.mocked(api.getCase).mockResolvedValueOnce(apiCase);
+
+    await useCaseStore.getState().fetchCase('case-001');
+
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'case-001')?.status).toBe('RESOLVED');
+    expect(useCaseStore.getState().cases).toHaveLength(1);
+  });
+
+  it('updateCaseStatus patches the list entry too', () => {
+    useCaseStore.getState().loadCase(mockCase);
+    useCaseStore.getState().loadCaseList([
+      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '', pinned: false },
+    ]);
+    useCaseStore.getState().updateCaseStatus('DEBATING', 2);
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'test-1')?.status).toBe('DEBATING');
+  });
+});
