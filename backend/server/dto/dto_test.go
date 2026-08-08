@@ -111,3 +111,23 @@ func TestFromTool(t *testing.T) {
 		t.Fatalf("FromTool: %+v", got)
 	}
 }
+
+func TestFromVote_NormalizesConfidence(t *testing.T) {
+	v := &entity.Vote{ID: "v1", Decision: entity.VoteDecisionReject, Confidence: 0.95}
+	out := FromVote(v, "melchior")
+	if out.Confidence != 95 {
+		t.Fatalf("FromVote confidence: got %v want 95", out.Confidence)
+	}
+}
+
+func TestAvgConfidence_NormalizesLegacyVotes(t *testing.T) {
+	votes := []entity.Vote{
+		{Confidence: 95},
+		{Confidence: 0.95},
+		{Confidence: 0.94},
+	}
+	// (95 + 95 + 94) / 3, not the raw mixed-scale average 32.3.
+	if got := avgConfidence(votes); got != 94.66666666666667 {
+		t.Fatalf("avgConfidence: got %v want 94.66666666666667", got)
+	}
+}

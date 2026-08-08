@@ -18,7 +18,7 @@ func BuildReport(resolution *entity.Resolution, votes []*entity.Vote, evidence [
 		b.WriteString(")\n\n--- Votes ---\n")
 	}
 	for _, v := range votes {
-		fmt.Fprintf(&b, "- %s (confidence %.0f)\n", v.Decision, v.Confidence)
+		fmt.Fprintf(&b, "- %s (confidence %.0f)\n", v.Decision, entity.NormalizeConfidence(v.Confidence))
 	}
 	if len(evidence) > 0 {
 		b.WriteString("\n--- Key Evidence ---\n")

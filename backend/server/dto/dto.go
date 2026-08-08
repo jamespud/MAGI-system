@@ -184,7 +184,7 @@ func avgConfidence(votes []entity.Vote) float64 {
 	}
 	sum := 0.0
 	for _, v := range votes {
-		sum += v.Confidence
+		sum += entity.NormalizeConfidence(v.Confidence)
 	}
 	return sum / float64(len(votes))
 }
@@ -305,7 +305,7 @@ func FromVote(v *entity.Vote, agentCode string) VoteDTO {
 		ID:         v.ID,
 		AgentCode:  agentCode,
 		Stance:     string(v.Decision),
-		Confidence: v.Confidence,
+		Confidence: entity.NormalizeConfidence(v.Confidence),
 		Reasoning:  v.ReasoningSummary,
 		Round:      v.Round,
 	}

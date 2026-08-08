@@ -106,7 +106,7 @@ func BuildAgentSystemPrompt(cfg *entity.MagiConfig, summarySchema, voteSchema, r
 		b.WriteString("\nReflection JSON schema:\n")
 		b.Write(reflectionSchema)
 		if debate.PreviousVote != nil {
-			fmt.Fprintf(&b, "\nYour previous vote: decision=%s, confidence=%.0f.", debate.PreviousVote.Decision, debate.PreviousVote.Confidence)
+			fmt.Fprintf(&b, "\nYour previous vote: decision=%s, confidence=%.0f.", debate.PreviousVote.Decision, entity.NormalizeConfidence(debate.PreviousVote.Confidence))
 		}
 	}
 	return b.String()

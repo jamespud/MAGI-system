@@ -124,15 +124,7 @@ func normalizeVoteConfidence(v *entity.Vote) {
 	if v == nil {
 		return
 	}
-	if v.Confidence > 0 && v.Confidence <= 1 {
-		v.Confidence *= 100
-	}
-	if v.Confidence < 0 {
-		v.Confidence = 0
-	}
-	if v.Confidence > 100 {
-		v.Confidence = 100
-	}
+	v.Confidence = entity.NormalizeConfidence(v.Confidence)
 }
 
 // stripDiscriminatorType removes a top-level "type" key from a JSON object

@@ -43,6 +43,22 @@ type Vote struct {
 	CreatedAt        time.Time               `json:"created_at,omitempty"`
 }
 
+// NormalizeConfidence coerces a model-provided confidence value to a 0-100
+// percentage. Models answer in both 0-1 and 0-100 scales; normalizing at
+// every read keeps legacy rows and freshly parsed votes consistent.
+func NormalizeConfidence(v float64) float64 {
+	if v > 0 && v <= 1 {
+		v *= 100
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
 type VoteDecision string
 
 const (
