@@ -104,7 +104,7 @@ export default function ConsensusPanel() {
         <div>
           <MonoText size="sm" muted>Confidence</MonoText>
           <div className="mt-1">
-            <span className="font-mono text-sm font-semibold text-accent">{confidence > 0 ? `${Math.round(confidence * 100)}%` : '-'}</span>
+            <span className="font-mono text-sm font-semibold text-accent">{confidence > 0 ? `${Math.round(confidence)}%` : '-'}</span>
           </div>
         </div>
 

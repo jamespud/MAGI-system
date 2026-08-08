@@ -78,6 +78,7 @@ func parseResponse(
 			if phase == "vote" {
 				vote, vr := voteVal.ValidateAndUnmarshal([]byte(content))
 				if vr != nil && vr.Valid {
+					normalizeVoteConfidence(vote)
 					pr.Type = ResponseVote
 					pr.Vote = vote
 					return pr
@@ -105,6 +106,7 @@ func parseResponse(
 	case "vote":
 		vote, vr := voteVal.ValidateAndUnmarshal([]byte(content))
 		if vr != nil && vr.Valid {
+			normalizeVoteConfidence(vote)
 			pr.Type = ResponseVote
 			pr.Vote = vote
 			return pr
@@ -113,6 +115,24 @@ func parseResponse(
 
 	pr.Type = ResponseInvalid
 	return pr
+}
+
+// normalizeVoteConfidence coerces model-provided confidence to a 0-100
+// percentage. LLMs answer in both 0-1 and 0-100 scales; storing them mixed
+// (e.g. 0.95 vs 95) corrupts averaging and display.
+func normalizeVoteConfidence(v *entity.Vote) {
+	if v == nil {
+		return
+	}
+	if v.Confidence > 0 && v.Confidence <= 1 {
+		v.Confidence *= 100
+	}
+	if v.Confidence < 0 {
+		v.Confidence = 0
+	}
+	if v.Confidence > 100 {
+		v.Confidence = 100
+	}
 }
 
 // stripDiscriminatorType removes a top-level "type" key from a JSON object

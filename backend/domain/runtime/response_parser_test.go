@@ -64,6 +64,30 @@ func TestParseResponse_StripsCodeFencesAroundVote(t *testing.T) {
 	}
 }
 
+
+func TestParseResponse_NormalizesVoteConfidenceToPercentage(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want float64
+	}{
+		{"fraction 0-1 scale", `{"decision":"approve","confidence":0.95,"utility_scores":[{"dimension_code":"correctness","score":90,"evidence_ids":["EV-001"],"reasoning":"r"}],"evidence_ids":["EV-001"]}`, 95},
+		{"percentage scale kept", `{"decision":"approve","confidence":95,"utility_scores":[{"dimension_code":"correctness","score":90,"evidence_ids":["EV-001"],"reasoning":"r"}],"evidence_ids":["EV-001"]}`, 95},
+		{"clamped above 100", `{"decision":"approve","confidence":250,"utility_scores":[{"dimension_code":"correctness","score":90,"evidence_ids":["EV-001"],"reasoning":"r"}],"evidence_ids":["EV-001"]}`, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := schema.AssistantMessage(tc.json, nil)
+			pr := parseResponse(resp, "vote", mustSumVal(t), mustVoteVal(t), mustClaimVal(t), mustReflVal(t))
+			if pr.Type != ResponseVote || pr.Vote == nil {
+				t.Fatalf("expected vote, got %s", pr.Type)
+			}
+			if pr.Vote.Confidence != tc.want {
+				t.Fatalf("confidence: got %v want %v", pr.Vote.Confidence, tc.want)
+			}
+		})
+	}
+}
 func TestParseResponse_StripsDiscriminatorTypeField(t *testing.T) {
 	// LLMs often emit a "type" discriminator field; with additionalProperties:false
 	// the schema rejects it. parseResponse must strip it before validating.

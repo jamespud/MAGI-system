@@ -54,7 +54,7 @@ export default function CaseHeader() {
 
           <div className="flex items-center gap-1.5">
             <MonoText size="sm" muted>Confidence</MonoText>
-            <span className="font-mono text-sm font-semibold text-accent">{c.confidence}%</span>
+            <span className="font-mono text-sm font-semibold text-accent">{Math.round(c.confidence)}%</span>
           </div>
         </div>
       </div>
