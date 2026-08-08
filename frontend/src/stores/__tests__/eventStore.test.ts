@@ -31,4 +31,12 @@ describe('eventStore', () => {
     useEventStore.getState().loadEvents([ev, { ...ev, id: 'e2' }]);
     expect(useEventStore.getState().events).toHaveLength(2);
   });
+
+  it('dedupes events by id (history replay + live overlap)', () => {
+    const { pushEvent } = useEventStore.getState();
+    pushEvent({ id: 'e1', type: 'VOTE_SUBMITTED', timestamp: 't', message: 'm' });
+    pushEvent({ id: 'e1', type: 'VOTE_SUBMITTED', timestamp: 't', message: 'm' });
+    pushEvent({ id: 'e2', type: 'AGENT_STEP', timestamp: 't', message: 'm' });
+    expect(useEventStore.getState().events).toHaveLength(2);
+  });
 });

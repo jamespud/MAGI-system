@@ -55,9 +55,15 @@ export function formatEventMessage(event: MagiEvent): string {
     case 'EVIDENCE_CREATED':
       if (d.evidence_id) return `evidence ${d.evidence_id}`;
       break;
-    case 'VOTE_SUBMITTED':
-      if (d.stance) return `voted ${d.stance}${d.confidence != null ? ` (${d.confidence}%)` : ''}`;
+    case 'VOTE_SUBMITTED': {
+      if (d.stance) {
+        const conf = typeof d.confidence === 'number'
+          ? (d.confidence > 0 && d.confidence <= 1 ? Math.round(d.confidence * 100) : Math.round(d.confidence))
+          : null;
+        return `voted ${d.stance}${conf != null ? ` (${conf}%)` : ''}`;
+      }
       break;
+    }
     case 'CONSENSUS_CHANGED':
       if (d.outcome) return `consensus: ${d.outcome}`;
       break;

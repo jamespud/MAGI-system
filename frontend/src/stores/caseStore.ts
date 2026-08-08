@@ -59,7 +59,7 @@ interface CaseState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   fetchCases: () => Promise<void>;
-  fetchCase: (id: string) => Promise<void>;
+  fetchCase: (id: string, opts?: { silent?: boolean }) => Promise<void>;
   createCase: (question: string, background?: string) => Promise<ApiCaseResponse>;
   runCase: (id: string) => Promise<void>;
   cancelCase: (id: string) => Promise<void>;
@@ -98,8 +98,8 @@ export const useCaseStore = create<CaseState>((set) => ({
     }
   },
 
-  fetchCase: async (id: string) => {
-    set({ loading: true, error: null });
+  fetchCase: async (id: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) set({ loading: true, error: null });
     try {
       const c = await api.getCase(id);
       set((s) => ({
@@ -108,7 +108,7 @@ export const useCaseStore = create<CaseState>((set) => ({
         loading: false,
       }));
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      if (!opts?.silent) set({ error: (e as Error).message, loading: false });
     }
   },
 

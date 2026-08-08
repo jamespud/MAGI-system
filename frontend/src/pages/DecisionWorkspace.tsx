@@ -24,7 +24,7 @@ export default function DecisionWorkspace() {
   // run completion (via the SSE terminal callback) so the UI reflects the final
   // status/consensus/votes without a manual page refresh.
   const refreshCaseData = (id: string) => {
-    useCaseStore.getState().fetchCase(id);
+    useCaseStore.getState().fetchCase(id, { silent: true });
     api.getAgents(id)
       .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
       .catch(() => {});

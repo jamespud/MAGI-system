@@ -17,7 +17,7 @@ export const useEventStore = create<EventState>((set) => ({
   filters: { ...defaultFilters },
 
   pushEvent: (event) =>
-    set((s) => ({ events: [...s.events, event] })),
+    set((s) => (s.events.some((e) => e.id === event.id) ? s : { events: [...s.events, event] })),
 
   loadEvents: (events) => set({ events }),
 

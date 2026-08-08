@@ -84,7 +84,7 @@ describe('DecisionWorkspace', () => {
 
   it('calls fetchCase when caseId present', () => {
     renderAt('/case/case-001');
-    expect(mockFetchCase).toHaveBeenCalledWith('case-001');
+    expect(mockFetchCase).toHaveBeenCalledWith('case-001', { silent: true });
   });
 
   it('loads agents + events + subscribes to stream when caseId present', async () => {
