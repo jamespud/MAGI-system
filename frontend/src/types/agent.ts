@@ -23,10 +23,13 @@ export const AGENT_COLORS: Record<AgentId, string> = {
 export type AgentStatus = 'idle' | 'running' | 'waiting' | 'completed' | 'error';
 
 export interface ToolCall {
+  id?: string;
   name: string;
   params: Record<string, string>;
   result: string | null;
   timestamp: string;
+  error?: string;
+  durationMs?: number;
 }
 
 export interface EvidenceRef {

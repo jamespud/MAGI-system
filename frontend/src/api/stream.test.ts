@@ -59,6 +59,48 @@ describe('subscribeCaseStream', () => {
   });
 
 
+
+  it('incrementally adds evidence from EVIDENCE_CREATED', () => {
+    useAgentStore.getState().patchAgent('melchior', { status: 'running' });
+    const unsub = subscribeCaseStream('c1');
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'EVIDENCE_CREATED', agent_code: 'melchior', message: 'm', payload: { evidence_id: 'EV-1', reliability: 0.9, tool_name: 'web_search' }, timestamp: 't' }),
+    });
+    expect(useAgentStore.getState().agents.melchior?.evidence).toHaveLength(1);
+    expect(useAgentStore.getState().agents.melchior?.evidence[0].id).toBe('EV-1');
+    unsub();
+  });
+
+  it('incrementally updates tool calls through the lifecycle', () => {
+    useAgentStore.getState().patchAgent('melchior', { status: 'running' });
+    const unsub = subscribeCaseStream('c1');
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'TOOL_CALL_REQUESTED', agent_code: 'melchior', message: 'm', payload: { tool_call_id: 'call-1', tool_name: 'web_search', arguments: '{"q":"x"}' }, timestamp: 't' }),
+    });
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e2', type: 'TOOL_CALL_COMPLETED', agent_code: 'melchior', message: 'm', payload: { tool_call_id: 'call-1', tool_name: 'web_search', duration_ms: 42, result: 'found' }, timestamp: 't' }),
+    });
+    const tc = useAgentStore.getState().agents.melchior?.toolCalls[0];
+    expect(tc?.name).toBe('web_search');
+    expect(tc?.params).toEqual({ q: 'x' });
+    expect(tc?.result).toBe('found');
+    expect(useAgentStore.getState().agents.melchior?.toolCalls).toHaveLength(1);
+    unsub();
+  });
+
+  it('incrementally sets the agent vote from VOTE_SUBMITTED', () => {
+    useAgentStore.getState().patchAgent('casper', { status: 'running' });
+    const unsub = subscribeCaseStream('c1');
+    const es = FakeEventSource.last!;
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'VOTE_SUBMITTED', agent_code: 'casper', message: 'm', payload: { stance: 'reject', confidence: 94, reasoning: 'r' }, timestamp: 't' }),
+    });
+    expect(useAgentStore.getState().agents.casper?.vote?.stance).toBe('reject');
+    expect(useAgentStore.getState().agents.casper?.vote?.confidence).toBe(94);
+    unsub();
+  });
   it('applies CASE_STATUS_CHANGED to caseStore without pushing to the timeline', () => {
     const unsub = subscribeCaseStream('c1');
     const es = FakeEventSource.last!;

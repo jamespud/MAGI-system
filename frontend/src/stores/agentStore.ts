@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AgentId, AgentSnapshot, AgentStatus, AgentVote } from '@/types/agent';
+import type { AgentId, AgentSnapshot, AgentStatus, AgentVote, ClaimRef, EvidenceRef, ToolCall } from '@/types/agent';
 import { normalizeStance } from '@/lib/stance';
 import type { ApiAgentSnapshot } from '@/api/client';
 
@@ -9,6 +9,10 @@ interface AgentState {
   loadAgentsFromApi: (snap: Record<string, ApiAgentSnapshot>) => void;
   patchAgent: (id: AgentId, patch: Partial<AgentSnapshot>) => void;
   updateAgentStatus: (id: AgentId, status: AgentStatus) => void;
+  addEvidence: (id: AgentId, evidence: EvidenceRef) => void;
+  addClaim: (id: AgentId, claim: ClaimRef) => void;
+  upsertToolCall: (id: AgentId, tc: Partial<ToolCall> & { id: string; name: string }) => void;
+  setVote: (id: AgentId, vote: AgentVote) => void;
   resetAgents: () => void;
 }
 
@@ -102,6 +106,39 @@ export const useAgentStore = create<AgentState>((set) => ({
         [id]: s.agents[id] ? { ...s.agents[id]!, status } : null,
       },
     })),
+
+  addEvidence: (id, evidence) =>
+    set((s) => {
+      const cur = s.agents[id];
+      if (!cur || cur.evidence.some((e) => e.id === evidence.id)) return {};
+      return { agents: { ...s.agents, [id]: { ...cur, evidence: [...cur.evidence, evidence] } } };
+    }),
+
+  addClaim: (id, claim) =>
+    set((s) => {
+      const cur = s.agents[id];
+      if (!cur) return {};
+      if (claim.id && cur.claims.some((c) => c.id === claim.id)) return {};
+      return { agents: { ...s.agents, [id]: { ...cur, claims: [...cur.claims, claim] } } };
+    }),
+
+  upsertToolCall: (id, tc) =>
+    set((s) => {
+      const cur = s.agents[id];
+      if (!cur) return {};
+      const idx = cur.toolCalls.findIndex((t) => t.id === tc.id);
+      const toolCalls = idx >= 0
+        ? cur.toolCalls.map((t, i) => (i === idx ? { ...t, ...tc } : t))
+        : [...cur.toolCalls, { params: {}, result: null, timestamp: '', ...tc }];
+      return { agents: { ...s.agents, [id]: { ...cur, toolCalls } } };
+    }),
+
+  setVote: (id, vote) =>
+    set((s) => {
+      const cur = s.agents[id];
+      if (!cur) return {};
+      return { agents: { ...s.agents, [id]: { ...cur, vote } } };
+    }),
 
   resetAgents: () => set({ agents: empty }),
 }));

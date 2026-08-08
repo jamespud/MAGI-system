@@ -3,6 +3,7 @@ import { mapBackendEvent } from './eventMapper';
 import type { ApiEvent } from './client';
 import type { AgentId, AgentStatus } from '@/types/agent';
 import type { CaseStatus } from '@/types/case';
+import { normalizeStance } from '@/lib/stance';
 
 // Maps backend event types to the agent status they imply. Absent types
 // (e.g. TASK_NORMALIZED) leave the agent status untouched.
@@ -23,6 +24,87 @@ const STATUS_BY_TYPE: Record<string, AgentStatus> = {
 // caller should re-fetch the case + artifacts (status/consensus/votes are
 // only final after completion).
 const TERMINAL_TYPES = new Set(['CASE_COMPLETED', 'CASE_FAILED']);
+
+function parseArgs(args: unknown): Record<string, string> {
+  if (typeof args !== 'string') return {};
+  try {
+    const parsed = JSON.parse(args);
+    if (parsed && typeof parsed === 'object') {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) out[k] = String(v);
+      return out;
+    }
+  } catch {
+    // not JSON
+  }
+  return {};
+}
+
+// applyIncremental updates the agent snapshot from live SSE events, so the
+// agent panel and evidence graph reflect evidence/tool calls/votes as they
+// happen instead of waiting for the terminal refetch.
+function applyIncremental(raw: ApiEvent) {
+  if (!raw.agent_code) return;
+  const agentId = raw.agent_code as AgentId;
+  const p = raw.payload ?? {};
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+  switch (raw.type) {
+    case 'MODEL_RESPONDED': {
+      const step = num(p.step);
+      if (step != null) useAgentStore.getState().patchAgent(agentId, { step });
+      break;
+    }
+    case 'EVIDENCE_CREATED': {
+      const id = str(p.evidence_id);
+      if (id) useAgentStore.getState().addEvidence(agentId, { id, source: str(p.tool_name) ?? '', reliability: num(p.reliability) ?? 0 });
+      break;
+    }
+    case 'CLAIM_CREATED': {
+      const stmt = str(p.statement);
+      if (stmt) useAgentStore.getState().addClaim(agentId, {
+        id: str(p.claim_id) ?? '',
+        text: stmt,
+        supports: Array.isArray(p.supports) ? p.supports as string[] : [],
+        contradicts: Array.isArray(p.contradicts) ? p.contradicts as string[] : [],
+      });
+      break;
+    }
+    case 'TOOL_CALL_REQUESTED': {
+      const id = str(p.tool_call_id);
+      const name = str(p.tool_name);
+      if (id && name) useAgentStore.getState().upsertToolCall(agentId, { id, name, params: parseArgs(p.arguments), result: null });
+      break;
+    }
+    case 'TOOL_CALL_STARTED': {
+      const id = str(p.tool_call_id);
+      const name = str(p.tool_name);
+      if (id && name) useAgentStore.getState().upsertToolCall(agentId, { id, name });
+      break;
+    }
+    case 'TOOL_CALL_COMPLETED': {
+      const id = str(p.tool_call_id);
+      const name = str(p.tool_name);
+      if (id && name) useAgentStore.getState().upsertToolCall(agentId, { id, name, result: str(p.result) ?? '', durationMs: num(p.duration_ms) });
+      break;
+    }
+    case 'TOOL_CALL_FAILED': {
+      const id = str(p.tool_call_id);
+      const name = str(p.tool_name);
+      if (id && name) useAgentStore.getState().upsertToolCall(agentId, { id, name, error: str(p.error) ?? 'tool failed' });
+      break;
+    }
+    case 'VOTE_SUBMITTED': {
+      const stance = str(p.stance);
+      if (stance) useAgentStore.getState().setVote(agentId, {
+        stance: normalizeStance(stance),
+        confidence: num(p.confidence) ?? 0,
+        reasoning: str(p.reasoning) ?? '',
+      });
+      break;
+    }
+  }
+}
 
 // subscribeCaseStream opens an SSE connection to /cases/:id/stream, maps each
 // backend event to the frontend shape, pushes it into eventStore, and patches
@@ -47,6 +129,7 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       }
       return; // phase transitions update the case status, not the timeline
     }
+    applyIncremental(raw);
     const ev = mapBackendEvent(raw);
     useEventStore.getState().pushEvent(ev);
     if (ev.agentId) {

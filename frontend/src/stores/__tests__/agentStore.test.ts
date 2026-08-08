@@ -106,4 +106,42 @@ describe('loadAgentsFromApi', () => {
     expect(c?.claims).toEqual([]);
     expect(c?.vote).toBeNull();
   });
+
+describe('incremental updates', () => {
+  beforeEach(() => {
+    useAgentStore.getState().resetAgents();
+  });
+
+  it('addEvidence appends and dedupes by id', () => {
+    useAgentStore.getState().patchAgent('melchior', { status: 'running' });
+    const s = useAgentStore.getState();
+    s.addEvidence('melchior', { id: 'EV-1', source: 'web_search', reliability: 0.9 });
+    s.addEvidence('melchior', { id: 'EV-1', source: 'web_search', reliability: 0.9 });
+    expect(useAgentStore.getState().agents.melchior?.evidence).toHaveLength(1);
+  });
+
+  it('addClaim appends a claim', () => {
+    useAgentStore.getState().patchAgent('casper', { status: 'running' });
+    useAgentStore.getState().addClaim('casper', { id: 'CL-1', text: 'claim', supports: ['EV-1'], contradicts: [] });
+    expect(useAgentStore.getState().agents.casper?.claims).toHaveLength(1);
+  });
+
+  it('upsertToolCall creates then updates by id', () => {
+    useAgentStore.getState().patchAgent('balthasar', { status: 'running' });
+    const s = useAgentStore.getState();
+    s.upsertToolCall('balthasar', { id: 'call-1', name: 'web_search', params: { q: 'x' }, result: null });
+    expect(useAgentStore.getState().agents.balthasar?.toolCalls).toHaveLength(1);
+    s.upsertToolCall('balthasar', { id: 'call-1', name: 'web_search', result: 'found', durationMs: 42 });
+    const tc = useAgentStore.getState().agents.balthasar?.toolCalls[0];
+    expect(tc?.result).toBe('found');
+    expect(tc?.durationMs).toBe(42);
+    expect(useAgentStore.getState().agents.balthasar?.toolCalls).toHaveLength(1);
+  });
+
+  it('setVote stores the agent vote', () => {
+    useAgentStore.getState().patchAgent('melchior', { status: 'running' });
+    useAgentStore.getState().setVote('melchior', { stance: 'approve', confidence: 90, reasoning: 'r' });
+    expect(useAgentStore.getState().agents.melchior?.vote?.stance).toBe('approve');
+  });
+});
 });

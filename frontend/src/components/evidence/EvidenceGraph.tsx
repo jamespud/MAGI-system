@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { useParams } from 'react-router-dom';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
-import { useUiStore } from '@/stores';
-import { api } from '@/api/client';
-import type { ApiEvidence, ApiClaim, ApiVote } from '@/api/client';
+import { useAgentStore, useUiStore } from '@/stores';
+import type { AgentId } from '@/types/agent';
 import { stanceColor } from '@/lib/stance';
 import { Card } from '@/components/ui';
 import { MonoText } from '@/components/shared';
@@ -22,21 +21,22 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   type: 'supports' | 'contradicts';
 }
 
+const AGENT_IDS: AgentId[] = ['melchior', 'balthasar', 'casper'];
+
+interface EvidenceInput { id: string; collected_by: string; }
+interface ClaimInput { id: string; text: string; supports: string[]; contradicts: string[]; created_by: string; }
+interface VoteInput { agent_code: string; stance: string; }
+
 function agentColor(code: string): string {
   return code === 'melchior' ? 'var(--melchior)'
     : code === 'balthasar' ? 'var(--balthasar)'
     : 'var(--casper)';
 }
 
-function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[]) {
-  // Dedup votes: one node per agent (latest round wins). Without this, an
-  // agent that voted in both investigate + reconsider phases renders as two
-  // same-id vote nodes.
-  const voteByAgent = new Map<string, ApiVote>();
-  for (const v of votes) {
-    const cur = voteByAgent.get(v.agent_code);
-    if (!cur || v.round >= cur.round) voteByAgent.set(v.agent_code, v);
-  }
+function buildGraph(evidence: EvidenceInput[], claims: ClaimInput[], votes: VoteInput[]) {
+  // One vote node per agent; the store keeps the latest vote per agent.
+  const voteByAgent = new Map<string, VoteInput>();
+  for (const v of votes) voteByAgent.set(v.agent_code, v);
   const dedupedVotes = [...voteByAgent.values()];
 
   // Only show evidence that is referenced by at least one claim's supports.
@@ -83,6 +83,7 @@ function buildGraph(evidence: ApiEvidence[], claims: ApiClaim[], votes: ApiVote[
 
 export default function EvidenceGraph() {
   const { caseId } = useParams<{ caseId: string }>();
+  const agents = useAgentStore((s) => s.agents);
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [empty, setEmpty] = useState(false);
@@ -91,20 +92,25 @@ export default function EvidenceGraph() {
   useEffect(() => {
     if (!caseId || !svgRef.current) return;
 
-    let cancelled = false;
     setZoomPct(100);
-    Promise.all([
-      api.getEvidence(caseId).catch(() => [] as ApiEvidence[]),
-      api.getClaims(caseId).catch(() => [] as ApiClaim[]),
-      api.getVotes(caseId).catch(() => [] as ApiVote[]),
-    ]).then(([evidence, claims, votes]) => {
-      if (cancelled) return;
-      const { nodes, links } = buildGraph(evidence, claims, votes);
-      setEmpty(nodes.length === 0);
-      if (nodes.length === 0 || !svgRef.current) return;
+    // Build from the agents' live evidence/claims/votes so the graph re-renders
+    // incrementally as SSE events arrive and after terminal sync.
+    const evidence: EvidenceInput[] = [];
+    const claims: ClaimInput[] = [];
+    const votes: VoteInput[] = [];
+    for (const id of AGENT_IDS) {
+      const a = agents[id];
+      if (!a) continue;
+      for (const e of a.evidence) evidence.push({ id: e.id, collected_by: id });
+      for (const c of a.claims) claims.push({ id: c.id, text: c.text, supports: c.supports, contradicts: c.contradicts, created_by: id });
+      if (a.vote) votes.push({ agent_code: id, stance: a.vote.stance });
+    }
+    const { nodes, links } = buildGraph(evidence, claims, votes);
+    setEmpty(nodes.length === 0);
+    if (nodes.length === 0 || !svgRef.current) return;
 
-      const svg = d3.select(svgRef.current);
-      svg.selectAll('*').remove();
+    const svg = d3.select(svgRef.current);
+    svg.selectAll('*').remove();
 
       const width = svgRef.current.clientWidth || 800;
       svg.attr('viewBox', `0 0 ${width} ${HEIGHT}`);
@@ -188,12 +194,8 @@ export default function EvidenceGraph() {
         node.attr('transform', (d) => `translate(${d.x},${d.y})`);
       });
 
-      cancelled = true;
       return () => { simulation.stop(); };
-    });
-
-    return () => { cancelled = true; };
-  }, [caseId]);
+  }, [caseId, agents]);
 
   const zoomBy = (factor: number) => {
     const z = zoomRef.current;
