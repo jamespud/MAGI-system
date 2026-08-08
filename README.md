@@ -233,3 +233,51 @@ The agent loop is heavily tested with scripted models, including failure policie
 ## License
 
 Personal project. See the repository for details.
+
+## Harness Capabilities
+
+Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
+
+- **Durable async execution** — decision jobs persist with leases, retries, cancellation, and startup recovery; agent runs checkpoint and resume.
+- **Multi-tenant API** — API-key auth (constant-time compare) with per-user ownership on cases, datasets, plugin bindings, and recurring templates. Health/docs/metrics stay public.
+- **Governance & safety** — per-user run concurrency limits, token cost accounting, Prometheus `/metrics`, code-runner guardrails (language/length/danger patterns/timeout), an autonomous tool-approval gate (high-impact tools require admin auto-approval), prompt-injection framing of tool output, and secret redaction before events/audit/model messages leave the process.
+- **Observability** — OpenTelemetry spans on HTTP requests and decision runs with `X-Trace-ID` propagation (log sink by default, OTLP-ready), plus readiness/DB ping and config fail-fast validation.
+- **Evidence-backed outputs** — the final report must cite at least one collected evidence/claim ID when evidence exists, or the case fails.
+- **User-scoped tools** — each user manages their own Coze plugin bindings; agent runs resolve the user's enabled tools dynamically.
+- **Ground-truth evaluation** — datasets of expected decisions run asynchronously through the full orchestrator and report accuracy / weighted accuracy with per-item results.
+- **Proactive scheduling** — recurring decision templates fire automatically at intervals through the async run manager.
+- **Conversational entry** — `POST /api/v1/assistant` turns a natural-language question into a full decision run with report.
+- **Admin operations** — role-gated usage aggregates (cases/runs/tokens/cost per user) at `GET /api/v1/admin/usage`.
+
+### API map (v1)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/assistant` | Run a decision from a message |
+| POST/GET | `/cases`, `/cases/:id` (+`/run`, `/cancel`, `/report`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
+| GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` | Ground-truth evaluation |
+| GET/POST/PATCH/DELETE | `/plugins`, `/plugins/:id` | User plugin bindings |
+| GET/POST/PATCH/DELETE | `/recurring`, `/recurring/:id` (+`/:id/run`) | Recurring templates |
+| POST | `/evaluation`, `/evaluation/:id`, `/benchmark` | Evaluation |
+| GET | `/admin/usage` | Admin usage aggregate |
+| GET | `/metrics`, `/health`, `/ready`, `/version`, `/openapi.json` | Ops |
+
+### Configuration highlights
+
+```yaml
+model: { api_key: "...", model_name: "..." }   # or model_id for Coze mode
+auth: { enabled: true, api_keys: [...] }        # per-user API keys
+limits: { max_concurrent_runs_per_user: 3 }
+code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
+tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
+```
+
+`Config.Validate()` runs at startup and fails fast on missing model, invalid auth, or negative limits; `/ready` performs a live database ping.
+
+## Development
+
+```bash
+cd backend && go test ./... && go test -race ./...
+```
+
+The end-to-end harness flow (`server/e2e_test.go`) exercises auth, case lifecycle, dataset evaluation, plugin bindings, recurring triggers, the assistant endpoint, metrics, and admin usage against a real SQLite-backed stack with a stubbed orchestrator.

@@ -36,3 +36,8 @@ backend/conf/magi.local.yaml
 # Environment (local overrides; .env is auto-loaded by docker compose)
 .env
 .env.local
+
+docs/
+
+# build artifacts
+backend/magi-server

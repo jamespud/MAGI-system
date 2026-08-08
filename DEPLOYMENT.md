@@ -1,0 +1,129 @@
+# MAGI Deployment & Verification Guide
+
+MAGI is a governed, evidence-driven multi-agent decision harness. This guide
+covers containerized deployment and the production end-to-end verification
+that requires real model/plugin/workflow credentials.
+
+## Prerequisites
+
+- Docker with compose plugin
+- Go 1.24+ (for local builds/tests)
+- Node.js 18+ (for the frontend)
+- An OpenAI-compatible model API key, or a Coze model id
+- Optional: Tavily API key (web_search), Coze plugin/workflow services
+
+## Quick start (containerized stack)
+
+```bash
+make prepare                       # bootstrap deps, .env, dirs
+cp backend/conf/magi.yaml.example backend/conf/magi.yaml
+# edit backend/conf/magi.yaml: model.api_key/model_name (+ auth, limits as needed)
+make web-up                        # mysql + magi-server + nginx (port 80)
+```
+
+- API: `http://localhost/api/v1`
+- OpenAPI: `http://localhost/openapi.json`
+- Metrics: `http://localhost/metrics`
+- Health/readiness: `/health`, `/ready` (readiness pings the database)
+
+Stop with `make web-down`; logs with `make web-logs`.
+
+## Configuration
+
+`backend/conf/magi.yaml` (or env overrides via `MAGI_*`):
+
+| Section | Purpose |
+| --- | --- |
+| `model` | `api_key` + `base_url` + `model_name` (direct) or `model_id` (Coze mode); `price_per_m_*_usd` for cost accounting |
+| `auth` | `enabled: true` + `api_keys` (name/key/user_id/role). Startup fails fast if enabled without valid keys |
+| `limits` | `max_concurrent_runs_per_user` |
+| `code_runner` | enable + timeout/length/language/danger-pattern guardrails |
+| `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
+| `tracing` | `enabled` + `service_name` (log sink; OTLP-ready) |
+
+Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
+`MAGI_AUTH_ENABLED`, `MAGI_AUTH_API_KEYS` (`userID:role:name:key;...`),
+`MAGI_DB_DSN`, `MAGI_DB_DRIVER`.
+
+## Verification checklist (real credentials required)
+
+1. Stack is healthy:
+   ```bash
+   curl -s http://localhost/ready     # {"status":"ready"}
+   curl -s http://localhost/metrics   # counters present
+   ```
+
+2. Authentication: create an API key in config, then
+   ```bash
+   curl -s -X POST http://localhost/api/v1/cases \
+     -H "Authorization: Bearer <key>" \
+     -H "Content-Type: application/json" \
+     -d '{"question":"Should we adopt Rust for the core service?"}'
+   ```
+
+3. Run the case and poll until `RESOLVED`:
+   ```bash
+   curl -s -X POST http://localhost/api/v1/cases/<id>/run -H "Authorization: Bearer <key>"
+   curl -s http://localhost/api/v1/cases/<id> -H "Authorization: Bearer <key>"
+   curl -s http://localhost/api/v1/cases/<id>/report -H "Authorization: Bearer <key>"
+   ```
+   The final report must cite at least one collected evidence/claim ID; if the
+   model never cites evidence, the case fails deliberately.
+
+4. Tools and safety:
+   - `GET /api/v1/tools` lists resolved tools.
+   - Code execution requires approval unless `code_runner` is in
+     `tool_policy.auto_approved`; language/length/pattern/timeout guardrails
+     apply before any sandbox call.
+   - Plugin bindings are per-user via `/api/v1/plugins`.
+
+5. Evaluation loop:
+   ```bash
+   curl -s -X POST http://localhost/api/v1/datasets \
+     -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+     -d '{"name":"launch-eval"}'
+   curl -s -X POST http://localhost/api/v1/datasets/<id>/items \
+     -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+     -d '{"items":[{"question":"ship A?","expected_decision":"approve"}]}'
+   curl -s -X POST http://localhost/api/v1/datasets/<id>/runs -H "Authorization: Bearer <key>"
+   curl -s http://localhost/api/v1/benchmarks/<runId> -H "Authorization: Bearer <key>"
+   ```
+
+6. Conversation + scheduler:
+   ```bash
+   curl -s -X POST http://localhost/api/v1/assistant \
+     -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+     -d '{"message":"Should we migrate the database?"}'
+   curl -s -X POST http://localhost/api/v1/recurring \
+     -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+     -d '{"name":"daily","question":"keep the stack?","interval_seconds":86400}'
+   ```
+
+7. Traceability: every HTTP response carries `X-Trace-ID`; spans are written
+   to server logs when `tracing.enabled: true`. Events are persisted in the
+   event store and available via `/api/v1/cases/<id>/events`.
+
+## Troubleshooting
+
+- **Startup fails fast**: read the error — model must be configured, auth keys
+  valid when enabled, limits non-negative.
+- **Case stuck in a state**: check `/api/v1/cases/<id>/events`; each transition
+  publishes an event. Restarting the server requeues expired jobs and recovers
+  checkpointed agent runs (attempt-namespaced artifacts, no duplicate writes).
+- **Report fails with citation error**: the model did not cite collected
+  evidence; retry the case (or improve prompts) — this is intentional.
+- **Plugin/workflow unavailable**: MAGI standalone degrades gracefully when
+  Coze `DefaultSVC` services are not registered; embed MAGI in the Coze process
+  or wire the services to use them.
+
+## Automated verification (no external credentials)
+
+```bash
+make test                            # backend go tests + frontend vitest
+cd backend && go test -race ./...
+docker compose -f docker/docker-compose-dev.yml config   # compose validity
+```
+
+`backend/server/e2e_test.go` exercises the full harness flow (auth, cases,
+dataset evaluation, plugins, recurring, assistant, metrics, admin usage)
+against a real SQLite-backed stack with a stubbed orchestrator.
