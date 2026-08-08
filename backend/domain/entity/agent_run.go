@@ -14,6 +14,18 @@ type AgentRun struct {
 	CompletedAt  *time.Time
 	Usage        *Usage
 	Err          string
+	Environment  *RunEnvironment
+}
+
+// RunEnvironment snapshots the configuration a Magi run executed under, so
+// forked runs stay comparable and traceable (which model/tools/knowledge
+// index were actually in effect for this run).
+type RunEnvironment struct {
+	ModelName      string   `json:"model_name"`
+	ModelBaseURL   string   `json:"model_base_url"`
+	Tools          []string `json:"tools,omitempty"`
+	KnowledgeIndex bool     `json:"knowledge_index"`
+	ConfigVersion  int64    `json:"config_version"`
 }
 
 type AgentRunStatus string

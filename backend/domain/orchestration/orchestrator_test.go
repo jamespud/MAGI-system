@@ -229,12 +229,16 @@ func TestOrchestrate_Deadlock(t *testing.T) {
 		Policy:    consensus.DefaultConsensusPolicy(),
 	})
 
-	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
-	if err == nil {
-		t.Fatalf("expected error for deadlock")
+	c := &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1}
+	res, err := orch.Orchestrate(context.Background(), c)
+	if err != nil {
+		t.Fatalf("deadlock is a terminal outcome, not a retryable error: %v", err)
 	}
 	if res != nil {
 		t.Fatalf("expected nil resolution on deadlock")
+	}
+	if c.Status != entity.CaseStatusDeadlocked {
+		t.Fatalf("expected case status DEADLOCKED, got %s", c.Status)
 	}
 }
 

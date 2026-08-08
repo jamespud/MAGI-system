@@ -56,6 +56,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	decH := handler.NewDecisionHandler(deps.Decision, deps.Metrics)
 	v1.POST("/cases", decH.Create)
 	v1.POST("/cases/:id/run", decH.Run)
+	v1.POST("/cases/:id/fork", decH.Fork)
 	v1.POST("/cases/:id/cancel", decH.Cancel)
 	v1.GET("/cases/:id", decH.Get)
 	v1.GET("/cases/:id/report", decH.Report)

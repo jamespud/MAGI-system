@@ -148,6 +148,39 @@ func (s *Service) StartRun(ctx context.Context, case_ *entity.DecisionCase) erro
 	return nil
 }
 
+// ForkAndRun creates a new case inheriting the source case's decision context
+// (question/background/constraints) and starts it immediately. The fork links
+// back via ParentCaseID, while the run executes under the current tool/RAG
+// environment — the fork's own context — so rerunning leverages capabilities
+// the original case did not have.
+func (s *Service) ForkAndRun(ctx context.Context, userID int64, sourceCaseID string) (*entity.DecisionCase, error) {
+	if s.caseRepo == nil {
+		return nil, fmt.Errorf("fork: case repository is required")
+	}
+	src, err := s.caseRepo.Get(ctx, sourceCaseID)
+	if err != nil || src == nil {
+		return nil, fmt.Errorf("fork: source case %q not found", sourceCaseID)
+	}
+	fork := &entity.DecisionCase{
+		ID:              fmt.Sprintf("case-%s", uuid.NewString()),
+		UserID:          userID,
+		Question:        src.Question,
+		Context:         src.Context,
+		Constraints:     src.Constraints,
+		MaxDebateRounds: s.cfg.MaxDebateRounds,
+		Status:          entity.CaseStatusDraft,
+		ParentCaseID:    src.ID,
+		CreatedAt:       time.Now(),
+	}
+	if err := s.caseRepo.Create(ctx, fork); err != nil {
+		return nil, fmt.Errorf("fork: create: %w", err)
+	}
+	if err := s.StartRun(ctx, fork); err != nil {
+		return nil, fmt.Errorf("fork: start run: %w", err)
+	}
+	return fork, nil
+}
+
 // CancelRun cancels an active run. Returns true if a run was active.
 func (s *Service) CancelRun(caseID string) bool {
 	if s.runs == nil {

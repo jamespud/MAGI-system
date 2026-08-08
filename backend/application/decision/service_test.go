@@ -20,9 +20,13 @@ func (s *stubOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCa
 type stubCaseRepo struct {
 	case_       *entity.DecisionCase
 	cancelledID string
+	created     []*entity.DecisionCase
 }
 
-func (s *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
+func (s *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
+	s.created = append(s.created, c)
+	return nil
+}
 func (s *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	return s.case_, nil
 }
@@ -112,6 +116,45 @@ func TestService_Get(t *testing.T) {
 	}
 }
 
+
+func TestService_ForkAndRun(t *testing.T) {
+	repo := &stubCaseRepo{case_: &entity.DecisionCase{
+		ID: "src", Question: "Should I adopt a dog?", Context: "one dog", MaxDebateRounds: 3,
+		Constraints: []entity.Constraint{{Key: "budget", Value: "small"}},
+	}}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 2}, decision.WithCaseRepo(repo))
+
+	forked, err := svc.ForkAndRun(context.Background(), 7, "src")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	if forked.ID == "src" {
+		t.Fatal("fork must be a new case")
+	}
+	if forked.ParentCaseID != "src" {
+		t.Fatalf("parent link: got %q want src", forked.ParentCaseID)
+	}
+	if forked.Question != "Should I adopt a dog?" || forked.Context != "one dog" {
+		t.Fatalf("fork must inherit question/context, got %q / %q", forked.Question, forked.Context)
+	}
+	if len(forked.Constraints) != 1 || forked.Constraints[0].Key != "budget" {
+		t.Fatalf("fork must inherit constraints: %+v", forked.Constraints)
+	}
+	if forked.UserID != 7 {
+		t.Fatalf("fork owner: got %d want 7", forked.UserID)
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("expected the fork to be persisted, got %d created", len(repo.created))
+	}
+}
+
+func TestService_ForkAndRun_MissingSource(t *testing.T) {
+	repo := &stubCaseRepo{} // Get returns nil
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))
+	if _, err := svc.ForkAndRun(context.Background(), 1, "missing"); err == nil {
+		t.Fatal("expected error for missing source case")
+	}
+}
 func TestService_Cancel(t *testing.T) {
 	repo := &stubCaseRepo{}
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))

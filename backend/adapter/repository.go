@@ -90,14 +90,16 @@ func (r *caseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
-		ConstraintsJSON: toJSON(c.Constraints), Status: string(c.Status), CurrentPhase: string(c.CurrentPhase),
+		ConstraintsJSON: toJSON(c.Constraints), ParentCaseID: c.ParentCaseID, Status: string(c.Status),
+		CurrentPhase: string(c.CurrentPhase),
 		MaxDebateRounds: c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
 func caseFromModel(m *CaseModel) *entity.DecisionCase {
 	return &entity.DecisionCase{
 		ID: m.ID, UserID: m.UserID, Question: m.Question, Context: m.Context,
-		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), Status: entity.CaseStatus(m.Status),
+		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ParentCaseID: m.ParentCaseID,
+		Status: entity.CaseStatus(m.Status),
 		CurrentPhase: entity.CasePhase(m.CurrentPhase), MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
@@ -110,7 +112,8 @@ type agentRunRepo struct{ db *gorm.DB }
 func (r *agentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
 	m := AgentRunModel{
 		ID: a.ID, CaseID: a.CaseID, MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode),
-		Round: a.Round, Status: string(a.Status), UsageJSON: toJSON(a.Usage), Err: a.Err,
+		Round: a.Round, Status: string(a.Status), UsageJSON: toJSON(a.Usage),
+		EnvironmentJSON: toJSON(a.Environment), Err: a.Err,
 		StartedAt: a.StartedAt, CompletedAt: a.CompletedAt,
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
@@ -123,6 +126,7 @@ func (r *agentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, er
 	return &entity.AgentRun{
 		ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
 		Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
+		Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
 		Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
 	}, nil
 }
@@ -135,7 +139,9 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	for i, m := range models {
 		out[i] = &entity.AgentRun{
 			ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
-			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON), Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
+			Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
+			Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
 		}
 	}
 	return out, nil

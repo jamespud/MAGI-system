@@ -67,6 +67,25 @@ func (h *DecisionHandler) Run(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusAccepted, dto.CaseResponse{ID: case_.ID, Status: string(case_.Status)})
 }
 
+func (h *DecisionHandler) Fork(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	src, err := h.svc.Get(ctx, id)
+	if err != nil || src == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, src.UserID) {
+		Forbidden(c)
+		return
+	}
+	forked, err := h.svc.ForkAndRun(ctx, CurrentUserID(ctx), id)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusAccepted, dto.FromCase(forked, nil))
+}
+
 func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	case_, err := h.svc.Get(ctx, id)

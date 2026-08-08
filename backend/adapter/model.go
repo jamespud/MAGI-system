@@ -9,6 +9,7 @@ type CaseModel struct {
 	Question        string `gorm:"type:text"`
 	Context         string `gorm:"type:text"`
 	ConstraintsJSON string `gorm:"type:text"`
+	ParentCaseID    string `gorm:"index"`
 	Status          string
 	CurrentPhase    string
 	MaxDebateRounds int
@@ -28,6 +29,7 @@ type AgentRunModel struct {
 	Round          int
 	Status         string
 	UsageJSON      string `gorm:"type:text"`
+	EnvironmentJSON string `gorm:"type:text"`
 	Err            string `gorm:"type:text"`
 	CheckpointJSON string `gorm:"type:text"`
 	SummaryJSON    string `gorm:"type:text"`

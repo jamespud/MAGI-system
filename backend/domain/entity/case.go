@@ -9,6 +9,7 @@ type DecisionCase struct {
 	Question     string
 	Context      string
 	Constraints  []Constraint
+	ParentCaseID string // lineage link: this case was forked from ParentCaseID
 	Status       CaseStatus
 	CurrentPhase CasePhase
 	// ExecutionAttempt is set by the durable worker for the current attempt.

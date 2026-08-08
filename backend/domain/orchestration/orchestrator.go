@@ -245,6 +245,13 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			case_.Status = status
 			return resolution, nil
 
+		case entity.CaseStatusDeadlocked:
+			// Deadlock is a legitimate terminal outcome, not a retryable failure:
+			// finish the run without an error so the durable worker marks it done.
+			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status), "outcome": "deadlocked", "round": round})
+			case_.Status = status
+			return nil, nil
+
 		default:
 			o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"status": string(status)})
 			case_.Status = status
@@ -300,6 +307,15 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 			CompletedAt: &now,
 			Usage:       r.Usage,
 			Err:         errStr(r.Err),
+		}
+		run.Environment = &entity.RunEnvironment{
+			ModelName:      cfg.Model.ModelName,
+			ModelBaseURL:   cfg.Model.BaseURL,
+			KnowledgeIndex: o.knowledge != nil,
+			ConfigVersion:  cfg.Version,
+		}
+		for _, tb := range cfg.Tools {
+			run.Environment.Tools = append(run.Environment.Tools, string(tb.Source)+":"+tb.ToolName)
 		}
 		_ = o.repo.AgentRunRepo().Create(ctx, run)
 

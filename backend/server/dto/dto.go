@@ -21,6 +21,7 @@ type CaseResponse struct {
 	Question      string          `json:"question"`
 	Background    string          `json:"background"`
 	Constraints   []ConstraintDTO `json:"constraints"`
+	ParentCaseID  string          `json:"parent_case_id,omitempty"`
 	Status        string          `json:"status"`
 	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
 	FinalDecision string          `json:"final_decision,omitempty"`
@@ -136,10 +137,11 @@ func FromCase(c *entity.DecisionCase, resolution *entity.Resolution) CaseRespons
 		Question:    c.Question,
 		Background:  c.Context,
 		Constraints: constraints,
-		Status:      string(c.Status),
-		Round:       0,
-		CreatedAt:   c.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   c.UpdatedAt.Format(time.RFC3339),
+		Status:       string(c.Status),
+		ParentCaseID: c.ParentCaseID,
+		Round:        0,
+		CreatedAt:    c.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    c.UpdatedAt.Format(time.RFC3339),
 	}
 	if resolution != nil {
 		resp.Round = resolution.Consensus.Round
