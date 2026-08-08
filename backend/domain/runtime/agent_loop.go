@@ -239,7 +239,18 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, err
 		}
 		stepStart := time.Now()
-		resp, err := bound.Generate(ctx, messages)
+		callCtx := ctx
+		var callCancel context.CancelFunc
+		if cfg.LoopPolicy.CallTimeout > 0 {
+			callCtx, callCancel = context.WithTimeout(ctx, cfg.LoopPolicy.CallTimeout)
+		}
+		resp, err := bound.Generate(callCtx, messages)
+		if callCancel != nil {
+			callCancel()
+		}
+		if err != nil && errors.Is(err, context.DeadlineExceeded) && cfg.LoopPolicy.CallTimeout > 0 {
+			err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
+		}
 		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
 		st := &Step{Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {

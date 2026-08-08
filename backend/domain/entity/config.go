@@ -148,7 +148,8 @@ const (
 // LoopPolicy bounds a single agent run.
 type LoopPolicy struct {
 	MaxSteps                         int
-	Timeout                          time.Duration
+	Timeout                          time.Duration // total loop budget for the agent run
+	CallTimeout                      time.Duration // per chat completion cap (0 = inherit loop timeout)
 	MaxGateFailures                  int
 	MaxConsecutiveToolFailures       int
 	MaxConsecutiveValidationFailures int

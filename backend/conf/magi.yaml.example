@@ -11,7 +11,8 @@ model:
 magi:
   max_debate_rounds: 2
   max_steps: 12
-  timeout_seconds: 120
+  timeout_seconds: 600            # per-agent total loop budget
+  call_timeout_seconds: 180       # per chat completion cap
 
   melchior:
     persona: "You are Melchior, the scientist. You value correctness, efficiency, and empirical validity. Analyze data, benchmarks, and technical feasibility."

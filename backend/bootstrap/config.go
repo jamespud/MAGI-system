@@ -23,10 +23,11 @@ type Config struct {
 		PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
 	} `yaml:"model"`
 	Magi struct {
-		MaxDebateRounds int      `yaml:"max_debate_rounds"`
-		MaxSteps        int      `yaml:"max_steps"`
-		TimeoutSeconds  int      `yaml:"timeout_seconds"`
-		Melchior        MagiSpec `yaml:"melchior"`
+		MaxDebateRounds  int      `yaml:"max_debate_rounds"`
+		MaxSteps         int      `yaml:"max_steps"`
+		TimeoutSeconds   int      `yaml:"timeout_seconds"`
+		CallTimeoutSeconds int    `yaml:"call_timeout_seconds"`
+		Melchior         MagiSpec `yaml:"melchior"`
 		Balthasar       MagiSpec `yaml:"balthasar"`
 		Casper          MagiSpec `yaml:"casper"`
 	} `yaml:"magi"`
@@ -177,7 +178,10 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Magi.MaxSteps = 12
 	}
 	if cfg.Magi.TimeoutSeconds == 0 {
-		cfg.Magi.TimeoutSeconds = 120
+		cfg.Magi.TimeoutSeconds = 600
+	}
+	if cfg.Magi.CallTimeoutSeconds == 0 {
+		cfg.Magi.CallTimeoutSeconds = 180
 	}
 	if len(cfg.ToolPolicy.RequireApproval) == 0 {
 		cfg.ToolPolicy.RequireApproval = []string{"code_runner"}
@@ -365,6 +369,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 		LoopPolicy: entity.LoopPolicy{
 			MaxSteps:                         cfg.Magi.MaxSteps,
 			Timeout:                          time.Duration(cfg.Magi.TimeoutSeconds) * time.Second,
+			CallTimeout:                      time.Duration(cfg.Magi.CallTimeoutSeconds) * time.Second,
 			MaxGateFailures:                  3,
 			MaxConsecutiveToolFailures:       5,
 			MaxConsecutiveValidationFailures: 5,
@@ -396,8 +401,8 @@ func (c *Config) Validate() error {
 	if c.Limits.MaxConcurrentRunsPerUser < 0 {
 		return fmt.Errorf("limits: max_concurrent_runs_per_user cannot be negative")
 	}
-	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 {
-		return fmt.Errorf("magi: max_debate_rounds, max_steps and timeout_seconds must be positive")
+	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
+		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")
 	}
 	return nil
 }

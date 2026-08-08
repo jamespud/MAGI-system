@@ -63,8 +63,11 @@ magi:
 	if cfg.Magi.MaxSteps != 12 {
 		t.Fatalf("MaxSteps default: got %d want 12", cfg.Magi.MaxSteps)
 	}
-	if cfg.Magi.TimeoutSeconds != 120 {
-		t.Fatalf("TimeoutSeconds default: got %d want 120", cfg.Magi.TimeoutSeconds)
+	if cfg.Magi.TimeoutSeconds != 600 {
+		t.Fatalf("TimeoutSeconds default: got %d want 600", cfg.Magi.TimeoutSeconds)
+	}
+	if cfg.Magi.CallTimeoutSeconds != 180 {
+		t.Fatalf("CallTimeoutSeconds default: got %d want 180", cfg.Magi.CallTimeoutSeconds)
 	}
 	if cfg.Model.APIKey != "test-key" {
 		t.Fatalf("APIKey: got %s", cfg.Model.APIKey)
