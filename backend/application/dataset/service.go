@@ -222,20 +222,24 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 			hasError = true
 		}
 	}
+	// Build the final state on a copy: `run` was already handed to the
+	// repository by the earlier UpdateRun, so mutating it in place would race
+	// with concurrent readers of the stored entity.
+	final := *run
 	now := time.Now()
-	run.Status = entity.BenchmarkRunSucceeded
+	final.Status = entity.BenchmarkRunSucceeded
 	if hasError {
-		run.Status = entity.BenchmarkRunFailed
+		final.Status = entity.BenchmarkRunFailed
 	}
-	run.Matched = matched
-	if run.Total > 0 {
-		run.Accuracy = float64(matched) / float64(run.Total)
+	final.Matched = matched
+	if final.Total > 0 {
+		final.Accuracy = float64(matched) / float64(final.Total)
 	}
 	if totalWeight > 0 {
-		run.WeightedAccuracy = matchedWeight / totalWeight
+		final.WeightedAccuracy = matchedWeight / totalWeight
 	}
-	run.CompletedAt = &now
-	_ = s.datasets.UpdateRun(ctx, run)
+	final.CompletedAt = &now
+	_ = s.datasets.UpdateRun(ctx, &final)
 }
 
 func (s *Service) ListRuns(ctx context.Context, ownerID int64, datasetID string) ([]*entity.BenchmarkRun, error) {
