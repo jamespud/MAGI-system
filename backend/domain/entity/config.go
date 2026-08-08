@@ -131,6 +131,7 @@ type ToolBinding struct {
 	IsDraft     bool   // draft/online selection when Source == ToolSourcePlugin
 	ToolName    string // valid when Source == ToolSourceLocal
 	WorkflowID  int64  // valid when Source == ToolSourceWorkflow
+	Server      string // valid when Source == ToolSourceMCP (MCP server name)
 	Reliability *float64
 }
 
@@ -143,6 +144,7 @@ const (
 	ToolSourceKnowledge  ToolSource = "knowledge"
 	ToolSourceWorkflow   ToolSource = "workflow"
 	ToolSourceCodeRunner ToolSource = "coderunner"
+	ToolSourceMCP        ToolSource = "mcp"
 )
 
 // LoopPolicy bounds a single agent run.

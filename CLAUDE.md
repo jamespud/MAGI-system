@@ -43,6 +43,14 @@ replace github.com/coze-dev/coze-studio/backend => /home/spud/proj/coze-studio/b
 
 The build **fails** if that local path is absent. MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox — but only through `adapter/`, never by importing Coze domain types into `domain/`. For production, swap the replace to a published fork (the go.mod comment shows the intended form). There is also a required `replace github.com/apache/thrift => ... v0.13.0` that must stay in sync with coze-studio.
 
+The code sandbox is wired in `bootstrap/container.go`: `codeRunnerAdapter`
+builds `infra/coderunner/impl/sandbox.Config` from the `code_runner` config and
+injects `sandbox.NewRunner` into `CodeRunnerAdapter` (no dependency on the Coze
+global). `backend/sandbox.py` is a vendored copy of Coze's sandbox orchestrator
+(provenance in its header); the Docker image ships `python3` + `deno` and warms
+the `jsr:@langchain/pyodide-sandbox` cache. MCP servers are config-driven
+(`backend/adapter/mcp`), tool names are `mcp_<server>_<tool>`.
+
 ## Architecture
 
 Four layers, strictly one-way dependencies:

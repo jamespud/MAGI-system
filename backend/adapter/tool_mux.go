@@ -17,6 +17,7 @@ type ToolRegistryMux struct {
 	plugin     port.ToolRegistryPort
 	workflow   port.WorkflowPort
 	coderunner port.CodeRunnerPort
+	mcp        port.ToolRegistryPort
 }
 
 func NewToolRegistryMux(local, plugin port.ToolRegistryPort) *ToolRegistryMux {
@@ -25,6 +26,11 @@ func NewToolRegistryMux(local, plugin port.ToolRegistryPort) *ToolRegistryMux {
 
 func NewToolRegistryMuxWithExt(local, plugin port.ToolRegistryPort, workflow port.WorkflowPort, coderunner port.CodeRunnerPort) *ToolRegistryMux {
 	return &ToolRegistryMux{local: local, plugin: plugin, workflow: workflow, coderunner: coderunner}
+}
+
+// NewToolRegistryMuxWithAll adds the MCP registry arm on top of the extended one.
+func NewToolRegistryMuxWithAll(local, plugin port.ToolRegistryPort, workflow port.WorkflowPort, coderunner port.CodeRunnerPort, mcp port.ToolRegistryPort) *ToolRegistryMux {
+	return &ToolRegistryMux{local: local, plugin: plugin, workflow: workflow, coderunner: coderunner, mcp: mcp}
 }
 
 func (m *ToolRegistryMux) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
@@ -62,12 +68,19 @@ func (m *ToolRegistryMux) List(ctx context.Context, bindings []entity.ToolBindin
 			}
 			out = append(out, port.ToolDefinition{
 				Name:       "code_runner",
-				Desc:       "Run Python or JavaScript code in the sandbox and return the JSON result.",
-				ArgsSchema: []byte(`{"type":"object","properties":{"lang":{"type":"string","enum":["Python","JavaScript"]},"code":{"type":"string"}},"required":["lang","code"],"additionalProperties":false}`),
+				Desc:       "Run Python code in the sandbox and return the JSON result.",
+				ArgsSchema: []byte(`{"type":"object","properties":{"lang":{"type":"string","enum":["Python"]},"code":{"type":"string"}},"required":["lang","code"],"additionalProperties":false}`),
 				Source:     entity.ToolSourceCodeRunner,
 				Binding:    b,
 			})
 		}
+	}
+	if m.mcp != nil {
+		defs, err := m.mcp.List(ctx, bindings)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, defs...)
 	}
 	return out, nil
 }
@@ -78,6 +91,7 @@ type ToolExecutorMux struct {
 	plugin     port.ToolExecutorPort
 	workflow   port.WorkflowPort
 	coderunner port.CodeRunnerPort
+	mcp        port.ToolExecutorPort
 }
 
 func NewToolExecutorMux(local, plugin port.ToolExecutorPort) *ToolExecutorMux {
@@ -86,6 +100,11 @@ func NewToolExecutorMux(local, plugin port.ToolExecutorPort) *ToolExecutorMux {
 
 func NewToolExecutorMuxWithExt(local, plugin port.ToolExecutorPort, workflow port.WorkflowPort, coderunner port.CodeRunnerPort) *ToolExecutorMux {
 	return &ToolExecutorMux{local: local, plugin: plugin, workflow: workflow, coderunner: coderunner}
+}
+
+// NewToolExecutorMuxWithAll adds the MCP executor arm on top of the extended one.
+func NewToolExecutorMuxWithAll(local, plugin port.ToolExecutorPort, workflow port.WorkflowPort, coderunner port.CodeRunnerPort, mcp port.ToolExecutorPort) *ToolExecutorMux {
+	return &ToolExecutorMux{local: local, plugin: plugin, workflow: workflow, coderunner: coderunner, mcp: mcp}
 }
 
 func (m *ToolExecutorMux) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
@@ -130,6 +149,11 @@ func (m *ToolExecutorMux) Execute(ctx context.Context, req port.ToolExecutionReq
 			return nil, fmt.Errorf("code runner tool: %w", err)
 		}
 		return &port.ToolExecutionResult{Output: out}, nil
+	case entity.ToolSourceMCP:
+		if m.mcp == nil {
+			return nil, fmt.Errorf("tool executor: mcp executor is not configured")
+		}
+		return m.mcp.Execute(ctx, req)
 	default:
 		if m.local == nil {
 			return nil, fmt.Errorf("tool executor: local executor is not configured")

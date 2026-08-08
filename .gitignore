@@ -28,6 +28,7 @@ Thumbs.db
 
 # Vendored dependencies
 **/vendor/
+backend/node_modules/
 
 # Config (keep template, ignore local overrides)
 backend/conf/magi.yaml

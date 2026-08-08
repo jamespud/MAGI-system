@@ -3,6 +3,7 @@ package bootstrap_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jamespud/magi/backend/bootstrap"
@@ -37,6 +38,92 @@ func TestConfigValidate_RejectsBrokenConfigs(t *testing.T) {
 	cfg.Auth.APIKeys = []bootstrap.APIKeySpec{{Key: "", UserID: 1, Role: "admin"}}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for empty auth key")
+	}
+}
+
+func TestConfigValidate_MCPRejectsInvalidServers(t *testing.T) {
+	base := func() *bootstrap.Config {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "base.yaml")
+		os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+  model_name: "m"
+magi:
+  max_debate_rounds: 1
+  max_steps: 1
+  timeout_seconds: 1
+  call_timeout_seconds: 1
+`), 0644)
+		cfg, err := bootstrap.LoadConfig(path)
+		if err != nil {
+			t.Fatalf("load base config: %v", err)
+		}
+		return cfg
+	}
+
+	cases := []struct {
+		name    string
+		servers []bootstrap.MCPServerConfig
+		wantErr string
+	}{
+		{"missing name", []bootstrap.MCPServerConfig{{Transport: "stdio", Command: "x"}}, "name is required"},
+		{"duplicate name", []bootstrap.MCPServerConfig{{Name: "a", Transport: "stdio", Command: "x"}, {Name: "a", Transport: "stdio", Command: "y"}}, "duplicate server name"},
+		{"bad transport", []bootstrap.MCPServerConfig{{Name: "a", Transport: "carrier-pigeon"}}, "transport must be"},
+		{"stdio without command", []bootstrap.MCPServerConfig{{Name: "a", Transport: "stdio"}}, "requires command"},
+		{"http without url", []bootstrap.MCPServerConfig{{Name: "a", Transport: "http"}}, "requires url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			cfg.MCP.Servers = tc.servers
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			} else if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigValidate_MCPAcceptsValidServers(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+	cfg.MCP.Servers = []bootstrap.MCPServerConfig{
+		{Name: "local", Transport: "stdio", Command: "/bin/echo"},
+		{Name: "remote", Transport: "http", URL: "https://mcp.example.com/mcp"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}
+
+func TestLoadConfig_MCPAndCodeRunnerDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "test-key"
+  base_url: "http://localhost"
+  model_name: "test-model"
+mcp:
+  servers:
+    - { name: "s", transport: "stdio", command: "/bin/echo" }
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.CodeRunner.MemoryLimitMB != 100 {
+		t.Errorf("MemoryLimitMB = %d, want 100", cfg.CodeRunner.MemoryLimitMB)
+	}
+	if len(cfg.MCP.Servers) != 1 || cfg.MCP.Servers[0].TimeoutSeconds != 60 {
+		t.Errorf("MCP servers = %+v, want timeout 60", cfg.MCP.Servers)
 	}
 }
 

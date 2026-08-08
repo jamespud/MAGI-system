@@ -40,11 +40,11 @@ func TestAllModels_IncludesToolCallModel(t *testing.T) {
 func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
-	with := bootstrap.ProvideToolRegistry(withCfg)
+	with := bootstrap.ProvideToolRegistry(withCfg, nil)
 	if _, ok := with.(*magi.ToolRegistryMux); !ok {
 		t.Fatalf("expected ToolRegistryMux when key set, got %T", with)
 	}
-	without := bootstrap.ProvideToolRegistry(&bootstrap.Config{})
+	without := bootstrap.ProvideToolRegistry(&bootstrap.Config{}, nil)
 	if _, ok := without.(*magi.ToolRegistryMux); !ok {
 		t.Fatalf("expected ToolRegistryMux when no key, got %T", without)
 	}
@@ -53,11 +53,11 @@ func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 func TestProvideToolExecutor_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
-	with := bootstrap.ProvideToolExecutor(withCfg)
+	with := bootstrap.ProvideToolExecutor(withCfg, nil)
 	if _, ok := with.(*magi.ToolExecutorMux); !ok {
 		t.Fatalf("expected ToolExecutorMux when key set, got %T", with)
 	}
-	without := bootstrap.ProvideToolExecutor(&bootstrap.Config{})
+	without := bootstrap.ProvideToolExecutor(&bootstrap.Config{}, nil)
 	if _, ok := without.(*magi.ToolExecutorMux); !ok {
 		t.Fatalf("expected ToolExecutorMux when no key, got %T", without)
 	}

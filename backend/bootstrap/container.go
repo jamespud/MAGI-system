@@ -5,6 +5,7 @@ import (
 	"fmt"
 	crossplugin "github.com/coze-dev/coze-studio/backend/crossdomain/plugin"
 	crossworkflow "github.com/coze-dev/coze-studio/backend/crossdomain/workflow"
+	coderunnersandbox "github.com/coze-dev/coze-studio/backend/infra/coderunner/impl/sandbox"
 	"time"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
@@ -13,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
+	mcpadapter "github.com/jamespud/magi/backend/adapter/mcp"
 	rag "github.com/jamespud/magi/backend/adapter/rag"
 	"github.com/jamespud/magi/backend/application/admin"
 	"github.com/jamespud/magi/backend/application/assistant"
@@ -56,6 +58,7 @@ var Module = fx.Options(
 		provideContextBuilder,
 		ProvideToolRegistry,
 		ProvideToolExecutor,
+		provideMCPAdapter,
 		provideAuthService,
 		ProvideKnowledgePort,
 
@@ -135,6 +138,9 @@ var Module = fx.Options(
 	fx.Invoke(registerLifecycle),
 	fx.Invoke(registerScheduler),
 	fx.Invoke(registerTracingShutdown),
+	fx.Invoke(func(a *mcpadapter.Adapter, lc fx.Lifecycle) {
+		lc.Append(fx.Hook{OnStop: func(context.Context) error { return a.Close() }})
+	}),
 )
 
 func provideAgentLoop(
@@ -161,24 +167,51 @@ func provideAgentLoop(
 	})
 }
 
-// ProvideToolRegistry routes local/plugin/workflow/code-runner bindings through one registry.
-func ProvideToolRegistry(cfg *Config) port.ToolRegistryPort {
+// ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.
+func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolRegistryPort {
 	var local port.ToolRegistryPort
 	if cfg.Tavily.APIKey != "" {
 		local = magi.NewLocalToolRegistry()
 	}
-	return magi.NewToolRegistryMuxWithExt(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
-		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg))
+	var mcpReg port.ToolRegistryPort
+	if len(cfg.MCP.Servers) > 0 {
+		mcpReg = mcpAdapter
+	}
+	return magi.NewToolRegistryMuxWithAll(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
+		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg), mcpReg)
 }
 
-// ProvideToolExecutor routes local/plugin/workflow/code-runner execution through one executor.
-func ProvideToolExecutor(cfg *Config) port.ToolExecutorPort {
+// ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
+func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolExecutorPort {
 	var local port.ToolExecutorPort
 	if cfg.Tavily.APIKey != "" {
 		local = magi.NewTavilyToolExecutor(cfg.Tavily.APIKey)
 	}
-	return magi.NewToolExecutorMuxWithExt(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
-		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg))
+	var mcpExec port.ToolExecutorPort
+	if len(cfg.MCP.Servers) > 0 {
+		mcpExec = mcpAdapter
+	}
+	return magi.NewToolExecutorMuxWithAll(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
+		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg), mcpExec)
+}
+
+// provideMCPAdapter builds the MCP client adapter from config. It is always
+// non-nil so the lifecycle close hook can be registered; the registry/executor
+// mux only attaches it when at least one server is configured.
+func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
+	cfgs := make([]mcpadapter.ServerConfig, 0, len(cfg.MCP.Servers))
+	for _, s := range cfg.MCP.Servers {
+		cfgs = append(cfgs, mcpadapter.ServerConfig{
+			Name:           s.Name,
+			Transport:      s.Transport,
+			Command:        s.Command,
+			Args:           s.Args,
+			URL:            s.URL,
+			Env:            s.Env,
+			TimeoutSeconds: s.TimeoutSeconds,
+		})
+	}
+	return mcpadapter.New(cfgs)
 }
 
 // ProvideKnowledgePort builds the HybridKnowledgeAdapter. When milvus.address /
@@ -427,7 +460,18 @@ func codeRunnerAdapter(cfg *Config) *magi.CodeRunnerAdapter {
 	if len(cfg.CodeRunner.BlockedPatterns) > 0 {
 		p.BlockedPatterns = cfg.CodeRunner.BlockedPatterns
 	}
-	return magi.NewCodeRunnerAdapterWithPolicy(p)
+	sr := coderunnersandbox.NewRunner(&coderunnersandbox.Config{
+		AllowEnv:       cfg.CodeRunner.AllowEnv,
+		AllowRead:      cfg.CodeRunner.AllowRead,
+		AllowWrite:     cfg.CodeRunner.AllowWrite,
+		AllowNet:       cfg.CodeRunner.AllowNet,
+		AllowRun:       cfg.CodeRunner.AllowRun,
+		AllowFFI:       cfg.CodeRunner.AllowFFI,
+		NodeModulesDir: cfg.CodeRunner.NodeModulesDir,
+		TimeoutSeconds: float64(p.TimeoutSeconds),
+		MemoryLimitMB:  cfg.CodeRunner.MemoryLimitMB,
+	})
+	return magi.NewCodeRunnerAdapterWithRunner(sr, p)
 }
 
 func provideAdminService(repo port.Repository) *admin.Service {

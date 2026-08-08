@@ -37,6 +37,23 @@ func (s *stubLocalExec) Execute(ctx context.Context, req port.ToolExecutionReque
 	return &port.ToolExecutionResult{Output: "local:" + req.ToolName}, nil
 }
 
+type stubMCPRegistry struct {
+	defs []port.ToolDefinition
+}
+
+func (s *stubMCPRegistry) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
+	return s.defs, nil
+}
+
+type stubMCPExecutor struct {
+	got port.ToolExecutionRequest
+}
+
+func (s *stubMCPExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
+	s.got = req
+	return &port.ToolExecutionResult{Output: "mcp:" + req.Binding.Server + ":" + req.Binding.ToolName}, nil
+}
+
 func TestToolRegistryMux_ListsWorkflowAndCodeRunner(t *testing.T) {
 	m := NewToolRegistryMuxWithExt(nil, nil, &stubWorkflowPort{}, &stubCodeRunnerPort{})
 	defs, err := m.List(context.Background(), []entity.ToolBinding{
@@ -71,6 +88,32 @@ func TestToolRegistryMux_WithoutPortsSkipsExtSources(t *testing.T) {
 	}
 }
 
+func TestToolRegistryMux_ListsMCPTools(t *testing.T) {
+	mcpDef := port.ToolDefinition{
+		Name: "mcp_srv_echo", Source: entity.ToolSourceMCP,
+		Binding: entity.ToolBinding{Source: entity.ToolSourceMCP, Server: "srv", ToolName: "echo"},
+	}
+	m := NewToolRegistryMuxWithAll(nil, nil, nil, nil, &stubMCPRegistry{defs: []port.ToolDefinition{mcpDef}})
+	defs, err := m.List(context.Background(), []entity.ToolBinding{{Source: entity.ToolSourceMCP, Server: "srv", ToolName: "echo"}})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != "mcp_srv_echo" || defs[0].Source != entity.ToolSourceMCP {
+		t.Fatalf("unexpected defs: %+v", defs)
+	}
+}
+
+func TestToolRegistryMux_WithoutMCPPortSkipsMCP(t *testing.T) {
+	m := NewToolRegistryMuxWithExt(nil, nil, nil, nil)
+	defs, err := m.List(context.Background(), []entity.ToolBinding{{Source: entity.ToolSourceMCP, Server: "srv", ToolName: "echo"}})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("expected no MCP defs without port, got %+v", defs)
+	}
+}
+
 func TestToolExecutorMux_RoutesWorkflow(t *testing.T) {
 	wf := &stubWorkflowPort{}
 	m := NewToolExecutorMuxWithExt(nil, nil, wf, nil)
@@ -89,6 +132,35 @@ func TestToolExecutorMux_RoutesWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, `"result":"ok"`) {
 		t.Fatalf("output: %s", res.Output)
+	}
+}
+
+func TestToolExecutorMux_RoutesMCP(t *testing.T) {
+	exec := &stubMCPExecutor{}
+	m := NewToolExecutorMuxWithAll(nil, nil, nil, nil, exec)
+	res, err := m.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName:      "mcp_srv_echo",
+		ArgumentsJSON: `{"text":"hi"}`,
+		Binding:       entity.ToolBinding{Source: entity.ToolSourceMCP, Server: "srv", ToolName: "echo"},
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if exec.got.Binding.Server != "srv" || exec.got.Binding.ToolName != "echo" {
+		t.Fatalf("binding: %+v", exec.got.Binding)
+	}
+	if res.Output != "mcp:srv:echo" {
+		t.Fatalf("output: %s", res.Output)
+	}
+}
+
+func TestToolExecutorMux_MCPWithoutExecutor(t *testing.T) {
+	m := NewToolExecutorMuxWithExt(nil, nil, nil, nil)
+	_, err := m.Execute(context.Background(), port.ToolExecutionRequest{
+		Binding: entity.ToolBinding{Source: entity.ToolSourceMCP, Server: "srv", ToolName: "echo"},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing MCP executor")
 	}
 }
 

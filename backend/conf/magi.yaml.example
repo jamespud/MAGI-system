@@ -105,13 +105,39 @@ auth:
 limits:
   max_concurrent_runs_per_user: 3
 
-# Code runner guardrails (defense-in-depth on top of the Coze sandbox).
+# Code runner: MAGI reuses the Coze Deno + Pyodide WASM sandbox (see
+# backend/sandbox.py). Guardrails below are defense-in-depth on top of it.
 code_runner:
   enabled: true
   timeout_seconds: 30
   max_code_chars: 4000
-  allowed_languages: ["Python", "JavaScript"]
+  # Coze's sandbox runner supports Python only (JS returns "js not supported yet").
+  allowed_languages: ["Python"]
   blocked_patterns: ["os.system", "subprocess", "eval(", "exec(", "shutil.rmtree", "socket"]
+  # Deno permission allow-lists passed to the sandbox. Empty = deny all.
+  allow_env: []
+  allow_read: []
+  allow_write: []
+  allow_net: []
+  allow_run: []
+  allow_ffi: []
+  node_modules_dir: ""
+  memory_limit_mb: 100
+
+# External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
+# stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
+mcp:
+  servers:
+    - name: "example"
+      transport: "stdio"      # or "http"
+      command: "/usr/local/bin/my-mcp-server"   # required for stdio
+      args: ["--flag"]
+      # env: { MY_TOKEN: "secret" }
+      timeout_seconds: 60
+    # - name: "remote"
+    #   transport: "http"
+    #   url: "https://mcp.example.com/mcp"
+    #   timeout_seconds: 60
 
 # Tool approval gate: tools listed here cannot execute in autonomous runs
 # unless also listed under auto_approved. Default: code_runner requires approval.

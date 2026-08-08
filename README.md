@@ -33,7 +33,7 @@ The Commander (an LLM) is deliberately *not* a "god agent" - it cannot count vot
 - **Executable role contracts** - each Magi must emit role-specific structured analysis: Melchior's technical feasibility, Balthasar's residual-risk/rollback assessment, or Casper's opportunity/timing assessment. Go gates these fields and blocks approvals outside each role's decision boundary.
 - **Hand-written agent loop** (not Eino ReAct) - gather -> evidence summary -> **evidence gate** (deterministic) -> vote. Termination is code-enforced: valid vote, max steps, timeout, token budget, repeated validation/gate failures.
 - **Evidence Ledger as the spine** - `tool result -> EvidenceRecord -> Claim -> Vote`. Reliability is a deterministic modifier formula (base + directness + recency + corroboration + extraction), never a single LLM-emitted number.
-- **Real tool integration** - Tavily `web_search` returns live web evidence; one search result -> one evidence record.
+- **Real tool integration** - Tavily `web_search` returns live web evidence, external MCP servers expose their tools as `mcp_<server>_<tool>`, and a WASM code sandbox (Coze's Deno + Pyodide runner) executes Python in isolation; one tool result -> one evidence record.
 - **Deterministic FSM orchestration** - ~20 case states (`DRAFT -> NORMALIZING -> … -> INVESTIGATING -> EVIDENCE_GATING -> COLLECTING_VOTES -> CONSENSUS_CHECK -> DEBATING -> REFLECTING -> REVOTING -> GENERATING_REPORT -> RESOLVED`). First-round 2:1 goes to debate; only post-revote 2:1 may resolve.
 - **Claim graph** - claims track supports/contradicts, so debate targets specific conflicting claims, not free-form prose.
 - **Live UI** - React workspace with per-agent panels, consensus panel, timeline, and an interactive Evidence Graph (zoom/pan, radial vote->claim->evidence hierarchy) fed by real API data over SSE.
@@ -126,7 +126,7 @@ Application  ->  Orchestration  ->  Agent Runtime  ->  Port/Adapter  ->  Coze In
 
 The frozen target architecture is `magi-design.md` (Chinese); all code targets that design.
 
-> **Build caveat:** `backend/go.mod` has a `replace` directive pointing `coze-dev/coze-studio` at a local path (`/home/spud/proj/coze-studio/backend`). The build **fails** if that path is absent. MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox - but only through `adapter/`, never by importing Coze domain types into `domain/`. For production, swap the replace to a published fork.
+> **Coze reuse:** `backend/go.mod` depends on the published `coze-dev/coze-studio` module from the Go proxy (see `backend/Dockerfile`). MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox - but only through `adapter/`, never by importing Coze domain types into `domain/`. The code sandbox reuses Coze's `infra/coderunner/impl/sandbox` (Deno + Pyodide WASM); `backend/sandbox.py` is a vendored copy of Coze's sandbox orchestrator (provenance pinned in its header), and the Docker image ships `python3` + `deno` with a warmed `jsr:@langchain/pyodide-sandbox` cache.
 
 ## Project Structure
 
@@ -240,7 +240,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 
 - **Durable async execution** — decision jobs persist with leases, retries, cancellation, and startup recovery; agent runs checkpoint and resume.
 - **Multi-tenant API** — API-key auth (constant-time compare) with per-user ownership on cases, datasets, plugin bindings, and recurring templates. Health/docs/metrics stay public.
-- **Governance & safety** — per-user run concurrency limits, token cost accounting, Prometheus `/metrics`, code-runner guardrails (language/length/danger patterns/timeout), an autonomous tool-approval gate (high-impact tools require admin auto-approval), prompt-injection framing of tool output, and secret redaction before events/audit/model messages leave the process.
+- **Governance & safety** — per-user run concurrency limits, token cost accounting, Prometheus `/metrics`, code-runner guardrails (language/length/danger patterns/timeout) on top of the Coze WASM sandbox, an autonomous tool-approval gate (high-impact tools require admin auto-approval), prompt-injection framing of tool output, and secret redaction before events/audit/model messages leave the process.
 - **Observability** — OpenTelemetry spans on HTTP requests and decision runs with `X-Trace-ID` propagation (log sink by default, OTLP-ready), plus readiness/DB ping and config fail-fast validation.
 - **Evidence-backed outputs** — the final report must cite at least one collected evidence/claim ID when evidence exists, or the case fails.
 - **User-scoped tools** — each user manages their own Coze plugin bindings; agent runs resolve the user's enabled tools dynamically.
@@ -270,9 +270,12 @@ auth: { enabled: true, api_keys: [...] }        # per-user API keys
 limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
+mcp:
+  servers:
+    - { name: "example", transport: "stdio", command: "/usr/local/bin/mcp-server", timeout_seconds: 60 }
 ```
 
-`Config.Validate()` runs at startup and fails fast on missing model, invalid auth, or negative limits; `/ready` performs a live database ping.
+`code_runner` maps its `allow_env/allow_read/allow_write/allow_net/allow_run/allow_ffi` lists into the Deno sandbox permission flags (empty = deny all). `Config.Validate()` runs at startup and fails fast on missing model, invalid auth, negative limits, or invalid MCP server definitions (empty/duplicate names, bad transport, missing command/url); `/ready` performs a live database ping.
 
 ## Development
 

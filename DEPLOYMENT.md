@@ -37,7 +37,8 @@ Stop with `make web-down`; logs with `make web-logs`.
 | `model` | `api_key` + `base_url` + `model_name` (direct) or `model_id` (Coze mode); `price_per_m_*_usd` for cost accounting |
 | `auth` | `enabled: true` + `api_keys` (name/key/user_id/role). Startup fails fast if enabled without valid keys |
 | `limits` | `max_concurrent_runs_per_user` |
-| `code_runner` | enable + timeout/length/language/danger-pattern guardrails |
+| `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
+| `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |
 | `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
 | `tracing` | `enabled` + `service_name` (log sink; OTLP-ready) |
 
@@ -75,6 +76,12 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
    - Code execution requires approval unless `code_runner` is in
      `tool_policy.auto_approved`; language/length/pattern/timeout guardrails
      apply before any sandbox call.
+   - The sandbox reuses Coze's Deno + Pyodide WASM runner: the image must
+     contain `python3`, `deno`, and `/app/sandbox.py` (vendored from
+     coze-studio), with the `jsr:@langchain/pyodide-sandbox` cache warmed at
+     build time. Code must define `async def main(args)` returning a dict.
+   - MCP servers are config-driven; unreachable servers are skipped in
+     `GET /api/v1/tools` and surface an error when called.
    - Plugin bindings are per-user via `/api/v1/plugins`.
 
 5. Evaluation loop:
@@ -115,6 +122,12 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
 - **Plugin/workflow unavailable**: MAGI standalone degrades gracefully when
   Coze `DefaultSVC` services are not registered; embed MAGI in the Coze process
   or wire the services to use them.
+- **Sandbox unavailable**: check the image has `python3`/`deno` and
+  `/app/sandbox.py`; `code_runner.enabled` must be true. Runtime errors like
+  "deno: command not found" mean the image was built before the sandbox deps.
+- **MCP tool missing from `/api/v1/tools`**: the server is unreachable or
+  failed `initialize`/`tools/list`; check the server URL/command and its logs.
+  Tool names are `mcp_<server>_<tool>` (names normalized to `[a-z0-9_]`).
 
 ## Automated verification (no external credentials)
 

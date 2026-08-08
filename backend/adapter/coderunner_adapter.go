@@ -27,7 +27,7 @@ func DefaultCodeRunnerPolicy() CodeRunnerPolicy {
 	return CodeRunnerPolicy{
 		TimeoutSeconds:   30,
 		MaxCodeChars:     4000,
-		AllowedLanguages: []string{"Python", "JavaScript"},
+		AllowedLanguages: []string{"Python"},
 		BlockedPatterns:  []string{"os.system", "subprocess", "eval(", "exec(", "shutil.rmtree", "socket"},
 	}
 }
@@ -35,6 +35,7 @@ func DefaultCodeRunnerPolicy() CodeRunnerPolicy {
 // CodeRunnerAdapter implements port.CodeRunnerPort via Coze infra/coderunner.
 type CodeRunnerAdapter struct {
 	policy       CodeRunnerPolicy
+	runner       coderunner.Runner // injected sandbox runner (default: Coze global)
 	activated    bool
 	activateOnce sync.Once
 	activateErr  error
@@ -48,13 +49,25 @@ func NewCodeRunnerAdapterWithPolicy(p CodeRunnerPolicy) *CodeRunnerAdapter {
 	return &CodeRunnerAdapter{policy: p}
 }
 
+// NewCodeRunnerAdapterWithRunner injects an explicit sandbox runner (for
+// example the Coze Deno/Pyodide sandbox runner assembled from MAGI config).
+// The Coze global runner is only consulted when no runner is injected.
+func NewCodeRunnerAdapterWithRunner(runner coderunner.Runner, p CodeRunnerPolicy) *CodeRunnerAdapter {
+	return &CodeRunnerAdapter{policy: p, runner: runner}
+}
+
 func (a *CodeRunnerAdapter) activate(ctx context.Context) error {
 	a.activateOnce.Do(func() {
+		if a.runner != nil {
+			a.activated = true
+			return
+		}
 		r := coderunner.GetCodeRunner()
 		if r == nil {
 			a.activateErr = fmt.Errorf("coderunner adapter: Coze code runner not initialized")
 			return
 		}
+		a.runner = r
 		a.activated = true
 	})
 	return a.activateErr
@@ -95,8 +108,7 @@ func (a *CodeRunnerAdapter) Run(ctx context.Context, lang, code string) (string,
 		runCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	runner := coderunner.GetCodeRunner()
-	resp, err := runner.Run(runCtx, &coderunner.RunRequest{
+	resp, err := a.runner.Run(runCtx, &coderunner.RunRequest{
 		Language: coderunner.Language(lang),
 		Code:     code,
 	})

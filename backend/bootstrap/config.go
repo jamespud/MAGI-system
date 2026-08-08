@@ -51,11 +51,22 @@ type Config struct {
 		MaxCodeChars     int      `yaml:"max_code_chars"`
 		AllowedLanguages []string `yaml:"allowed_languages"`
 		BlockedPatterns  []string `yaml:"blocked_patterns"`
+		AllowEnv         []string `yaml:"allow_env"`
+		AllowRead        []string `yaml:"allow_read"`
+		AllowWrite       []string `yaml:"allow_write"`
+		AllowNet         []string `yaml:"allow_net"`
+		AllowRun         []string `yaml:"allow_run"`
+		AllowFFI         []string `yaml:"allow_ffi"`
+		NodeModulesDir   string   `yaml:"node_modules_dir"`
+		MemoryLimitMB    int64    `yaml:"memory_limit_mb"`
 	} `yaml:"code_runner"`
 	ToolPolicy struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
 	} `yaml:"tool_policy"`
+	MCP struct {
+		Servers []MCPServerConfig `yaml:"servers"`
+	} `yaml:"mcp"`
 	Tracing struct {
 		Enabled     bool   `yaml:"enabled"`
 		ServiceName string `yaml:"service_name"`
@@ -71,6 +82,19 @@ type APIKeySpec struct {
 	Key    string `yaml:"key"`
 	UserID int64  `yaml:"user_id"`
 	Role   string `yaml:"role"`
+}
+
+// MCPServerConfig describes one external MCP server. stdio servers are child
+// processes spawned by MAGI; http servers use the MCP Streamable HTTP
+// transport.
+type MCPServerConfig struct {
+	Name           string            `yaml:"name"`
+	Transport      string            `yaml:"transport"` // "stdio" | "http"
+	Command        string            `yaml:"command"`   // stdio: executable to spawn
+	Args           []string          `yaml:"args"`
+	URL            string            `yaml:"url"` // http: base URL of the MCP endpoint
+	Env            map[string]string `yaml:"env"`
+	TimeoutSeconds int               `yaml:"timeout_seconds"`
 }
 
 type EmbeddingConfig struct {
@@ -185,6 +209,14 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if len(cfg.ToolPolicy.RequireApproval) == 0 {
 		cfg.ToolPolicy.RequireApproval = []string{"code_runner"}
+	}
+	if cfg.CodeRunner.MemoryLimitMB == 0 {
+		cfg.CodeRunner.MemoryLimitMB = 100
+	}
+	for i := range cfg.MCP.Servers {
+		if cfg.MCP.Servers[i].TimeoutSeconds == 0 {
+			cfg.MCP.Servers[i].TimeoutSeconds = 60
+		}
 	}
 	if cfg.Model.PricePerMInputUSD == 0 {
 		cfg.Model.PricePerMInputUSD = 2.5
@@ -403,6 +435,28 @@ func (c *Config) Validate() error {
 	}
 	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
 		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")
+	}
+	seenMCP := make(map[string]bool, len(c.MCP.Servers))
+	for i, s := range c.MCP.Servers {
+		if s.Name == "" {
+			return fmt.Errorf("mcp: server #%d: name is required", i)
+		}
+		if seenMCP[s.Name] {
+			return fmt.Errorf("mcp: duplicate server name %q", s.Name)
+		}
+		seenMCP[s.Name] = true
+		switch s.Transport {
+		case "stdio":
+			if s.Command == "" {
+				return fmt.Errorf("mcp: server %q: stdio transport requires command", s.Name)
+			}
+		case "http":
+			if s.URL == "" {
+				return fmt.Errorf("mcp: server %q: http transport requires url", s.Name)
+			}
+		default:
+			return fmt.Errorf("mcp: server %q: transport must be \"stdio\" or \"http\"", s.Name)
+		}
 	}
 	return nil
 }

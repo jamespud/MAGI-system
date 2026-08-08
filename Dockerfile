@@ -14,15 +14,20 @@ RUN CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w" -o magi-server ./cmd/magi-s
 
 FROM alpine:3.21
 
-# ca-certificates: the server makes outbound HTTPS calls to the model API/Tavily.
-RUN apk add --no-cache ca-certificates
+# ca-certificates: outbound HTTPS (model API/Tavily). python3+deno run the
+# vendored Coze sandbox orchestrator (backend/sandbox.py -> pyodide-sandbox).
+RUN apk add --no-cache ca-certificates python3 deno
 
 COPY --from=builder /app/magi-server /app/magi-server
+# Vendored Coze sandbox orchestrator (see backend/sandbox.py header for provenance).
+COPY --from=builder /app/backend/sandbox.py /app/sandbox.py
 # Bake only the structural config (placeholder secrets). Real secrets/DSN are
 # injected at runtime via env vars (see bootstrap.applyEnvOverrides).
 COPY --from=builder /app/conf/magi.yaml.example /app/conf/magi.yaml
 
 WORKDIR /app
+# Warm the pyodide-sandbox module cache so sandbox executions work offline.
+RUN deno run -A jsr:@langchain/pyodide-sandbox@0.0.4 -c "print('ok')"
 EXPOSE 8080
 
 CMD ["/app/magi-server"]
