@@ -136,7 +136,16 @@ func (s *Service) StartRun(ctx context.Context, case_ *entity.DecisionCase) erro
 		_, err := s.Run(ctx, case_)
 		return err
 	}
-	return s.runs.Start(ctx, case_)
+	if err := s.runs.Start(ctx, case_); err != nil {
+		return err
+	}
+	// Execution is asynchronous; surface an in-progress status so the caller
+	// (and the sidebar) sees the case as running immediately.
+	case_.Status = entity.CaseStatusNormalizing
+	if s.caseRepo != nil {
+		_ = s.caseRepo.UpdateStatus(ctx, case_.ID, case_.Status)
+	}
+	return nil
 }
 
 // CancelRun cancels an active run. Returns true if a run was active.

@@ -24,6 +24,7 @@ type EventType string
 
 const (
 	EventCaseCreated         EventType = "CASE_CREATED"
+	EventCaseStatusChanged   EventType = "CASE_STATUS_CHANGED"
 	EventTaskNormalized      EventType = "TASK_NORMALIZED"
 	EventMemoryRetrieved     EventType = "MEMORY_RETRIEVED"
 	EventAgentStarted        EventType = "AGENT_STARTED"

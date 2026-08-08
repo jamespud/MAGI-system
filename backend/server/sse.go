@@ -10,6 +10,7 @@ import (
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/server/dto"
 	"github.com/jamespud/magi/backend/server/handler"
 )
 
@@ -78,7 +79,11 @@ func SSEHandlerWithHistory(broker *EventBroker, repo port.EventRepository, caseS
 }
 
 func writeEvent(w *sse.Stream, ev *entity.MagiEvent) error {
-	data, _ := json.Marshal(ev)
+	// Serialize through the DTO so SSE frames carry the same snake_case shape
+	// (id/type/agent_code/run_id/message/payload/timestamp) as the REST event
+	// endpoint. Marshalling the raw entity would emit Go field names
+	// (ID/CaseID/AgentCode/...) that the frontend EventSource cannot parse.
+	data, _ := json.Marshal(dto.FromEvent(ev))
 	return w.Publish(&sse.Event{
 		ID:    ev.ID,
 		Event: string(ev.Type),

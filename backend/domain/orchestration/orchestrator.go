@@ -254,6 +254,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		if o.caseRepo != nil {
 			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
 		}
+		o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(status), "round": round})
 	}
 }
 
