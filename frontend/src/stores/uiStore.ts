@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { AgentId } from '@/types/agent';
 
-export type SelectionType = 'evidence' | 'vote' | 'agent' | 'event';
+export type SelectionType = 'tool_call' | 'evidence' | 'claim' | 'vote' | 'event';
 
 interface Selection {
   type: SelectionType;

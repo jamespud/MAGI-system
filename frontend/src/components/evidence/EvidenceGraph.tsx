@@ -15,6 +15,7 @@ interface GraphNode extends d3.SimulationNodeDatum {
   label: string;
   type: 'evidence' | 'claim' | 'vote';
   color: string;
+  agent?: string; // owning agent code, used for Inspector lookups
 }
 
 interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
@@ -52,17 +53,17 @@ function buildGraph(evidence: EvidenceInput[], claims: ClaimInput[], votes: Vote
 
   const nodes: GraphNode[] = [
     ...shownEvidence.map((e) => ({
-      id: e.id, label: evLabel(e.id), type: 'evidence' as const, color: agentColor(e.collected_by),
+      id: e.id, label: evLabel(e.id), type: 'evidence' as const, color: agentColor(e.collected_by), agent: e.collected_by,
     })),
     ...claims.map((c) => ({
       id: c.id,
       label: c.text.slice(0, 30) + (c.text.length > 30 ? '...' : ''),
-      type: 'claim' as const, color: agentColor(c.created_by),
+      type: 'claim' as const, color: agentColor(c.created_by), agent: c.created_by,
     })),
     ...dedupedVotes.map((v) => ({
       id: `vote-${v.agent_code}`,
       label: `${v.agent_code}: ${v.stance}`,
-      type: 'vote' as const, color: stanceColor(v.stance),
+      type: 'vote' as const, color: stanceColor(v.stance), agent: v.agent_code,
     })),
   ];
 
@@ -90,7 +91,7 @@ export default function EvidenceGraph() {
   const [zoomPct, setZoomPct] = useState(100);
 
   useEffect(() => {
-    if (!caseId || !svgRef.current) return;
+    if (!caseId) return;
 
     setZoomPct(100);
     // Build from the agents' live evidence/claims/votes so the graph re-renders
@@ -152,7 +153,7 @@ export default function EvidenceGraph() {
         .join('g')
         .style('cursor', 'pointer')
         .on('click', (_e, d) => {
-          useUiStore.getState().select({ type: d.type === 'vote' ? 'vote' : 'evidence', id: d.id });
+          useUiStore.getState().select({ type: d.type, id: d.id, data: { agentId: d.agent } });
         });
 
       node.append('circle')
@@ -242,13 +243,18 @@ export default function EvidenceGraph() {
           )}
         </div>
       </div>
-      {empty ? (
-        <div className="flex items-center justify-center" style={{ height: HEIGHT }}>
-          <MonoText size="sm" muted>No evidence yet. Run the decision to populate.</MonoText>
-        </div>
-      ) : (
+      <div className="relative" style={{ height: HEIGHT }}>
+        {/* The svg stays mounted so the d3 effect can rebuild whenever the
+            agent store changes. The empty hint is an overlay: unmounting the
+            svg would null svgRef and permanently block re-rendering once data
+            arrives (the graph could never auto-populate after a run). */}
         <svg ref={svgRef} className="w-full cursor-grab active:cursor-grabbing" style={{ height: HEIGHT }} />
-      )}
+        {empty && (
+          <div className="absolute inset-0 flex items-center justify-center bg-base/70">
+            <MonoText size="sm" muted>No evidence yet. Run the decision to populate.</MonoText>
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

@@ -21,6 +21,10 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
     setExpandedAgent(isExpanded ? null : agentId);
   };
 
+  const inspect = (type: 'tool_call' | 'evidence' | 'claim' | 'vote', id: string) => {
+    useUiStore.getState().select({ type, id, data: { agentId } });
+  };
+
   if (!agent) {
     return (
       <Card className="flex-1 min-w-0">
@@ -110,9 +114,14 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
                 <MonoText size="sm" muted>Tool Calls</MonoText>
                 <div className="mt-1 space-y-1.5">
                   {agent.toolCalls.map((tc, i) => (
-                    <div key={i} className="bg-raised rounded p-2 text-xs">
+                    <div
+                      key={i}
+                      onClick={(e) => { e.stopPropagation(); inspect('tool_call', tc.id ?? `tc-${i}`); }}
+                      className="bg-raised rounded p-2 text-xs cursor-pointer hover:border-[var(--border-active)] border border-transparent"
+                    >
                       <div className="font-mono" style={{ color }}>{tc.name}({JSON.stringify(tc.params)})</div>
                       {tc.result && <div className="text-text-muted mt-0.5 truncate">{tc.result}</div>}
+                      {tc.error && <div className="text-error mt-0.5 truncate">{tc.error}</div>}
                     </div>
                   ))}
                 </div>
@@ -126,6 +135,7 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
                   {agent.evidence.map((ev) => (
                     <span
                       key={ev.id}
+                      onClick={(e) => { e.stopPropagation(); inspect('evidence', ev.id); }}
                       className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-raised text-text-secondary border border-border-dim cursor-pointer hover:border-[var(--border-active)]"
                     >
                       {ev.id}
@@ -140,7 +150,12 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
                 <MonoText size="sm" muted>Claims</MonoText>
                 <ul className="mt-1 space-y-1">
                   {agent.claims.map((cl) => (
-                    <li key={cl.id} className="text-xs text-text-secondary pl-2 border-l-2" style={{ borderColor: `${color}60` }}>
+                    <li
+                      key={cl.id}
+                      onClick={(e) => { e.stopPropagation(); inspect('claim', cl.id); }}
+                      className="text-xs text-text-secondary pl-2 border-l-2 cursor-pointer hover:border-[var(--border-active)]"
+                      style={{ borderColor: `${color}60` }}
+                    >
                       {cl.text}
                     </li>
                   ))}
@@ -151,7 +166,10 @@ export default function AgentPanel({ agentId }: AgentPanelProps) {
             {agent.vote && (
               <div>
                 <MonoText size="sm" muted>Vote</MonoText>
-                <div className="mt-1 p-2 rounded bg-raised">
+                <div
+                  onClick={(e) => { e.stopPropagation(); inspect('vote', `vote-${agentId}`); }}
+                  className="mt-1 p-2 rounded bg-raised cursor-pointer hover:border-[var(--border-active)] border border-transparent"
+                >
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-mono text-xs font-bold" style={{ color: stanceColor(agent.vote.stance) }}>
                       {stanceLabel(agent.vote.stance)}

@@ -121,6 +121,7 @@ export default function BottomTimeline() {
           {filteredEvents.map((event, i) => (
             <div
               key={event.id}
+              onClick={() => useUiStore.getState().select({ type: 'event', id: event.id })}
               className="flex items-center gap-2 px-4 py-1 border-b border-border-dim animate-slide-up hover:bg-raised cursor-pointer"
               style={{ animationDelay: `${i * 20}ms` }}
             >

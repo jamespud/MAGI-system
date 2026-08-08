@@ -5,7 +5,7 @@ import { MonoText, AgentAvatar } from '@/components/shared';
 import { Globe, Link2, Shield, Clock, FileText } from 'lucide-react';
 import { api } from '@/api/client';
 import type { ApiEvidence } from '@/api/client';
-import type { AgentId } from '@/types/agent';
+import type { AgentId, AgentSnapshot } from '@/types/agent';
 import { stanceColor, stanceLabel } from '@/lib/stance';
 
 export default function RightInspector() {
@@ -39,43 +39,54 @@ export default function RightInspector() {
   }
 
   const renderEvidenceDetail = () => {
-    const ev = evidenceMap[selected.id];
+    const agentId = selected.data?.agentId as AgentId | undefined;
+    const ref = agentId
+      ? agents[agentId]?.evidence.find((e) => e.id === selected.id)
+      : Object.values(agents).flatMap((a) => (a ? a.evidence : [])).find((e) => e.id === selected.id);
+    const full = evidenceMap[selected.id];
+    const ev = full ?? ref;
     if (!ev) return <MonoText muted>Evidence {selected.id} not found</MonoText>;
+    const source = full?.source ?? ref?.source ?? '';
+    const url = full?.url ?? ref?.url;
+    const observation = full?.observation ?? ref?.observation ?? '';
+    const reliability = full?.reliability ?? ref?.reliability ?? 0;
+    const collectedBy = full?.collected_by ?? agentId ?? '';
+    const timestamp = full?.timestamp ?? ref?.timestamp ?? '';
     return (
       <div className="space-y-4">
         <div>
           <MonoText size="sm" muted>Source</MonoText>
           <div className="flex items-center gap-1.5 mt-1">
             <Globe size={14} className="text-text-muted" />
-            <span className="text-sm text-text-primary">{ev.source}</span>
+            <span className="text-sm text-text-primary">{source}</span>
           </div>
         </div>
-        {ev.url && (
+        {url && (
           <div>
             <MonoText size="sm" muted>URL</MonoText>
             <div className="flex items-center gap-1.5 mt-1">
               <Link2 size={14} className="text-text-muted" />
-              <span className="text-xs text-accent truncate block">{ev.url}</span>
+              <span className="text-xs text-accent truncate block">{url}</span>
             </div>
           </div>
         )}
         <div>
           <MonoText size="sm" muted>Observation</MonoText>
-          <p className="text-sm text-text-secondary mt-1 leading-relaxed">{ev.observation}</p>
+          <p className="text-sm text-text-secondary mt-1 leading-relaxed whitespace-pre-wrap break-words">{observation}</p>
         </div>
         <div className="flex items-center gap-4">
           <div>
             <MonoText size="sm" muted>Reliability</MonoText>
             <div className="flex items-center gap-1.5 mt-1">
               <Shield size={14} className="text-accent" />
-              <span className="font-mono text-sm font-semibold text-accent">{ev.reliability.toFixed(2)}</span>
+              <span className="font-mono text-sm font-semibold text-accent">{reliability.toFixed(2)}</span>
             </div>
           </div>
           <div>
             <MonoText size="sm" muted>Collected By</MonoText>
             <div className="flex items-center gap-1.5 mt-1">
-              <AgentAvatar agentId={ev.collected_by as AgentId} size={18} />
-              <span className="text-sm text-text-secondary">{ev.collected_by}</span>
+              <AgentAvatar agentId={collectedBy as AgentId} size={18} />
+              <span className="text-sm text-text-secondary">{collectedBy}</span>
             </div>
           </div>
         </div>
@@ -83,7 +94,7 @@ export default function RightInspector() {
           <MonoText size="sm" muted>Timestamp</MonoText>
           <div className="flex items-center gap-1.5 mt-1">
             <Clock size={14} className="text-text-muted" />
-            <span className="font-mono text-xs text-text-muted">{ev.timestamp}</span>
+            <span className="font-mono text-xs text-text-muted">{timestamp}</span>
           </div>
         </div>
       </div>
@@ -95,7 +106,8 @@ export default function RightInspector() {
       .filter(([, a]) => a?.vote?.stance)
       .map(([id, a]) => ({ agentId: id, ...a!.vote! }));
 
-    const vote = agentVotes.find((v) => v.agentId === selected.id) || agentVotes[0];
+    const voteAgentId = (selected.data?.agentId as AgentId | undefined) ?? selected.id.replace(/^vote-/, '');
+    const vote = agentVotes.find((v) => v.agentId === voteAgentId) || agentVotes[0];
     if (!vote) return <MonoText muted>No vote data available</MonoText>;
 
     return (
@@ -140,42 +152,114 @@ export default function RightInspector() {
     );
   };
 
-  const renderAgentDetail = () => {
-    const agent = agents[selected.id as keyof typeof agents];
-    if (!agent) return <MonoText muted>No agent data</MonoText>;
-    return (
-      <div className="space-y-3">
-        <div>
-          <MonoText size="sm" muted>Status</MonoText>
-          <div className="mt-1 flex items-center gap-2">
-            <span className={`inline-block w-2 h-2 rounded-full ${agent.status === 'running' ? 'bg-accent animate-status-blink' : 'bg-text-muted'}`} />
-            <span className="text-sm text-text-primary">{agent.status}</span>
-          </div>
-        </div>
-        <div>
-          <MonoText size="sm" muted>Progress</MonoText>
-          <div className="mt-1">
-            <span className="font-mono text-sm text-text-primary">Step {agent.step} / {agent.maxSteps}</span>
-          </div>
-        </div>
-        <div>
-          <MonoText size="sm" muted>Tools Called</MonoText>
-          <div className="mt-1"><span className="font-mono text-sm text-text-primary">{agent.toolCalls.length}</span></div>
-        </div>
-        <div>
-          <MonoText size="sm" muted>Evidence Collected</MonoText>
-          <div className="mt-1"><span className="font-mono text-sm text-text-primary">{agent.evidence.length}</span></div>
-        </div>
-        <div>
-          <MonoText size="sm" muted>Claims Submitted</MonoText>
-          <div className="mt-1"><span className="font-mono text-sm text-text-primary">{agent.claims.length}</span></div>
-        </div>
-        {agent.thought && (
+  const renderToolCallDetail = () => {
+    const agentId = selected.data?.agentId as AgentId | undefined;
+    const entries: [AgentId, AgentSnapshot | null][] = agentId
+      ? [[agentId, agents[agentId] ?? null]]
+      : (Object.keys(agents) as AgentId[]).map((k): [AgentId, AgentSnapshot | null] => [k, agents[k]]);
+    for (const [id, a] of entries) {
+      if (!a) continue;
+      const tc = a.toolCalls.find((t) => t.id === selected.id);
+      if (!tc) continue;
+      return (
+        <div className="space-y-4">
           <div>
-            <MonoText size="sm" muted>Thought</MonoText>
-            <p className="text-xs text-text-secondary mt-1 leading-relaxed">{agent.thought}</p>
+            <MonoText size="sm" muted>Agent</MonoText>
+            <div className="flex items-center gap-1.5 mt-1">
+              <AgentAvatar agentId={id} size={18} />
+              <span className="text-sm text-text-secondary">{id}</span>
+            </div>
           </div>
-        )}
+          <div>
+            <MonoText size="sm" muted>Tool</MonoText>
+            <div className="mt-1"><span className="font-mono text-sm text-accent">{tc.name}</span></div>
+          </div>
+          <div>
+            <MonoText size="sm" muted>Arguments</MonoText>
+            <pre className="text-xs text-text-secondary mt-1 whitespace-pre-wrap break-words font-mono bg-raised rounded p-2">{JSON.stringify(tc.params, null, 2)}</pre>
+          </div>
+          {tc.result && (
+            <div>
+              <MonoText size="sm" muted>Result</MonoText>
+              <pre className="text-xs text-text-secondary mt-1 whitespace-pre-wrap break-words font-mono bg-raised rounded p-2 max-h-72 overflow-y-auto">{tc.result}</pre>
+            </div>
+          )}
+          {tc.error && (
+            <div>
+              <MonoText size="sm" muted>Error</MonoText>
+              <pre className="text-xs text-error mt-1 whitespace-pre-wrap break-words font-mono bg-raised rounded p-2">{tc.error}</pre>
+            </div>
+          )}
+          <div className="flex items-center gap-4">
+            {tc.durationMs != null && (
+              <div>
+                <MonoText size="sm" muted>Duration</MonoText>
+                <div className="mt-1"><span className="font-mono text-sm text-text-primary">{tc.durationMs}ms</span></div>
+              </div>
+            )}
+            <div>
+              <MonoText size="sm" muted>Tool Call ID</MonoText>
+              <div className="mt-1"><span className="font-mono text-xs text-text-muted">{tc.id}</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <MonoText muted>Tool call not found</MonoText>;
+  };
+
+  const renderClaimDetail = () => {
+    const agentId = selected.data?.agentId as AgentId | undefined;
+    const scoped = agentId
+      ? ([[agentId, agents[agentId] ?? null]] as [AgentId, AgentSnapshot | null][])
+      : (Object.keys(agents) as AgentId[]).map((k): [AgentId, AgentSnapshot | null] => [k, agents[k]]);
+    const claim = scoped
+      .flatMap(([id, a]) => a ? a.claims.map((cl) => ({ ...cl, created_by: id })) : [])
+      .find((cl) => cl.id === selected.id);
+    if (!claim) return <MonoText muted>Claim not found</MonoText>;
+    return (
+      <div className="space-y-4">
+        <div>
+          <MonoText size="sm" muted>Created By</MonoText>
+          <div className="flex items-center gap-1.5 mt-1">
+            <AgentAvatar agentId={claim.created_by as AgentId} size={18} />
+            <span className="text-sm text-text-secondary">{claim.created_by}</span>
+          </div>
+        </div>
+        <div>
+          <MonoText size="sm" muted>Statement</MonoText>
+          <p className="text-sm text-text-secondary mt-1 leading-relaxed">{claim.text}</p>
+        </div>
+        <div>
+          <MonoText size="sm" muted>Supports</MonoText>
+          {claim.supports.length === 0 ? (
+            <p className="text-xs text-text-muted mt-1">None</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {claim.supports.map((evId) => {
+                const ev = evidenceMap[evId] ?? agents[claim.created_by as AgentId]?.evidence.find((e) => e.id === evId);
+                return (
+                  <li key={evId} className="text-xs text-text-secondary font-mono">
+                    {evId}
+                    {ev && <span className="text-text-muted"> — {ev.source}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+        <div>
+          <MonoText size="sm" muted>Contradicts</MonoText>
+          {claim.contradicts.length === 0 ? (
+            <p className="text-xs text-text-muted mt-1">None</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {claim.contradicts.map((cId) => (
+                <li key={cId} className="text-xs text-text-secondary font-mono">{cId}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     );
   };
@@ -220,15 +304,16 @@ export default function RightInspector() {
 
   const renderContent = () => {
     switch (selected.type) {
+      case 'tool_call': return renderToolCallDetail();
       case 'evidence': return renderEvidenceDetail();
+      case 'claim': return renderClaimDetail();
       case 'vote': return renderVoteDetail();
-      case 'agent': return renderAgentDetail();
       case 'event': return renderEventDetail();
       default: return <MonoText muted>Unknown selection type</MonoText>;
     }
   };
 
-  const titleMap: Record<string, string> = { evidence: 'Evidence', vote: 'Vote', agent: 'Agent', event: 'Event' };
+  const titleMap: Record<string, string> = { tool_call: 'Tool Call', evidence: 'Evidence', claim: 'Claim', vote: 'Vote', event: 'Event' };
 
   return (
     <aside className="w-80 shrink-0 border-l border-border-dim bg-base overflow-y-auto">

@@ -36,6 +36,9 @@ export interface EvidenceRef {
   id: string;
   source: string;
   reliability: number;
+  url?: string;
+  observation?: string;
+  timestamp?: string;
 }
 
 export interface ClaimRef {

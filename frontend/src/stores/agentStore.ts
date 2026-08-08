@@ -66,12 +66,22 @@ export const useAgentStore = create<AgentState>((set) => ({
         maxSteps: 12,
         thought: '',
         toolCalls: (v.tool_calls ?? []).map((tc) => ({
+          id: tc.tool_call_id,
           name: tc.tool_name,
           params: tc.arguments ? safeParseArgs(tc.arguments) : {},
           result: tc.result || null,
+          error: tc.err || undefined,
+          durationMs: tc.duration_ms > 0 ? tc.duration_ms : undefined,
           timestamp: '',
         })),
-        evidence: (v.evidence ?? []).map((e) => ({ id: e.id, source: e.source, reliability: e.reliability })),
+        evidence: (v.evidence ?? []).map((e) => ({
+          id: e.id,
+          source: e.source,
+          reliability: e.reliability,
+          url: e.url,
+          observation: e.observation,
+          timestamp: e.timestamp,
+        })),
         claims: (v.claims ?? []).map((cl) => ({ id: cl.id, text: cl.text, supports: cl.supports, contradicts: cl.contradicts })),
         vote,
       };
