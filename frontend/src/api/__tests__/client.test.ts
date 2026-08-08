@@ -179,3 +179,58 @@ describe('api.getCases wrapper', () => {
     expect(result[0].id).toBe('case-001');
   });
 });
+
+describe('api.datasets', () => {
+  it('creates a dataset', async () => {
+    const ds = { id: 'd1', name: 'eval', description: '', item_count: 0, created_at: 'x' };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(ds),
+    } as Response);
+    await expect(api.createDataset('eval')).resolves.toEqual(ds);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/datasets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'eval', description: undefined }),
+    });
+  });
+
+  it('starts a dataset run', async () => {
+    const run = { id: 'r1', dataset_id: 'd1', status: 'queued', total: 2, matched: 0, accuracy: 0, weighted_accuracy: 0, started_at: 'x' };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(run),
+    } as Response);
+    await expect(api.startDatasetRun('d1')).resolves.toEqual(run);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/datasets/d1/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('fetches benchmark run detail', async () => {
+    const detail = { run: { id: 'r1', dataset_id: 'd1', status: 'succeeded', total: 2, matched: 1, accuracy: 0.5, weighted_accuracy: 0.5, started_at: 'x' }, results: [] };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(detail),
+    } as Response);
+    await expect(api.getBenchmarkRun('r1')).resolves.toEqual(detail);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/benchmarks/r1', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+});
+
+describe('api.searchMemory', () => {
+  it('queries memory with encoded query and limit', async () => {
+    const results = { results: [{ CaseID: 'case-1', QuestionSummary: 'stack choice', ContextSummary: '', Resolution: 'approve', ProjectionVersion: 1 }] };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(results),
+    } as Response);
+    await expect(api.searchMemory('stack choice', 5)).resolves.toEqual(results);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/memory?q=stack%20choice&limit=5', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+});

@@ -129,10 +129,137 @@ export const api = {
   getVotes: (id: string) => request<ApiVote[]>(`/cases/${id}/votes`),
 
   getEvents: (id: string) => request<ApiEvent[]>(`/cases/${id}/events`),
+
+  listDatasets: () => request<{ datasets: ApiDataset[] }>('/datasets'),
+
+  createDataset: (name: string, description?: string) =>
+    request<ApiDataset>('/datasets', { method: 'POST', body: JSON.stringify({ name, description }) }),
+
+  addDatasetItems: (id: string, items: { question: string; expected_decision: string }[]) =>
+    request<{ added: number }>(`/datasets/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
+
+  startDatasetRun: (id: string) =>
+    request<ApiBenchmarkRun>(`/datasets/${id}/runs`, { method: 'POST' }),
+
+  getBenchmarkRun: (runId: string) => request<ApiBenchmarkDetail>(`/benchmarks/${runId}`),
+
+  getDatasetRuns: (id: string) => request<ApiBenchmarkRun[]>(`/datasets/${id}/runs`),
+
+  searchMemory: (query: string, limit = 20) =>
+    request<{ results: ApiMemoryProjection[] }>(`/memory?q=${encodeURIComponent(query)}&limit=${limit}`),
+
+  evaluateCase: (id: string) => request<ApiEvaluation>(`/evaluation/${id}`, { method: 'POST' }),
+
+  listRecurring: () => request<ApiRecurring[]>(`/recurring`),
+
+  createRecurring: (name: string, question: string, intervalSeconds: number) =>
+    request<ApiRecurring>(`/recurring`, {
+      method: 'POST',
+      body: JSON.stringify({ name, question, interval_seconds: intervalSeconds }),
+    }),
+
+  setRecurringEnabled: (id: string, enabled: boolean) =>
+    request<unknown>(`/recurring/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
+
+  runRecurringNow: (id: string) => request<{ id: string; status: string }>(`/recurring/${id}/run`, { method: 'POST' }),
+
+  listTools: () => request<{ name: string; desc: string }[]>(`/tools`),
+
+  getVersion: () => request<{ version: string }>(`/version`),
+
+  getReady: () => request<{ status: string }>(`/ready`),
+
+  benchmarkCases: (caseIds: string[]) =>
+    request<Record<string, ApiEvaluation>>(`/benchmark`, {
+      method: 'POST',
+      body: JSON.stringify({ case_ids: caseIds }),
+    }),
+
+  deleteRecurring: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/recurring/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
 };
+
+interface ApiRecurring {
+  id: string;
+  name: string;
+  question: string;
+  background: string;
+  interval_seconds: number;
+  enabled: boolean;
+  last_run_at?: string;
+  created_at: string;
+}
+
+interface ApiEvaluation {
+  tool_success_rate: number;
+  gate_failures: number;
+  total_tokens: number;
+  first_round_consensus: boolean;
+  consensus_round: number;
+}
+
+interface ApiMemoryProjection {
+  CaseID: string;
+  QuestionSummary: string;
+  ContextSummary: string;
+  Resolution: string;
+  Outcome?: { Status: string; Learned: string } | null;
+  ProjectionVersion: number;
+}
+
+interface ApiDataset {
+  id: string;
+  name: string;
+  description: string;
+  item_count: number;
+  created_at: string;
+}
+
+interface ApiBenchmarkRun {
+  id: string;
+  dataset_id: string;
+  status: string;
+  total: number;
+  matched: number;
+  accuracy: number;
+  weighted_accuracy: number;
+  started_at: string;
+  completed_at?: string;
+}
+
+interface ApiBenchmarkItemResult {
+  id: string;
+  case_id: string;
+  expected_decision: string;
+  actual_decision: string;
+  matched: boolean;
+  score: number;
+  error?: string;
+  feedback?: string;
+  feedback_at?: string;
+}
+
+interface ApiBenchmarkDetail {
+  run: ApiBenchmarkRun;
+  results: ApiBenchmarkItemResult[];
+}
 
 export type {
   ApiCaseResponse,
+  ApiDataset,
+  ApiBenchmarkRun,
+  ApiBenchmarkDetail,
+  ApiMemoryProjection,
+  ApiEvaluation,
+  ApiRecurring,
   ApiConsensus,
   ApiRunResponse,
   ApiAgentSnapshot,

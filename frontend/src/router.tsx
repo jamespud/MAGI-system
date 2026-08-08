@@ -1,7 +1,15 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
 import DecisionWorkspace from '@/pages/DecisionWorkspace';
-import PlaceholderPage from '@/pages/PlaceholderPage';
+import Dataset from '@/pages/Dataset';
+import Memory from '@/pages/Memory';
+import History from '@/pages/History';
+import Replay from '@/pages/Replay';
+import Evaluation from '@/pages/Evaluation';
+import Templates from '@/pages/Templates';
+import Benchmark from '@/pages/Benchmark';
+import Tools from '@/pages/Tools';
+import Settings from '@/pages/Settings';
 
 export const router = createBrowserRouter([
   {
@@ -10,15 +18,15 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DecisionWorkspace /> },
       { path: 'case/:caseId', element: <DecisionWorkspace /> },
-      { path: 'memory', element: <PlaceholderPage title="Memory" /> },
-      { path: 'replay', element: <PlaceholderPage title="Replay" /> },
-      { path: 'evaluation', element: <PlaceholderPage title="Evaluation" /> },
-      { path: 'dataset', element: <PlaceholderPage title="Dataset" /> },
-      { path: 'tools', element: <PlaceholderPage title="Tools" /> },
-      { path: 'settings', element: <PlaceholderPage title="Settings" /> },
-      { path: 'templates', element: <PlaceholderPage title="Templates" /> },
-      { path: 'benchmark', element: <PlaceholderPage title="Benchmark" /> },
-      { path: 'history', element: <PlaceholderPage title="History" /> },
+      { path: 'memory', element: <Memory /> },
+      { path: 'replay', element: <Replay /> },
+      { path: 'evaluation', element: <Evaluation /> },
+      { path: 'dataset', element: <Dataset /> },
+      { path: 'tools', element: <Tools /> },
+      { path: 'settings', element: <Settings /> },
+      { path: 'templates', element: <Templates /> },
+      { path: 'benchmark', element: <Benchmark /> },
+      { path: 'history', element: <History /> },
     ],
   },
 ]);
