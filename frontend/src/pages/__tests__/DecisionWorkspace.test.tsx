@@ -5,6 +5,8 @@ import DecisionWorkspace from '../DecisionWorkspace';
 
 const mockFetchCase = vi.fn();
 const mockRunCase = vi.fn().mockResolvedValue(undefined);
+const mockForkCase = vi.fn().mockResolvedValue({ id: 'case-forked', status: 'NORMALIZING' });
+const mockNavigate = vi.fn();
 const mockLoadAgentsFromApi = vi.fn();
 const mockClearEvents = vi.fn();
 const mockPushEvent = vi.fn();
@@ -23,6 +25,11 @@ vi.mock('@/api/stream', () => ({
   subscribeCaseStream: (...args: unknown[]) => mockSubscribe(...args),
 }));
 
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 vi.mock('@/api/eventMapper', () => ({
   mapBackendEvent: (e: { id: string; type: string; message: string; timestamp: string }) => ({
     id: e.id, type: 'ERROR', timestamp: e.timestamp, message: e.message,
@@ -40,7 +47,9 @@ vi.mock('@/stores', () => {
     getState: () => ({
       fetchCase: mockFetchCase,
       runCase: mockRunCase,
+      forkCase: mockForkCase,
       createCase: vi.fn(),
+      case: currentCase,
     }),
   });
   const agentHook = vi.fn(() => ({}));
@@ -112,10 +121,13 @@ describe('DecisionWorkspace', () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it('shows Re-run for failed state', () => {
+  it('forks and navigates when Re-run is clicked on a terminal case', async () => {
     currentCase = { id: 'case-001', question: 'q', status: 'FAILED' };
     const { getByText } = renderAt('/case/case-001');
     const btn = getByText('Re-run') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
+    fireEvent.click(btn);
+    await waitFor(() => expect(mockForkCase).toHaveBeenCalledWith('case-001'));
+    expect(mockNavigate).toHaveBeenCalledWith('/case/case-forked');
   });
 });

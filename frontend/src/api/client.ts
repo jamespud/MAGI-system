@@ -12,6 +12,7 @@ interface ApiCaseResponse {
   question: string;
   background: string;
   constraints: { label: string; value: string }[];
+  parent_case_id?: string;
   status: string;
   consensus: ApiConsensus | null;
   final_decision: string;
@@ -117,6 +118,8 @@ export const api = {
     }),
 
   runCase: (id: string) => request<ApiRunResponse>(`/cases/${id}/run`, { method: 'POST' }),
+
+  forkCase: (id: string) => request<ApiCaseResponse>(`/cases/${id}/fork`, { method: 'POST' }),
 
   cancelCase: (id: string) => request<ApiRunResponse>(`/cases/${id}/cancel`, { method: 'POST' }),
 

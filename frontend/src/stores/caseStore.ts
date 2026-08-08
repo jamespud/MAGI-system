@@ -6,6 +6,7 @@ function mapToSummary(c: ApiCaseResponse): CaseSummary {
   return {
     id: c.id,
     question: c.question,
+    parentCaseId: c.parent_case_id ?? '',
     status: c.status as CaseStatus,
     round: c.round,
     createdAt: c.created_at,
@@ -19,6 +20,7 @@ function mapToCase(c: ApiCaseResponse): Case {
     question: c.question,
     background: c.background,
     constraints: (c.constraints || []).map(ct => ({ label: ct.label, value: ct.value })),
+    parentCaseId: c.parent_case_id ?? '',
     status: c.status as CaseStatus,
     round: c.round,
     consensus: c.consensus ? {
@@ -61,6 +63,7 @@ interface CaseState {
   fetchCases: () => Promise<void>;
   fetchCase: (id: string, opts?: { silent?: boolean }) => Promise<void>;
   createCase: (question: string, background?: string) => Promise<ApiCaseResponse>;
+  forkCase: (id: string) => Promise<ApiCaseResponse>;
   runCase: (id: string) => Promise<void>;
   cancelCase: (id: string) => Promise<void>;
 }
@@ -116,6 +119,18 @@ export const useCaseStore = create<CaseState>((set) => ({
     set({ loading: true, error: null });
     try {
       const c = await api.createCase(question, background);
+      set((s) => ({ cases: upsertSummary(s.cases, mapToSummary(c)), loading: false }));
+      return c;
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+      throw e;
+    }
+  },
+
+  forkCase: async (id: string) => {
+    set({ loading: true, error: null });
+    try {
+      const c = await api.forkCase(id);
       set((s) => ({ cases: upsertSummary(s.cases, mapToSummary(c)), loading: false }));
       return c;
     } catch (e) {

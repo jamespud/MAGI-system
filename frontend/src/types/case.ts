@@ -47,6 +47,10 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   MEMORY_INDEXED: 'Memory Indexed',
 };
 
+export const TERMINAL_CASE_STATUSES: readonly CaseStatus[] = [
+  'RESOLVED', 'DEADLOCKED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'INSUFFICIENT_EVIDENCE',
+];
+
 export const ACTIVE_CASE_STATUSES: readonly CaseStatus[] = [
   'NORMALIZING', 'CONTEXT_BUILDING', 'RETRIEVING_MEMORY', 'INVESTIGATING',
   'EVIDENCE_GATING', 'COLLECTING_VOTES', 'CONSENSUS_CHECK', 'DEBATING',
@@ -59,6 +63,7 @@ export interface Case {
   question: string;
   background: string;
   constraints: Constraint[];
+  parentCaseId?: string;
   status: CaseStatus;
   round: number;
   consensus: ConsensusState | null;
@@ -71,6 +76,7 @@ export interface Case {
 export interface CaseSummary {
   id: string;
   question: string;
+  parentCaseId?: string;
   status: CaseStatus;
   round: number;
   createdAt: string;

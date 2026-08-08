@@ -4,7 +4,7 @@ import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
 import { api } from '@/api/client';
 import { subscribeCaseStream } from '@/api/stream';
 import { mapBackendEvent } from '@/api/eventMapper';
-import { ACTIVE_CASE_STATUSES, type CaseStatus } from '@/types/case';
+import { ACTIVE_CASE_STATUSES, TERMINAL_CASE_STATUSES, type CaseStatus } from '@/types/case';
 import CaseHeader from '@/components/workspace/CaseHeader';
 import AgentTrio from '@/components/workspace/AgentTrio';
 import ConsensusPanel from '@/components/workspace/ConsensusPanel';
@@ -60,7 +60,15 @@ export default function DecisionWorkspace() {
   const handleRun = async () => {
     if (!caseId) return;
     try {
-      await useCaseStore.getState().runCase(caseId);
+      const status = useCaseStore.getState().case?.status;
+      if (status && TERMINAL_CASE_STATUSES.includes(status as CaseStatus)) {
+        // Rerun creates a forked case that inherits the decision context and
+        // runs under the current tool/RAG environment; the original stays as is.
+        const c = await useCaseStore.getState().forkCase(caseId);
+        navigate(`/case/${c.id}`);
+      } else {
+        await useCaseStore.getState().runCase(caseId);
+      }
     } catch {
       // 409 or error already set in store
     }

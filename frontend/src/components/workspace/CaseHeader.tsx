@@ -1,4 +1,5 @@
-import { Play, Pause, RotateCw, Download, Trash2 } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
+import { Play, Pause, RotateCw, Download, Trash2, GitFork } from 'lucide-react';
 import { useCaseStore } from '@/stores';
 import { StatusBadge, MonoText } from '@/components/shared';
 import { Button } from '@/components/ui';
@@ -30,6 +31,16 @@ export default function CaseHeader() {
         <h1 className="text-lg font-semibold text-text-primary mb-3 font-sans">
           {c.question}
         </h1>
+
+        {c.parentCaseId && (
+          <NavLink
+            to={`/case/${c.parentCaseId}`}
+            className="inline-flex items-center gap-1 mb-3 font-mono text-xs text-text-muted hover:text-accent transition-colors"
+          >
+            <GitFork size={12} />
+            Fork of {c.parentCaseId.length > 24 ? `${c.parentCaseId.slice(0, 24)}…` : c.parentCaseId}
+          </NavLink>
+        )}
 
         <div className="flex items-center gap-4 flex-wrap">
           <StatusBadge

@@ -8,6 +8,7 @@ vi.mock('@/api/client', () => ({
     getCases: vi.fn(),
     getCase: vi.fn(),
     createCase: vi.fn(),
+    forkCase: vi.fn(),
     runCase: vi.fn(),
     cancelCase: vi.fn(),
   },
@@ -124,6 +125,21 @@ describe('caseStore', () => {
   });
 });
 
+
+  it('forkCase creates and upserts the forked case with its parent link', async () => {
+    const apiCase = {
+      id: 'case-fork', question: 'Q?', background: '', constraints: [], parent_case_id: 'case-001',
+      status: 'NORMALIZING', consensus: null, confidence: 0, round: 0, final_decision: '',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    };
+    vi.mocked(api.forkCase).mockResolvedValueOnce(apiCase);
+
+    const result = await useCaseStore.getState().forkCase('case-001');
+
+    expect(api.forkCase).toHaveBeenCalledWith('case-001');
+    expect(result.id).toBe('case-fork');
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'case-fork')?.parentCaseId).toBe('case-001');
+  });
 describe('caseStore.runCase', () => {
   it('posts run and updates case status from response', async () => {
     useCaseStore.getState().loadCase(mockCase);
