@@ -47,6 +47,13 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   MEMORY_INDEXED: 'Memory Indexed',
 };
 
+export const ACTIVE_CASE_STATUSES: readonly CaseStatus[] = [
+  'NORMALIZING', 'CONTEXT_BUILDING', 'RETRIEVING_MEMORY', 'INVESTIGATING',
+  'EVIDENCE_GATING', 'COLLECTING_VOTES', 'CONSENSUS_CHECK', 'DEBATING',
+  'REFLECTING', 'REVOTING', 'RESOLVING', 'GENERATING_REPORT',
+  'SAVING_MEMORY', 'EVALUATING',
+];
+
 export interface Case {
   id: string;
   question: string;

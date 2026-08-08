@@ -47,7 +47,7 @@ describe('caseStore', () => {
 
   it('updates case status', () => {
     useCaseStore.getState().loadCase(mockCase);
-    useCaseStore.getState().updateCaseStatus('INVESTIGATING', 1);
+    useCaseStore.getState().updateCaseStatus('test-1', 'INVESTIGATING', 1);
     expect(useCaseStore.getState().case?.status).toBe('INVESTIGATING');
   });
 
@@ -214,7 +214,7 @@ describe('caseStore sidebar list sync', () => {
     useCaseStore.getState().loadCaseList([
       { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '', pinned: false },
     ]);
-    useCaseStore.getState().updateCaseStatus('DEBATING', 2);
+    useCaseStore.getState().updateCaseStatus('test-1', 'DEBATING', 2);
     expect(useCaseStore.getState().cases.find((c) => c.id === 'test-1')?.status).toBe('DEBATING');
   });
 });

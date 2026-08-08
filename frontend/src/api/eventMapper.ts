@@ -7,6 +7,7 @@ import type { AgentId } from '@/types/agent';
 // frontend collapses related backend events into one display bucket.
 const TYPE_MAP: Record<string, EventType> = {
   CASE_CREATED: 'ROUND_START',
+  CASE_STATUS_CHANGED: 'AGENT_STEP',
   TASK_NORMALIZED: 'ROUND_START',
   MEMORY_RETRIEVED: 'ROUND_START',
   AGENT_STARTED: 'AGENT_STEP',

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { subscribeCaseStream } from './stream';
-import { useEventStore, useAgentStore } from '@/stores';
+import { useEventStore, useAgentStore, useCaseStore } from '@/stores';
 
 class FakeEventSource {
   static last: FakeEventSource | null = null;
@@ -18,6 +18,7 @@ describe('subscribeCaseStream', () => {
     vi.stubGlobal('EventSource', FakeEventSource);
     useEventStore.getState().clearEvents();
     useAgentStore.getState().resetAgents();
+    useCaseStore.setState({ case: null, cases: [], loading: false, error: null });
   });
 
   it('opens an EventSource on /api/v1/cases/:id/stream', () => {
@@ -57,6 +58,20 @@ describe('subscribeCaseStream', () => {
     unsub();
   });
 
+
+  it('applies CASE_STATUS_CHANGED to caseStore without pushing to the timeline', () => {
+    const unsub = subscribeCaseStream('c1');
+    const es = FakeEventSource.last!;
+    useCaseStore.getState().loadCaseList([
+      { id: 'c1', question: 'Q?', status: 'DRAFT', round: 0, createdAt: 't', pinned: false },
+    ]);
+    es.onmessage!({
+      data: JSON.stringify({ id: 'e1', type: 'CASE_STATUS_CHANGED', message: 'status', payload: { status: 'DEBATING', round: 2 }, timestamp: 't' }),
+    });
+    expect(useCaseStore.getState().cases.find((c) => c.id === 'c1')?.status).toBe('DEBATING');
+    expect(useEventStore.getState().events).toHaveLength(0);
+    unsub();
+  });
   it('close() is called on unsubscribe', () => {
     const unsub = subscribeCaseStream('c1');
     const es = FakeEventSource.last!;

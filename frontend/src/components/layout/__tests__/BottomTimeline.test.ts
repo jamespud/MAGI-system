@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatEventMessage } from '../BottomTimeline';
+import { formatEventMessage, sortEventsNewestFirst } from '../BottomTimeline';
 import type { MagiEvent } from '@/types/event';
 
 function ev(type: MagiEvent['type'], data?: Record<string, unknown>, message = 'fallback'): MagiEvent {
@@ -29,5 +29,21 @@ describe('formatEventMessage', () => {
 
   it('falls back to event.message for types without payload logic', () => {
     expect(formatEventMessage(ev('ROUND_START', undefined, 'Round started'))).toBe('Round started');
+  });
+});
+
+describe('sortEventsNewestFirst', () => {
+  it('orders events newest first', () => {
+    const older = { id: 'e1', type: 'AGENT_STEP' as const, timestamp: '2026-01-01T00:00:00Z', message: 'older' };
+    const newer = { id: 'e2', type: 'AGENT_STEP' as const, timestamp: '2026-01-02T00:00:00Z', message: 'newer' };
+    expect(sortEventsNewestFirst([older, newer]).map((e) => e.id)).toEqual(['e2', 'e1']);
+  });
+
+  it('does not mutate the input array', () => {
+    const a = { id: 'e1', type: 'AGENT_STEP' as const, timestamp: '2026-01-01T00:00:00Z', message: 'm' };
+    const b = { id: 'e2', type: 'AGENT_STEP' as const, timestamp: '2026-01-02T00:00:00Z', message: 'm' };
+    const input = [a, b];
+    sortEventsNewestFirst(input);
+    expect(input).toEqual([a, b]);
   });
 });

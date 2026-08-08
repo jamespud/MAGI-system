@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Pin, Play, CheckCircle, Archive, FileText, FlaskConical, Database, History } from 'lucide-react';
 import PaginatedSection from './PaginatedSection';
 import { useCaseStore } from '@/stores';
-import type { CaseSummary } from '@/types/case';
+import { ACTIVE_CASE_STATUSES, type CaseSummary } from '@/types/case';
 
 interface LeftNavProps {
   cases?: CaseSummary[];
@@ -11,7 +11,7 @@ interface LeftNavProps {
 
 const SECTIONS: { title: string; icon: typeof Pin; filter: (c: CaseSummary) => boolean }[] = [
   { title: 'Pinned', icon: Pin, filter: (c) => c.pinned },
-  { title: 'Running', icon: Play, filter: (c) => c.status === 'INVESTIGATING' || c.status === 'DEBATING' },
+  { title: 'Running', icon: Play, filter: (c) => ACTIVE_CASE_STATUSES.includes(c.status) },
   { title: 'Completed', icon: CheckCircle, filter: (c) => c.status === 'RESOLVED' },
   { title: 'Archived', icon: Archive, filter: () => false },
 ];

@@ -54,7 +54,7 @@ interface CaseState {
   error: string | null;
   loadCase: (c: Case) => void;
   loadCaseList: (list: CaseSummary[]) => void;
-  updateCaseStatus: (status: Case['status'], round: number) => void;
+  updateCaseStatus: (caseId: string, status: Case['status'], round: number) => void;
   updateConsensus: (consensus: Case['consensus'], confidence: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -75,10 +75,10 @@ export const useCaseStore = create<CaseState>((set) => ({
 
   loadCaseList: (list) => set({ cases: list }),
 
-  updateCaseStatus: (status, round) =>
+  updateCaseStatus: (caseId, status, round) =>
     set((s) => ({
-      case: s.case ? { ...s.case, status, round } : null,
-      cases: patchSummary(s.cases, s.case?.id ?? '', { status, round }),
+      case: s.case && s.case.id === caseId ? { ...s.case, status, round } : s.case,
+      cases: patchSummary(s.cases, caseId, { status, round }),
     })),
 
   updateConsensus: (consensus, confidence) =>

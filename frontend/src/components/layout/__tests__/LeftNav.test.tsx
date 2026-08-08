@@ -46,6 +46,16 @@ describe('LeftNav', () => {
     expect(getByText('Decision Center')).toBeDefined();
   });
 
+
+  it('shows in-progress statuses (e.g. NORMALIZING) in the Running section', () => {
+    const { getByText } = render(
+      <MemoryRouter>
+        <LeftNav cases={[{ id: 'c1', question: 'Active question', status: 'NORMALIZING' as const, round: 1, createdAt: 't', pinned: false }]} />
+      </MemoryRouter>
+    );
+    expect(getByText('Running')).toBeDefined();
+    expect(getByText('Active question')).toBeDefined();
+  });
   it('paginates the Completed section when many cases are resolved', () => {
     const resolved = Array.from({ length: 12 }, (_, i) => ({
       id: `c-${i}`, question: `Question ${i}`, status: 'RESOLVED' as const,

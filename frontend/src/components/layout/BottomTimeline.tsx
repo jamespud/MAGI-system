@@ -40,6 +40,12 @@ const EVENT_TO_FILTER: Record<EventType, keyof EventFilter> = {
 // formatEventMessage derives a specific label from the event type + payload,
 // falling back to the backend's generic message when the payload field is
 // absent. Exported for testing.
+// sortEventsNewestFirst returns events ordered newest-first; the timeline is
+// displayed as reverse chronological.
+export function sortEventsNewestFirst(events: MagiEvent[]): MagiEvent[] {
+  return [...events].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
 export function formatEventMessage(event: MagiEvent): string {
   const d = (event.data ?? {}) as Record<string, unknown>;
   switch (event.type) {
@@ -69,7 +75,7 @@ export default function BottomTimeline() {
   const toggleTimeline = useUiStore((s) => s.toggleTimeline);
   const timelineHeight = useUiStore((s) => s.timelineHeight);
 
-  const filteredEvents = events.filter((e) => filters[EVENT_TO_FILTER[e.type]]);
+  const filteredEvents = sortEventsNewestFirst(events.filter((e) => filters[EVENT_TO_FILTER[e.type]]));
 
   return (
     <div

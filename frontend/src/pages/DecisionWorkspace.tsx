@@ -4,6 +4,7 @@ import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
 import { api } from '@/api/client';
 import { subscribeCaseStream } from '@/api/stream';
 import { mapBackendEvent } from '@/api/eventMapper';
+import { ACTIVE_CASE_STATUSES, type CaseStatus } from '@/types/case';
 import CaseHeader from '@/components/workspace/CaseHeader';
 import AgentTrio from '@/components/workspace/AgentTrio';
 import ConsensusPanel from '@/components/workspace/ConsensusPanel';
@@ -28,7 +29,9 @@ export default function DecisionWorkspace() {
       .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
       .catch(() => {});
     api.getEvents(id)
-      .then((evs) => evs.forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
+      .then((evs) => evs
+        .filter((e) => e.type !== 'CASE_STATUS_CHANGED')
+        .forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
       .catch(() => {});
   };
 
@@ -64,10 +67,7 @@ export default function DecisionWorkspace() {
   };
 
   function runButtonState(status: string): { disabled: boolean; label: string } {
-    const active = ['INVESTIGATING','EVIDENCE_GATING','COLLECTING_VOTES','CONSENSUS_CHECK',
-                     'DEBATING','REFLECTING','REVOTING','RESOLVING','GENERATING_REPORT',
-                     'SAVING_MEMORY','EVALUATING','NORMALIZING','CONTEXT_BUILDING','RETRIEVING_MEMORY'];
-    if (active.includes(status)) return { disabled: true, label: 'Running...' };
+    if (ACTIVE_CASE_STATUSES.includes(status as CaseStatus)) return { disabled: true, label: 'Running...' };
     if (status === 'RESOLVED') return { disabled: true, label: 'Resolved' };
     if (['FAILED','DEADLOCKED','CANCELLED','TIMED_OUT'].includes(status))
       return { disabled: false, label: 'Re-run' };

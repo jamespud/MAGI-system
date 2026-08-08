@@ -1,7 +1,8 @@
-import { useEventStore, useAgentStore } from '@/stores';
+import { useCaseStore, useEventStore, useAgentStore } from '@/stores';
 import { mapBackendEvent } from './eventMapper';
 import type { ApiEvent } from './client';
 import type { AgentId, AgentStatus } from '@/types/agent';
+import type { CaseStatus } from '@/types/case';
 
 // Maps backend event types to the agent status they imply. Absent types
 // (e.g. TASK_NORMALIZED) leave the agent status untouched.
@@ -37,6 +38,14 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       raw = JSON.parse(msg.data) as ApiEvent;
     } catch {
       return; // ignore malformed frames
+    }
+    if (raw.type === 'CASE_STATUS_CHANGED') {
+      const status = raw.payload?.status;
+      const round = raw.payload?.round;
+      if (typeof status === 'string') {
+        useCaseStore.getState().updateCaseStatus(caseId, status as CaseStatus, typeof round === 'number' ? round : 0);
+      }
+      return; // phase transitions update the case status, not the timeline
     }
     const ev = mapBackendEvent(raw);
     useEventStore.getState().pushEvent(ev);
