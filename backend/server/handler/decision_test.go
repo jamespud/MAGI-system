@@ -53,6 +53,9 @@ func (s stubCaseLookup) List(ctx context.Context) ([]*entity.DecisionCase, error
 func (s stubCaseLookup) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
 	return nil
 }
+func (s stubCaseLookup) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
 
 // Compile-time: stubCaseLookup satisfies port.CaseRepository.
 var _ port.CaseRepository = stubCaseLookup{}

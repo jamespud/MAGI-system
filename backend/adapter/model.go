@@ -37,6 +37,38 @@ type AgentRunModel struct {
 
 func (AgentRunModel) TableName() string { return "magi_agent_run" }
 
+// DecisionJobModel is the durable worker envelope for one case.
+type DecisionJobModel struct {
+	ID          string `gorm:"primaryKey"`
+	CaseID      string `gorm:"uniqueIndex"`
+	Status      string `gorm:"index"`
+	Attempt     int
+	MaxAttempts int
+	WorkerID    string
+	LeaseUntil  *time.Time
+	AvailableAt time.Time `gorm:"index"`
+	LastError   string    `gorm:"type:text"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (DecisionJobModel) TableName() string { return "decision_job" }
+
+// CheckpointModel stores the durable working-memory snapshot used by the
+// runtime to resume an interrupted agent run. It intentionally lives in its
+// own table: checkpoint writes are frequent and should not rewrite the
+// relatively stable AgentRun row.
+type CheckpointModel struct {
+	RunID           string `gorm:"primaryKey"`
+	MessagesJSON    string `gorm:"type:mediumtext"`
+	MessagesRefJSON string `gorm:"type:text"`
+	StepCount       int
+	TokenUsed       int
+	Phase           string
+}
+
+func (CheckpointModel) TableName() string { return "magi_agent_checkpoint" }
+
 type EvidenceModel struct {
 	ID              string `gorm:"primaryKey"`
 	CaseID          string `gorm:"index"`
@@ -94,6 +126,7 @@ type ResolutionModel struct {
 	KeyEvidenceIDsJSON string `gorm:"type:text"`
 	KeyClaimIDsJSON    string `gorm:"type:text"`
 	VoteIDsJSON        string `gorm:"type:text"`
+	EvaluationJSON     string `gorm:"type:text"`
 	CreatedAt          time.Time
 }
 
@@ -115,7 +148,7 @@ type DebateRoundModel struct {
 	ID          string `gorm:"primaryKey"`
 	CaseID      string `gorm:"index"`
 	Round       int
-	PacketJSON  string `gorm:"type:text"`
+	PacketJSON  string `gorm:"type:mediumtext"`
 	StartedAt   time.Time
 	CompletedAt *time.Time
 }
@@ -168,12 +201,101 @@ type ToolCallModel struct {
 
 func (ToolCallModel) TableName() string { return "magi_tool_call" }
 
+type DatasetModel struct {
+	ID          string `gorm:"primaryKey"`
+	OwnerID     int64
+	Name        string
+	Description string `gorm:"type:text"`
+	ItemCount   int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (DatasetModel) TableName() string { return "magi_dataset" }
+
+type DatasetItemModel struct {
+	ID               string `gorm:"primaryKey"`
+	DatasetID        string `gorm:"index"`
+	Question         string `gorm:"type:text"`
+	Context          string `gorm:"type:text"`
+	ConstraintsJSON  string `gorm:"type:text"`
+	ExpectedDecision string
+	Weight           float64
+	TagsJSON         string `gorm:"type:text"`
+	CreatedAt        time.Time
+}
+
+func (DatasetItemModel) TableName() string { return "magi_dataset_item" }
+
+type BenchmarkRunModel struct {
+	ID               string `gorm:"primaryKey"`
+	DatasetID        string `gorm:"index"`
+	Status           string `gorm:"index"`
+	Total            int
+	Matched          int
+	Accuracy         float64
+	WeightedAccuracy float64
+	StartedAt        time.Time
+	CompletedAt      *time.Time
+	CreatedAt        time.Time
+}
+
+func (BenchmarkRunModel) TableName() string { return "magi_benchmark_run" }
+
+type BenchmarkItemResultModel struct {
+	ID               string `gorm:"primaryKey"`
+	RunID            string `gorm:"index"`
+	DatasetItemID    string
+	CaseID           string
+	ExpectedDecision string
+	ActualDecision   string
+	Matched          bool
+	Score            float64
+	Error            string `gorm:"type:text"`
+	Feedback         string `gorm:"type:text"`
+	FeedbackAt       *time.Time
+	CreatedAt        time.Time
+}
+
+func (BenchmarkItemResultModel) TableName() string { return "magi_benchmark_item_result" }
+
+type PluginBindingModel struct {
+	ID        string `gorm:"primaryKey"`
+	UserID    int64  `gorm:"index"`
+	PluginID  int64
+	ToolID    int64
+	IsDraft   bool
+	Enabled   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (PluginBindingModel) TableName() string { return "magi_plugin_binding" }
+
+type RecurringCaseModel struct {
+	ID              string `gorm:"primaryKey"`
+	UserID          int64  `gorm:"index"`
+	Name            string
+	Question        string `gorm:"type:text"`
+	Context         string `gorm:"type:text"`
+	ConstraintsJSON string `gorm:"type:text"`
+	IntervalMillis  int64
+	Enabled         bool
+	LastRunAt       *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (RecurringCaseModel) TableName() string { return "magi_recurring_case" }
+
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
-		&CaseModel{}, &AgentRunModel{}, &EvidenceModel{}, &ClaimModel{},
+		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
-		&ToolCallModel{},
+		&ToolCallModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
+		&PluginBindingModel{},
+		&RecurringCaseModel{},
 	}
 }

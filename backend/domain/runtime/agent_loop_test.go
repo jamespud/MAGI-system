@@ -15,6 +15,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	magi "github.com/jamespud/magi/backend/adapter"
+	"github.com/jamespud/magi/backend/application/redact"
+	"github.com/jamespud/magi/backend/application/toolpolicy"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -50,9 +52,13 @@ func (s *stubModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.T
 	return s.m, nil
 }
 
-type stubToolReg struct{ defs []port.ToolDefinition }
+type stubToolReg struct {
+	defs        []port.ToolDefinition
+	gotBindings []entity.ToolBinding
+}
 
 func (s *stubToolReg) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
+	s.gotBindings = bindings
 	return s.defs, nil
 }
 
@@ -469,6 +475,99 @@ func TestAgentLoop_GatePassSingleClaimCreatedEvent(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_UsesRuntimeToolBindings(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	reg := &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSONWithClaim(`"EV-001"`)),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   reg,
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	pluginBinding := entity.ToolBinding{Source: entity.ToolSourcePlugin, PluginID: 9, ToolID: 10}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		Task:         entity.DecisionTask{CanonicalQuestion: "compute"},
+		ToolBindings: []entity.ToolBinding{pluginBinding},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(reg.gotBindings) != 1 || reg.gotBindings[0] != pluginBinding {
+		t.Fatalf("expected runtime bindings to override cfg.Tools, got %+v", reg.gotBindings)
+	}
+}
+
+func TestAgentLoop_ToolApprovalGate(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	exec := &stubToolExec{}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSONWithClaim(`"EV-001"`)),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  exec,
+		Validator: v, Gen: gen,
+		ToolPolicy: toolpolicy.NewPolicy([]string{"calc"}, nil),
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	res, _ := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	rejected := false
+	if res != nil && res.Trace != nil {
+		for _, st := range res.Trace.Steps {
+			for _, tc := range st.ToolCalls {
+				if strings.Contains(tc.Err, "requires approval") {
+					rejected = true
+				}
+			}
+		}
+	}
+	if !rejected {
+		t.Fatal("expected approval-gated tool call to be rejected")
+	}
+}
+
+func TestAgentLoop_AutoApprovedToolExecutes(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSONWithClaim(`"EV-001"`)),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		ToolPolicy: toolpolicy.NewPolicy([]string{"calc"}, []string{"calc"}),
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_, err = loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}
+
 func TestAgentLoop_EventsCarryRunID(t *testing.T) {
 	v := validation.NewJSONSchemaValidator()
 	gen := validation.NewReflectSchemaGenerator()
@@ -857,5 +956,43 @@ func TestAgentLoop_MaxToolCallsNoOrphanedToolCalls(t *testing.T) {
 	}
 	if res.Vote == nil {
 		t.Fatal("expected a vote after forced convergence")
+	}
+}
+
+type secretToolExec struct{}
+
+func (secretToolExec) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
+	return &port.ToolExecutionResult{Output: `{"data":"sk-secret-1"}`}, nil
+}
+
+func TestAgentLoop_RedactsSecretsInAuditAndModelMessages(t *testing.T) {
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: &scriptedChatModel{responses: []*schema.Message{
+			callMsg("c1", "calc", `{"a":1,"b":2}`),
+			finalMsg(summaryJSONWithClaim(`"EV-001"`)),
+			finalMsg(voteJSON("correctness")),
+		}}},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  secretToolExec{},
+		Validator: v, Gen: gen,
+		Redactor: redact.New("sk-secret-1"),
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{Task: entity.DecisionTask{CanonicalQuestion: "compute"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, st := range res.Trace.Steps {
+		for _, tc := range st.ToolCalls {
+			if strings.Contains(tc.Result, "sk-secret-1") || strings.Contains(tc.Result, "[REDACTED]") == false {
+				t.Fatalf("tool result not redacted: %q", tc.Result)
+			}
+		}
 	}
 }

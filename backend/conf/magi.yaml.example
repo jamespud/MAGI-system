@@ -89,6 +89,40 @@ magi:
 tavily:
   api_key: ""  # Tavily search API key; leave empty to disable web_search (agents reason from intrinsic knowledge)
 
+# Coze mode: add these under `model:` (model_id > 0 uses Coze modelbuilder when api_key is empty):
+#   model_id: 0
+#   price_per_m_input_usd: 2.5
+#   price_per_m_output_usd: 10.0
+
+# API-key authentication. Set enabled: true and define at least one key.
+auth:
+  enabled: false
+  api_keys:
+    - { name: "admin", key: "change-me", user_id: 1, role: "admin" }
+
+# Per-user governance.
+limits:
+  max_concurrent_runs_per_user: 3
+
+# Code runner guardrails (defense-in-depth on top of the Coze sandbox).
+code_runner:
+  enabled: true
+  timeout_seconds: 30
+  max_code_chars: 4000
+  allowed_languages: ["Python", "JavaScript"]
+  blocked_patterns: ["os.system", "subprocess", "eval(", "exec(", "shutil.rmtree", "socket"]
+
+# Tool approval gate: tools listed here cannot execute in autonomous runs
+# unless also listed under auto_approved. Default: code_runner requires approval.
+tool_policy:
+  require_approval: ["code_runner"]
+  auto_approved: []
+
+# Distributed tracing (log sink by default; swap in an OTLP exporter for production).
+tracing:
+  enabled: true
+  service_name: "magi"
+
 # RAG pipeline (HybridKnowledgeAdapter). Leave milvus.address / elasticsearch.addresses
 # empty to use in-memory fake indexes (standalone-safe). The containerized stack
 # (docker-compose-dev.yml) injects MAGI_MILVUS_ADDRESS / MAGI_ES_ADDRESSES via env.

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -96,10 +100,11 @@ func NewService(orch Orchestrator, cfg ServiceConfig, opts ...Option) *Service {
 	return s
 }
 
-// Create creates a new DecisionCase from a question, optional background, and constraints.
-func (s *Service) Create(ctx context.Context, question, background string, constraints []entity.Constraint) (*entity.DecisionCase, error) {
+// Create creates a new DecisionCase owned by userID (0 = unowned/open mode).
+func (s *Service) Create(ctx context.Context, userID int64, question, background string, constraints []entity.Constraint) (*entity.DecisionCase, error) {
 	case_ := &entity.DecisionCase{
-		ID:              fmt.Sprintf("case-%d", time.Now().Unix()),
+		ID:              fmt.Sprintf("case-%s", uuid.NewString()),
+		UserID:          userID,
 		Question:        question,
 		Context:         background,
 		Constraints:     constraints,
@@ -117,6 +122,9 @@ func (s *Service) Create(ctx context.Context, question, background string, const
 
 // Run executes the orchestrator on a DecisionCase.
 func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
+	ctx, span := tracing.Start(ctx, "decision.run",
+		attribute.String("case.id", case_.ID), attribute.Int64("user.id", case_.UserID))
+	defer span.End()
 	return s.orch.Orchestrate(ctx, case_)
 }
 

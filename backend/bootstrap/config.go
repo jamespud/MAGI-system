@@ -1,7 +1,10 @@
 package bootstrap
 
 import (
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -12,9 +15,12 @@ import (
 // Config is the root YAML configuration for MAGI server.
 type Config struct {
 	Model struct {
-		APIKey    string `yaml:"api_key"`
-		BaseURL   string `yaml:"base_url"`
-		ModelName string `yaml:"model_name"`
+		APIKey             string  `yaml:"api_key"`
+		BaseURL            string  `yaml:"base_url"`
+		ModelName          string  `yaml:"model_name"`
+		ModelID            int64   `yaml:"model_id"`
+		PricePerMInputUSD  float64 `yaml:"price_per_m_input_usd"`
+		PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
 	} `yaml:"model"`
 	Magi struct {
 		MaxDebateRounds int      `yaml:"max_debate_rounds"`
@@ -31,10 +37,39 @@ type Config struct {
 	Tavily struct {
 		APIKey string `yaml:"api_key"`
 	} `yaml:"tavily"`
+	Auth struct {
+		Enabled bool         `yaml:"enabled"`
+		APIKeys []APIKeySpec `yaml:"api_keys"`
+	} `yaml:"auth"`
+	Limits struct {
+		MaxConcurrentRunsPerUser int `yaml:"max_concurrent_runs_per_user"`
+	} `yaml:"limits"`
+	CodeRunner struct {
+		Enabled          *bool    `yaml:"enabled"`
+		TimeoutSeconds   int      `yaml:"timeout_seconds"`
+		MaxCodeChars     int      `yaml:"max_code_chars"`
+		AllowedLanguages []string `yaml:"allowed_languages"`
+		BlockedPatterns  []string `yaml:"blocked_patterns"`
+	} `yaml:"code_runner"`
+	ToolPolicy struct {
+		RequireApproval []string `yaml:"require_approval"`
+		AutoApproved    []string `yaml:"auto_approved"`
+	} `yaml:"tool_policy"`
+	Tracing struct {
+		Enabled     bool   `yaml:"enabled"`
+		ServiceName string `yaml:"service_name"`
+	} `yaml:"tracing"`
 	Embedding     EmbeddingConfig `yaml:"embedding"`
 	Milvus        MilvusConfig    `yaml:"milvus"`
 	Elasticsearch ESConfig        `yaml:"elasticsearch"`
 	RAG           RAGConfig       `yaml:"rag"`
+}
+
+type APIKeySpec struct {
+	Name   string `yaml:"name"`
+	Key    string `yaml:"key"`
+	UserID int64  `yaml:"user_id"`
+	Role   string `yaml:"role"`
 }
 
 type EmbeddingConfig struct {
@@ -144,6 +179,16 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Magi.TimeoutSeconds == 0 {
 		cfg.Magi.TimeoutSeconds = 120
 	}
+	if len(cfg.ToolPolicy.RequireApproval) == 0 {
+		cfg.ToolPolicy.RequireApproval = []string{"code_runner"}
+	}
+	if cfg.Model.PricePerMInputUSD == 0 {
+		cfg.Model.PricePerMInputUSD = 2.5
+	}
+	if cfg.Model.PricePerMOutputUSD == 0 {
+		cfg.Model.PricePerMOutputUSD = 10
+	}
+
 	if cfg.RAG.TopK == 0 {
 		cfg.RAG.TopK = 15
 	}
@@ -192,6 +237,12 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MAGI_TAVILY_API_KEY"); v != "" {
 		cfg.Tavily.APIKey = v
 	}
+	if v := os.Getenv("MAGI_AUTH_ENABLED"); v != "" {
+		cfg.Auth.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("MAGI_AUTH_API_KEYS"); v != "" {
+		cfg.Auth.APIKeys = parseAPIKeys(v)
+	}
 	if v := os.Getenv("MAGI_EMBEDDING_API_KEY"); v != "" {
 		cfg.Embedding.APIKey = v
 	}
@@ -207,6 +258,33 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MAGI_ES_ADDRESSES"); v != "" {
 		cfg.Elasticsearch.Addresses = []string{v}
 	}
+}
+
+// parseAPIKeys parses MAGI_AUTH_API_KEYS entries separated by ';', each in the
+// form userID:role:name:key (the key may contain colons).
+func parseAPIKeys(raw string) []APIKeySpec {
+	var out []APIKeySpec
+	for _, entry := range strings.Split(raw, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ":", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		uid, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, APIKeySpec{
+			UserID: uid,
+			Role:   strings.TrimSpace(parts[1]),
+			Name:   strings.TrimSpace(parts[2]),
+			Key:    strings.TrimSpace(parts[3]),
+		})
+	}
+	return out
 }
 
 // ToConfig converts a MagiSpec to an entity.MagiConfig.
@@ -270,9 +348,12 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			CustomRules:          customRules,
 		},
 		Model: entity.ModelRef{
-			APIKey:    cfg.Model.APIKey,
-			BaseURL:   cfg.Model.BaseURL,
-			ModelName: cfg.Model.ModelName,
+			APIKey:             cfg.Model.APIKey,
+			BaseURL:            cfg.Model.BaseURL,
+			ModelName:          cfg.Model.ModelName,
+			ModelID:            cfg.Model.ModelID,
+			PricePerMInputUSD:  cfg.Model.PricePerMInputUSD,
+			PricePerMOutputUSD: cfg.Model.PricePerMOutputUSD,
 		},
 		ReflectionPolicy: entity.ReflectionPolicy{
 			RequireJustification: s.ReflectionPolicy.RequireJustification,
@@ -291,4 +372,32 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			MaxToolCalls:                     5,
 		},
 	}
+}
+
+// Validate returns a descriptive error for invalid or incomplete
+// configurations, so the server fails fast instead of booting broken.
+func (c *Config) Validate() error {
+	if c.Model.APIKey == "" && c.Model.ModelID == 0 {
+		return fmt.Errorf("model: set api_key+model_name (direct) or model_id (coze)")
+	}
+	if c.Model.APIKey != "" && c.Model.ModelName == "" {
+		return fmt.Errorf("model: model_name is required when api_key is set")
+	}
+	if c.Auth.Enabled {
+		if len(c.Auth.APIKeys) == 0 {
+			return fmt.Errorf("auth: at least one api_key is required when enabled")
+		}
+		for _, k := range c.Auth.APIKeys {
+			if k.Key == "" || k.UserID <= 0 || k.Role == "" {
+				return fmt.Errorf("auth: each api_key needs non-empty key, user_id > 0 and role")
+			}
+		}
+	}
+	if c.Limits.MaxConcurrentRunsPerUser < 0 {
+		return fmt.Errorf("limits: max_concurrent_runs_per_user cannot be negative")
+	}
+	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 {
+		return fmt.Errorf("magi: max_debate_rounds, max_steps and timeout_seconds must be positive")
+	}
+	return nil
 }

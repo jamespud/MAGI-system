@@ -85,7 +85,7 @@ Constraints: %v`,
 	return nil, fmt.Errorf("commander: normalize failed after retries")
 }
 
-func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCase, resolution *entity.Resolution, votes []*entity.Vote) (string, error) {
+func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCase, resolution *entity.Resolution, votes []*entity.Vote, evidenceIDs, claimIDs []string) (string, error) {
 	cm, err := c.model.Build(ctx, c.cfg.Model)
 	if err != nil {
 		return "", fmt.Errorf("commander: build model: %w", err)
@@ -98,20 +98,29 @@ Generate a FinalReportData JSON for this decision. You MUST include ALL fields:
 - key_reasons: main reasoning points (array of strings)
 - risks: risks or dissenting points (array of strings)
 - next_steps: recommended next steps (array of strings)
+- key_evidence_ids: array of evidence IDs this decision relies on
+- key_claim_ids: array of claim IDs this decision relies on
 
-Question: %s. Consensus: %s. Votes: %d.`,
-		c.cfg.Persona, case_.Question, resolution.Consensus.Outcome, len(votes))
+Question: %s. Consensus: %s. Votes: %d.
+Available evidence IDs: %v
+Available claim IDs: %v
+When evidence or claim IDs are available you MUST cite at least one of them in key_evidence_ids/key_claim_ids.`,
+		c.cfg.Persona, case_.Question, resolution.Consensus.Outcome, len(votes), evidenceIDs, claimIDs)
 	for attempt := 0; attempt < 3; attempt++ {
-		resp, err := cm.Generate(ctx, []*schema.Message{
-			schema.SystemMessage(prompt),
-			schema.UserMessage("Output the FinalReportData JSON now."),
-		})
+		msgs := []*schema.Message{schema.SystemMessage(prompt)}
+		if attempt > 0 {
+			msgs = append(msgs, schema.UserMessage(
+				"Your previous response did not pass validation or did not cite any available evidence/claim ID. "+
+					"Re-output the FinalReportData JSON now, citing at least one of the provided IDs in key_evidence_ids/key_claim_ids."))
+		}
+		msgs = append(msgs, schema.UserMessage("Output the FinalReportData JSON now."))
+		resp, err := cm.Generate(ctx, msgs)
 		if err != nil {
 			log.Printf("commander: report attempt %d: model generate error: %v", attempt+1, err)
 			continue
 		}
 		data, vr := c.reportVal.ValidateAndUnmarshal([]byte(resp.Content))
-		if vr != nil && vr.Valid {
+		if vr != nil && vr.Valid && reportCites(data, evidenceIDs, claimIDs) {
 			return RenderReport(data), nil
 		}
 		if vr != nil {
@@ -119,7 +128,19 @@ Question: %s. Consensus: %s. Votes: %d.`,
 			for i, v := range vr.Violations {
 				log.Printf("  violation %d: [%s] %s field=%s", i+1, v.Code, v.Message, v.Field)
 			}
+		} else if data != nil && !reportCites(data, evidenceIDs, claimIDs) {
+			log.Printf("commander: report attempt %d: no evidence/claim citation", attempt+1)
 		}
 	}
 	return "", fmt.Errorf("commander: report generation failed after retries")
+}
+
+func reportCites(data *entity.FinalReportData, evidenceIDs, claimIDs []string) bool {
+	if data == nil {
+		return false
+	}
+	if len(evidenceIDs)+len(claimIDs) == 0 {
+		return true
+	}
+	return len(data.KeyEvidenceIDs)+len(data.KeyClaimIDs) > 0
 }

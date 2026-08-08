@@ -20,6 +20,7 @@ type ToolExecutionRequest struct {
 	ToolName      string
 	ArgumentsJSON string
 	UserID        string
+	Binding       entity.ToolBinding
 }
 
 // ToolExecutionResult is the raw tool output.

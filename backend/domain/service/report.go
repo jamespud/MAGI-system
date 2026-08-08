@@ -69,5 +69,17 @@ func RenderReport(d *entity.FinalReportData) string {
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
+	if len(d.KeyEvidenceIDs) > 0 {
+		b.WriteString("\n## Key Evidence\n")
+		for _, id := range d.KeyEvidenceIDs {
+			fmt.Fprintf(&b, "- %s\n", id)
+		}
+	}
+	if len(d.KeyClaimIDs) > 0 {
+		b.WriteString("\n## Key Claims\n")
+		for _, id := range d.KeyClaimIDs {
+			fmt.Fprintf(&b, "- %s\n", id)
+		}
+	}
 	return b.String()
 }

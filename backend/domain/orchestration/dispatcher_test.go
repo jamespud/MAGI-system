@@ -61,6 +61,33 @@ func TestDispatchReconsider_SetsReconsiderRunID(t *testing.T) {
 	}
 }
 
+type stubBindingsProvider struct {
+	userID   int64
+	bindings []entity.ToolBinding
+}
+
+func (s *stubBindingsProvider) BindingsForUser(ctx context.Context, userID int64) ([]entity.ToolBinding, error) {
+	s.userID = userID
+	return s.bindings, nil
+}
+
+func TestDispatch_InjectsUserToolBindings(t *testing.T) {
+	cr := &captureRuntime{}
+	prov := &stubBindingsProvider{bindings: []entity.ToolBinding{{Source: entity.ToolSourcePlugin, PluginID: 1, ToolID: 2}}}
+	d := orchestration.NewDispatcher(cr, nil, orchestration.WithToolBindingsProvider(prov))
+	cfg := &entity.MagiConfig{Code: "melchior"}
+	d.Dispatch(context.Background(), &entity.DecisionCase{ID: "c1", UserID: 7}, nil, []*entity.MagiConfig{cfg}, 1)
+	if cr.actx == nil {
+		t.Fatal("no actx captured")
+	}
+	if prov.userID != 7 {
+		t.Fatalf("provider userID: %d", prov.userID)
+	}
+	if len(cr.actx.ToolBindings) != 1 || cr.actx.ToolBindings[0].PluginID != 1 {
+		t.Fatalf("tool bindings: %+v", cr.actx.ToolBindings)
+	}
+}
+
 func TestDispatch_ContextBuilderRetrievesKnowledge(t *testing.T) {
 	kp := &mockKnowledgePort{blocks: []port.MergedBlock{{Level: 300, Content: "historical case X"}}}
 	cb := memory.NewContextBuilder(kp)

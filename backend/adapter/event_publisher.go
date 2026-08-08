@@ -7,6 +7,7 @@ import (
 
 	"github.com/coze-dev/coze-studio/backend/infra/sse"
 	hertzsse "github.com/hertz-contrib/sse"
+	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -14,13 +15,30 @@ import (
 // EventPublisherAdapter implements port.EventPublisher (ADR-008).
 // Dual-publish: EventStore (persistence) + SSE (real-time push, optional).
 type EventPublisherAdapter struct {
-	store  port.EventRepository
-	sender sse.SSender      // optional, nil = no SSE
-	stream *hertzsse.Stream // optional, nil = no SSE
+	store    port.EventRepository
+	live     port.EventPublisher // optional fan-out target, e.g. the SSE broker
+	sender   sse.SSender         // optional, nil = no SSE
+	stream   *hertzsse.Stream    // optional, nil = no SSE
+	redactor *redact.Redactor    // optional, nil = no redaction
 }
 
 func NewEventPublisherAdapter(store port.EventRepository) *EventPublisherAdapter {
 	return &EventPublisherAdapter{store: store}
+}
+
+// NewEventPublisherAdapterWithFanout persists events and then forwards the
+// same event to a live subscriber transport. Keeping both responsibilities in
+// one publisher prevents the production path from accidentally using an
+// in-memory-only event store.
+func NewEventPublisherAdapterWithFanout(store port.EventRepository, live port.EventPublisher) *EventPublisherAdapter {
+	return &EventPublisherAdapter{store: store, live: live}
+}
+
+// NewEventPublisherAdapterWithRedaction persists redacted events and forwards
+// them to a live transport. Known secrets are masked before anything is stored
+// or pushed.
+func NewEventPublisherAdapterWithRedaction(store port.EventRepository, live port.EventPublisher, redactor *redact.Redactor) *EventPublisherAdapter {
+	return &EventPublisherAdapter{store: store, live: live, redactor: redactor}
 }
 
 func NewEventPublisherAdapterWithSSE(store port.EventRepository, sender sse.SSender, stream *hertzsse.Stream) *EventPublisherAdapter {
@@ -28,14 +46,21 @@ func NewEventPublisherAdapterWithSSE(store port.EventRepository, sender sse.SSen
 }
 
 func (p *EventPublisherAdapter) Publish(ctx context.Context, e entity.MagiEvent) error {
+	if p.redactor != nil {
+		e.Payload = p.redactor.JSON(e.Payload)
+	}
+	var storeErr error
 	if p.store != nil {
-		_ = p.store.Create(ctx, &e) // non-blocking; events don't fail the run
+		storeErr = p.store.Create(ctx, &e)
+	}
+	if p.live != nil {
+		_ = p.live.Publish(ctx, e)
 	}
 	if p.sender != nil && p.stream != nil {
 		data, _ := json.Marshal(e)
 		_ = p.sender.Send(ctx, p.stream, &hertzsse.Event{Event: string(e.Type), Data: data})
 	}
-	return nil
+	return storeErr
 }
 
 var _ port.EventPublisher = (*EventPublisherAdapter)(nil)

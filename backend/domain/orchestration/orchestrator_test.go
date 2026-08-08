@@ -56,11 +56,11 @@ func (s *stubModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.T
 }
 
 type mockMagiRuntime struct {
-	mu        sync.Mutex
-	votes     map[string][]*entity.Vote // code -> [vote per round]
-	calls     map[string]int
-	errOn     map[string]bool           // code -> return error
-	loopStatus runtime.LoopStatus        // status to return (default Completed); 0 means Completed
+	mu         sync.Mutex
+	votes      map[string][]*entity.Vote // code -> [vote per round]
+	calls      map[string]int
+	errOn      map[string]bool    // code -> return error
+	loopStatus runtime.LoopStatus // status to return (default Completed); 0 means Completed
 }
 
 func newMockMagiRuntime() *mockMagiRuntime {
@@ -135,7 +135,7 @@ func newCommander(t *testing.T) *service.Commander {
 	val := validation.NewJSONSchemaValidator()
 	cm := &scriptedChatModel{responses: []*schema.Message{
 		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[]}`, nil),
+		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"]}`, nil),
 	}}
 	cmd, err := service.NewCommander(service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"}, &stubModelPort{m: cm}, gen, val)
 	if err != nil {
@@ -439,41 +439,101 @@ func (s *stubRepo) MemoryRepo() port.MemoryRepository         { return &stubMemR
 func (s *stubRepo) ToolCallRepo() port.ToolCallRepository     { return &stubToolCallRepo{s: s} }
 
 type stubCaseRepo struct{ s *stubRepo }
-func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.cases = append(r.s.cases, c); return nil }
-func (r *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) { return nil, nil }
+
+func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.cases = append(r.s.cases, c)
+	return nil
+}
+func (r *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return nil, nil
+}
 func (r *stubCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
-func (r *stubCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.statuses[id] = st; return nil }
+func (r *stubCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.statuses[id] = st
+	return nil
+}
+func (r *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
 
 type stubAgentRunRepo struct{ s *stubRepo }
-func (r *stubAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.agentRuns = append(r.s.agentRuns, a); return nil }
-func (r *stubAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, error) { return nil, nil }
-func (r *stubAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) { return nil, nil }
+
+func (r *stubAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.agentRuns = append(r.s.agentRuns, a)
+	return nil
+}
+func (r *stubAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, error) {
+	return nil, nil
+}
+func (r *stubAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
+	return nil, nil
+}
 
 type stubEvidenceRepo struct{ s *stubRepo }
-func (r *stubEvidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.evidence = append(r.s.evidence, e); return nil }
-func (r *stubEvidenceRepo) Get(ctx context.Context, id string) (*entity.EvidenceRecord, error) { return nil, nil }
-func (r *stubEvidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) { return nil, nil }
+
+func (r *stubEvidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.evidence = append(r.s.evidence, e)
+	return nil
+}
+func (r *stubEvidenceRepo) Get(ctx context.Context, id string) (*entity.EvidenceRecord, error) {
+	return nil, nil
+}
+func (r *stubEvidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) {
+	return nil, nil
+}
 
 type stubClaimRepo struct{ s *stubRepo }
-func (r *stubClaimRepo) Create(ctx context.Context, c *entity.Claim) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.claims = append(r.s.claims, c); return nil }
+
+func (r *stubClaimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.claims = append(r.s.claims, c)
+	return nil
+}
 func (r *stubClaimRepo) Get(ctx context.Context, id string) (*entity.Claim, error) { return nil, nil }
-func (r *stubClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) { return nil, nil }
+func (r *stubClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) {
+	return nil, nil
+}
 
 type stubVoteRepo struct{ s *stubRepo }
-func (r *stubVoteRepo) Create(ctx context.Context, v *entity.Vote) error { r.s.mu.Lock(); defer r.s.mu.Unlock(); r.s.votes = append(r.s.votes, v); return nil }
-func (r *stubVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) { return nil, nil }
+
+func (r *stubVoteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.votes = append(r.s.votes, v)
+	return nil
+}
+func (r *stubVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) {
+	return nil, nil
+}
 
 type stubDebateRepo struct{}
+
 func (stubDebateRepo) Create(ctx context.Context, d *entity.DebateRound) error { return nil }
-func (stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.DebateRound, error) { return nil, nil }
+func (stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.DebateRound, error) {
+	return nil, nil
+}
 
 type stubReflRepo struct{}
+
 func (stubReflRepo) Create(ctx context.Context, r *entity.Reflection) error { return nil }
-func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) { return nil, nil }
+func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) {
+	return nil, nil
+}
 
 type stubToolCallRepo struct{ s *stubRepo }
+
 func (r *stubToolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
-	r.s.mu.Lock(); defer r.s.mu.Unlock()
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
 	cp := *t
 	r.s.toolCalls = append(r.s.toolCalls, &cp)
 	return nil
@@ -483,6 +543,7 @@ func (r *stubToolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*en
 }
 
 type stubResRepo struct{ s *stubRepo }
+
 func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
@@ -493,19 +554,31 @@ func (r *stubResRepo) Create(ctx context.Context, res *entity.Resolution) error 
 	r.s.resolutions = append(r.s.resolutions, &cp)
 	return nil
 }
-func (r *stubResRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) { return nil, nil }
+func (r *stubResRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) {
+	return nil, nil
+}
 
 type stubEventRepo struct{}
+
 func (stubEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error { return nil }
-func (stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) { return nil, nil }
+func (stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
+	return nil, nil
+}
 
 type stubCpRepo struct{}
-func (stubCpRepo) Save(context.Context, *entity.AgentState) error            { return nil }
-func (stubCpRepo) Load(context.Context, string) (*entity.AgentState, error)  { return nil, nil }
+
+func (stubCpRepo) Save(context.Context, *entity.AgentState) error           { return nil }
+func (stubCpRepo) Load(context.Context, string) (*entity.AgentState, error) { return nil, nil }
 
 type stubMemRepo struct{}
-func (stubMemRepo) Get(context.Context, string) (*entity.CaseMemoryProjection, error) { return nil, nil }
-func (stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error          { return nil }
+
+func (stubMemRepo) Get(context.Context, string) (*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
+func (stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error { return nil }
+func (stubMemRepo) Search(context.Context, string, int) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
 
 func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 	mrt := newMockMagiRuntime()

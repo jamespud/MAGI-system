@@ -3,6 +3,7 @@ package magi
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -47,7 +48,7 @@ func (r *magiRepository) DebateRepo() port.DebateRepository         { return &de
 func (r *magiRepository) ReflectionRepo() port.ReflectionRepository { return &reflectionRepo{db: r.db} }
 func (r *magiRepository) ResolutionRepo() port.ResolutionRepository { return &resolutionRepo{db: r.db} }
 func (r *magiRepository) EventRepo() port.EventRepository           { return &eventRepo{db: r.db} }
-func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{} }
+func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{db: r.db} }
 func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
 func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
 
@@ -70,6 +71,9 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 }
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("status", string(status)).Error
+}
+func (r *caseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("task_json", toJSON(task)).Error
 }
 func (r *caseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 	var models []CaseModel
@@ -131,7 +135,7 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	for i, m := range models {
 		out[i] = &entity.AgentRun{
 			ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
-			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON), Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
 		}
 	}
 	return out, nil
@@ -261,7 +265,7 @@ func (r *resolutionRepo) Create(ctx context.Context, res *entity.Resolution) err
 	m := ResolutionModel{
 		ID: res.ID, CaseID: res.CaseID, ConsensusJSON: toJSON(res.Consensus), FinalDecision: string(res.FinalDecision),
 		FinalReport: res.FinalReport, KeyEvidenceIDsJSON: toJSON(res.KeyEvidenceIDs), KeyClaimIDsJSON: toJSON(res.KeyClaimIDs),
-		VoteIDsJSON: toJSON(res.VoteIDs), CreatedAt: res.CreatedAt,
+		VoteIDsJSON: toJSON(res.VoteIDs), EvaluationJSON: toJSON(res.Evaluation), CreatedAt: res.CreatedAt,
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
 }
@@ -274,7 +278,7 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 		ID: m.ID, CaseID: m.CaseID, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
 		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
 		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
-		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), CreatedAt: m.CreatedAt,
+		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
 	}, nil
 }
 
@@ -367,12 +371,43 @@ func (r *reflectionRepo) ListByCase(ctx context.Context, caseID string) ([]*enti
 	return out, nil
 }
 
-// --- CheckpointRepository (stub) ---
+// --- CheckpointRepository ---
 
-type checkpointRepo struct{}
+type checkpointRepo struct{ db *gorm.DB }
 
-func (checkpointRepo) Save(context.Context, *entity.AgentState) error           { return nil }
-func (checkpointRepo) Load(context.Context, string) (*entity.AgentState, error) { return nil, nil }
+func (r *checkpointRepo) Save(ctx context.Context, state *entity.AgentState) error {
+	if state == nil || state.RunID == "" {
+		return nil
+	}
+	m := CheckpointModel{
+		RunID:           state.RunID,
+		MessagesJSON:    state.MessagesJSON,
+		MessagesRefJSON: toJSON(state.Messages),
+		StepCount:       state.StepCount,
+		TokenUsed:       state.TokenUsed,
+		Phase:           state.Phase,
+	}
+	// Save is an upsert so every loop step has one durable snapshot per run.
+	return r.db.WithContext(ctx).Save(&m).Error
+}
+
+func (r *checkpointRepo) Load(ctx context.Context, runID string) (*entity.AgentState, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	var m CheckpointModel
+	if err := r.db.WithContext(ctx).First(&m, "run_id = ?", runID).Error; err != nil {
+		return nil, err
+	}
+	return &entity.AgentState{
+		RunID:        m.RunID,
+		Messages:     fromJSON[[]entity.MessageRef](m.MessagesRefJSON),
+		MessagesJSON: m.MessagesJSON,
+		StepCount:    m.StepCount,
+		TokenUsed:    m.TokenUsed,
+		Phase:        m.Phase,
+	}, nil
+}
 
 // --- MemoryRepository (DB) ---
 
@@ -398,6 +433,39 @@ func (r *memoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 		ProjectionVersion: proj.ProjectionVersion,
 	}
 	return r.db.WithContext(ctx).Save(&m).Error
+}
+
+// Search provides a deterministic local fallback for historical decision
+// retrieval when a Coze Knowledge service is not configured. Coze remains the
+// preferred semantic retriever; this fallback keeps Memory useful in the
+// standalone/server deployment and is deliberately read-only.
+func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	pattern := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
+	var models []MemoryProjectionModel
+	if err := r.db.WithContext(ctx).
+		Where("question_summary LIKE ? OR context_summary LIKE ? OR resolution LIKE ?", pattern, pattern, pattern).
+		Order("projection_version DESC").Limit(limit).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.CaseMemoryProjection, len(models))
+	for i := range models {
+		m := &models[i]
+		out[i] = &entity.CaseMemoryProjection{
+			CaseID: m.CaseID, QuestionSummary: m.QuestionSummary, ContextSummary: m.ContextSummary,
+			KeyEvidence: fromJSON[[]entity.MemoryEvidence](m.KeyEvidenceJSON),
+			KeyClaims:   fromJSON[[]entity.MemoryClaim](m.KeyClaimsJSON),
+			Votes:       fromJSON[[]entity.MemoryVote](m.VotesJSON), Resolution: m.Resolution,
+			Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), ProjectionVersion: m.ProjectionVersion,
+		}
+	}
+	return out, nil
 }
 
 // --- ToolCallRepository ---

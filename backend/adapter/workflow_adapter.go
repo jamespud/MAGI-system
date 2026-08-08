@@ -2,10 +2,13 @@ package magi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 
 	crossworkflow "github.com/coze-dev/coze-studio/backend/crossdomain/workflow"
+	workflowmodel "github.com/coze-dev/coze-studio/backend/crossdomain/workflow/model"
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
@@ -37,7 +40,40 @@ func (a *WorkflowAdapter) Execute(ctx context.Context, workflowID string, input 
 	if err := a.activate(ctx); err != nil {
 		return nil, fmt.Errorf("workflow adapter: Coze workflow API unavailable: %w", err)
 	}
-	return nil, fmt.Errorf("workflow execute: full wiring pending; Coze API confirmed available")
+	id, err := strconv.ParseInt(workflowID, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("workflow execute: invalid workflow ID %q", workflowID)
+	}
+	exec, _, err := a.svc.SyncExecuteWorkflow(ctx, workflowmodel.ExecuteConfig{
+		ID:          id,
+		From:        workflowmodel.FromLatestVersion,
+		Mode:        workflowmodel.ExecuteModeRelease,
+		TaskType:    workflowmodel.TaskTypeForeground,
+		SyncPattern: workflowmodel.SyncPatternSync,
+		BizType:     workflowmodel.BizTypeWorkflow,
+		Cancellable: true,
+	}, input)
+	if err != nil {
+		return nil, fmt.Errorf("workflow execute: %w", err)
+	}
+	if exec == nil {
+		return nil, fmt.Errorf("workflow execute: empty response")
+	}
+	if exec.Status != crossworkflow.WorkflowSuccess {
+		reason := "workflow failed"
+		if exec.FailReason != nil && *exec.FailReason != "" {
+			reason = *exec.FailReason
+		}
+		return nil, fmt.Errorf("workflow execute: %s", reason)
+	}
+	if exec.Output == nil || *exec.Output == "" {
+		return map[string]any{}, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(*exec.Output), &out); err != nil {
+		return map[string]any{"output": *exec.Output}, nil
+	}
+	return out, nil
 }
 
 var _ port.WorkflowPort = (*WorkflowAdapter)(nil)

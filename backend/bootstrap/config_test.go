@@ -9,6 +9,37 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 )
 
+func TestConfigValidate_ExamplePasses(t *testing.T) {
+	cfg, err := bootstrap.LoadConfig("../conf/magi.yaml.example")
+	if err != nil {
+		t.Fatalf("load example: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate example: %v", err)
+	}
+}
+
+func TestConfigValidate_RejectsBrokenConfigs(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for missing model")
+	}
+
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Auth.Enabled = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for enabled auth without keys")
+	}
+	cfg.Auth.APIKeys = []bootstrap.APIKeySpec{{Key: "", UserID: 1, Role: "admin"}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for empty auth key")
+	}
+}
+
 func TestLoadConfig_Defaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")

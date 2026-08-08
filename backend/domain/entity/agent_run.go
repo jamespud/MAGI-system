@@ -47,4 +47,14 @@ type Usage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+	CostUSD          float64
+}
+
+// Cost returns the estimated cost for this usage at the given per-million
+// token prices.
+func (u *Usage) Cost(inPerMillion, outPerMillion float64) float64 {
+	if u == nil {
+		return 0
+	}
+	return float64(u.PromptTokens)/1e6*inPerMillion + float64(u.CompletionTokens)/1e6*outPerMillion
 }

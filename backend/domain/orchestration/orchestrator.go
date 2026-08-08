@@ -30,18 +30,19 @@ type Orchestrator struct {
 }
 
 type OrchestratorDeps struct {
-	AgentLoop      runtime.MagiRuntime
-	Consensus      *consensus.ConsensusEngine
-	Debate         *debate.DebateEngine
-	Commander      *service.Commander
-	EventPub       port.EventPublisher
-	CaseRepo       port.CaseRepository
-	Repo           port.Repository
-	ContextBuilder *memory.ContextBuilder
-	Knowledge      port.KnowledgePort
-	Configs        []*entity.MagiConfig
-	Policy         consensus.ConsensusPolicy
-	FailPolicy     FailurePolicy
+	AgentLoop            runtime.MagiRuntime
+	Consensus            *consensus.ConsensusEngine
+	Debate               *debate.DebateEngine
+	Commander            *service.Commander
+	EventPub             port.EventPublisher
+	CaseRepo             port.CaseRepository
+	Repo                 port.Repository
+	ContextBuilder       *memory.ContextBuilder
+	Knowledge            port.KnowledgePort
+	ToolBindingsProvider ToolBindingsProvider
+	Configs              []*entity.MagiConfig
+	Policy               consensus.ConsensusPolicy
+	FailPolicy           FailurePolicy
 }
 
 func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
@@ -50,7 +51,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		fp = DefaultFailurePolicy()
 	}
 	return &Orchestrator{
-		dispatcher: NewDispatcher(d.AgentLoop, d.ContextBuilder),
+		dispatcher: NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
 		consensus:  d.Consensus,
 		debate:     d.Debate,
 		commander:  d.Commander,
@@ -84,6 +85,19 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	if status == "" {
 		status = entity.CaseStatusDraft
 	}
+	if status == entity.CaseStatusResolved && o.repo != nil {
+		if existing, err := o.repo.ResolutionRepo().Get(ctx, case_.ID); err == nil && existing != nil {
+			case_.Status = entity.CaseStatusResolved
+			return existing, nil
+		}
+	}
+	if status == entity.CaseStatusFailed || status == entity.CaseStatusCancelled || status == entity.CaseStatusTimedOut {
+		status = entity.CaseStatusDraft
+		case_.Status = status
+		if o.caseRepo != nil {
+			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
+		}
+	}
 
 	for {
 		switch status {
@@ -97,6 +111,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 				return o.fail(ctx, case_, fmt.Sprintf("normalize: %v", err))
 			}
 			task = t
+			if o.caseRepo != nil {
+				_ = o.caseRepo.UpdateTask(ctx, case_.ID, task)
+			}
 			status = entity.CaseStatusContextBuilding
 
 		case entity.CaseStatusContextBuilding:
@@ -145,6 +162,12 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			allClaims := o.collectClaims(results)
 			allEvidence := o.collectEvidence(results)
 			packet := o.debate.BuildPacket(derefVotes(votes), allClaims, round, allEvidence)
+			if o.repo != nil {
+				_ = o.repo.DebateRepo().Create(ctx, &entity.DebateRound{
+					ID: fmt.Sprintf("deb-%s-r%d", case_.ID, round), CaseID: case_.ID, Round: round,
+					Packet: packet, StartedAt: time.Now(),
+				})
+			}
 			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs, round)
 			status = entity.CaseStatusReflecting
 
@@ -155,7 +178,18 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		case entity.CaseStatusRevoting:
 			o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": round})
 			newVotes := o.extractVotes(results)
-			EnforceReflectionRule(votes, newVotes, results, o.configs, round)
+			reflections := EnforceReflectionRule(votes, newVotes, results, o.configs, round)
+			if o.repo != nil {
+				for idx, rf := range reflections {
+					// IDs must be unique per case/attempt/round/agent: inferred
+					// reflections are re-created on every retry attempt.
+					rf.ID = fmt.Sprintf("refl-%s-a%d-r%d-%d", case_.ID, case_.ExecutionAttempt, rf.Round, idx)
+					if rf.AgentRunID == "" && idx < len(newVotes) && newVotes[idx] != nil {
+						rf.AgentRunID = newVotes[idx].AgentRunID
+					}
+					_ = o.repo.ReflectionRepo().Create(ctx, rf)
+				}
+			}
 			o.persistArtifacts(ctx, case_, results, newVotes, round, "reconsider")
 			votes = newVotes
 			round++
@@ -176,9 +210,10 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			status = entity.CaseStatusGeneratingReport
 
 		case entity.CaseStatusGeneratingReport:
-			report, err := o.commander.GenerateReport(ctx, case_, &entity.Resolution{Consensus: consResult}, votes)
+			report, err := o.commander.GenerateReport(ctx, case_, resolution, votes,
+				resolution.KeyEvidenceIDs, resolution.KeyClaimIDs)
 			if err != nil {
-				report = "report generation failed"
+				return o.fail(ctx, case_, fmt.Sprintf("report generation: %v", err))
 			}
 			resolution.FinalReport = report
 			o.publish(ctx, case_, entity.EventResolutionCreated, map[string]any{"final_decision": string(resolution.FinalDecision)})
@@ -202,7 +237,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			// Evaluation (Evaluating) are set. Persisting earlier would snapshot
 			// an empty FinalReport.
 			if o.repo != nil && resolution != nil {
-				_ = o.repo.ResolutionRepo().Create(ctx, resolution)
+				if err := o.repo.ResolutionRepo().Create(ctx, resolution); err != nil {
+					return o.fail(ctx, case_, fmt.Sprintf("persist resolution: %v", err))
+				}
 			}
 			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status)})
 			case_.Status = status
@@ -253,7 +290,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		cfg := o.configAt(i)
 		code := codeOf(cfg)
 		run := &entity.AgentRun{
-			ID:          fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase),
+			ID:          executionRunID(case_.ID, code, case_.ExecutionAttempt, round, phase),
 			CaseID:      case_.ID,
 			MagiCode:    code,
 			Round:       round,
@@ -267,7 +304,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 
 		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
 		// persist copies so the ledger is left untouched for any later use.
-		prefix := fmt.Sprintf("%s-%s-r%d-%s", case_.ID, code, round, phase)
+		prefix := executionRunID(case_.ID, code, case_.ExecutionAttempt, round, phase)
 		evRemap := map[string]string{}
 		clRemap := map[string]string{}
 		if r.Ledger != nil {
@@ -339,9 +376,10 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 			continue
 		}
 		cfg := o.configAt(i)
-		if v.ID == "" {
-			v.ID = fmt.Sprintf("vote-%s-%s-r%d-%s", case_.ID, codeOf(cfg), round, phase)
-		}
+		// Regenerate the vote ID unconditionally: a reconsider result may reuse
+		// the investigate Vote pointer, which would otherwise re-insert the old
+		// ID and violate the primary key (observed on real runs).
+		v.ID = "vote-" + executionRunID(case_.ID, codeOf(cfg), case_.ExecutionAttempt, round, phase)
 		v.CaseID = case_.ID
 		v.Round = round
 		_ = o.repo.VoteRepo().Create(ctx, v)
@@ -471,7 +509,8 @@ func (o *Orchestrator) shouldDebate(round int, maxDebate int) bool {
 // between rounds. For each agent whose config requires justification and whose
 // vote decision changed, it infers a Reflection from the vote diff and validates
 // it; an unjustified change is reverted to the previous vote.
-func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtime.LoopResult, configs []*entity.MagiConfig, round int) {
+func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtime.LoopResult, configs []*entity.MagiConfig, round int) []*entity.Reflection {
+	var reflections []*entity.Reflection
 	for i := 0; i < len(newVotes) && i < len(prevVotes); i++ {
 		pv, nv := prevVotes[i], newVotes[i]
 		if pv == nil || nv == nil || pv.Decision == nv.Decision {
@@ -489,6 +528,13 @@ func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtim
 		if r == nil {
 			continue
 		}
+		if r.Round == 0 {
+			r.Round = round
+		}
+		if r.CreatedAt.IsZero() {
+			r.CreatedAt = time.Now()
+		}
+		reflections = append(reflections, r)
 		var ledger *evidence.EvidenceLedger
 		claimIDs := map[string]bool{}
 		if i < len(results) && results[i] != nil && results[i].Ledger != nil {
@@ -504,6 +550,7 @@ func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtim
 			newVotes[i] = pv // revert unjustified change
 		}
 	}
+	return reflections
 }
 
 func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType, payload any) {
@@ -516,6 +563,9 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
 	o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"error": msg})
 	case_.Status = entity.CaseStatusFailed
+	if o.caseRepo != nil {
+		_ = o.caseRepo.UpdateStatus(ctx, case_.ID, entity.CaseStatusFailed)
+	}
 	return nil, fmt.Errorf("%s", msg)
 }
 

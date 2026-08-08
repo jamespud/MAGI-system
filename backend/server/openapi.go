@@ -17,6 +17,7 @@ const openAPISpec = `{
     "/health": {"get": {"summary": "Health check", "responses": {"200": {"description": "ok"}}}},
     "/ready": {"get": {"summary": "Readiness check", "responses": {"200": {"description": "ready"}}}},
     "/version": {"get": {"summary": "Version info", "responses": {"200": {"description": "version"}}}},
+    "/api/v1/assistant": {"post": {"summary": "Ask MAGI: run a decision from a message", "responses": {"200": {"description": "decision"}}}},
     "/api/v1/cases": {
       "post": {"summary": "Create a decision case", "responses": {"201": {"description": "created"}}},
       "get": {"summary": "List all cases", "responses": {"200": {"description": "list"}}}
@@ -29,9 +30,46 @@ const openAPISpec = `{
     "/api/v1/cases/{id}/timeline": {"get": {"summary": "Event timeline", "responses": {"200": {"description": "timeline"}}}},
     "/api/v1/cases/{id}/trace": {"get": {"summary": "Case trace", "responses": {"200": {"description": "trace"}}}},
     "/api/v1/cases/{id}/stream": {"get": {"summary": "SSE stream", "responses": {"200": {"description": "stream"}}}},
+    "/api/v1/memory": {"get": {"summary": "Search case memory", "responses": {"200": {"description": "memories"}}}},
     "/api/v1/memory/{id}": {"get": {"summary": "Get case memory", "responses": {"200": {"description": "memory"}}}},
-    "/api/v1/evaluation": {"post": {"summary": "Evaluate a case", "responses": {"200": {"description": "evaluation"}}}},
+    "/api/v1/evaluation": {"post": {"summary": "Evaluate a case (case_id in body/query)", "responses": {"200": {"description": "evaluation"}}}},
+    "/api/v1/evaluation/{id}": {"post": {"summary": "Evaluate a case by ID", "responses": {"200": {"description": "evaluation"}}}},
+    "/metrics": {"get": {"summary": "Prometheus metrics", "responses": {"200": {"description": "metrics"}}}},
     "/api/v1/benchmark": {"post": {"summary": "Benchmark", "responses": {"200": {"description": "benchmark"}}}},
+    "/api/v1/datasets": {
+      "post": {"summary": "Create a ground-truth dataset", "responses": {"201": {"description": "created"}}},
+      "get": {"summary": "List datasets", "responses": {"200": {"description": "list"}}}
+    },
+    "/api/v1/datasets/{id}": {"get": {"summary": "Get dataset", "responses": {"200": {"description": "dataset"}}}},
+    "/api/v1/datasets/{id}/items": {
+      "post": {"summary": "Add ground-truth items to a dataset", "responses": {"200": {"description": "added"}}},
+      "get": {"summary": "List dataset items", "responses": {"200": {"description": "items"}}}
+    },
+    "/api/v1/datasets/{id}/runs": {
+      "post": {"summary": "Run a dataset benchmark", "responses": {"202": {"description": "run"}}},
+      "get": {"summary": "List dataset runs", "responses": {"200": {"description": "runs"}}}
+    },
+    "/api/v1/benchmarks/{runID}": {"get": {"summary": "Get benchmark run detail", "responses": {"200": {"description": "detail"}}}},
+    "/api/v1/benchmarks/{runID}/results/{resultID}": {"patch": {"summary": "Record user feedback on a benchmark result", "responses": {"200": {"description": "updated"}}}},
+    "/api/v1/plugins": {
+      "get": {"summary": "List my plugin bindings", "responses": {"200": {"description": "bindings"}}},
+      "post": {"summary": "Create a plugin binding", "responses": {"201": {"description": "created"}}}
+    },
+    "/api/v1/plugins/{id}": {
+      "patch": {"summary": "Enable/disable a plugin binding", "responses": {"200": {"description": "updated"}}},
+      "delete": {"summary": "Delete a plugin binding", "responses": {"204": {"description": "deleted"}}}
+    },
+    "/api/v1/recurring": {
+      "get": {"summary": "List my recurring decision templates", "responses": {"200": {"description": "templates"}}},
+      "post": {"summary": "Create a recurring decision template", "responses": {"201": {"description": "created"}}}
+    },
+    "/api/v1/recurring/{id}": {
+      "get": {"summary": "Get recurring template", "responses": {"200": {"description": "template"}}},
+      "patch": {"summary": "Enable/disable recurring template", "responses": {"200": {"description": "updated"}}},
+      "delete": {"summary": "Delete recurring template", "responses": {"204": {"description": "deleted"}}}
+    },
+    "/api/v1/recurring/{id}/run": {"post": {"summary": "Trigger a recurring run now", "responses": {"202": {"description": "started"}}}},
+    "/api/v1/admin/usage": {"get": {"summary": "Admin usage aggregate (admin only)", "responses": {"200": {"description": "usage"}}}},
     "/api/v1/tools": {"get": {"summary": "List tools", "responses": {"200": {"description": "tools"}}}},
     "/api/v1/tools/{name}": {"get": {"summary": "Get tool details", "responses": {"200": {"description": "tool"}}}}
   }

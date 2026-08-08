@@ -21,8 +21,21 @@ func NewArtifactHandler(svc *decision.Service) *ArtifactHandler {
 	return &ArtifactHandler{svc: svc}
 }
 
+// authorize checks that the authenticated principal may access the case.
+func (h *ArtifactHandler) authorize(ctx context.Context, c *app.RequestContext, id string) bool {
+	case_, _ := h.svc.Get(ctx, id)
+	if CaseAllowed(ctx, case_) {
+		return true
+	}
+	Forbidden(c)
+	return false
+}
+
 func (h *ArtifactHandler) Evidence(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	evs, err := h.svc.Evidence(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
@@ -37,6 +50,9 @@ func (h *ArtifactHandler) Evidence(ctx context.Context, c *app.RequestContext) {
 
 func (h *ArtifactHandler) Claims(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	cls, err := h.svc.Claims(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
@@ -51,6 +67,9 @@ func (h *ArtifactHandler) Claims(ctx context.Context, c *app.RequestContext) {
 
 func (h *ArtifactHandler) Votes(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	vs, err := h.svc.Votes(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
@@ -75,6 +94,9 @@ func (h *ArtifactHandler) Votes(ctx context.Context, c *app.RequestContext) {
 // counts + the agent's latest vote.
 func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	runs, _ := h.svc.AgentRuns(ctx, id)
 	evs, _ := h.svc.Evidence(ctx, id)
 	cls, _ := h.svc.Claims(ctx, id)

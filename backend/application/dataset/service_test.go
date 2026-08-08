@@ -1,0 +1,390 @@
+package dataset_test
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/application/dataset"
+	"github.com/jamespud/magi/backend/domain/entity"
+)
+
+type stubDatasetRepo struct {
+	mu      sync.Mutex
+	ds      map[string]*entity.BenchmarkDataset
+	items   map[string][]*entity.BenchmarkItem
+	runs    map[string]*entity.BenchmarkRun
+	results map[string][]*entity.BenchmarkItemResult
+	byItem  map[string]string // runID -> itemID prefix for GetRun
+}
+
+func newStubDatasetRepo() *stubDatasetRepo {
+	return &stubDatasetRepo{
+		ds:      make(map[string]*entity.BenchmarkDataset),
+		items:   make(map[string][]*entity.BenchmarkItem),
+		runs:    make(map[string]*entity.BenchmarkRun),
+		results: make(map[string][]*entity.BenchmarkItemResult),
+	}
+}
+
+func (s *stubDatasetRepo) CreateDataset(ctx context.Context, d *entity.BenchmarkDataset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ds[d.ID] = d
+	return nil
+}
+func (s *stubDatasetRepo) GetDataset(ctx context.Context, id string) (*entity.BenchmarkDataset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if d, ok := s.ds[id]; ok {
+		return d, nil
+	}
+	return nil, errors.New("not found")
+}
+func (s *stubDatasetRepo) ListDatasets(ctx context.Context) ([]*entity.BenchmarkDataset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*entity.BenchmarkDataset, 0, len(s.ds))
+	for _, d := range s.ds {
+		out = append(out, d)
+	}
+	return out, nil
+}
+func (s *stubDatasetRepo) UpdateDataset(ctx context.Context, d *entity.BenchmarkDataset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ds[d.ID] = d
+	return nil
+}
+func (s *stubDatasetRepo) CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, it := range items {
+		s.items[it.DatasetID] = append(s.items[it.DatasetID], it)
+	}
+	return nil
+}
+func (s *stubDatasetRepo) ListItems(ctx context.Context, datasetID string) ([]*entity.BenchmarkItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*entity.BenchmarkItem(nil), s.items[datasetID]...), nil
+}
+func (s *stubDatasetRepo) CreateRun(ctx context.Context, r *entity.BenchmarkRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[r.ID] = r
+	return nil
+}
+func (s *stubDatasetRepo) UpdateRun(ctx context.Context, r *entity.BenchmarkRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[r.ID] = r
+	return nil
+}
+func (s *stubDatasetRepo) GetRun(ctx context.Context, id string) (*entity.BenchmarkRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.runs[id]; ok {
+		cp := *r
+		return &cp, nil
+	}
+	return nil, errors.New("not found")
+}
+func (s *stubDatasetRepo) ListRuns(ctx context.Context, datasetID string) ([]*entity.BenchmarkRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*entity.BenchmarkRun
+	for _, r := range s.runs {
+		if r.DatasetID == datasetID {
+			cp := *r
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+func (s *stubDatasetRepo) ListAllRuns(ctx context.Context) ([]*entity.BenchmarkRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*entity.BenchmarkRun, 0, len(s.runs))
+	for _, r := range s.runs {
+		cp := *r
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+func (s *stubDatasetRepo) CreateItemResult(ctx context.Context, r *entity.BenchmarkItemResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.results[r.RunID] = append(s.results[r.RunID], r)
+	return nil
+}
+func (s *stubDatasetRepo) ListItemResults(ctx context.Context, runID string) ([]*entity.BenchmarkItemResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*entity.BenchmarkItemResult(nil), s.results[runID]...), nil
+}
+func (s *stubDatasetRepo) UpdateFeedback(ctx context.Context, resultID, feedback string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, list := range s.results {
+		for _, r := range list {
+			if r.ID == resultID {
+				r.Feedback = feedback
+				r.FeedbackAt = &at
+				return nil
+			}
+		}
+	}
+	return errors.New("not found")
+}
+
+type stubCaseRepo struct {
+	mu      sync.Mutex
+	created int
+}
+
+func (s *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.created++
+	return nil
+}
+
+func (s *stubCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return nil, nil
+}
+func (s *stubCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
+func (s *stubCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
+	return nil
+}
+func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
+
+type stubOrch struct {
+	mu   sync.Mutex
+	call int
+	errs map[string]error
+}
+
+func (s *stubOrch) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.call++
+	if err := s.errs[c.Question]; err != nil {
+		return nil, err
+	}
+	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+func TestService_CreateAndAddItems(t *testing.T) {
+	svc := dataset.NewService(newStubDatasetRepo(), &stubCaseRepo{}, &stubOrch{}, 1)
+	ctx := context.Background()
+	d, err := svc.Create(ctx, 0, "launch-eval", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Create(ctx, 0, "", ""); err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	n, err := svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{
+		{Question: "ship?", ExpectedDecision: entity.VoteDecisionApprove},
+		{Question: "ship2?", ExpectedDecision: entity.VoteDecisionReject, Weight: 2},
+	})
+	if err != nil || n != 2 {
+		t.Fatalf("add items: %v n=%d", err, n)
+	}
+	if d.ItemCount != 2 {
+		t.Fatalf("item count: %d", d.ItemCount)
+	}
+	if _, err := svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{{Question: "", ExpectedDecision: entity.VoteDecisionApprove}}); err == nil {
+		t.Fatal("expected error for empty question")
+	}
+}
+
+func TestService_RunComputesAccuracy(t *testing.T) {
+	repo := newStubDatasetRepo()
+	svc := dataset.NewService(repo, &stubCaseRepo{}, &stubOrch{}, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 0, "eval", "")
+	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{
+		{Question: "q1", ExpectedDecision: entity.VoteDecisionApprove, Weight: 1},
+		{Question: "q2", ExpectedDecision: entity.VoteDecisionReject, Weight: 3},
+	})
+	run, err := svc.StartRun(ctx, 0, d.ID)
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+	if run.Total != 2 || run.Matched != 1 {
+		t.Fatalf("run totals: %+v", run)
+	}
+	if run.Accuracy != 0.5 || run.WeightedAccuracy != 0.25 {
+		t.Fatalf("accuracy: acc=%v wacc=%v", run.Accuracy, run.WeightedAccuracy)
+	}
+	results, err := repo.ListItemResults(ctx, run.ID)
+	if err != nil || len(results) != 2 {
+		t.Fatalf("results: %v %d", err, len(results))
+	}
+	matchedCount := 0
+	for _, r := range results {
+		if r.Matched {
+			matchedCount++
+		}
+	}
+	if matchedCount != 1 {
+		t.Fatalf("matched results: %d", matchedCount)
+	}
+}
+
+func TestService_RunMarksFailedOnItemError(t *testing.T) {
+	repo := newStubDatasetRepo()
+	orch := &stubOrch{errs: map[string]error{"bad": errors.New("boom")}}
+	svc := dataset.NewService(repo, &stubCaseRepo{}, orch, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 0, "eval", "")
+	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{
+		{Question: "good", ExpectedDecision: entity.VoteDecisionApprove},
+		{Question: "bad", ExpectedDecision: entity.VoteDecisionReject},
+	})
+	run, err := svc.StartRun(ctx, 0, d.ID)
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunFailed)
+	results, _ := repo.ListItemResults(ctx, run.ID)
+	if len(results) != 2 {
+		t.Fatalf("results: %d", len(results))
+	}
+	errorCount := 0
+	matchedCount := 0
+	for _, r := range results {
+		if r.Error != "" {
+			errorCount++
+		}
+		if r.Matched {
+			matchedCount++
+		}
+	}
+	if errorCount != 1 || matchedCount != 1 {
+		t.Fatalf("errorCount=%d matchedCount=%d", errorCount, matchedCount)
+	}
+}
+
+func TestService_OwnershipEnforced(t *testing.T) {
+	svc := dataset.NewService(newStubDatasetRepo(), &stubCaseRepo{}, &stubOrch{}, 1)
+	ctx := context.Background()
+	d, err := svc.Create(ctx, 1, "private", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	other := auth.WithPrincipal(ctx, &auth.Principal{UserID: 2, Role: "user"})
+	if _, err := svc.Get(other, 2, d.ID); err == nil {
+		t.Fatal("expected forbidden for other user")
+	}
+	owner := auth.WithPrincipal(ctx, &auth.Principal{UserID: 1, Role: "admin"})
+	got, err := svc.Get(owner, 1, d.ID)
+	if err != nil || got == nil || got.ID != d.ID {
+		t.Fatalf("owner get: %v %+v", err, got)
+	}
+}
+
+func waitRun(t *testing.T, repo *stubDatasetRepo, runID string, want entity.BenchmarkRunStatus) *entity.BenchmarkRun {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r, _ := repo.GetRun(context.Background(), runID)
+		if r != nil && r.Status == want {
+			return r
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	r, _ := repo.GetRun(context.Background(), runID)
+	t.Fatalf("run %s did not reach %s: %+v", runID, want, r)
+	return nil
+}
+
+type gatedOrchestrator struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (o *gatedOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	o.once.Do(func() { close(o.started) })
+	<-o.release
+	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+func TestService_RejectsSecondActiveRun(t *testing.T) {
+	repo := newStubDatasetRepo()
+	orch := &gatedOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
+	svc := dataset.NewService(repo, &stubCaseRepo{}, orch, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 0, "eval", "")
+	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{{Question: "q", ExpectedDecision: entity.VoteDecisionApprove}})
+	run, err := svc.StartRun(ctx, 0, d.ID)
+	if err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	<-orch.started
+	if _, err := svc.StartRun(ctx, 0, d.ID); err != dataset.ErrRunActive {
+		t.Fatalf("expected ErrRunActive, got %v", err)
+	}
+	close(orch.release)
+	waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+}
+
+func TestService_RecoverOrphanRuns(t *testing.T) {
+	repo := newStubDatasetRepo()
+	orch := &gatedOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
+	svc := dataset.NewService(repo, &stubCaseRepo{}, orch, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 0, "eval", "")
+	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{{Question: "q", ExpectedDecision: entity.VoteDecisionApprove}})
+	run, err := svc.StartRun(ctx, 0, d.ID)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-orch.started
+	if err := svc.RecoverOrphanRuns(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	got, _ := repo.GetRun(ctx, run.ID)
+	if got == nil || got.Status != entity.BenchmarkRunFailed {
+		t.Fatalf("orphan run should be failed, got %+v", got)
+	}
+	close(orch.release)
+}
+
+func TestService_AddFeedbackOwnershipAndPersists(t *testing.T) {
+	repo := newStubDatasetRepo()
+	svc := dataset.NewService(repo, &stubCaseRepo{}, &stubOrch{}, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 1, "eval", "")
+	_, _ = svc.AddItems(ctx, 1, d.ID, []dataset.NewItem{{Question: "q", ExpectedDecision: entity.VoteDecisionApprove}})
+	run, err := svc.StartRun(ctx, 1, d.ID)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+	results, _ := repo.ListItemResults(ctx, run.ID)
+	if len(results) == 0 {
+		t.Fatal("no results")
+	}
+	other := auth.WithPrincipal(ctx, &auth.Principal{UserID: 2})
+	if err := svc.AddFeedback(other, 2, run.ID, results[0].ID, "wrong user"); err == nil {
+		t.Fatal("expected forbidden for other user")
+	}
+	owner := auth.WithPrincipal(ctx, &auth.Principal{UserID: 1})
+	if err := svc.AddFeedback(owner, 1, run.ID, results[0].ID, "agree with the call"); err != nil {
+		t.Fatalf("feedback: %v", err)
+	}
+	got, _ := repo.ListItemResults(ctx, run.ID)
+	if got[0].Feedback != "agree with the call" || got[0].FeedbackAt == nil {
+		t.Fatalf("feedback not persisted: %+v", got[0])
+	}
+}

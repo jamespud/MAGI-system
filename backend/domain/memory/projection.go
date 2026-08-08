@@ -16,6 +16,7 @@ func BuildProjection(
 	proj := &entity.CaseMemoryProjection{ProjectionVersion: 1}
 
 	if case_ != nil {
+		proj.CaseID = case_.ID
 		proj.QuestionSummary = case_.Question
 		proj.ContextSummary = truncateRunes(case_.Context, 200)
 	}

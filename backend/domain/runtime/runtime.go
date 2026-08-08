@@ -50,9 +50,11 @@ type MagiRuntime interface {
 
 type AgentContext struct {
 	CaseID        string
+	UserID        string
 	RunID         string
 	Task          entity.DecisionTask
 	Constraints   []entity.Constraint
+	ToolBindings  []entity.ToolBinding
 	KnowledgeCtx  []port.KnowledgeChunk
 	DebateContext *DebateContext
 	PreviousRun   *PreviousAgentState

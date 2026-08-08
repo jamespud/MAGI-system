@@ -3,22 +3,37 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	crossplugin "github.com/coze-dev/coze-studio/backend/crossdomain/plugin"
+	crossworkflow "github.com/coze-dev/coze-studio/backend/crossdomain/workflow"
+	"time"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	rag "github.com/jamespud/magi/backend/adapter/rag"
+	"github.com/jamespud/magi/backend/application/admin"
+	"github.com/jamespud/magi/backend/application/assistant"
+	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/memory"
+	"github.com/jamespud/magi/backend/application/metrics"
+	"github.com/jamespud/magi/backend/application/plugins"
+	"github.com/jamespud/magi/backend/application/recurring"
+	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/application/replay"
 	"github.com/jamespud/magi/backend/application/tool"
+	"github.com/jamespud/magi/backend/application/toolpolicy"
+	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
+	domainmemory "github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/orchestration"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
@@ -37,13 +52,19 @@ var Module = fx.Options(
 		// Adapters (standalone mode; Coze mode replaces these)
 		magi.NewModelAdapter,
 		appserver.NewEventBroker,
+		provideEventPublisher,
+		provideContextBuilder,
 		ProvideToolRegistry,
 		ProvideToolExecutor,
+		provideAuthService,
 		ProvideKnowledgePort,
 
 		// Database
 		provideDB,
 		provideRepository,
+		provideDecisionJobRepository,
+		provideDatasetRepository,
+		providePluginBindingRepository,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -55,9 +76,20 @@ var Module = fx.Options(
 		provideRunManager,
 		provideDecisionService,
 		provideReplayService,
-		evaluation.NewService,
+		provideEvaluationService,
 		provideMemoryService,
 		provideToolService,
+		provideDatasetService,
+		providePluginsService,
+		provideAdminService,
+		provideRecurringRepository,
+		provideRecurringService,
+		provideAssistantService,
+		metrics.New,
+		provideToolPolicy,
+		provideRedactor,
+		provideTracingProvider,
+		provideHealthPinger,
 
 		// Server
 		provideServer,
@@ -65,22 +97,44 @@ var Module = fx.Options(
 	fx.Invoke(func(
 		h *hzserver.Hertz,
 		decSvc *decision.Service,
+		authSvc *auth.Service,
+		dsSvc *dataset.Service,
 		repSvc *replay.Service,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		toolSvc *tool.Service,
 		broker *appserver.EventBroker,
+		repo port.Repository,
+		reg *metrics.Registry,
+		plugs *plugins.Service,
+		admSvc *admin.Service,
+		recSvc *recurring.Service,
+		askSvc *assistant.Service,
+		dbPing func(context.Context) error,
+		tp *trace.TracerProvider,
 	) {
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
-			Decision:   decSvc,
-			Replay:     repSvc,
-			Evaluation: evalSvc,
-			Memory:     memSvc,
-			Tool:       toolSvc,
-			Broker:     broker,
+			Decision:     decSvc,
+			Auth:         authSvc,
+			Metrics:      reg,
+			Dataset:      dsSvc,
+			Plugins:      plugs,
+			Admin:        admSvc,
+			Recurring:    recSvc,
+			Assistant:    askSvc,
+			Replay:       repSvc,
+			Evaluation:   evalSvc,
+			Memory:       memSvc,
+			Tool:         toolSvc,
+			Broker:       broker,
+			EventRepo:    repo.EventRepo(),
+			HealthPinger: dbPing,
+			Tracing:      tp,
 		})
 	}),
 	fx.Invoke(registerLifecycle),
+	fx.Invoke(registerScheduler),
+	fx.Invoke(registerTracingShutdown),
 )
 
 func provideAgentLoop(
@@ -89,7 +143,11 @@ func provideAgentLoop(
 	toolExec port.ToolExecutorPort,
 	val validation.Validator,
 	gen validation.SchemaGenerator,
-	broker *appserver.EventBroker,
+	eventPub port.EventPublisher,
+	repo port.Repository,
+	toolPol *toolpolicy.Policy,
+	reg *metrics.Registry,
+	red *redact.Redactor,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -99,26 +157,28 @@ func provideAgentLoop(
 	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: broker, Adapter: adapterRegistry,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red,
 	})
 }
 
-// ProvideToolRegistry returns a LocalToolRegistry (resolves web_search) when a
-// Tavily key is configured, else the no-op StubToolRegistry (no tools).
+// ProvideToolRegistry routes local/plugin/workflow/code-runner bindings through one registry.
 func ProvideToolRegistry(cfg *Config) port.ToolRegistryPort {
+	var local port.ToolRegistryPort
 	if cfg.Tavily.APIKey != "" {
-		return magi.NewLocalToolRegistry()
+		local = magi.NewLocalToolRegistry()
 	}
-	return &StubToolRegistry{}
+	return magi.NewToolRegistryMuxWithExt(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
+		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg))
 }
 
-// ProvideToolExecutor returns a TavilyToolExecutor when a Tavily key is
-// configured, else the no-op StubToolExecutor.
+// ProvideToolExecutor routes local/plugin/workflow/code-runner execution through one executor.
 func ProvideToolExecutor(cfg *Config) port.ToolExecutorPort {
+	var local port.ToolExecutorPort
 	if cfg.Tavily.APIKey != "" {
-		return magi.NewTavilyToolExecutor(cfg.Tavily.APIKey)
+		local = magi.NewTavilyToolExecutor(cfg.Tavily.APIKey)
 	}
-	return &StubToolExecutor{}
+	return magi.NewToolExecutorMuxWithExt(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
+		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg))
 }
 
 // ProvideKnowledgePort builds the HybridKnowledgeAdapter. When milvus.address /
@@ -190,27 +250,34 @@ func provideMagiConfigs(cfg *Config) []*entity.MagiConfig {
 func provideOrchestrator(
 	agentLoop *runtime.AgentLoop,
 	commander *service.Commander,
-	broker *appserver.EventBroker,
+	eventPub port.EventPublisher,
 	configs []*entity.MagiConfig,
 	repo port.Repository,
+	contextBuilder *domainmemory.ContextBuilder,
 	knowledge port.KnowledgePort,
+	plugs *plugins.Service,
 ) *orchestration.Orchestrator {
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		AgentLoop: agentLoop,
-		Consensus: consensus.NewConsensusEngine(),
-		Debate:    debate.NewDebateEngine(nil),
-		Commander: commander,
-		EventPub:  broker,
-		CaseRepo:  repo.CaseRepo(),
-		Repo:      repo,
-		Knowledge: knowledge,
-		Configs:   configs,
-		Policy:    consensus.DefaultConsensusPolicy(),
+		AgentLoop:            agentLoop,
+		Consensus:            consensus.NewConsensusEngine(),
+		Debate:               debate.NewDebateEngine(nil),
+		Commander:            commander,
+		EventPub:             eventPub,
+		CaseRepo:             repo.CaseRepo(),
+		Repo:                 repo,
+		ContextBuilder:       contextBuilder,
+		Knowledge:            knowledge,
+		Configs:              configs,
+		Policy:               consensus.DefaultConsensusPolicy(),
+		ToolBindingsProvider: plugs,
 	})
 }
 
-func provideRunManager(orch *orchestration.Orchestrator) *decision.RunManager {
-	return decision.NewRunManager(orch)
+func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {
+	return decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
+		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
+	})
 }
 
 func provideDecisionService(
@@ -231,16 +298,35 @@ func provideDecisionService(
 		decision.WithRunManager(rm))
 }
 
-func provideReplayService(broker *appserver.EventBroker) *replay.Service {
-	return replay.NewService(broker)
+func provideEventPublisher(repo port.Repository, broker *appserver.EventBroker, red *redact.Redactor) port.EventPublisher {
+	return magi.NewEventPublisherAdapterWithRedaction(repo.EventRepo(), broker, red)
+}
+
+func provideContextBuilder(knowledge port.KnowledgePort) *domainmemory.ContextBuilder {
+	return domainmemory.NewContextBuilder(knowledge)
+}
+func provideEvaluationService(repo port.Repository) *evaluation.Service {
+	return evaluation.NewService(evaluation.WithRepository(repo))
+}
+
+func provideReplayService(repo port.Repository) *replay.Service {
+	return replay.NewService(repo.EventRepo())
 }
 
 func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository) *memory.Service {
-	return memory.NewService(knowledge, repo.MemoryRepo())
+	return memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo()))
 }
 
 func provideToolService(toolReg port.ToolRegistryPort) *tool.Service {
 	return tool.NewService(toolReg)
+}
+
+func provideDatasetRepository(db *gorm.DB) port.DatasetRepository {
+	return magi.NewDatasetRepository(db)
+}
+
+func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.Orchestrator, repo port.Repository, cfg *Config) *dataset.Service {
+	return dataset.NewService(datasets, repo.CaseRepo(), orch, cfg.Magi.MaxDebateRounds)
 }
 
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
@@ -259,9 +345,19 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(h *hzserver.Hertz) {
-	// Routes are registered via fx.Invoke(appserver.RegisterRoutes).
-	// This function ensures the server is created; lifecycle is in provideServer.
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			if err := rm.Recover(ctx); err != nil {
+				return err
+			}
+			return dsSvc.RecoverOrphanRuns(ctx)
+		},
+	})
+}
+
+func provideDecisionJobRepository(db *gorm.DB) port.DecisionJobRepository {
+	return magi.NewDecisionJobRepository(db)
 }
 
 // StubToolRegistry is a no-op tool registry for standalone mode.
@@ -292,4 +388,111 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 
 func provideRepository(db *gorm.DB) port.Repository {
 	return magi.NewRepository(db)
+}
+
+func provideAuthService(cfg *Config) *auth.Service {
+	keys := make([]auth.KeySpec, 0, len(cfg.Auth.APIKeys))
+	for _, k := range cfg.Auth.APIKeys {
+		keys = append(keys, auth.KeySpec{Name: k.Name, Key: k.Key, UserID: k.UserID, Role: k.Role})
+	}
+	return auth.NewService(cfg.Auth.Enabled, keys)
+}
+
+func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {
+	return magi.NewPluginBindingRepository(db)
+}
+
+func providePluginsService(repo port.PluginBindingRepository) *plugins.Service {
+	return plugins.NewService(repo)
+}
+
+func codeRunnerAdapter(cfg *Config) *magi.CodeRunnerAdapter {
+	enabled := true
+	if cfg.CodeRunner.Enabled != nil {
+		enabled = *cfg.CodeRunner.Enabled
+	}
+	if !enabled {
+		return nil
+	}
+	p := magi.DefaultCodeRunnerPolicy()
+	if cfg.CodeRunner.TimeoutSeconds > 0 {
+		p.TimeoutSeconds = cfg.CodeRunner.TimeoutSeconds
+	}
+	if cfg.CodeRunner.MaxCodeChars > 0 {
+		p.MaxCodeChars = cfg.CodeRunner.MaxCodeChars
+	}
+	if len(cfg.CodeRunner.AllowedLanguages) > 0 {
+		p.AllowedLanguages = cfg.CodeRunner.AllowedLanguages
+	}
+	if len(cfg.CodeRunner.BlockedPatterns) > 0 {
+		p.BlockedPatterns = cfg.CodeRunner.BlockedPatterns
+	}
+	return magi.NewCodeRunnerAdapterWithPolicy(p)
+}
+
+func provideAdminService(repo port.Repository) *admin.Service {
+	return admin.NewService(repo.CaseRepo(), repo.AgentRunRepo())
+}
+
+func provideToolPolicy(cfg *Config) *toolpolicy.Policy {
+	return toolpolicy.NewPolicy(cfg.ToolPolicy.RequireApproval, cfg.ToolPolicy.AutoApproved)
+}
+
+func provideRecurringRepository(db *gorm.DB) port.RecurringRepository {
+	return magi.NewRecurringRepository(db)
+}
+
+func provideRecurringService(repo port.RecurringRepository, agg port.Repository, rm *decision.RunManager, cfg *Config) *recurring.Service {
+	return recurring.NewService(repo, agg.CaseRepo(), rm, cfg.Magi.MaxDebateRounds)
+}
+
+func registerScheduler(lc fx.Lifecycle, svc *recurring.Service) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.Hook{
+		OnStart: func(startCtx context.Context) error {
+			go recurring.NewScheduler(svc, time.Minute).Run(ctx)
+			return nil
+		},
+		OnStop: func(stopCtx context.Context) error {
+			cancel()
+			return nil
+		},
+	})
+}
+
+func provideAssistantService(decSvc *decision.Service) *assistant.Service {
+	return assistant.NewService(decSvc)
+}
+
+func provideHealthPinger(db *gorm.DB) func(context.Context) error {
+	return func(ctx context.Context) error {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return err
+		}
+		return sqlDB.PingContext(ctx)
+	}
+}
+
+func provideRedactor(cfg *Config) *redact.Redactor {
+	secrets := []string{cfg.Model.APIKey, cfg.Tavily.APIKey}
+	for _, k := range cfg.Auth.APIKeys {
+		secrets = append(secrets, k.Key)
+	}
+	return redact.New(secrets...)
+}
+
+func provideTracingProvider(cfg *Config) *trace.TracerProvider {
+	return tracing.NewProvider(tracing.Config{Enabled: cfg.Tracing.Enabled, ServiceName: cfg.Tracing.ServiceName}, nil)
+}
+
+func registerTracingShutdown(lc fx.Lifecycle, tp *trace.TracerProvider) {
+	if tp == nil {
+		return
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return tp.Shutdown(ctx)
+		},
+	})
 }

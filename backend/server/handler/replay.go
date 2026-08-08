@@ -11,15 +11,31 @@ import (
 )
 
 type ReplayHandler struct {
-	svc *replay.Service
+	svc     *replay.Service
+	caseSvc CaseGetter
 }
 
-func NewReplayHandler(svc *replay.Service) *ReplayHandler {
-	return &ReplayHandler{svc: svc}
+func NewReplayHandler(svc *replay.Service, caseSvc CaseGetter) *ReplayHandler {
+	return &ReplayHandler{svc: svc, caseSvc: caseSvc}
+}
+
+func (h *ReplayHandler) authorize(ctx context.Context, c *app.RequestContext, id string) bool {
+	if h.caseSvc == nil {
+		return true
+	}
+	case_, _ := h.caseSvc.Get(ctx, id)
+	if CaseAllowed(ctx, case_) {
+		return true
+	}
+	Forbidden(c)
+	return false
 }
 
 func (h *ReplayHandler) Events(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	events, err := h.svc.Replay(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
@@ -34,6 +50,9 @@ func (h *ReplayHandler) Events(ctx context.Context, c *app.RequestContext) {
 
 func (h *ReplayHandler) Timeline(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	events, err := h.svc.Timeline(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
@@ -48,6 +67,9 @@ func (h *ReplayHandler) Timeline(ctx context.Context, c *app.RequestContext) {
 
 func (h *ReplayHandler) Trace(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
+	if !h.authorize(ctx, c, id) {
+		return
+	}
 	events, err := h.svc.Trace(ctx, id)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})

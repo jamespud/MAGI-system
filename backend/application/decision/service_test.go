@@ -36,10 +36,13 @@ func (s *stubCaseRepo) UpdateStatus(ctx context.Context, id string, status entit
 	s.cancelledID = id
 	return nil
 }
+func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
 
 func TestService_Create(t *testing.T) {
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 2})
-	c, err := svc.Create(context.Background(), "test question", "", nil)
+	c, err := svc.Create(context.Background(), 0, "test question", "", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -54,9 +57,17 @@ func TestService_Create(t *testing.T) {
 	}
 }
 
+func TestService_Create_UsesUniqueIDs(t *testing.T) {
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{})
+	first, _ := svc.Create(context.Background(), 0, "q1", "", nil)
+	second, _ := svc.Create(context.Background(), 0, "q2", "", nil)
+	if first.ID == second.ID || len(first.ID) <= len("case-") || len(second.ID) <= len("case-") {
+		t.Fatalf("case IDs are not unique/usable: %q %q", first.ID, second.ID)
+	}
+}
 func TestService_Create_WithBackgroundAndConstraints(t *testing.T) {
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 3})
-	c, err := svc.Create(context.Background(), "Should we adopt Rust?",
+	c, err := svc.Create(context.Background(), 0, "Should we adopt Rust?",
 		"Java backend team of 5",
 		[]entity.Constraint{{Key: "Budget", Value: "3 months", Hard: false}})
 	if err != nil {
@@ -79,7 +90,7 @@ func TestService_Create_WithBackgroundAndConstraints(t *testing.T) {
 func TestService_Run(t *testing.T) {
 	want := &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}
 	svc := decision.NewService(&stubOrchestrator{result: want}, decision.ServiceConfig{MaxDebateRounds: 2})
-	c, _ := svc.Create(context.Background(), "q", "", nil)
+	c, _ := svc.Create(context.Background(), 0, "q", "", nil)
 	got, err := svc.Run(context.Background(), c)
 	if err != nil {
 		t.Fatalf("run: %v", err)

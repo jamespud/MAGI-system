@@ -20,6 +20,10 @@ func main() {
 		fmt.Printf("Failed to load config from %s: %v\n", configPath, err)
 		os.Exit(1)
 	}
+	if err := cfg.Validate(); err != nil {
+		fmt.Printf("Invalid config: %v\n", err)
+		os.Exit(1)
+	}
 
 	app := fx.New(
 		fx.Provide(func() *bootstrap.Config { return cfg }),

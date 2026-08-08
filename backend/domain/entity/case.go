@@ -4,17 +4,20 @@ import "time"
 
 // DecisionCase is the aggregate root of a MAGI decision run.
 type DecisionCase struct {
-	ID              string
-	UserID          int64
-	Question        string
-	Context         string
-	Constraints     []Constraint
-	Status          CaseStatus
-	CurrentPhase    CasePhase
-	MaxDebateRounds int
-	Deadline        *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID           string
+	UserID       int64
+	Question     string
+	Context      string
+	Constraints  []Constraint
+	Status       CaseStatus
+	CurrentPhase CasePhase
+	// ExecutionAttempt is set by the durable worker for the current attempt.
+	// It is intentionally runtime-only: the durable job owns the source of truth.
+	ExecutionAttempt int
+	MaxDebateRounds  int
+	Deadline         *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type CaseStatus string

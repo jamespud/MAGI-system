@@ -91,11 +91,13 @@ type EvidenceRule struct {
 // - Direct mode (standalone): APIKey + BaseURL + ModelName -> eino-ext openai.NewChatModel
 // - Coze mode (integrated): ModelID > 0 -> Coze modelbuilder.BuildModelByID
 type ModelRef struct {
-	APIKey    string
-	BaseURL   string
-	ModelName string // e.g. "gpt-4o", "doubao-pro-32k"
-	ModelID   int64  // Coze model ID (0 = use direct mode)
-	Params    *LLMParams
+	APIKey             string
+	BaseURL            string
+	ModelName          string  // e.g. "gpt-4o", "doubao-pro-32k"
+	PricePerMInputUSD  float64 // USD per million input tokens (cost accounting)
+	PricePerMOutputUSD float64 // USD per million output tokens (cost accounting)
+	ModelID            int64   // Coze model ID (0 = use direct mode)
+	Params             *LLMParams
 }
 
 // LLMParams is the MAGI-owned run-time LLM params. The application adapter
@@ -128,6 +130,7 @@ type ToolBinding struct {
 	ToolID      int64  // valid when Source == ToolSourcePlugin
 	IsDraft     bool   // draft/online selection when Source == ToolSourcePlugin
 	ToolName    string // valid when Source == ToolSourceLocal
+	WorkflowID  int64  // valid when Source == ToolSourceWorkflow
 	Reliability *float64
 }
 

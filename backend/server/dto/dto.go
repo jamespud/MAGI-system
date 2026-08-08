@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/jamespud/magi/backend/application/admin"
+
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -319,4 +321,193 @@ func FromToolCall(t *entity.ToolCall) ToolCallDTO {
 		EvidenceID: t.EvidenceID,
 		DurationMs: t.DurationMs,
 	}
+}
+
+type CreateDatasetRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type DatasetResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ItemCount   int    `json:"item_count"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type DatasetListResponse struct {
+	Datasets []DatasetResponse `json:"datasets"`
+}
+
+type AddDatasetItemsRequest struct {
+	Items []DatasetItemDTO `json:"items"`
+}
+
+type DatasetItemDTO struct {
+	Question         string          `json:"question"`
+	Background       string          `json:"background,omitempty"`
+	Constraints      []ConstraintDTO `json:"constraints,omitempty"`
+	ExpectedDecision string          `json:"expected_decision"`
+	Weight           float64         `json:"weight,omitempty"`
+	Tags             []string        `json:"tags,omitempty"`
+}
+
+type BenchmarkRunResponse struct {
+	ID               string  `json:"id"`
+	DatasetID        string  `json:"dataset_id"`
+	Status           string  `json:"status"`
+	Total            int     `json:"total"`
+	Matched          int     `json:"matched"`
+	Accuracy         float64 `json:"accuracy"`
+	WeightedAccuracy float64 `json:"weighted_accuracy"`
+	StartedAt        string  `json:"started_at"`
+	CompletedAt      string  `json:"completed_at,omitempty"`
+}
+
+type BenchmarkItemResultResponse struct {
+	ID               string  `json:"id"`
+	CaseID           string  `json:"case_id"`
+	ExpectedDecision string  `json:"expected_decision"`
+	ActualDecision   string  `json:"actual_decision"`
+	Matched          bool    `json:"matched"`
+	Score            float64 `json:"score"`
+	Error            string  `json:"error,omitempty"`
+	Feedback         string  `json:"feedback,omitempty"`
+	FeedbackAt       string  `json:"feedback_at,omitempty"`
+}
+
+type BenchmarkDetailResponse struct {
+	Run     BenchmarkRunResponse          `json:"run"`
+	Results []BenchmarkItemResultResponse `json:"results"`
+}
+
+func FromDataset(d *entity.BenchmarkDataset) DatasetResponse {
+	return DatasetResponse{
+		ID: d.ID, Name: d.Name, Description: d.Description,
+		ItemCount: d.ItemCount, CreatedAt: d.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func FromBenchmarkRun(r *entity.BenchmarkRun) BenchmarkRunResponse {
+	resp := BenchmarkRunResponse{
+		ID: r.ID, DatasetID: r.DatasetID, Status: string(r.Status),
+		Total: r.Total, Matched: r.Matched, Accuracy: r.Accuracy,
+		WeightedAccuracy: r.WeightedAccuracy, StartedAt: r.StartedAt.Format(time.RFC3339),
+	}
+	if r.CompletedAt != nil {
+		resp.CompletedAt = r.CompletedAt.Format(time.RFC3339)
+	}
+	return resp
+}
+
+func FromBenchmarkResult(r *entity.BenchmarkItemResult) BenchmarkItemResultResponse {
+	out := BenchmarkItemResultResponse{
+		ID: r.ID, CaseID: r.CaseID, ExpectedDecision: string(r.ExpectedDecision),
+		ActualDecision: string(r.ActualDecision), Matched: r.Matched, Score: r.Score, Error: r.Error,
+		Feedback: r.Feedback,
+	}
+	if r.FeedbackAt != nil {
+		out.FeedbackAt = r.FeedbackAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+type PluginBindingResponse struct {
+	ID       string `json:"id"`
+	PluginID int64  `json:"plugin_id"`
+	ToolID   int64  `json:"tool_id"`
+	IsDraft  bool   `json:"is_draft"`
+	Enabled  bool   `json:"enabled"`
+}
+
+func FromPluginBinding(b *entity.PluginBinding) PluginBindingResponse {
+	return PluginBindingResponse{
+		ID: b.ID, PluginID: b.PluginID, ToolID: b.ToolID, IsDraft: b.IsDraft, Enabled: b.Enabled,
+	}
+}
+
+type AdminUsageRow struct {
+	UserID  int64   `json:"user_id"`
+	Cases   int     `json:"cases"`
+	Runs    int     `json:"runs"`
+	Tokens  int64   `json:"tokens"`
+	CostUSD float64 `json:"cost_usd"`
+}
+
+type AdminUsageResponse struct {
+	TotalCases   int             `json:"total_cases"`
+	TotalRuns    int             `json:"total_runs"`
+	TotalTokens  int64           `json:"total_tokens"`
+	TotalCostUSD float64         `json:"total_cost_usd"`
+	ByUser       []AdminUsageRow `json:"by_user"`
+}
+
+func FromAdminUsage(s *admin.UsageSummary) AdminUsageResponse {
+	out := AdminUsageResponse{TotalCases: s.TotalCases, TotalRuns: s.TotalRuns, TotalTokens: s.TotalTokens, TotalCostUSD: s.TotalCostUSD}
+	for _, r := range s.ByUser {
+		out.ByUser = append(out.ByUser, AdminUsageRow{UserID: r.UserID, Cases: r.Cases, Runs: r.Runs, Tokens: r.Tokens, CostUSD: r.CostUSD})
+	}
+	return out
+}
+
+type CreateRecurringRequest struct {
+	Name            string          `json:"name"`
+	Question        string          `json:"question"`
+	Background      string          `json:"background,omitempty"`
+	Constraints     []ConstraintDTO `json:"constraints,omitempty"`
+	IntervalSeconds int             `json:"interval_seconds"`
+}
+
+type SetRecurringEnabledRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+type RecurringResponse struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Question        string `json:"question"`
+	Background      string `json:"background"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	Enabled         bool   `json:"enabled"`
+	LastRunAt       string `json:"last_run_at,omitempty"`
+	CreatedAt       string `json:"created_at"`
+}
+
+func FromRecurring(r *entity.RecurringCase) RecurringResponse {
+	resp := RecurringResponse{
+		ID: r.ID, Name: r.Name, Question: r.Question, Background: r.Background,
+		IntervalSeconds: int(r.Interval.Seconds()), Enabled: r.Enabled,
+		CreatedAt: r.CreatedAt.Format(time.RFC3339),
+	}
+	if r.LastRunAt != nil {
+		resp.LastRunAt = r.LastRunAt.Format(time.RFC3339)
+	}
+	return resp
+}
+
+type AskRequest struct {
+	Message     string          `json:"message"`
+	Background  string          `json:"background,omitempty"`
+	Constraints []ConstraintDTO `json:"constraints,omitempty"`
+}
+
+type AskResponse struct {
+	CaseID   string `json:"case_id"`
+	Status   string `json:"status"`
+	Decision string `json:"decision"`
+	Report   string `json:"report"`
+}
+
+func FromAsk(c *entity.DecisionCase, res *entity.Resolution) AskResponse {
+	out := AskResponse{CaseID: c.ID, Status: string(c.Status)}
+	if res != nil {
+		out.Decision = string(res.FinalDecision)
+		out.Report = res.FinalReport
+	}
+	return out
+}
+
+type MemorySearchResponse struct {
+	Results []*entity.CaseMemoryProjection `json:"results"`
 }
