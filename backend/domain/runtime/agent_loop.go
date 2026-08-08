@@ -345,11 +345,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds()})
 				ts.consecToolFail = 0
 				tcr.Valid = true
 				tcr.Result = l.redactor.String(execRes.Output)
 				l.metrics.IncToolCall(true)
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds(), "result": quoteToolOutput(tcr.Result)})
 				// Evidence
 				candidates, _ := l.adapter.Extract(ctx, td, execRes)
 				for _, c := range candidates {
@@ -383,8 +383,9 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						}
 					}
 					if validEVs {
-						ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
+						if cl := ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts); cl != nil {
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"claim_id": cl.ID, "statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
+						}
 					}
 				}
 			}
@@ -416,8 +417,9 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGatePassed, nil)
 			result.Summary = pr.Summary
 			for _, c := range pr.Summary.Claims {
-				ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts)
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
+				if cl := ledger.RecordClaim(c.Statement, c.Supports, c.Contradicts); cl != nil {
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventClaimCreated, map[string]any{"claim_id": cl.ID, "statement": c.Statement, "supports": c.Supports, "contradicts": c.Contradicts})
+				}
 			}
 			messages = append(messages, resp)
 			if actx.DebateContext != nil {
