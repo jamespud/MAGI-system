@@ -84,9 +84,12 @@ func writeEvent(w *sse.Stream, ev *entity.MagiEvent) error {
 	// endpoint. Marshalling the raw entity would emit Go field names
 	// (ID/CaseID/AgentCode/...) that the frontend EventSource cannot parse.
 	data, _ := json.Marshal(dto.FromEvent(ev))
+	// Deliberately leave Event empty: an `event:` line makes the browser
+	// dispatch a named event that es.onmessage does not receive. A frame
+	// without `event:` dispatches "message", which is what the frontend
+	// subscribes to.
 	return w.Publish(&sse.Event{
-		ID:    ev.ID,
-		Event: string(ev.Type),
-		Data:  data,
+		ID:   ev.ID,
+		Data: data,
 	})
 }
