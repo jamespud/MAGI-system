@@ -35,6 +35,7 @@ type DecisionJobRepository interface {
 	RequeueExpired(ctx context.Context, now time.Time) error
 	ListRunnable(ctx context.Context, now time.Time) ([]*entity.DecisionJob, error)
 	GetByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error)
+	CountActiveByUser(ctx context.Context, userID int64) (int, error)
 }
 type CaseRepository interface {
 	Create(ctx context.Context, c *entity.DecisionCase) error

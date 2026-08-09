@@ -216,4 +216,14 @@ func jobFromModel(model *DecisionJobModel) *entity.DecisionJob {
 	}
 }
 
+func (r *decisionJobRepo) CountActiveByUser(ctx context.Context, userID int64) (int, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
+		Joins("JOIN decision_case ON decision_case.id = decision_job.case_id").
+		Where("decision_case.user_id = ? AND decision_job.status IN ?", userID,
+			[]string{string(entity.DecisionJobQueued), string(entity.DecisionJobRunning)}).
+		Count(&count).Error
+	return int(count), err
+}
+
 var _ port.DecisionJobRepository = (*decisionJobRepo)(nil)

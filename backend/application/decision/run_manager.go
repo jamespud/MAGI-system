@@ -104,11 +104,21 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 		return ErrAlreadyRunning
 	}
 	if m.maxConcurrentPerUser > 0 && c.UserID != 0 {
-		m.mu.Lock()
-		active := m.userRuns[c.UserID]
-		m.mu.Unlock()
-		if active >= m.maxConcurrentPerUser {
-			return ErrRateLimited
+		if m.jobRepo != nil {
+			active, err := m.jobRepo.CountActiveByUser(ctx, c.UserID)
+			if err != nil {
+				return fmt.Errorf("run manager: count active runs: %w", err)
+			}
+			if active >= m.maxConcurrentPerUser {
+				return ErrRateLimited
+			}
+		} else {
+			m.mu.Lock()
+			active := m.userRuns[c.UserID]
+			m.mu.Unlock()
+			if active >= m.maxConcurrentPerUser {
+				return ErrRateLimited
+			}
 		}
 	}
 
@@ -145,7 +155,7 @@ func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) boo
 		return false
 	}
 	m.runs[c.ID] = h
-	if c.UserID != 0 {
+	if m.jobRepo == nil && c.UserID != 0 {
 		m.userRuns[c.UserID]++
 	}
 	m.mu.Unlock()
@@ -165,7 +175,7 @@ func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) boo
 func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *entity.DecisionJob) {
 	defer func() {
 		m.mu.Lock()
-		if c.UserID != 0 && m.userRuns[c.UserID] > 0 {
+		if m.jobRepo == nil && c.UserID != 0 && m.userRuns[c.UserID] > 0 {
 			m.userRuns[c.UserID]--
 		}
 		m.mu.Unlock()

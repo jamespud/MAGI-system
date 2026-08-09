@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"strings"
 )
 
@@ -15,10 +17,11 @@ type Principal struct {
 
 // KeySpec is one API key entry from configuration.
 type KeySpec struct {
-	Name   string
-	Key    string
-	UserID int64
-	Role   string
+	Name    string
+	Key     string
+	KeyHash string
+	UserID  int64
+	Role    string
 }
 
 // Service authenticates bearer tokens against configured API keys. When
@@ -26,17 +29,20 @@ type KeySpec struct {
 type Service struct {
 	enabled bool
 	keys    map[string]Principal
+	hashes  map[string]Principal
 }
 
 func NewService(enabled bool, keys []KeySpec) *Service {
 	index := make(map[string]Principal, len(keys))
+	hashes := make(map[string]Principal, len(keys))
 	for _, k := range keys {
-		if k.Key == "" {
-			continue
+		if k.Key != "" {
+			index[k.Key] = Principal{UserID: k.UserID, Name: k.Name, Role: k.Role}
+		} else if k.KeyHash != "" {
+			hashes[k.KeyHash] = Principal{UserID: k.UserID, Name: k.Name, Role: k.Role}
 		}
-		index[k.Key] = Principal{UserID: k.UserID, Name: k.Name, Role: k.Role}
 	}
-	return &Service{enabled: enabled, keys: index}
+	return &Service{enabled: enabled, keys: index, hashes: hashes}
 }
 
 func (s *Service) Enabled() bool { return s.enabled }
@@ -54,6 +60,19 @@ func (s *Service) Authenticate(token string) (*Principal, bool) {
 		if subtle.ConstantTimeCompare([]byte(key), []byte(token)) == 1 {
 			cp := p
 			return &cp, true
+		}
+	}
+	if token != "" && len(s.hashes) > 0 {
+		sum := sha256.Sum256([]byte(token))
+		got := hex.EncodeToString(sum[:])
+		for hash, p := range s.hashes {
+			if len(hash) != len(got) {
+				continue
+			}
+			if subtle.ConstantTimeCompare([]byte(hash), []byte(got)) == 1 {
+				cp := p
+				return &cp, true
+			}
 		}
 	}
 	return nil, false

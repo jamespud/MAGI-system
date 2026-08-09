@@ -300,6 +300,15 @@ type PluginBindingModel struct {
 
 func (PluginBindingModel) TableName() string { return "magi_plugin_binding" }
 
+type SchedulerLockModel struct {
+	Name       string `gorm:"primaryKey"`
+	Owner      string
+	LeaseUntil time.Time
+	UpdatedAt  time.Time
+}
+
+func (SchedulerLockModel) TableName() string { return "magi_scheduler_lock" }
+
 type JudgeModel struct {
 	ID                  uint `gorm:"primaryKey;autoIncrement"`
 	CaseID              string `gorm:"index"`
@@ -340,5 +349,6 @@ func AllModels() []any {
 		&PluginBindingModel{},
 		&RecurringCaseModel{},
 		&JudgeModel{},
+		&SchedulerLockModel{},
 	}
 }

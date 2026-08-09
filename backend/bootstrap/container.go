@@ -9,6 +9,7 @@ import (
 	"time"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
@@ -74,6 +75,7 @@ var Module = fx.Options(
 		provideApprovalService,
 		provideJudgeRepository,
 		provideJudgeService,
+		provideSchedulerLock,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -337,6 +339,10 @@ func provideJudgeService(cfg *Config, modelPort *magi.ModelAdapter, gen validati
 	return j.WithRepositories(repo), nil
 }
 
+func provideSchedulerLock(db *gorm.DB) port.SchedulerLock {
+	return magi.NewSchedulerLock(db)
+}
+
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
@@ -458,7 +464,7 @@ func provideRepository(db *gorm.DB) port.Repository {
 func provideAuthService(cfg *Config) *auth.Service {
 	keys := make([]auth.KeySpec, 0, len(cfg.Auth.APIKeys))
 	for _, k := range cfg.Auth.APIKeys {
-		keys = append(keys, auth.KeySpec{Name: k.Name, Key: k.Key, UserID: k.UserID, Role: k.Role})
+		keys = append(keys, auth.KeySpec{Name: k.Name, Key: k.Key, KeyHash: k.KeyHash, UserID: k.UserID, Role: k.Role})
 	}
 	return auth.NewService(cfg.Auth.Enabled, keys)
 }
@@ -522,11 +528,12 @@ func provideRecurringService(repo port.RecurringRepository, agg port.Repository,
 	return recurring.NewService(repo, agg.CaseRepo(), rm, cfg.Magi.MaxDebateRounds)
 }
 
-func registerScheduler(lc fx.Lifecycle, svc *recurring.Service) {
+func registerScheduler(lc fx.Lifecycle, svc *recurring.Service, lock port.SchedulerLock) {
 	ctx, cancel := context.WithCancel(context.Background())
+	owner := "scheduler-" + uuid.NewString()
 	lc.Append(fx.Hook{
 		OnStart: func(startCtx context.Context) error {
-			go recurring.NewScheduler(svc, time.Minute).Run(ctx)
+			go recurring.NewSchedulerWithLock(svc, time.Minute, lock, owner).Run(ctx)
 			return nil
 		},
 		OnStop: func(stopCtx context.Context) error {

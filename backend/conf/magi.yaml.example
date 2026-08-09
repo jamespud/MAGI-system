@@ -103,6 +103,8 @@ auth:
   enabled: false
   api_keys:
     - { name: "admin", key: "change-me", user_id: 1, role: "admin" }
+    # Prefer key_hash (sha256 hex of the API key) over plaintext key:
+    # - { name: "ops", key_hash: "<sha256-hex>", user_id: 2, role: "admin" }
 
 # Per-user governance.
 limits:

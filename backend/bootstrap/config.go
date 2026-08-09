@@ -87,10 +87,11 @@ type BenchmarkConfig struct {
 }
 
 type APIKeySpec struct {
-	Name   string `yaml:"name"`
-	Key    string `yaml:"key"`
-	UserID int64  `yaml:"user_id"`
-	Role   string `yaml:"role"`
+	Name    string `yaml:"name"`
+	Key     string `yaml:"key"`
+	KeyHash string `yaml:"key_hash"`
+	UserID  int64  `yaml:"user_id"`
+	Role    string `yaml:"role"`
 }
 
 // MCPServerConfig describes one external MCP server. stdio servers are child
@@ -448,7 +449,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("auth: at least one api_key is required when enabled")
 		}
 		for _, k := range c.Auth.APIKeys {
-			if k.Key == "" || k.UserID <= 0 || k.Role == "" {
+			if (k.Key == "" && k.KeyHash == "") || k.UserID <= 0 || k.Role == "" {
 				return fmt.Errorf("auth: each api_key needs non-empty key, user_id > 0 and role")
 			}
 		}
