@@ -137,6 +137,8 @@ mcp:
       transport: "stdio"      # or "http"
       command: "/usr/local/bin/my-mcp-server"   # required for stdio
       args: ["--flag"]
+      # headers: { Authorization: "Bearer ..." }   # http servers only
+      # retry_attempts: 2                          # reconnect attempts on failure
       # env: { MY_TOKEN: "secret" }
       timeout_seconds: 60
     # - name: "remote"

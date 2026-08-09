@@ -215,13 +215,8 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 	cfgs := make([]mcpadapter.ServerConfig, 0, len(cfg.MCP.Servers))
 	for _, s := range cfg.MCP.Servers {
 		cfgs = append(cfgs, mcpadapter.ServerConfig{
-			Name:           s.Name,
-			Transport:      s.Transport,
-			Command:        s.Command,
-			Args:           s.Args,
-			URL:            s.URL,
-			Env:            s.Env,
-			TimeoutSeconds: s.TimeoutSeconds,
+			Name: s.Name, Transport: s.Transport, Command: s.Command, Args: s.Args, URL: s.URL,
+			Env: s.Env, TimeoutSeconds: s.TimeoutSeconds, Headers: s.Headers, RetryAttempts: s.RetryAttempts,
 		})
 	}
 	return mcpadapter.New(cfgs)

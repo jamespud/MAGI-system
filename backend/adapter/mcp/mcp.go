@@ -7,11 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	transport "github.com/mark3labs/mcp-go/client/transport"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -26,13 +28,14 @@ type ServerConfig struct {
 	Args           []string
 	URL            string // http: base URL of the MCP endpoint
 	Env            map[string]string
+	Headers        map[string]string // http: extra headers (auth, tenant, etc.)
 	TimeoutSeconds int
+	RetryAttempts  int // reconnect attempts on a failed call (default 2)
 }
 
 // Adapter connects to configured MCP servers and exposes their tools through
 // the MAGI tool ports. Activation is lazy and per-server: an unreachable
-// server is skipped during List and surfaces an error on Execute, so MAGI
-// startup does not fail because of a downstream MCP server.
+// server is skipped during List and surfaces an error on Execute.
 type Adapter struct {
 	mu      sync.RWMutex
 	order   []string
@@ -41,12 +44,12 @@ type Adapter struct {
 }
 
 type server struct {
-	cfg    ServerConfig
-	dial   func(ServerConfig) (*mcpclient.Client, error)
-	client *mcpclient.Client
-	tools  []port.ToolDefinition
-	err    error
-	once   sync.Once
+	mu       sync.Mutex
+	cfg      ServerConfig
+	dial     func(ServerConfig) (*mcpclient.Client, error)
+	client   *mcpclient.Client
+	tools    []port.ToolDefinition
+	lastErr  error
 }
 
 var _ port.ToolRegistryPort = (*Adapter)(nil)
@@ -79,7 +82,11 @@ func dial(cfg ServerConfig) (*mcpclient.Client, error) {
 		}
 		return mcpclient.NewStdioMCPClient(cfg.Command, env, cfg.Args...)
 	case "http":
-		return mcpclient.NewStreamableHttpClient(cfg.URL)
+		var opts []transport.StreamableHTTPCOption
+		if len(cfg.Headers) > 0 {
+			opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
+		}
+		return mcpclient.NewStreamableHttpClient(cfg.URL, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported transport %q", cfg.Transport)
 	}
@@ -103,7 +110,8 @@ func (a *Adapter) List(ctx context.Context, _ []entity.ToolBinding) ([]port.Tool
 	return out, nil
 }
 
-// Execute routes a tool call to the MCP server named in the binding.
+// Execute routes a tool call to the MCP server named in the binding. A
+// connection-level failure triggers one reconnect + retry with backoff.
 func (a *Adapter) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
 	if a == nil {
 		return nil, fmt.Errorf("mcp: adapter not configured")
@@ -123,17 +131,21 @@ func (a *Adapter) Execute(ctx context.Context, req port.ToolExecutionRequest) (*
 			return nil, fmt.Errorf("mcp server %q: parse arguments: %w", s.cfg.Name, err)
 		}
 	}
-	callCtx := ctx
-	var cancel context.CancelFunc
-	if s.cfg.TimeoutSeconds > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, time.Duration(s.cfg.TimeoutSeconds)*time.Second)
-		defer cancel()
-	}
-	res, err := s.client.CallTool(callCtx, mcpgo.CallToolRequest{
+	res, err := s.call(ctx, mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{Name: req.Binding.ToolName, Arguments: args},
+		Header: s.requestHeaders(),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("mcp server %q tool %q: %w", s.cfg.Name, req.Binding.ToolName, err)
+		// Connection-level failure: reconnect once and retry the call.
+		if rerr := s.reconnect(ctx); rerr == nil {
+			res, err = s.call(ctx, mcpgo.CallToolRequest{
+				Params: mcpgo.CallToolParams{Name: req.Binding.ToolName, Arguments: args},
+				Header: s.requestHeaders(),
+			})
+		}
+		if err != nil {
+			return nil, fmt.Errorf("mcp server %q tool %q: %w", s.cfg.Name, req.Binding.ToolName, err)
+		}
 	}
 	out, err := renderResult(res)
 	if err != nil {
@@ -179,7 +191,17 @@ func sanitize(s string) string {
 	return strings.Trim(b.String(), "_")
 }
 
+func (s *server) requestHeaders() http.Header {
+	h := make(http.Header, len(s.cfg.Headers))
+	for k, v := range s.cfg.Headers {
+		h.Set(k, v)
+	}
+	return h
+}
+
 func (s *server) close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.client == nil {
 		return nil
 	}
@@ -187,50 +209,107 @@ func (s *server) close() error {
 }
 
 func (s *server) activate(ctx context.Context) error {
-	s.once.Do(func() {
-		if err := s.connect(ctx); err != nil {
-			s.err = err
-		}
-	})
-	return s.err
-}
-
-func (s *server) connect(ctx context.Context) error {
-	c, err := s.dial(s.cfg)
-	if err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil {
+		return nil
+	}
+	if err := s.connectLocked(ctx); err != nil {
+		s.lastErr = err
 		return err
 	}
-	if _, err := c.Initialize(ctx, mcpgo.InitializeRequest{
-		Params: mcpgo.InitializeParams{
-			ProtocolVersion: mcpgo.LATEST_PROTOCOL_VERSION,
-			Capabilities:    mcpgo.ClientCapabilities{},
-			ClientInfo:      mcpgo.Implementation{Name: "magi", Version: "1.0"},
-		},
-	}); err != nil {
-		_ = c.Close()
-		return fmt.Errorf("initialize: %w", err)
+	s.lastErr = nil
+	return nil
+}
+
+// reconnect drops the current client and activates a fresh connection.
+func (s *server) reconnect(ctx context.Context) error {
+	s.mu.Lock()
+	if s.client != nil {
+		_ = s.client.Close()
+		s.client = nil
 	}
-	list, err := c.ListTools(ctx, mcpgo.ListToolsRequest{})
-	if err != nil {
-		_ = c.Close()
-		return fmt.Errorf("list tools: %w", err)
+	s.tools = nil
+	s.mu.Unlock()
+	return s.activate(ctx)
+}
+
+func (s *server) connectLocked(ctx context.Context) error {
+	attempts := s.cfg.RetryAttempts + 1
+	if attempts <= 0 {
+		attempts = 1
 	}
-	s.client = c
-	for _, t := range list.Tools {
-		schema, err := json.Marshal(t.InputSchema)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			delay := 200 * time.Millisecond * time.Duration(1<<(i-1))
+			if delay > 2*time.Second {
+				delay = 2 * time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		c, err := s.dial(s.cfg)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if _, err := c.Initialize(ctx, mcpgo.InitializeRequest{
+			Params: mcpgo.InitializeParams{
+				ProtocolVersion: mcpgo.LATEST_PROTOCOL_VERSION,
+				Capabilities:    mcpgo.ClientCapabilities{},
+				ClientInfo:      mcpgo.Implementation{Name: "magi", Version: "1.0"},
+			},
+			Header: s.requestHeaders(),
+		}); err != nil {
+			_ = c.Close()
+			lastErr = fmt.Errorf("initialize: %w", err)
+			continue
+		}
+		list, err := c.ListTools(ctx, mcpgo.ListToolsRequest{Header: s.requestHeaders()})
 		if err != nil {
 			_ = c.Close()
-			return fmt.Errorf("tool %q: encode input schema: %w", t.Name, err)
+			lastErr = fmt.Errorf("list tools: %w", err)
+			continue
 		}
-		s.tools = append(s.tools, port.ToolDefinition{
-			Name:       ToolName(s.cfg.Name, t.Name),
-			Desc:       t.Description,
-			ArgsSchema: schema,
-			Source:     entity.ToolSourceMCP,
-			Binding:    entity.ToolBinding{Source: entity.ToolSourceMCP, Server: s.cfg.Name, ToolName: t.Name},
-		})
+		s.client = c
+		s.tools = nil
+		for _, t := range list.Tools {
+			schema, err := json.Marshal(t.InputSchema)
+			if err != nil {
+				_ = c.Close()
+				return fmt.Errorf("tool %q: encode input schema: %w", t.Name, err)
+			}
+			s.tools = append(s.tools, port.ToolDefinition{
+				Name:       ToolName(s.cfg.Name, t.Name),
+				Desc:       t.Description,
+				ArgsSchema: schema,
+				Source:     entity.ToolSourceMCP,
+				Binding:    entity.ToolBinding{Source: entity.ToolSourceMCP, Server: s.cfg.Name, ToolName: t.Name},
+			})
+		}
+		return nil
 	}
-	return nil
+	return lastErr
+}
+
+func (s *server) call(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	if client == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+	callCtx := ctx
+	var cancel context.CancelFunc
+	if s.cfg.TimeoutSeconds > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, time.Duration(s.cfg.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
+	return client.CallTool(callCtx, req)
 }
 
 func renderResult(res *mcpgo.CallToolResult) (string, error) {

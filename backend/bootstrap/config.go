@@ -105,6 +105,8 @@ type MCPServerConfig struct {
 	URL            string            `yaml:"url"` // http: base URL of the MCP endpoint
 	Env            map[string]string `yaml:"env"`
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
+  	Headers        map[string]string `yaml:"headers"`
+	RetryAttempts  int               `yaml:"retry_attempts"`
 }
 
 type EmbeddingConfig struct {
@@ -477,6 +479,9 @@ func (c *Config) Validate() error {
 		case "http":
 			if s.URL == "" {
 				return fmt.Errorf("mcp: server %q: http transport requires url", s.Name)
+			}
+			if s.RetryAttempts < 0 {
+				return fmt.Errorf("mcp: server %q: retry_attempts cannot be negative", s.Name)
 			}
 		default:
 			return fmt.Errorf("mcp: server %q: transport must be \"stdio\" or \"http\"", s.Name)
