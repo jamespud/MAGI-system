@@ -62,16 +62,17 @@ func TestIntegration_OrchestratorWithDB(t *testing.T) {
 
 	knowledge := &stubKnowledge{}
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		AgentLoop: mrt,
-		Consensus: consensus.NewConsensusEngine(),
-		Debate:    debate.NewDebateEngine(nil),
-		Commander: cmd,
-		CaseRepo:  caseRepo,
-		Repo:      repo,
-		EventPub:  magiapp.NewEventPublisherAdapter(eventRepo),
-		Knowledge: knowledge,
-		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
-		Policy:    consensus.DefaultConsensusPolicy(),
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  cmd,
+		CaseRepo:   caseRepo,
+		Repo:       repo,
+		EventPub:   magiapp.NewEventPublisherAdapter(eventRepo),
+		Knowledge:  knowledge,
+		MemoryRepo: repo.MemoryRepo(),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
 	})
 
 	case_ := &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1}
@@ -134,5 +135,18 @@ func TestIntegration_OrchestratorWithDB(t *testing.T) {
 	// Memory projection written through the knowledge adapter.
 	if len(knowledge.stored) != 1 || knowledge.stored[0].Resolution == "" {
 		t.Fatalf("memory projection not stored via knowledge: %+v", knowledge.stored)
+	}
+
+	// Memory projection row persisted to case_memory_projection (regression:
+	// SAVING_MEMORY used to write RAG chunks only, never the projection row,
+	// which left the Memory page search permanently empty).
+	proj, err := repo.MemoryRepo().Get(ctx, "c1")
+	if err != nil || proj == nil || proj.Resolution == "" || len(proj.Votes) != 3 {
+		t.Fatalf("memory projection persisted: %+v err=%v", proj, err)
+	}
+	// Votes persisted for the three agents.
+	votes, err := repo.VoteRepo().ListByCase(ctx, "c1")
+	if err != nil || len(votes) != 3 {
+		t.Fatalf("votes persisted: %d err=%v", len(votes), err)
 	}
 }

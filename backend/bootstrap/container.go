@@ -322,6 +322,7 @@ func provideOrchestrator(
 		Repo:                 repo,
 		ContextBuilder:       contextBuilder,
 		Knowledge:            knowledge,
+		MemoryRepo:           repo.MemoryRepo(),
 		Configs:              configs,
 		Policy:               consensus.DefaultConsensusPolicy(),
 		ToolBindingsProvider: plugs,

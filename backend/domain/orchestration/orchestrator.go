@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/consensus"
@@ -24,6 +25,7 @@ type Orchestrator struct {
 	caseRepo   port.CaseRepository
 	repo       port.Repository
 	knowledge  port.KnowledgePort
+	memRepo    port.MemoryRepository
 	policy     consensus.ConsensusPolicy
 	failPolicy FailurePolicy
 	configs    []*entity.MagiConfig
@@ -39,6 +41,7 @@ type OrchestratorDeps struct {
 	Repo                 port.Repository
 	ContextBuilder       *memory.ContextBuilder
 	Knowledge            port.KnowledgePort
+	MemoryRepo           port.MemoryRepository
 	ToolBindingsProvider ToolBindingsProvider
 	Configs              []*entity.MagiConfig
 	Policy               consensus.ConsensusPolicy
@@ -59,6 +62,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		caseRepo:   d.CaseRepo,
 		repo:       d.Repo,
 		knowledge:  d.Knowledge,
+		memRepo:    d.MemoryRepo,
 		policy:     d.Policy,
 		failPolicy: fp,
 		configs:    d.Configs,
@@ -227,6 +231,14 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 				// published after indexing actually completes (sync) or by the
 				// async worker, with chunk counts in the payload.
 				_, _ = o.knowledge.Store(ctx, proj)
+			}
+			if o.memRepo != nil {
+				// Persist the projection row itself. The Memory page search
+				// reads case_memory_projection (LIKE fallback); RAG chunks are
+				// derived from the same projection.
+				if err := o.memRepo.Save(ctx, proj); err != nil {
+					log.Printf("orchestrator: save memory projection for case %s failed: %v", case_.ID, err)
+				}
 			}
 			status = entity.CaseStatusEvaluating
 
