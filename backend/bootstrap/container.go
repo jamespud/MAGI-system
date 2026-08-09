@@ -573,7 +573,7 @@ func provideRedactor(cfg *Config) *redact.Redactor {
 }
 
 func provideTracingProvider(cfg *Config) *trace.TracerProvider {
-	return tracing.NewProvider(tracing.Config{Enabled: cfg.Tracing.Enabled, ServiceName: cfg.Tracing.ServiceName}, nil)
+	return tracing.NewProvider(tracing.Config{Enabled: cfg.Tracing.Enabled, ServiceName: cfg.Tracing.ServiceName, OTLPEndpoint: cfg.Tracing.OTLPEndpoint}, nil)
 }
 
 func registerTracingShutdown(lc fx.Lifecycle, tp *trace.TracerProvider) {

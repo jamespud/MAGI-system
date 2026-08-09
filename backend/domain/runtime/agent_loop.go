@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/application/toolpolicy"
+	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -211,6 +213,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	defer func() {
 		if result.Usage != nil {
 			result.Usage.CostUSD = result.Usage.Cost(cfg.Model.PricePerMInputUSD, cfg.Model.PricePerMOutputUSD)
+			l.metrics.AddCostUSD(result.Usage.CostUSD)
 			l.metrics.AddTokens(result.Usage.TotalTokens)
 		}
 	}()
@@ -263,7 +266,9 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		if cfg.LoopPolicy.CallTimeout > 0 {
 			callCtx, callCancel = context.WithTimeout(ctx, cfg.LoopPolicy.CallTimeout)
 		}
-		resp, err := bound.Generate(callCtx, messages)
+		stepCtx, stepSpan := tracing.Start(callCtx, "agent.step.generate", attribute.Int("step", step), attribute.String("agent", cfg.Code))
+		resp, err := bound.Generate(stepCtx, messages)
+		stepSpan.End()
 		if callCancel != nil {
 			callCancel()
 		}
@@ -372,11 +377,17 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				// Execute
 				toolStart := time.Now()
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
-				execRes, execErr := l.toolExec.Execute(ctx, port.ToolExecutionRequest{
+
+    				toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
+
+    				execRes, execErr := l.toolExec.Execute(toolCtx, port.ToolExecutionRequest{
 					ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments,
 					UserID: actx.UserID, Binding: td.Binding,
 				})
-				tcr.Duration = time.Since(toolStart)
+
+    				tcr.Duration = time.Since(toolStart)
+
+    				toolSpan.End()
 				if execErr != nil {
 					tcr.Err = l.redactor.String(execErr.Error())
 					ts.consecToolFail++

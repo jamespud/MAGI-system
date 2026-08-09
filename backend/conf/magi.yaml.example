@@ -162,6 +162,7 @@ tool_policy:
 tracing:
   enabled: true
   service_name: "magi"
+  otlp_endpoint: ""  # e.g. http://jaeger:4318 ; empty = log sink
 
 # RAG pipeline (HybridKnowledgeAdapter). Leave milvus.address / elasticsearch.addresses
 # empty to use in-memory fake indexes (standalone-safe). The containerized stack

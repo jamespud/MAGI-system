@@ -42,6 +42,8 @@ Stop with `make web-down`; logs with `make web-logs`.
 | `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
 | `magi` budget | `approval_timeout_seconds` (default 3600), `token_budget` (150000), `compaction_threshold` (0.7) |
 | `tracing` | `enabled` + `service_name` (log sink; OTLP-ready) |
+| `tool_quota` | `default_per_minute` + per-tool limits |
+| `benchmark` | `runs_per_item`, `regression_threshold` |
 
 Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
 `MAGI_AUTH_ENABLED`, `MAGI_AUTH_API_KEYS` (`userID:role:name:key;...`),
@@ -88,6 +90,9 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
    - Plugin bindings are per-user via `/api/v1/plugins`.
 
 5. Evaluation loop:
+   - `POST /api/v1/datasets/<id>/runs?runs=N&threshold=T` repeats each item N times
+     and fails the run below the accuracy threshold; run detail reports stability.
+   - `POST /api/v1/evaluation/<caseId>/judge` runs the semantic judge.
    ```bash
    curl -s -X POST http://localhost/api/v1/datasets \
      -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \

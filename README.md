@@ -229,9 +229,6 @@ The agent loop is heavily tested with scripted models, including failure policie
 
 ## Known Limitations / Future Work
 
-- **LLM-as-a-Judge (evaluation layer)** - semantic review of report quality, evidence-chain consistency, and reflection validity is not implemented; decision voting intentionally stays deterministic (see `docs/harness-eva-design.md`).
-- **Counterfactual stability** - the function exists but is not wired into dataset benchmark runs yet.
-- **Multi-instance deployment** - per-user run concurrency and the recurring scheduler are single-process; multi-replica operation needs shared-state limits.
 - The standalone CLI mode referenced in some older docs is not currently wired; run via the HTTP server + frontend.
 
 ## License
@@ -252,6 +249,11 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Evidence-backed outputs** — the final report must cite at least one collected evidence/claim ID when evidence exists, or the case fails.
 - **User-scoped tools** — each user manages their own Coze plugin bindings; agent runs resolve the user's enabled tools dynamically.
 - **Ground-truth evaluation** — datasets of expected decisions run asynchronously through the full orchestrator and report accuracy / weighted accuracy with per-item results.
+- **Semantic judge** — `POST /evaluation/:id/judge` scores report quality, evidence consistency and reflection validity (LLM-as-a-Judge), persisted per case.
+- **Counterfactual stability & regression gate** — benchmark items repeat N times (`runs_per_item`), report stability, and fail the run when accuracy drops below `regression_threshold`.
+- **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
+- **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
+- **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
 - **Proactive scheduling** — recurring decision templates fire automatically at intervals through the async run manager.
 - **Conversational entry** — `POST /api/v1/assistant` turns a natural-language question into a full decision run with report.
 - **Admin operations** — role-gated usage aggregates (cases/runs/tokens/cost per user) at `GET /api/v1/admin/usage`.

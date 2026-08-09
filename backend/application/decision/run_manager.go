@@ -181,9 +181,11 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		m.mu.Unlock()
 	}()
 	if m.jobRepo == nil {
+		runStart := time.Now()
 		m.metrics.RunStart()
 		_, err := m.orch.Orchestrate(ctx, c)
 		m.metrics.RunFinish(err == nil)
+		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		return
 	}
 	for {
@@ -209,9 +211,11 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			}
 		}
 		stopHeartbeat := m.startHeartbeat(ctx, claimed.ID)
+		runStart := time.Now()
 		m.metrics.RunStart()
 		_, runErr := m.orch.Orchestrate(ctx, c)
 		m.metrics.RunFinish(runErr == nil)
+		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		stopHeartbeat()
 
 		if runErr == nil {

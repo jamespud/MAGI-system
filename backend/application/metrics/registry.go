@@ -6,8 +6,12 @@ import (
 	"sync/atomic"
 )
 
-// Registry exposes atomic counters for the harness's operational health.
-// All methods are nil-safe so dependencies can pass an optional registry.
+// runDurationBounds are Prometheus histogram bucket upper bounds in ms.
+var runDurationBounds = []int64{100, 500, 1000, 5000, 30000, 120000, 600000}
+
+// Registry exposes operational counters, a run-duration histogram and cost
+// accounting. All methods are nil-safe so dependencies can pass an optional
+// registry.
 type Registry struct {
 	CasesCreated     atomic.Int64
 	RunsActive       atomic.Int64
@@ -17,6 +21,11 @@ type Registry struct {
 	ToolCallFailures atomic.Int64
 	TokensTotal      atomic.Int64
 	RequestsTotal    atomic.Int64
+
+	RunDurationSumMs   atomic.Int64
+	RunDurationCount   atomic.Int64
+	RunDurationBuckets [8]atomic.Int64 // 7 bounded buckets + +Inf
+	CostTotalMicro     atomic.Int64    // USD * 1e6
 }
 
 func New() *Registry { return &Registry{} }
@@ -64,7 +73,29 @@ func (r *Registry) IncToolCall(ok bool) {
 	}
 }
 
-// WritePrometheus renders the counters in Prometheus text exposition format.
+// RecordRunDuration records one run duration in milliseconds.
+func (r *Registry) RecordRunDuration(ms int64) {
+	if r == nil {
+		return
+	}
+	r.RunDurationSumMs.Add(ms)
+	r.RunDurationCount.Add(1)
+	for i, b := range runDurationBounds {
+		if ms <= b {
+			r.RunDurationBuckets[i].Add(1)
+		}
+	}
+	r.RunDurationBuckets[len(runDurationBounds)].Add(1)
+}
+
+// AddCostUSD records an estimated model cost in USD.
+func (r *Registry) AddCostUSD(usd float64) {
+	if r != nil {
+		r.CostTotalMicro.Add(int64(usd * 1e6))
+	}
+}
+
+// WritePrometheus renders the counters and histogram in Prometheus text format.
 func (r *Registry) WritePrometheus(w io.Writer) {
 	if r == nil {
 		return
@@ -77,4 +108,14 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_tool_call_failures_total counter\nmagi_tool_call_failures_total %d\n", r.ToolCallFailures.Load())
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
+
+	fmt.Fprintf(w, "# TYPE magi_run_duration_ms histogram\n")
+	fmt.Fprintf(w, "magi_run_duration_ms_sum %d\n", r.RunDurationSumMs.Load())
+	fmt.Fprintf(w, "magi_run_duration_ms_count %d\n", r.RunDurationCount.Load())
+	for i, b := range runDurationBounds {
+		fmt.Fprintf(w, "magi_run_duration_ms_bucket{le=\"%d\"} %d\n", b, r.RunDurationBuckets[i].Load())
+	}
+	fmt.Fprintf(w, "magi_run_duration_ms_bucket{le=\"+Inf\"} %d\n", r.RunDurationBuckets[len(runDurationBounds)].Load())
+
+	fmt.Fprintf(w, "# TYPE magi_cost_usd_total counter\nmagi_cost_usd_total %.6f\n", float64(r.CostTotalMicro.Load())/1e6)
 }

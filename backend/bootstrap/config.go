@@ -71,8 +71,9 @@ type Config struct {
 		Servers []MCPServerConfig `yaml:"servers"`
 	} `yaml:"mcp"`
 	Tracing struct {
-		Enabled     bool   `yaml:"enabled"`
-		ServiceName string `yaml:"service_name"`
+		Enabled      bool   `yaml:"enabled"`
+		ServiceName  string `yaml:"service_name"`
+		OTLPEndpoint string `yaml:"otlp_endpoint"`
 	} `yaml:"tracing"`
 	Embedding     EmbeddingConfig `yaml:"embedding"`
 	Milvus        MilvusConfig    `yaml:"milvus"`

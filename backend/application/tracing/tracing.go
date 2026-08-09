@@ -9,19 +9,20 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Config controls distributed tracing.
+// Config controls distributed tracing. When OTLPEndpoint is set, spans are
+// exported over OTLP/HTTP; otherwise a zero-dependency log sink is used.
 type Config struct {
-	Enabled     bool
-	ServiceName string
+	Enabled      bool
+	ServiceName  string
+	OTLPEndpoint string
 }
 
-// LoggingSpanProcessor writes finished spans as structured log lines. It is a
-// zero-dependency sink suitable for standalone deployments; swap in an OTLP
-// exporter later by replacing the processor.
+// LoggingSpanProcessor writes finished spans as structured log lines.
 type LoggingSpanProcessor struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -46,13 +47,26 @@ func (p *LoggingSpanProcessor) Shutdown(ctx context.Context) error   { return ni
 func (p *LoggingSpanProcessor) ForceFlush(ctx context.Context) error { return nil }
 
 // NewProvider builds a tracer provider. When disabled it returns nil and the
-// global tracer stays no-op, so callers can use tracing.Start safely.
+// global tracer stays no-op. An OTLP endpoint switches the sink to OTLP/HTTP;
+// if the exporter cannot be built it falls back to the log sink.
 func NewProvider(cfg Config, w io.Writer) *sdkTrace.TracerProvider {
 	if !cfg.Enabled {
 		return nil
 	}
+	var sp sdkTrace.SpanProcessor
+	if cfg.OTLPEndpoint != "" {
+		exp, err := otlptracehttp.New(context.Background(),
+			otlptracehttp.WithEndpoint(cfg.OTLPEndpoint),
+			otlptracehttp.WithInsecure())
+		if err == nil {
+			sp = sdkTrace.NewBatchSpanProcessor(exp)
+		}
+	}
+	if sp == nil {
+		sp = NewLoggingSpanProcessor(w)
+	}
 	tp := sdkTrace.NewTracerProvider(
-		sdkTrace.WithSpanProcessor(NewLoggingSpanProcessor(w)),
+		sdkTrace.WithSpanProcessor(sp),
 		sdkTrace.WithSampler(sdkTrace.AlwaysSample()),
 	)
 	otel.SetTracerProvider(tp)
