@@ -79,6 +79,12 @@ type Config struct {
 	Elasticsearch ESConfig        `yaml:"elasticsearch"`
 	RAG           RAGConfig       `yaml:"rag"`
 	Benchmark     BenchmarkConfig `yaml:"benchmark"`
+	ToolQuota     ToolQuotaConfig  `yaml:"tool_quota"`
+}
+
+type ToolQuotaConfig struct {
+	DefaultPerMinute int           `yaml:"default_per_minute"`
+	Tools            map[string]int `yaml:"tools"`
 }
 
 type BenchmarkConfig struct {

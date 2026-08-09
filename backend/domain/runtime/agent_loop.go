@@ -48,6 +48,7 @@ type AgentLoop struct {
 	metrics        *metrics.Registry
 	redactor       *redact.Redactor
 	approvalRepo    port.ApprovalRepository
+	quota           port.ToolQuotaPort
 }
 
 type AgentLoopDeps struct {
@@ -64,6 +65,7 @@ type AgentLoopDeps struct {
 	Metrics        *metrics.Registry
 	Redactor       *redact.Redactor
 	ApprovalRepo   port.ApprovalRepository
+	Quota          port.ToolQuotaPort
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -99,7 +101,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	}
 	return &AgentLoop{
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
-		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo,
+		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo, quota: d.Quota,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal:  rv,
 		eventPub:       d.EventPub,
@@ -344,6 +346,16 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						continue
 					}
 					tcr.ApprovedBy = decidedBy
+				}
+				if l.quota != nil {
+					allowed, qerr := l.quota.Allow(ctx, actx.UserID, td.Name)
+					if qerr == nil && !allowed {
+						tcr.Err = "tool quota exceeded: " + td.Name
+						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
+						ts.consecToolFail++
+						st.ToolCalls = append(st.ToolCalls, tcr)
+						continue
+					}
 				}
 				// Validate args
 				vr := l.validator.Validate(td.ArgsSchema, []byte(tc.Function.Arguments))

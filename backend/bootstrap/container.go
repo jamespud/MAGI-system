@@ -33,6 +33,7 @@ import (
 	"github.com/jamespud/magi/backend/application/replay"
 	"github.com/jamespud/magi/backend/application/tool"
 	"github.com/jamespud/magi/backend/application/toolpolicy"
+	"github.com/jamespud/magi/backend/application/toolquota"
 	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
@@ -76,6 +77,8 @@ var Module = fx.Options(
 		provideJudgeRepository,
 		provideJudgeService,
 		provideSchedulerLock,
+		provideToolQuotaRepository,
+		provideToolQuotaService,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -167,6 +170,7 @@ func provideAgentLoop(
 	reg *metrics.Registry,
 	red *redact.Redactor,
 	approvalRepo port.ApprovalRepository,
+	quota *toolquota.Service,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -176,7 +180,7 @@ func provideAgentLoop(
 	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota,
 	})
 }
 
@@ -336,6 +340,14 @@ func provideJudgeService(cfg *Config, modelPort *magi.ModelAdapter, gen validati
 
 func provideSchedulerLock(db *gorm.DB) port.SchedulerLock {
 	return magi.NewSchedulerLock(db)
+}
+
+func provideToolQuotaRepository(db *gorm.DB) port.ToolQuotaRepository {
+	return magi.NewToolQuotaRepository(db)
+}
+
+func provideToolQuotaService(cfg *Config, repo port.ToolQuotaRepository) *toolquota.Service {
+	return toolquota.NewService(repo, cfg.ToolQuota.DefaultPerMinute, cfg.ToolQuota.Tools)
 }
 
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {

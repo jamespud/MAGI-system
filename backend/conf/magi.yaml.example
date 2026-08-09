@@ -148,6 +148,12 @@ mcp:
 
 # Tool approval gate: tools listed here cannot execute in autonomous runs
 # unless also listed under auto_approved. Default: code_runner requires approval.
+# Per-user per-tool rate limits per minute (0 = unlimited).
+tool_quota:
+  default_per_minute: 0
+  tools:
+    code_runner: 0
+
 tool_policy:
   require_approval: ["code_runner"]
   auto_approved: []

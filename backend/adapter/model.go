@@ -309,6 +309,15 @@ type SchedulerLockModel struct {
 
 func (SchedulerLockModel) TableName() string { return "magi_scheduler_lock" }
 
+type ToolQuotaCounterModel struct {
+	UserID      int64 `gorm:"primaryKey"`
+	ToolName    string `gorm:"primaryKey"`
+	WindowStart time.Time `gorm:"primaryKey"`
+	Calls       int
+}
+
+func (ToolQuotaCounterModel) TableName() string { return "magi_tool_quota_counter" }
+
 type JudgeModel struct {
 	ID                  uint `gorm:"primaryKey;autoIncrement"`
 	CaseID              string `gorm:"index"`
@@ -350,5 +359,6 @@ func AllModels() []any {
 		&RecurringCaseModel{},
 		&JudgeModel{},
 		&SchedulerLockModel{},
+		&ToolQuotaCounterModel{},
 	}
 }
