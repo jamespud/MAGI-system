@@ -32,6 +32,9 @@ const TYPE_MAP: Record<string, EventType> = {
   CASE_FAILED: 'ERROR',
   EVIDENCE_GATE_FAILED: 'ERROR',
   CLAIM_CONTRADICTION_DECLARED: 'ERROR',
+  TOOL_APPROVAL_REQUESTED: 'TOOL_CALL',
+  TOOL_APPROVAL_RESOLVED: 'TOOL_CALL',
+  CONTEXT_COMPACTED: 'AGENT_STEP',
 };
 
 export function mapBackendEvent(raw: ApiEvent): MagiEvent {

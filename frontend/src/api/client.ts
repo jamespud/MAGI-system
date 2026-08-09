@@ -169,6 +169,18 @@ export const api = {
 
   runRecurringNow: (id: string) => request<{ id: string; status: string }>(`/recurring/${id}/run`, { method: 'POST' }),
 
+  getStatus: () => request<ApiStatus>(`/status`),
+
+  listDatasetItems: (id: string) => request<ApiDatasetItem[]>(`/datasets/${id}/items`),
+
+  updateDatasetItem: (datasetId: string, itemId: string, item: ApiDatasetItem) =>
+    request<unknown>(`/datasets/${datasetId}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(item) }),
+
+  deleteDatasetItem: (datasetId: string, itemId: string) =>
+    request<unknown>(`/datasets/${datasetId}/items/${itemId}`, { method: 'DELETE' }),
+
+  exportDatasetItems: (id: string) => request<ApiDatasetItem[]>(`/datasets/${id}/items/export`),
+
   listTools: () => request<{ name: string; desc: string }[]>(`/tools`),
 
   listApprovals: (caseId?: string) =>
@@ -274,6 +286,24 @@ interface ApiBenchmarkDetail {
   results: ApiBenchmarkItemResult[];
 }
 
+interface ApiStatus {
+  model_name: string;
+  tokens_total: number;
+  cost_usd: number;
+  runs_active: number;
+  connected: boolean;
+}
+
+interface ApiDatasetItem {
+  id?: string;
+  question: string;
+  background?: string;
+  constraints?: { label: string; value: string }[];
+  expected_decision: string;
+  weight?: number;
+  tags?: string[];
+}
+
 interface ApiDissent {
   agent_code: string;
   decision: string;
@@ -327,4 +357,6 @@ export type {
   ApiApproval,
   ApiDissent,
   ApiJudgeResult,
+  ApiStatus,
+  ApiDatasetItem,
 };

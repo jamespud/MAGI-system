@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { api, type ApiEvent } from '@/api/client';
 
+function groupByRun(events: ApiEvent[]): Record<string, ApiEvent[]> {
+  const out: Record<string, ApiEvent[]> = {};
+  for (const e of events) {
+    const k = e.run_id || '';
+    (out[k] = out[k] || []).push(e);
+  }
+  return out;
+}
+
 export default function Replay() {
   const [caseId, setCaseId] = useState('');
   const [events, setEvents] = useState<ApiEvent[] | null>(null);
@@ -46,14 +55,26 @@ export default function Replay() {
       {events && (
         <ol className="space-y-2">
           {events.length === 0 && <li className="text-sm text-text-muted">No events for this case.</li>}
-          {events.map((e) => (
-            <li key={e.id} className="rounded border border-border-dim bg-raised px-4 py-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs text-text-muted">{e.type}</span>
-                <span className="text-xs text-text-muted">{new Date(e.timestamp).toLocaleTimeString()}</span>
-              </div>
-              <p className="mt-1">{e.message}</p>
-              {e.run_id && <p className="text-xs text-text-muted mt-1">run: {e.run_id}</p>}
+          {Object.entries(groupByRun(events)).map(([runId, evs]) => (
+            <li key={runId || 'case'} className="rounded border border-border-dim bg-raised p-3">
+              <p className="font-mono text-xs text-text-muted mb-2">{runId || 'case-level'} · {evs.length} steps</p>
+              <ol className="space-y-1">
+                {evs.map((e) => (
+                  <li key={e.id} className="rounded bg-background px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs text-text-muted">{e.type}</span>
+                      <span className="text-xs text-text-muted">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <p className="mt-1">{e.message}</p>
+                    {e.payload && Object.keys(e.payload).length > 0 && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-xs text-text-muted">payload</summary>
+                        <pre className="mt-1 text-[10px] font-mono whitespace-pre-wrap break-all text-text-muted">{JSON.stringify(e.payload, null, 2)}</pre>
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ol>
             </li>
           ))}
         </ol>

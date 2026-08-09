@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Activity, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck } from 'lucide-react';
 import { PulseDot, MonoText } from '@/components/shared';
+import { api, type ApiStatus } from '@/api/client';
 
 const NAV_ITEMS = [
   { to: '/', icon: Activity, label: 'Decision' },
@@ -14,6 +16,24 @@ const NAV_ITEMS = [
 ];
 
 export default function TopNav() {
+  const [status, setStatus] = useState<ApiStatus | null>(null);
+  const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const s = await api.getStatus();
+        if (!cancelled) { setStatus(s); setOffline(false); }
+      } catch {
+        if (!cancelled) setOffline(true);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
   return (
     <header className="flex h-12 items-center justify-between border-b border-border-dim bg-base px-4 shrink-0">
       <div className="flex items-center gap-6">
@@ -42,16 +62,16 @@ export default function TopNav() {
       </div>
 
       <div className="flex items-center gap-4 font-mono text-xs text-text-muted">
-        <MonoText size="sm">Claude Opus 4</MonoText>
-        <MonoText size="sm" muted>$0.14</MonoText>
-        <MonoText size="sm" muted>1450 Tokens</MonoText>
+        <MonoText size="sm">{status?.model_name || '—'}</MonoText>
+        <MonoText size="sm" muted>${(status?.cost_usd ?? 0).toFixed(2)}</MonoText>
+        <MonoText size="sm" muted>{(status?.tokens_total ?? 0).toLocaleString()} Tokens</MonoText>
         <div className="flex items-center gap-1.5">
           <PulseDot color="var(--accent)" size={6} />
-          <MonoText size="sm" muted>Running</MonoText>
+          <MonoText size="sm" muted>{(status?.runs_active ?? 0) > 0 ? 'Running' : 'Idle'}</MonoText>
         </div>
         <div className="flex items-center gap-1.5 text-text-muted">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-success" />
-          <MonoText size="sm" muted>Connected</MonoText>
+          <span className={`inline-block w-1.5 h-1.5 rounded-full ${offline ? 'bg-error' : 'bg-success'}`} />
+          <MonoText size="sm" muted>{offline ? 'Offline' : 'Connected'}</MonoText>
         </div>
       </div>
     </header>

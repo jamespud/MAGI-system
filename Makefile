@@ -9,6 +9,7 @@ SCRIPTS_DIR := scripts
         db-up db-down db-logs db-reset \
         rag_up rag_down \
         stop \
+        fmt vet tidy lint \
         build clean \
         test \
         web-up web-down web-logs web-ps
@@ -99,6 +100,17 @@ clean:
 test:
 	go -C backend test ./...
 	npm -C frontend test
+
+fmt:
+	go -C backend fmt ./...
+
+vet:
+	go -C backend vet ./...
+
+tidy:
+	go -C backend mod tidy
+
+lint: fmt vet
 
 # =============================================================================
 # Web (containerized stack)

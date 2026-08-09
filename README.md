@@ -183,15 +183,16 @@ All run from the repo root.
 
 | Command | Description |
 |---------|-------------|
-| `make prepare` | Bootstrap: check deps, init `.env.local`, install Go + npm dependencies |
-| `make docker-up` | Start MySQL on `127.0.0.1:3307` |
-| `make debug` | Start MySQL + Go backend + Vite frontend (parallel) |
-| `make backend` | Start Go server only |
-| `make frontend` | Start Vite dev server only |
-| `make build` | Build `bin/magi` + `frontend/dist/` |
-| `make migrate` | Apply Atlas SQL migrations (`docker/atlas/migrations/`) |
-| `make test` | Run Go tests with coverage |
-| `make lint` / `make fmt` / `make vet` / `make tidy` | Go quality tools |
+| `make prepare` | Bootstrap: check deps, init `.env`, install Go + npm dependencies |
+| `make db-up` / `make db-down` | Start/stop MySQL middleware on `127.0.0.1:3307` |
+| `make debug` | MySQL + Go backend + nginx on `:80` |
+| `make backend` / `make frontend` | Run Go server (`:8080`) / Vite dev (`:5173`) |
+| `make build` | Build `bin/magi` + `frontend/dist/` + Docker images |
+| `make test` | Go tests + frontend tests |
+| `make fmt` / `make vet` / `make tidy` / `make lint` | Go quality tools |
+| `make web-up` / `make web-down` | Containerized full stack (mysql + server + nginx + RAG) |
+| `make rag_up` / `make rag_down` | RAG middleware (Milvus + ES) |
+| `make stop` | Stop all dev/web containers |
 | `make clean` | Remove build artifacts |
 
 Frontend (from `frontend/`): `npm run dev` · `npm run build` · `npm test` (Vitest) · `npm run lint`.

@@ -404,6 +404,7 @@ type AddDatasetItemsRequest struct {
 }
 
 type DatasetItemDTO struct {
+	ID               string          `json:"id,omitempty"`
 	Question         string          `json:"question"`
 	Background       string          `json:"background,omitempty"`
 	Constraints      []ConstraintDTO `json:"constraints,omitempty"`
@@ -474,7 +475,7 @@ func FromItem(it *entity.BenchmarkItem) DatasetItemDTO {
 		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
 	}
 	return DatasetItemDTO{
-		Question: it.Question, Background: it.Context, Constraints: constraints,
+		ID: it.ID, 		Question: it.Question, Background: it.Context, Constraints: constraints,
 		ExpectedDecision: string(it.ExpectedDecision), Weight: it.Weight, Tags: it.Tags,
 	}
 }

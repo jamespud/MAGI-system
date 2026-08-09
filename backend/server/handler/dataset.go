@@ -132,7 +132,7 @@ func (h *DatasetHandler) ListItems(ctx context.Context, c *app.RequestContext) {
 	out := make([]dto.DatasetItemDTO, 0, len(items))
 	for _, it := range items {
 		out = append(out, dto.DatasetItemDTO{
-			Question: it.Question, Background: it.Context,
+			ID: it.ID, 			Question: it.Question, Background: it.Context,
 			ExpectedDecision: string(it.ExpectedDecision), Weight: it.Weight, Tags: it.Tags,
 		})
 	}

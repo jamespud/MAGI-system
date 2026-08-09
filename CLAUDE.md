@@ -13,19 +13,22 @@ Go module at `backend/` (`github.com/jamespud/magi/backend`), Go 1.24+.
 Makefile targets run from repo root:
 
 ```bash
-make server ARGS='是否应该把后端从 Java 重构成 Rust？'  # build + run a decision (standalone CLI)
-make debug                # start MySQL (docker-compose) + run server
-make middleware           # start MySQL only (host port 3307 -> 3306)
-make sync_db              # apply SQL migrations (docker/atlas/migrations s6 + s7)
-make build_server         # build ./bin/magi only
-make test                 # go test ./domain/... ./adapter/...
-make clean                # stop middleware + remove binary
+make prepare     # bootstrap deps and env
+make debug       # MySQL + Go server (:8080) + nginx (:80)
+make backend     # Go server only
+make frontend    # Vite dev server
+make db-up       # MySQL middleware only
+make rag_up      # Milvus + Elasticsearch middleware
+make web-up      # containerized full stack
+make test        # backend Go tests + frontend vitest
+make fmt vet tidy lint   # Go quality targets
+make stop        # stop all dev/web containers
 ```
 
 Direct Go (from `backend/`):
 
 ```bash
-go build -o ../bin/magi .
+go build ./cmd/magi-server
 go test ./...
 go test ./domain/validation/ -run TestTypedValidator -v   # single test
 go vet ./...

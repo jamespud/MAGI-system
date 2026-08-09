@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, type ApiBenchmarkDetail, type ApiDataset } from '@/api/client';
+import { api, type ApiBenchmarkDetail, type ApiDataset, type ApiDatasetItem } from '@/api/client';
 
 interface DemoItem {
   question: string;
@@ -18,6 +18,11 @@ export default function Dataset() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [runsPerItem, setRunsPerItem] = useState(1);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [items, setItems] = useState<Record<string, ApiDatasetItem[]>>({});
+  const [newQuestion, setNewQuestion] = useState('');
+  const [newDecision, setNewDecision] = useState('approve');
+  const [importText, setImportText] = useState('');
   const [regressionThreshold, setRegressionThreshold] = useState(0);
   const [runs, setRuns] = useState<Record<string, ApiBenchmarkDetail | null>>({});
   const pollTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -76,6 +81,63 @@ export default function Dataset() {
     } finally {
       setBusy('');
     }
+  };
+
+  const toggleItems = async (id: string) => {
+    if (expanded === id) { setExpanded(null); return; }
+    setExpanded(id);
+    try {
+      const list = await api.listDatasetItems(id);
+      setItems((prev) => ({ ...prev, [id]: list }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'load items failed');
+    }
+  };
+
+  const addCustomItem = async (id: string) => {
+    if (!newQuestion.trim()) return;
+    setBusy(`add-${id}`);
+    try {
+      await api.addDatasetItems(id, [{ question: newQuestion.trim(), expected_decision: newDecision }]);
+      setNewQuestion('');
+      const list = await api.listDatasetItems(id);
+      setItems((prev) => ({ ...prev, [id]: list }));
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'add failed'); } finally { setBusy(''); }
+  };
+
+  const deleteItem = async (datasetId: string, itemId: string) => {
+    setBusy(`del-${itemId}`);
+    try {
+      await api.deleteDatasetItem(datasetId, itemId);
+      setItems((prev) => ({ ...prev, [datasetId]: (prev[datasetId] || []).filter((it) => it.id !== itemId) }));
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'delete failed'); } finally { setBusy(''); }
+  };
+
+  const exportItems = async (id: string) => {
+    try {
+      const list = await api.exportDatasetItems(id);
+      const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${id}-items.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError(e instanceof Error ? e.message : 'export failed'); }
+  };
+
+  const importItems = async (id: string) => {
+    try {
+      const parsed = JSON.parse(importText) as ApiDatasetItem[];
+      if (!Array.isArray(parsed)) throw new Error('expected an array');
+      await api.addDatasetItems(id, parsed.map((p) => ({ question: p.question, expected_decision: p.expected_decision })));
+      setImportText('');
+      const list = await api.listDatasetItems(id);
+      setItems((prev) => ({ ...prev, [id]: list }));
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'import failed'); }
   };
 
   const addItems = async (id: string) => {
@@ -152,10 +214,19 @@ export default function Dataset() {
                 <div className="space-x-2">
                   <button
                     className="rounded border border-border-dim px-3 py-1.5 text-sm disabled:opacity-50"
+                    onClick={() => toggleItems(d.id)}
+                  >
+                    {expanded === d.id ? 'Hide items' : 'Manage items'}
+                  </button>
+                  <button
+                    className="rounded border border-border-dim px-3 py-1.5 text-sm disabled:opacity-50"
                     disabled={busy === `items-${d.id}`}
                     onClick={() => addItems(d.id)}
                   >
                     Add demo items
+                  </button>
+                  <button className="rounded border border-border-dim px-3 py-1.5 text-sm" onClick={() => exportItems(d.id)}>
+                    Export
                   </button>
                   <label className="flex items-center gap-1 text-xs text-text-muted">
                     runs
@@ -189,6 +260,52 @@ export default function Dataset() {
                   </button>
                 </div>
               </div>
+              {expanded === d.id && (
+                <div className="mt-3 border-t border-border-dim pt-3">
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 rounded border border-border-dim bg-background px-2 py-1 text-sm"
+                      placeholder="Question"
+                      value={newQuestion}
+                      onChange={(e) => setNewQuestion(e.target.value)}
+                    />
+                    <select
+                      className="rounded border border-border-dim bg-background px-2 py-1 text-sm"
+                      value={newDecision}
+                      onChange={(e) => setNewDecision(e.target.value)}
+                    >
+                      <option value="approve">approve</option>
+                      <option value="reject">reject</option>
+                      <option value="abstain">abstain</option>
+                    </select>
+                    <button className="rounded bg-accent px-3 py-1 text-sm disabled:opacity-50" disabled={!newQuestion.trim()} onClick={() => addCustomItem(d.id)}>
+                      Add
+                    </button>
+                  </div>
+                  <ul className="mt-2 space-y-1">
+                    {(items[d.id] || []).map((it, i) => (
+                      <li key={it.id || i} className="flex items-center justify-between rounded bg-raised px-3 py-1.5 text-sm">
+                        <span className="truncate">{it.question} → {it.expected_decision}</span>
+                        <button
+                          className="text-xs text-red-400 hover:underline"
+                          onClick={() => { if (it.id) void deleteItem(d.id, it.id); }}
+                        >
+                          Delete
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <textarea
+                    className="mt-2 w-full h-20 rounded border border-border-dim bg-background px-2 py-1 text-xs font-mono"
+                    placeholder={'Import JSON array: [{"question":"...","expected_decision":"approve"}]'}
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                  />
+                  <button className="mt-1 rounded border border-border-dim px-3 py-1 text-sm" onClick={() => importItems(d.id)}>
+                    Import
+                  </button>
+                </div>
+              )}
               {detail && (
                 <div className="mt-3 text-sm">
                   <p>

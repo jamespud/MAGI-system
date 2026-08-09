@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { api, type ApiEvaluation } from '@/api/client';
+import { api, type ApiBenchmarkDetail, type ApiEvaluation } from '@/api/client';
 
 export default function Benchmark() {
   const [input, setInput] = useState('');
   const [results, setResults] = useState<Record<string, ApiEvaluation> | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [runA, setRunA] = useState('');
+  const [runB, setRunB] = useState('');
+  const [compare, setCompare] = useState<[ApiBenchmarkDetail, ApiBenchmarkDetail] | null>(null);
 
   const run = async () => {
     const ids = input.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
@@ -20,6 +23,16 @@ export default function Benchmark() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const doCompare = async () => {
+    if (!runA.trim() || !runB.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const [a, b] = await Promise.all([api.getBenchmarkRun(runA.trim()), api.getBenchmarkRun(runB.trim())]);
+      setCompare([a, b]);
+    } catch (e) { setError(e instanceof Error ? e.message : 'compare failed'); setCompare(null); } finally { setBusy(false); }
   };
 
   return (
@@ -41,6 +54,29 @@ export default function Benchmark() {
         </button>
       </div>
       {error && <p className="text-red-500">{error}</p>}
+
+      <div className="rounded border border-border-dim bg-raised p-4">
+        <h2 className="text-sm font-semibold mb-2">Compare benchmark runs</h2>
+        <div className="flex gap-2">
+          <input className="flex-1 rounded border border-border-dim bg-background px-2 py-1 text-sm font-mono" placeholder="Run A ID" value={runA} onChange={(e) => setRunA(e.target.value)} />
+          <input className="flex-1 rounded border border-border-dim bg-background px-2 py-1 text-sm font-mono" placeholder="Run B ID" value={runB} onChange={(e) => setRunB(e.target.value)} />
+          <button className="rounded bg-accent px-3 py-1 text-sm disabled:opacity-50" disabled={busy} onClick={() => void doCompare()}>
+            Compare
+          </button>
+        </div>
+        {compare && (
+          <table className="mt-3 w-full text-left text-sm">
+            <thead><tr><th className="py-1 pr-2"></th><th className="py-1 pr-2">Run A</th><th>Run B</th></tr></thead>
+            <tbody>
+              <tr><td className="py-1 pr-2 text-text-muted">Status</td><td>{compare[0].run.status}</td><td>{compare[1].run.status}</td></tr>
+              <tr><td className="py-1 pr-2 text-text-muted">Accuracy</td><td>{(compare[0].run.accuracy * 100).toFixed(0)}%</td><td>{(compare[1].run.accuracy * 100).toFixed(0)}%</td></tr>
+              <tr><td className="py-1 pr-2 text-text-muted">Stability</td><td>{compare[0].run.stability != null ? `${(compare[0].run.stability * 100).toFixed(0)}%` : '—'}</td><td>{compare[1].run.stability != null ? `${(compare[1].run.stability * 100).toFixed(0)}%` : '—'}</td></tr>
+              <tr><td className="py-1 pr-2 text-text-muted">Runs/item</td><td>{compare[0].run.runs_per_item || 1}</td><td>{compare[1].run.runs_per_item || 1}</td></tr>
+              <tr><td className="py-1 pr-2 text-text-muted">Regression</td><td>{compare[0].run.regression_failed ? 'FAILED' : 'ok'}</td><td>{compare[1].run.regression_failed ? 'FAILED' : 'ok'}</td></tr>
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {results && (
         <div className="space-y-3">
