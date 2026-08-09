@@ -41,6 +41,32 @@ func BuildReport(resolution *entity.Resolution, votes []*entity.Vote, evidence [
 	return b.String()
 }
 
+// RenderDissent renders structured minority positions as a markdown section.
+func RenderDissent(dissent []entity.Dissent) string {
+	if len(dissent) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range dissent {
+		fmt.Fprintf(&b, "- %s dissented with %s", d.AgentCode, d.Decision)
+		if d.Reasoning != "" {
+			fmt.Fprintf(&b, ": %s", d.Reasoning)
+		}
+		if len(d.EvidenceIDs) > 0 {
+			fmt.Fprintf(&b, " (evidence: %v)", d.EvidenceIDs)
+		}
+		if len(d.Conditions) > 0 {
+			var conds []string
+			for _, c := range d.Conditions {
+				conds = append(conds, c.Statement)
+			}
+			fmt.Fprintf(&b, " (conditions: %v)", conds)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 // RenderReport renders a validated FinalReportData into a markdown report.
 // Empty list sections are omitted. A nil input returns "".
 func RenderReport(d *entity.FinalReportData) string {

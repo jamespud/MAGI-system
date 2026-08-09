@@ -167,6 +167,11 @@ milvus:
 elasticsearch:
   addresses: []             # e.g. ["http://localhost:9200"]; empty -> fake lexical index
   index: "magi_rag_300"
+# Ground-truth benchmark defaults. Per-run query params (runs, threshold) override these.
+benchmark:
+  runs_per_item: 1              # counterfactual repeats per item; agreement rate = stability
+  regression_threshold: 0       # fail a run when accuracy drops below this (0 = disabled)
+
 rag:
   levels: [1800, 900, 300]
   top_k: 15

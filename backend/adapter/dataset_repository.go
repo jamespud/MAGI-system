@@ -107,14 +107,16 @@ func (r *datasetRepo) CreateRun(ctx context.Context, run *entity.BenchmarkRun) e
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = run.StartedAt
 	}
-	m := BenchmarkRunModel{ID: run.ID, DatasetID: run.DatasetID, Status: string(run.Status), Total: run.Total, Matched: run.Matched, Accuracy: run.Accuracy, WeightedAccuracy: run.WeightedAccuracy, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt, CreatedAt: run.CreatedAt}
+	m := BenchmarkRunModel{ID: run.ID, DatasetID: run.DatasetID, Status: string(run.Status), Total: run.Total, Matched: run.Matched, Accuracy: run.Accuracy, WeightedAccuracy: run.WeightedAccuracy, RunsPerItem: run.RunsPerItem, Stability: run.Stability, RegressionThreshold: run.RegressionThreshold, RegressionFailed: run.RegressionFailed, FailureReason: run.FailureReason, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt, CreatedAt: run.CreatedAt}
 	return r.db.WithContext(ctx).Create(&m).Error
 }
 
 func (r *datasetRepo) UpdateRun(ctx context.Context, run *entity.BenchmarkRun) error {
 	return r.db.WithContext(ctx).Model(&BenchmarkRunModel{}).Where("id = ?", run.ID).Updates(map[string]any{
 		"status": string(run.Status), "total": run.Total, "matched": run.Matched,
-		"accuracy": run.Accuracy, "weighted_accuracy": run.WeightedAccuracy, "completed_at": run.CompletedAt,
+		"accuracy": run.Accuracy, "weighted_accuracy": run.WeightedAccuracy, "runs_per_item": run.RunsPerItem,
+		"stability": run.Stability, "regression_threshold": run.RegressionThreshold,
+		"regression_failed": run.RegressionFailed, "failure_reason": run.FailureReason, "completed_at": run.CompletedAt,
 	}).Error
 }
 
@@ -157,7 +159,7 @@ func (r *datasetRepo) CreateItemResult(ctx context.Context, res *entity.Benchmar
 	if res.CreatedAt.IsZero() {
 		res.CreatedAt = time.Now()
 	}
-	m := BenchmarkItemResultModel{ID: res.ID, RunID: res.RunID, DatasetItemID: res.DatasetItemID, CaseID: res.CaseID, ExpectedDecision: string(res.ExpectedDecision), ActualDecision: string(res.ActualDecision), Matched: res.Matched, Score: res.Score, Error: res.Error, Feedback: res.Feedback, FeedbackAt: res.FeedbackAt, CreatedAt: res.CreatedAt}
+	m := BenchmarkItemResultModel{ID: res.ID, RunID: res.RunID, DatasetItemID: res.DatasetItemID, CaseID: res.CaseID, ExpectedDecision: string(res.ExpectedDecision), ActualDecision: string(res.ActualDecision), Matched: res.Matched, Score: res.Score, Runs: res.Runs, Consistency: res.Consistency, DecisionsJSON: toJSON(res.Decisions), Error: res.Error, Feedback: res.Feedback, FeedbackAt: res.FeedbackAt, CreatedAt: res.CreatedAt}
 	return r.db.WithContext(ctx).Create(&m).Error
 }
 
@@ -175,7 +177,7 @@ func (r *datasetRepo) ListItemResults(ctx context.Context, runID string) ([]*ent
 	out := make([]*entity.BenchmarkItemResult, len(models))
 	for i := range models {
 		m := &models[i]
-		out[i] = &entity.BenchmarkItemResult{ID: m.ID, RunID: m.RunID, DatasetItemID: m.DatasetItemID, CaseID: m.CaseID, ExpectedDecision: entity.VoteDecision(m.ExpectedDecision), ActualDecision: entity.VoteDecision(m.ActualDecision), Matched: m.Matched, Score: m.Score, Error: m.Error, Feedback: m.Feedback, FeedbackAt: m.FeedbackAt, CreatedAt: m.CreatedAt}
+		out[i] = &entity.BenchmarkItemResult{ID: m.ID, RunID: m.RunID, DatasetItemID: m.DatasetItemID, CaseID: m.CaseID, ExpectedDecision: entity.VoteDecision(m.ExpectedDecision), ActualDecision: entity.VoteDecision(m.ActualDecision), Matched: m.Matched, Score: m.Score, Runs: m.Runs, Consistency: m.Consistency, Decisions: fromJSON[[]entity.VoteDecision](m.DecisionsJSON), Error: m.Error, Feedback: m.Feedback, FeedbackAt: m.FeedbackAt, CreatedAt: m.CreatedAt}
 	}
 	return out, nil
 }
@@ -185,7 +187,7 @@ func datasetFromModel(m *DatasetModel) *entity.BenchmarkDataset {
 }
 
 func runFromModel(m *BenchmarkRunModel) *entity.BenchmarkRun {
-	return &entity.BenchmarkRun{ID: m.ID, DatasetID: m.DatasetID, Status: entity.BenchmarkRunStatus(m.Status), Total: m.Total, Matched: m.Matched, Accuracy: m.Accuracy, WeightedAccuracy: m.WeightedAccuracy, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt, CreatedAt: m.CreatedAt}
+	return &entity.BenchmarkRun{ID: m.ID, DatasetID: m.DatasetID, Status: entity.BenchmarkRunStatus(m.Status), Total: m.Total, Matched: m.Matched, Accuracy: m.Accuracy, WeightedAccuracy: m.WeightedAccuracy, RunsPerItem: m.RunsPerItem, Stability: m.Stability, RegressionThreshold: m.RegressionThreshold, RegressionFailed: m.RegressionFailed, FailureReason: m.FailureReason, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt, CreatedAt: m.CreatedAt}
 }
 
 var _ port.DatasetRepository = (*datasetRepo)(nil)

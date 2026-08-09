@@ -16,6 +16,16 @@ type Resolution struct {
 	CreatedAt      time.Time
 }
 
+// Dissent is a structured minority position recorded for auditability.
+type Dissent struct {
+	AgentCode   MagiCode
+	Decision    VoteDecision
+	Reasoning   string
+	EvidenceIDs []string
+	ClaimIDs    []string
+	Conditions  []DecisionCondition
+}
+
 // ConsensusResult is the deterministic consensus outcome.
 type ConsensusResult struct {
 	Outcome    ConsensusOutcome

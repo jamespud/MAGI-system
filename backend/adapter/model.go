@@ -255,6 +255,11 @@ type BenchmarkRunModel struct {
 	Matched          int
 	Accuracy         float64
 	WeightedAccuracy float64
+	RunsPerItem      int
+	Stability        float64
+	RegressionThreshold float64
+	RegressionFailed bool
+	FailureReason    string
 	StartedAt        time.Time
 	CompletedAt      *time.Time
 	CreatedAt        time.Time
@@ -271,6 +276,9 @@ type BenchmarkItemResultModel struct {
 	ActualDecision   string
 	Matched          bool
 	Score            float64
+	Runs             int
+	Consistency      float64
+	DecisionsJSON    string `gorm:"type:text"`
 	Error            string `gorm:"type:text"`
 	Feedback         string `gorm:"type:text"`
 	FeedbackAt       *time.Time
@@ -291,6 +299,20 @@ type PluginBindingModel struct {
 }
 
 func (PluginBindingModel) TableName() string { return "magi_plugin_binding" }
+
+type JudgeModel struct {
+	ID                  uint `gorm:"primaryKey;autoIncrement"`
+	CaseID              string `gorm:"index"`
+	ReportQuality       float64
+	EvidenceConsistency float64
+	ReflectionValidity  float64
+	Overall             float64
+	Rationale           string `gorm:"type:text"`
+	ModelName           string
+	CreatedAt           time.Time
+}
+
+func (JudgeModel) TableName() string { return "magi_judge_eval" }
 
 type RecurringCaseModel struct {
 	ID              string `gorm:"primaryKey"`
@@ -317,5 +339,6 @@ func AllModels() []any {
 		&ToolCallModel{}, &ApprovalModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
 		&PluginBindingModel{},
 		&RecurringCaseModel{},
+		&JudgeModel{},
 	}
 }

@@ -10,6 +10,7 @@ export default function ConsensusPanel() {
   const confidence = useCaseStore((s) => s.case?.confidence ?? 0);
   const status = useCaseStore((s) => s.case?.status ?? 'DRAFT');
   const agents = useAgentStore((s) => s.agents);
+  const dissent = useCaseStore((s) => s.case?.dissent ?? []);
 
   const renderVoteIcon = (stance: string | undefined) => {
     const s = normalizeStance(stance);
@@ -137,6 +138,25 @@ export default function ConsensusPanel() {
           );
         })}
       </div>
+
+      {dissent.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-border-dim">
+          <h4 className="font-mono text-xs font-semibold text-warning uppercase tracking-wider">Dissent</h4>
+          {dissent.map((d, i) => (
+            <div key={i} className="mt-2 rounded bg-raised p-2 text-xs">
+              <span className="font-mono font-semibold">{d.agentCode.toUpperCase()}</span> dissented with{' '}
+              <span className="font-mono">{d.decision}</span>
+              {d.reasoning && <p className="mt-1 text-text-muted">{d.reasoning}</p>}
+              {d.evidenceIds && d.evidenceIds.length > 0 && (
+                <p className="mt-1 font-mono text-[10px] text-text-muted">evidence: {d.evidenceIds.join(', ')}</p>
+              )}
+              {d.conditions && d.conditions.length > 0 && (
+                <p className="mt-1 font-mono text-[10px] text-text-muted">conditions: {d.conditions.join('; ')}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border-dim">
         {timelineSteps.map((step, i) => (

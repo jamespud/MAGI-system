@@ -11,6 +11,7 @@ import (
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
+	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/plugins"
@@ -34,6 +35,7 @@ type RouteDeps struct {
 	Recurring    *recurring.Service
 	Replay       *replay.Service
 	Evaluation   *evaluation.Service
+	Judge        *judge.Service
 	Memory       *memory.Service
 	Tool         *tool.Service
 	Broker       *EventBroker
@@ -83,6 +85,9 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	evalH := handler.NewEvaluationHandler(deps.Evaluation, deps.Decision)
 	v1.POST("/evaluation", evalH.Evaluate)
 	v1.POST("/evaluation/:id", evalH.Evaluate)
+
+	judgeH := handler.NewJudgeHandler(deps.Judge, deps.Decision)
+	v1.POST("/evaluation/:id/judge", judgeH.Judge)
 	v1.POST("/benchmark", evalH.Benchmark)
 
 	toolH := handler.NewToolHandler(deps.Tool)

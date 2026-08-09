@@ -22,6 +22,7 @@ import (
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
@@ -71,6 +72,8 @@ var Module = fx.Options(
 		providePluginBindingRepository,
 		provideApprovalRepository,
 		provideApprovalService,
+		provideJudgeRepository,
+		provideJudgeService,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -103,6 +106,7 @@ var Module = fx.Options(
 	fx.Invoke(func(
 		h *hzserver.Hertz,
 		apprSvc *approval.Service,
+		judgeSvc *judge.Service,
 		decSvc *decision.Service,
 		authSvc *auth.Service,
 		dsSvc *dataset.Service,
@@ -123,6 +127,7 @@ var Module = fx.Options(
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
 			Decision:     decSvc,
 			Approval:     apprSvc,
+			Judge:        judgeSvc,
 			Auth:         authSvc,
 			Metrics:      reg,
 			Dataset:      dsSvc,
@@ -320,6 +325,18 @@ func provideApprovalService(repo port.ApprovalRepository) *approval.Service {
 	return approval.NewService(repo)
 }
 
+func provideJudgeRepository(db *gorm.DB) port.JudgeRepository {
+	return magi.NewJudgeRepository(db)
+}
+
+func provideJudgeService(cfg *Config, modelPort *magi.ModelAdapter, gen validation.SchemaGenerator, val validation.Validator, repo port.Repository, judgeRepo port.JudgeRepository) (*judge.Service, error) {
+	j, err := judge.NewService(modelPort, entity.ModelRef{APIKey: cfg.Model.APIKey, BaseURL: cfg.Model.BaseURL, ModelName: cfg.Model.ModelName}, gen, val, judgeRepo)
+	if err != nil {
+		return nil, err
+	}
+	return j.WithRepositories(repo), nil
+}
+
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
@@ -373,7 +390,8 @@ func provideDatasetRepository(db *gorm.DB) port.DatasetRepository {
 }
 
 func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.Orchestrator, repo port.Repository, cfg *Config) *dataset.Service {
-	return dataset.NewService(datasets, repo.CaseRepo(), orch, cfg.Magi.MaxDebateRounds)
+	return dataset.NewService(datasets, repo.CaseRepo(), orch, cfg.Magi.MaxDebateRounds,
+		dataset.WithRunsPerItem(cfg.Benchmark.RunsPerItem), dataset.WithRegressionThreshold(cfg.Benchmark.RegressionThreshold))
 }
 
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {

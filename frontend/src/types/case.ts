@@ -67,6 +67,7 @@ export interface Case {
   status: CaseStatus;
   round: number;
   consensus: ConsensusState | null;
+  dissent?: Dissent[];
   confidence: number;
   finalDecision: string;
   createdAt: string;
@@ -94,4 +95,13 @@ export interface ConsensusState {
   abstain: number;
   majority: 'Approve' | 'Reject' | 'Tie';
   needReflection: boolean;
+}
+
+export interface Dissent {
+  agentCode: string;
+  decision: string;
+  reasoning?: string;
+  evidenceIds?: string[];
+  claimIds?: string[];
+  conditions?: string[];
 }

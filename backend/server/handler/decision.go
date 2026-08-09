@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/decision"
+	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/server/dto"
@@ -16,6 +17,19 @@ import (
 type DecisionHandler struct {
 	svc     *decision.Service
 	metrics *metrics.Registry
+}
+
+func (h *DecisionHandler) dissent(ctx context.Context, id string, res *entity.Resolution) []entity.Dissent {
+	if res == nil {
+		return nil
+	}
+	votes, _ := h.svc.Votes(ctx, id)
+	runs, _ := h.svc.AgentRuns(ctx, id)
+	codes := make(map[string]entity.MagiCode, len(runs))
+	for _, r := range runs {
+		codes[r.ID] = r.MagiCode
+	}
+	return domainservice.ExtractDissent(res.FinalDecision, votes, codes)
 }
 
 func NewDecisionHandler(svc *decision.Service, regs ...*metrics.Registry) *DecisionHandler {
@@ -117,7 +131,7 @@ func (h *DecisionHandler) Get(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	res, _ := h.svc.Resolution(ctx, id)
-	c.JSON(consts.StatusOK, dto.FromCase(case_, res))
+	c.JSON(consts.StatusOK, dto.FromCaseWithDissent(case_, res, h.dissent(ctx, id, res)))
 }
 
 func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
@@ -131,7 +145,11 @@ func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
 		Forbidden(c)
 		return
 	}
+	res, _ := h.svc.Resolution(ctx, id)
 	report := h.svc.Report(ctx, id)
+	if ds := h.dissent(ctx, id, res); len(ds) > 0 {
+		report += "\n\n--- Dissent ---\n" + domainservice.RenderDissent(ds)
+	}
 	c.JSON(consts.StatusOK, dto.DecisionReport{Report: report})
 }
 

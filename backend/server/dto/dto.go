@@ -24,6 +24,7 @@ type CaseResponse struct {
 	ParentCaseID  string          `json:"parent_case_id,omitempty"`
 	Status        string          `json:"status"`
 	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
+	Dissent       []DissentDTO     `json:"dissent,omitempty"`
 	FinalDecision string          `json:"final_decision,omitempty"`
 	Confidence    float64         `json:"confidence"`
 	Round         int             `json:"round"`
@@ -164,6 +165,14 @@ func FromApproval(a *entity.ApprovalRequest) ApprovalRequestDTO {
 }
 
 func FromCase(c *entity.DecisionCase, resolution *entity.Resolution) CaseResponse {
+	return fromCase(c, resolution, nil)
+}
+
+func FromCaseWithDissent(c *entity.DecisionCase, resolution *entity.Resolution, dissent []entity.Dissent) CaseResponse {
+	return fromCase(c, resolution, dissent)
+}
+
+func fromCase(c *entity.DecisionCase, resolution *entity.Resolution, dissent []entity.Dissent) CaseResponse {
 	constraints := make([]ConstraintDTO, len(c.Constraints))
 	for i, ct := range c.Constraints {
 		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
@@ -178,6 +187,11 @@ func FromCase(c *entity.DecisionCase, resolution *entity.Resolution) CaseRespons
 		Round:        0,
 		CreatedAt:    c.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    c.UpdatedAt.Format(time.RFC3339),
+	}
+	if len(dissent) > 0 {
+		for _, d := range dissent {
+			resp.Dissent = append(resp.Dissent, FromDissent(d))
+		}
 	}
 	if resolution != nil {
 		resp.Round = resolution.Consensus.Round
@@ -406,6 +420,10 @@ type BenchmarkRunResponse struct {
 	Matched          int     `json:"matched"`
 	Accuracy         float64 `json:"accuracy"`
 	WeightedAccuracy float64 `json:"weighted_accuracy"`
+	RunsPerItem      int     `json:"runs_per_item"`
+	Stability        float64 `json:"stability"`
+	RegressionFailed bool    `json:"regression_failed"`
+	FailureReason    string  `json:"failure_reason,omitempty"`
 	StartedAt        string  `json:"started_at"`
 	CompletedAt      string  `json:"completed_at,omitempty"`
 }
@@ -417,6 +435,9 @@ type BenchmarkItemResultResponse struct {
 	ActualDecision   string  `json:"actual_decision"`
 	Matched          bool    `json:"matched"`
 	Score            float64 `json:"score"`
+	Runs             int     `json:"runs"`
+	Consistency      float64 `json:"consistency"`
+	Decisions        []string `json:"decisions,omitempty"`
 	Error            string  `json:"error,omitempty"`
 	Feedback         string  `json:"feedback,omitempty"`
 	FeedbackAt       string  `json:"feedback_at,omitempty"`
@@ -438,7 +459,8 @@ func FromBenchmarkRun(r *entity.BenchmarkRun) BenchmarkRunResponse {
 	resp := BenchmarkRunResponse{
 		ID: r.ID, DatasetID: r.DatasetID, Status: string(r.Status),
 		Total: r.Total, Matched: r.Matched, Accuracy: r.Accuracy,
-		WeightedAccuracy: r.WeightedAccuracy, StartedAt: r.StartedAt.Format(time.RFC3339),
+		WeightedAccuracy: r.WeightedAccuracy, RunsPerItem: r.RunsPerItem, Stability: r.Stability,
+		RegressionFailed: r.RegressionFailed, FailureReason: r.FailureReason, StartedAt: r.StartedAt.Format(time.RFC3339),
 	}
 	if r.CompletedAt != nil {
 		resp.CompletedAt = r.CompletedAt.Format(time.RFC3339)
@@ -449,11 +471,53 @@ func FromBenchmarkRun(r *entity.BenchmarkRun) BenchmarkRunResponse {
 func FromBenchmarkResult(r *entity.BenchmarkItemResult) BenchmarkItemResultResponse {
 	out := BenchmarkItemResultResponse{
 		ID: r.ID, CaseID: r.CaseID, ExpectedDecision: string(r.ExpectedDecision),
-		ActualDecision: string(r.ActualDecision), Matched: r.Matched, Score: r.Score, Error: r.Error,
+		ActualDecision: string(r.ActualDecision), Matched: r.Matched, Score: r.Score, Runs: r.Runs, Consistency: r.Consistency, Error: r.Error,
 		Feedback: r.Feedback,
 	}
 	if r.FeedbackAt != nil {
 		out.FeedbackAt = r.FeedbackAt.Format(time.RFC3339)
+	}
+	for _, d := range r.Decisions {
+		out.Decisions = append(out.Decisions, string(d))
+	}
+	return out
+}
+
+type JudgeResultDTO struct {
+	CaseID              string  `json:"case_id"`
+	ReportQuality       float64 `json:"report_quality"`
+	EvidenceConsistency float64 `json:"evidence_consistency"`
+	ReflectionValidity  float64 `json:"reflection_validity"`
+	Overall             float64 `json:"overall"`
+	Rationale           string  `json:"rationale,omitempty"`
+	ModelName           string  `json:"model_name,omitempty"`
+	CreatedAt           string  `json:"created_at"`
+}
+
+func FromJudge(r *entity.JudgeResult) JudgeResultDTO {
+	return JudgeResultDTO{
+		CaseID: r.CaseID, ReportQuality: r.ReportQuality, EvidenceConsistency: r.EvidenceConsistency,
+		ReflectionValidity: r.ReflectionValidity, Overall: r.Overall, Rationale: r.Rationale,
+		ModelName: r.ModelName, CreatedAt: r.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+type DissentDTO struct {
+	AgentCode   string   `json:"agent_code"`
+	Decision    string   `json:"decision"`
+	Reasoning   string   `json:"reasoning,omitempty"`
+	EvidenceIDs []string `json:"evidence_ids,omitempty"`
+	ClaimIDs    []string `json:"claim_ids,omitempty"`
+	Conditions  []string `json:"conditions,omitempty"`
+}
+
+func FromDissent(d entity.Dissent) DissentDTO {
+	out := DissentDTO{
+		AgentCode: string(d.AgentCode), Decision: string(d.Decision), Reasoning: d.Reasoning,
+		EvidenceIDs: d.EvidenceIDs, ClaimIDs: d.ClaimIDs,
+	}
+	for _, c := range d.Conditions {
+		out.Conditions = append(out.Conditions, c.Statement)
 	}
 	return out
 }

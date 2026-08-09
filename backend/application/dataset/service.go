@@ -30,15 +30,45 @@ type Service struct {
 	datasets        port.DatasetRepository
 	cases           port.CaseRepository
 	orch            Orchestrator
-	maxDebateRounds int
-	workerSlots     chan struct{}
+	maxDebateRounds    int
+	workerSlots        chan struct{}
+	runsPerItem        int
+	regressionThreshold float64
 }
 
-func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch Orchestrator, maxDebateRounds int) *Service {
-	return &Service{
-		datasets: datasets, cases: cases, orch: orch, maxDebateRounds: maxDebateRounds,
+// Option configures a dataset.Service.
+type Option func(*Service)
+
+// WithRunsPerItem sets the default number of counterfactual repeats per item.
+func WithRunsPerItem(n int) Option {
+	return func(s *Service) {
+		if n < 1 {
+			n = 1
+		}
+		s.runsPerItem = n
+	}
+}
+
+// WithRegressionThreshold sets the accuracy gate for benchmark runs (0 disables).
+func WithRegressionThreshold(t float64) Option {
+	return func(s *Service) { s.regressionThreshold = t }
+}
+
+func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch Orchestrator, maxDebateRounds int, opts ...Option) *Service {
+	s := &Service{
+		datasets: datasets, cases: cases, orch: orch, maxDebateRounds: maxDebateRounds, runsPerItem: 1,
 		workerSlots: make(chan struct{}, 2),
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// RunOptions controls one benchmark run.
+type RunOptions struct {
+	RunsPerItem        int
+	RegressionThreshold float64
 }
 
 // NewItem is a ground-truth case to add to a dataset.
@@ -143,6 +173,10 @@ func (s *Service) ListItems(ctx context.Context, ownerID int64, datasetID string
 // The worker executes each dataset item, persists results, and finalizes the
 // run; poll run detail for progress.
 func (s *Service) StartRun(ctx context.Context, ownerID int64, datasetID string) (*entity.BenchmarkRun, error) {
+	return s.StartRunWithOptions(ctx, ownerID, datasetID, RunOptions{})
+}
+
+func (s *Service) StartRunWithOptions(ctx context.Context, ownerID int64, datasetID string, opts RunOptions) (*entity.BenchmarkRun, error) {
 	ds, err := s.requireDataset(ctx, ownerID, datasetID)
 	if err != nil {
 		return nil, err
@@ -167,11 +201,11 @@ func (s *Service) StartRun(ctx context.Context, ownerID int64, datasetID string)
 	if err := s.datasets.CreateRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("dataset: create run: %w", err)
 	}
-	go s.processRun(run.ID, items, ds.OwnerID)
+ 	go s.processRun(run.ID, items, ds.OwnerID, opts)
 	return run, nil
 }
 
-func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerID int64) {
+func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerID int64, opts RunOptions) {
 	s.workerSlots <- struct{}{}
 	defer func() { <-s.workerSlots }()
 	ctx := context.Background()
@@ -186,31 +220,53 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 	matched := 0
 	totalWeight := 0.0
 	matchedWeight := 0.0
+	sumConsistency := 0.0
+	completedItems := 0
 	hasError := false
+	runs := s.runsPerItem
+	if opts.RunsPerItem > 0 {
+		runs = opts.RunsPerItem
+	}
+	threshold := opts.RegressionThreshold
+	if threshold == 0 {
+		threshold = s.regressionThreshold
+	}
 	for _, item := range items {
 		res := &entity.BenchmarkItemResult{RunID: run.ID, DatasetItemID: item.ID, ExpectedDecision: item.ExpectedDecision}
-		case_ := &entity.DecisionCase{
-			ID: "case-" + uuid.NewString(), UserID: ownerID, Question: item.Question, Context: item.Context,
-			Constraints: item.Constraints, MaxDebateRounds: s.maxDebateRounds,
-			Status: entity.CaseStatusDraft, CreatedAt: time.Now(),
-		}
-		if s.cases != nil {
-			if err := s.cases.Create(ctx, case_); err != nil {
-				res.Error = fmt.Sprintf("create case: %v", err)
+		decisions := make([]entity.VoteDecision, 0, runs)
+		var firstCaseID string
+		for i := 0; i < runs; i++ {
+			case_ := &entity.DecisionCase{
+				ID: "case-" + uuid.NewString(), UserID: ownerID, Question: item.Question, Context: item.Context,
+				Constraints: item.Constraints, MaxDebateRounds: s.maxDebateRounds,
+				Status: entity.CaseStatusDraft, CreatedAt: time.Now(),
 			}
-		}
-		if res.Error == "" {
+			if s.cases != nil {
+				if err := s.cases.Create(ctx, case_); err != nil {
+					res.Error = fmt.Sprintf("create case: %v", err)
+					break
+				}
+			}
 			resolution, runErr := s.orch.Orchestrate(ctx, case_)
 			if runErr != nil {
 				res.Error = runErr.Error()
-			} else if resolution != nil {
-				res.CaseID = case_.ID
-				res.ActualDecision = resolution.FinalDecision
-				res.Matched = resolution.FinalDecision == item.ExpectedDecision
+				break
 			}
+			if firstCaseID == "" {
+				firstCaseID = case_.ID
+			}
+			decisions = append(decisions, resolution.FinalDecision)
 		}
 		if res.Error != "" {
 			hasError = true
+		} else {
+			res.CaseID = firstCaseID
+			res.Decisions = decisions
+			res.Runs = len(decisions)
+			res.ActualDecision, res.Consistency = majorityDecision(decisions)
+			res.Matched = res.ActualDecision == item.ExpectedDecision
+			completedItems++
+			sumConsistency += res.Consistency
 		}
 		totalWeight += item.Weight
 		if res.Matched {
@@ -231,6 +287,10 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 	if hasError {
 		final.Status = entity.BenchmarkRunFailed
 	}
+	final.RunsPerItem = runs
+	if completedItems > 0 {
+		final.Stability = sumConsistency / float64(completedItems)
+	}
 	final.Matched = matched
 	if final.Total > 0 {
 		final.Accuracy = float64(matched) / float64(final.Total)
@@ -238,8 +298,32 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 	if totalWeight > 0 {
 		final.WeightedAccuracy = matchedWeight / totalWeight
 	}
+	if threshold > 0 && final.Accuracy < threshold {
+		final.RegressionFailed = true
+		final.FailureReason = fmt.Sprintf("accuracy %.2f below regression threshold %.2f", final.Accuracy, threshold)
+		final.Status = entity.BenchmarkRunFailed
+	}
 	final.CompletedAt = &now
 	_ = s.datasets.UpdateRun(ctx, &final)
+}
+
+// majorityDecision returns the most frequent decision and its agreement rate.
+func majorityDecision(decisions []entity.VoteDecision) (entity.VoteDecision, float64) {
+	if len(decisions) == 0 {
+		return "", 0
+	}
+	counts := map[entity.VoteDecision]int{}
+	for _, d := range decisions {
+		counts[d]++
+	}
+	best := decisions[0]
+	bestCount := 0
+	for d, c := range counts {
+		if c > bestCount {
+			best, bestCount = d, c
+		}
+	}
+	return best, float64(bestCount) / float64(len(decisions))
 }
 
 func (s *Service) ListRuns(ctx context.Context, ownerID int64, datasetID string) ([]*entity.BenchmarkRun, error) {

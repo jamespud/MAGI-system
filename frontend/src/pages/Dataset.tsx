@@ -17,6 +17,8 @@ export default function Dataset() {
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [runsPerItem, setRunsPerItem] = useState(1);
+  const [regressionThreshold, setRegressionThreshold] = useState(0);
   const [runs, setRuns] = useState<Record<string, ApiBenchmarkDetail | null>>({});
   const pollTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
@@ -93,7 +95,7 @@ export default function Dataset() {
     setBusy(`run-${id}`);
     setError('');
     try {
-      const run = await api.startDatasetRun(id);
+      const run = await api.startDatasetRun(id, runsPerItem, regressionThreshold);
       setRuns((prev) => ({ ...prev, [run.id]: null }));
       pollRun(run.id);
     } catch (e) {
@@ -155,6 +157,29 @@ export default function Dataset() {
                   >
                     Add demo items
                   </button>
+                  <label className="flex items-center gap-1 text-xs text-text-muted">
+                    runs
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={runsPerItem}
+                      onChange={(e) => setRunsPerItem(Number(e.target.value) || 1)}
+                      className="w-14 rounded border border-border-dim bg-background px-1 py-1 text-xs font-mono"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-text-muted">
+                    threshold
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={regressionThreshold}
+                      onChange={(e) => setRegressionThreshold(Number(e.target.value) || 0)}
+                      className="w-16 rounded border border-border-dim bg-background px-1 py-1 text-xs font-mono"
+                    />
+                  </label>
                   <button
                     className="rounded bg-accent px-3 py-1.5 text-sm disabled:opacity-50"
                     disabled={busy === `run-${d.id}` || d.item_count === 0}
@@ -171,6 +196,8 @@ export default function Dataset() {
                     {detail.run.status === 'succeeded' && (
                       <> · accuracy <span className="font-medium">{(detail.run.accuracy * 100).toFixed(0)}%</span> ({detail.run.matched}/{detail.run.total})</>
                     )}
+                    {detail.run.runs_per_item ? ` · stability $((detail.run.stability ?? 0) * 100).toFixed(0)% (runs=${detail.run.runs_per_item})` : ''}
+                    {detail.run.regression_failed ? ` · REGRESSION FAILED: ${detail.run.failure_reason || ''}` : ''}
                   </p>
                   {detail.results.length > 0 && (
                     <ul className="mt-2 space-y-1">

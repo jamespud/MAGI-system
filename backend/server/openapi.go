@@ -34,6 +34,7 @@ const openAPISpec = `{
     "/api/v1/memory/{id}": {"get": {"summary": "Get case memory", "responses": {"200": {"description": "memory"}}}},
     "/api/v1/evaluation": {"post": {"summary": "Evaluate a case (case_id in body/query)", "responses": {"200": {"description": "evaluation"}}}},
     "/api/v1/evaluation/{id}": {"post": {"summary": "Evaluate a case by ID", "responses": {"200": {"description": "evaluation"}}}},
+    "/api/v1/evaluation/{id}/judge": {"post": {"summary": "Run LLM-as-a-Judge on a case", "responses": {"200": {"description": "judge"}}}},
     "/metrics": {"get": {"summary": "Prometheus metrics", "responses": {"200": {"description": "metrics"}}}},
     "/api/v1/benchmark": {"post": {"summary": "Benchmark", "responses": {"200": {"description": "benchmark"}}}},
     "/api/v1/datasets": {

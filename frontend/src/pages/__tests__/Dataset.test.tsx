@@ -45,7 +45,7 @@ describe('Dataset page', () => {
     ]));
 
     fireEvent.click(getByText('Run benchmark'));
-    await waitFor(() => expect(mockStartRun).toHaveBeenCalledWith('d1'));
+    await waitFor(() => expect(mockStartRun).toHaveBeenCalledWith('d1', 1, 0));
     await waitFor(() => {
       const text = document.body.textContent ?? '';
       expect(text).toContain('succeeded');

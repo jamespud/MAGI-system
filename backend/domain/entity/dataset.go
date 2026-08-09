@@ -35,6 +35,11 @@ type BenchmarkRun struct {
 	Matched          int
 	Accuracy         float64
 	WeightedAccuracy float64
+	RunsPerItem      int
+	Stability         float64
+	RegressionThreshold float64
+	RegressionFailed   bool
+	FailureReason      string
 	StartedAt        time.Time
 	CompletedAt      *time.Time
 	CreatedAt        time.Time
@@ -59,6 +64,9 @@ type BenchmarkItemResult struct {
 	ActualDecision   VoteDecision
 	Matched          bool
 	Score            float64
+	Runs             int
+	Consistency      float64
+	Decisions        []VoteDecision
 	Error            string
 	Feedback         string
 	FeedbackAt       *time.Time

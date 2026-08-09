@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -100,7 +101,15 @@ func (h *DatasetHandler) ListItems(ctx context.Context, c *app.RequestContext) {
 // Run enqueues an asynchronous dataset benchmark and returns the run id.
 // Poll GET /api/v1/benchmarks/:runID for progress and results.
 func (h *DatasetHandler) Run(ctx context.Context, c *app.RequestContext) {
-	run, err := h.svc.StartRun(ctx, CurrentUserID(ctx), c.Param("id"))
+	runs := 0
+	if v := c.Query("runs"); v != "" {
+		fmt.Sscanf(v, "%d", &runs)
+	}
+	threshold := 0.0
+	if v := c.Query("threshold"); v != "" {
+		fmt.Sscanf(v, "%f", &threshold)
+	}
+	run, err := h.svc.StartRunWithOptions(ctx, CurrentUserID(ctx), c.Param("id"), dataset.RunOptions{RunsPerItem: runs, RegressionThreshold: threshold})
 	if err != nil {
 		if errors.Is(err, dataset.ErrRunActive) {
 			c.JSON(consts.StatusConflict, dto.ErrorResponse{Error: err.Error()})

@@ -15,6 +15,7 @@ interface ApiCaseResponse {
   parent_case_id?: string;
   status: string;
   consensus: ApiConsensus | null;
+  dissent?: ApiDissent[];
   final_decision: string;
   confidence: number;
   round: number;
@@ -141,8 +142,8 @@ export const api = {
   addDatasetItems: (id: string, items: { question: string; expected_decision: string }[]) =>
     request<{ added: number }>(`/datasets/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
 
-  startDatasetRun: (id: string) =>
-    request<ApiBenchmarkRun>(`/datasets/${id}/runs`, { method: 'POST' }),
+  startDatasetRun: (id: string, runs?: number, threshold?: number) =>
+    request<ApiBenchmarkRun>(`/datasets/${id}/runs${runs ? `?runs=${runs}${threshold ? `&threshold=${threshold}` : ''}` : ''}`, { method: 'POST' }),
 
   getBenchmarkRun: (runId: string) => request<ApiBenchmarkDetail>(`/benchmarks/${runId}`),
 
@@ -152,6 +153,8 @@ export const api = {
     request<{ results: ApiMemoryProjection[] }>(`/memory?q=${encodeURIComponent(query)}&limit=${limit}`),
 
   evaluateCase: (id: string) => request<ApiEvaluation>(`/evaluation/${id}`, { method: 'POST' }),
+
+  judgeCase: (id: string) => request<ApiJudgeResult>(`/evaluation/${id}/judge`, { method: 'POST' }),
 
   listRecurring: () => request<ApiRecurring[]>(`/recurring`),
 
@@ -243,6 +246,10 @@ interface ApiBenchmarkRun {
   matched: number;
   accuracy: number;
   weighted_accuracy: number;
+  runs_per_item?: number;
+  stability?: number;
+  regression_failed?: boolean;
+  failure_reason?: string;
   started_at: string;
   completed_at?: string;
 }
@@ -254,6 +261,9 @@ interface ApiBenchmarkItemResult {
   actual_decision: string;
   matched: boolean;
   score: number;
+  runs?: number;
+  consistency?: number;
+  decisions?: string[];
   error?: string;
   feedback?: string;
   feedback_at?: string;
@@ -262,6 +272,26 @@ interface ApiBenchmarkItemResult {
 interface ApiBenchmarkDetail {
   run: ApiBenchmarkRun;
   results: ApiBenchmarkItemResult[];
+}
+
+interface ApiDissent {
+  agent_code: string;
+  decision: string;
+  reasoning?: string;
+  evidence_ids?: string[];
+  claim_ids?: string[];
+  conditions?: string[];
+}
+
+interface ApiJudgeResult {
+  case_id: string;
+  report_quality: number;
+  evidence_consistency: number;
+  reflection_validity: number;
+  overall: number;
+  rationale?: string;
+  model_name?: string;
+  created_at: string;
 }
 
 interface ApiApproval {
@@ -295,4 +325,6 @@ export type {
   ApiVote,
   ApiEvent,
   ApiApproval,
+  ApiDissent,
+  ApiJudgeResult,
 };

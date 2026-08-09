@@ -78,6 +78,12 @@ type Config struct {
 	Milvus        MilvusConfig    `yaml:"milvus"`
 	Elasticsearch ESConfig        `yaml:"elasticsearch"`
 	RAG           RAGConfig       `yaml:"rag"`
+	Benchmark     BenchmarkConfig `yaml:"benchmark"`
+}
+
+type BenchmarkConfig struct {
+	RunsPerItem        int     `yaml:"runs_per_item"`
+	RegressionThreshold float64 `yaml:"regression_threshold"`
 }
 
 type APIKeySpec struct {
@@ -254,6 +260,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.RAG.StoreWorkers == 0 {
 		cfg.RAG.StoreWorkers = 4
+	}
+	if cfg.Benchmark.RunsPerItem == 0 {
+		cfg.Benchmark.RunsPerItem = 1
 	}
 	if len(cfg.RAG.Levels) == 0 {
 		cfg.RAG.Levels = []int{1800, 900, 300}
