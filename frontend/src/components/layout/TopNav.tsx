@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Database, Play, BarChart3, Wrench, Settings, Layers } from 'lucide-react';
+import { Activity, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck } from 'lucide-react';
 import { PulseDot, MonoText } from '@/components/shared';
 
 const NAV_ITEMS = [
   { to: '/', icon: Activity, label: 'Decision' },
   { to: '/memory', icon: Layers, label: 'Memory' },
   { to: '/replay', icon: Play, label: 'Replay' },
+  { to: '/approvals', icon: ShieldCheck, label: 'Approvals' },
   { to: '/evaluation', icon: BarChart3, label: 'Evaluation' },
   { to: '/dataset', icon: Database, label: 'Dataset' },
   { to: '/tools', icon: Wrench, label: 'Tools' },

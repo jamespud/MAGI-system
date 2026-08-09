@@ -27,6 +27,9 @@ type Config struct {
 		MaxSteps         int      `yaml:"max_steps"`
 		TimeoutSeconds   int      `yaml:"timeout_seconds"`
 		CallTimeoutSeconds int    `yaml:"call_timeout_seconds"`
+		ApprovalTimeoutSeconds int    `yaml:"approval_timeout_seconds"`
+		TokenBudget            int    `yaml:"token_budget"`
+		CompactionThreshold    float64 `yaml:"compaction_threshold"`
 		Melchior         MagiSpec `yaml:"melchior"`
 		Balthasar       MagiSpec `yaml:"balthasar"`
 		Casper          MagiSpec `yaml:"casper"`
@@ -206,6 +209,15 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Magi.CallTimeoutSeconds == 0 {
 		cfg.Magi.CallTimeoutSeconds = 180
+	}
+	if cfg.Magi.ApprovalTimeoutSeconds == 0 {
+		cfg.Magi.ApprovalTimeoutSeconds = 3600
+	}
+	if cfg.Magi.TokenBudget == 0 {
+		cfg.Magi.TokenBudget = 150000
+	}
+	if cfg.Magi.CompactionThreshold == 0 {
+		cfg.Magi.CompactionThreshold = 0.7
 	}
 	if len(cfg.ToolPolicy.RequireApproval) == 0 {
 		cfg.ToolPolicy.RequireApproval = []string{"code_runner"}
@@ -405,8 +417,10 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			MaxGateFailures:                  3,
 			MaxConsecutiveToolFailures:       5,
 			MaxConsecutiveValidationFailures: 5,
-			TokenBudget:                      150000,
+			TokenBudget:                      cfg.Magi.TokenBudget,
 			MaxToolCalls:                     5,
+			ApprovalTimeout:                  time.Duration(cfg.Magi.ApprovalTimeoutSeconds) * time.Second,
+			TokenCompactionThreshold:         cfg.Magi.CompactionThreshold,
 		},
 	}
 }

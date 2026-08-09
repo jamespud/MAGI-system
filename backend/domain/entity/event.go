@@ -49,6 +49,9 @@ const (
 	EventMemoryIndexed       EventType = "MEMORY_INDEXED"
 	EventCaseCompleted       EventType = "CASE_COMPLETED"
 	EventCaseFailed          EventType = "CASE_FAILED"
+	EventToolApprovalRequested EventType = "TOOL_APPROVAL_REQUESTED"
+	EventToolApprovalResolved  EventType = "TOOL_APPROVAL_RESOLVED"
+	EventContextCompacted      EventType = "CONTEXT_COMPACTED"
 )
 
 // NewEvent constructs a MagiEvent with a unique ID and JSON-serialized payload.

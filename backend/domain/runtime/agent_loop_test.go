@@ -532,7 +532,7 @@ func TestAgentLoop_ToolApprovalGate(t *testing.T) {
 	if res != nil && res.Trace != nil {
 		for _, st := range res.Trace.Steps {
 			for _, tc := range st.ToolCalls {
-				if strings.Contains(tc.Err, "requires approval") {
+				if strings.Contains(tc.Err, "approval") {
 					rejected = true
 				}
 			}

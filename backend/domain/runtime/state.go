@@ -35,6 +35,7 @@ type ToolCallRecord struct {
 	Violations []validation.Violation
 	Result     string
 	Err        string
+	ApprovedBy string
 	Duration   time.Duration
 }
 

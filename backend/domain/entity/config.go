@@ -157,7 +157,10 @@ type LoopPolicy struct {
 	MaxConsecutiveValidationFailures int
 	TokenBudget                      int
 	MaxToolCalls                     int // 0 = unlimited; >0 forces convergence to EvidenceSummary after N tool calls
+	ApprovalTimeout                  time.Duration // how long a gated tool waits for human approval (0 = until run cancel)
+	TokenCompactionThreshold         float64       // fraction of TokenBudget that triggers history compaction (0 = disabled)
 }
+
 
 // ReflectionPolicy bounds the debate/reflection phase.
 type ReflectionPolicy struct {

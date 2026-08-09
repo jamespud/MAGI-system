@@ -47,6 +47,7 @@ type AgentLoop struct {
 	toolPolicy     *toolpolicy.Policy
 	metrics        *metrics.Registry
 	redactor       *redact.Redactor
+	approvalRepo    port.ApprovalRepository
 }
 
 type AgentLoopDeps struct {
@@ -62,6 +63,7 @@ type AgentLoopDeps struct {
 	ToolPolicy     *toolpolicy.Policy
 	Metrics        *metrics.Registry
 	Redactor       *redact.Redactor
+	ApprovalRepo   port.ApprovalRepository
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -97,7 +99,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	}
 	return &AgentLoop{
 		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
-		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor,
+		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal:  rv,
 		eventPub:       d.EventPub,
@@ -143,6 +145,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if maxSteps <= 0 {
 		maxSteps = 12
 	}
+	runCtx := ctx
 	if cfg.LoopPolicy.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.LoopPolicy.Timeout)
@@ -214,6 +217,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		phase = "reconsider_gather"
 	}
 	ts := &terminationState{}
+	compacted := false
 	agentCode := entity.MagiCode(cfg.Code)
 
 	// Resume from checkpoint if available (§18).
@@ -231,6 +235,19 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 
 	for step := startStep; step <= maxSteps; step++ {
+		if cfg.LoopPolicy.TokenBudget > 0 && cfg.LoopPolicy.TokenCompactionThreshold > 0 && !compacted &&
+			float64(ts.tokenUsed) >= float64(cfg.LoopPolicy.TokenBudget)*cfg.LoopPolicy.TokenCompactionThreshold {
+			compactedMsgs, usage, cerr := compactHistory(ctx, cm, messages)
+			if cerr == nil && len(compactedMsgs) > 0 {
+				messages = compactedMsgs
+				compacted = true
+				if usage != nil {
+					result.Usage = addUsage(result.Usage, usage)
+					ts.tokenUsed += usage.TotalTokens
+				}
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.tokenUsed})
+			}
+		}
 		l.saveCheckpoint(ctx, actx.RunID, messages, step-1, ts, phase)
 		if err := ctx.Err(); err != nil {
 			result.Status = LoopStatusCancelled
@@ -309,12 +326,24 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				if l.toolPolicy != nil && !l.toolPolicy.Allowed(td.Name) {
-					tcr.Err = "tool requires approval: " + td.Name
-					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-					ts.consecToolFail++
-					st.ToolCalls = append(st.ToolCalls, tcr)
-					continue
+				if l.toolPolicy != nil && l.toolPolicy.RequiresApproval(td.Name) && !l.toolPolicy.Allowed(td.Name) {
+					approved, decidedBy, reason, aerr := l.requestApproval(runCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
+					if aerr != nil {
+						tcr.Err = "approval check failed: " + aerr.Error()
+						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
+						ts.consecToolFail++
+						st.ToolCalls = append(st.ToolCalls, tcr)
+						continue
+					}
+					if !approved {
+						tcr.Err = "tool rejected by human: " + reason
+						tcr.ApprovedBy = decidedBy
+						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
+						ts.consecToolFail++
+						st.ToolCalls = append(st.ToolCalls, tcr)
+						continue
+					}
+					tcr.ApprovedBy = decidedBy
 				}
 				// Validate args
 				vr := l.validator.Validate(td.ArgsSchema, []byte(tc.Function.Arguments))
@@ -474,6 +503,61 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	result.Err = ErrMaxSteps
 	finalizeTrace(trace, result.Status)
 	return result, ErrMaxSteps
+}
+
+func (l *AgentLoop) requestApproval(runCtx context.Context, actx *AgentContext, agentCode entity.MagiCode, tc *schema.ToolCall, td port.ToolDefinition, timeout time.Duration) (bool, string, string, error) {
+	if l.approvalRepo == nil {
+		return false, "", "approval required but approval repository is not configured", nil
+	}
+	req, err := l.approvalRepo.FindByKey(runCtx, actx.CaseID, actx.RunID, td.Name)
+	if err != nil {
+		return false, "", "", fmt.Errorf("find approval: %w", err)
+	}
+	if req == nil {
+		req = &entity.ApprovalRequest{
+			CaseID: actx.CaseID, RunID: actx.RunID, AgentCode: agentCode,
+			ToolName: td.Name, Arguments: tc.Function.Arguments,
+			Status: entity.ApprovalPending, RequestedAt: time.Now(),
+		}
+		if err := l.approvalRepo.Create(runCtx, req); err != nil {
+			return false, "", "", fmt.Errorf("create approval: %w", err)
+		}
+		l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalRequested, map[string]any{
+			"approval_id": req.ID, "tool_name": td.Name, "case_id": actx.CaseID,
+		})
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	var timerC <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		timerC = timer.C
+	}
+	for {
+		cur, err := l.approvalRepo.Get(runCtx, req.ID)
+		if err == nil && cur != nil {
+			switch cur.Status {
+			case entity.ApprovalApproved:
+				l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalResolved, map[string]any{"approval_id": cur.ID, "tool_name": td.Name, "status": "approved", "decided_by": cur.DecidedBy})
+				return true, cur.DecidedBy, cur.Reason, nil
+			case entity.ApprovalRejected:
+				l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalResolved, map[string]any{"approval_id": cur.ID, "tool_name": td.Name, "status": "rejected", "decided_by": cur.DecidedBy, "reason": cur.Reason})
+				return false, cur.DecidedBy, cur.Reason, nil
+			case entity.ApprovalExpired:
+				return false, "", "approval request expired", nil
+			}
+		}
+		select {
+		case <-runCtx.Done():
+			return false, "", "", runCtx.Err()
+		case <-timerC:
+			_ = l.approvalRepo.MarkExpired(runCtx, req.ID)
+			l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalResolved, map[string]any{"approval_id": req.ID, "tool_name": td.Name, "status": "expired"})
+			return false, "", "approval request timed out", nil
+		case <-ticker.C:
+		}
+	}
 }
 
 // quoteToolOutput frames external tool output as untrusted data so model

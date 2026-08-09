@@ -92,7 +92,7 @@ func (d *Dispatcher) Dispatch(
 		i, c := i, cfg
 		g.Go(func() error {
 			actx := *base
-			actx.RunID = executionRunID(case_.ID, entity.MagiCode(c.Code), case_.ExecutionAttempt, round, "investigate")
+			actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(c.Code), round, "investigate")
 			r, _ := d.agentLoop.Run(gctx, c, &actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
@@ -125,7 +125,7 @@ func (d *Dispatcher) DispatchReconsider(
 				prevVote = prevResults[i].Vote
 			}
 			actx := *base
-			actx.RunID = executionRunID(case_.ID, entity.MagiCode(c.Code), case_.ExecutionAttempt, round, "reconsider")
+			actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(c.Code), round, "reconsider")
 			actx.DebateContext = &runtime.DebateContext{Packet: packet, PreviousVote: prevVote}
 			r, _ := d.agentLoop.Run(gctx, c, &actx)
 			if r == nil {
@@ -137,6 +137,13 @@ func (d *Dispatcher) DispatchReconsider(
 	}
 	_ = g.Wait()
 	return results
+}
+
+// checkpointRunID is the stable identity of an agent's working memory for a
+// (case, agent, round, phase). Unlike executionRunID it deliberately excludes
+// the execution attempt so durable retries resume the same checkpoint.
+func checkpointRunID(caseID string, code entity.MagiCode, round int, phase string) string {
+	return fmt.Sprintf("%s-%s-r%d-%s", caseID, code, round, phase)
 }
 
 func executionRunID(caseID string, code entity.MagiCode, attempt, round int, phase string) string {

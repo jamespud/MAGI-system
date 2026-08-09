@@ -17,6 +17,7 @@ import (
 	mcpadapter "github.com/jamespud/magi/backend/adapter/mcp"
 	rag "github.com/jamespud/magi/backend/adapter/rag"
 	"github.com/jamespud/magi/backend/application/admin"
+	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
@@ -68,6 +69,8 @@ var Module = fx.Options(
 		provideDecisionJobRepository,
 		provideDatasetRepository,
 		providePluginBindingRepository,
+		provideApprovalRepository,
+		provideApprovalService,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -99,6 +102,7 @@ var Module = fx.Options(
 	),
 	fx.Invoke(func(
 		h *hzserver.Hertz,
+		apprSvc *approval.Service,
 		decSvc *decision.Service,
 		authSvc *auth.Service,
 		dsSvc *dataset.Service,
@@ -118,6 +122,7 @@ var Module = fx.Options(
 	) {
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
 			Decision:     decSvc,
+			Approval:     apprSvc,
 			Auth:         authSvc,
 			Metrics:      reg,
 			Dataset:      dsSvc,
@@ -154,6 +159,7 @@ func provideAgentLoop(
 	toolPol *toolpolicy.Policy,
 	reg *metrics.Registry,
 	red *redact.Redactor,
+	approvalRepo port.ApprovalRepository,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -163,7 +169,7 @@ func provideAgentLoop(
 	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo,
 	})
 }
 
@@ -304,6 +310,14 @@ func provideOrchestrator(
 		Policy:               consensus.DefaultConsensusPolicy(),
 		ToolBindingsProvider: plugs,
 	})
+}
+
+func provideApprovalRepository(db *gorm.DB) port.ApprovalRepository {
+	return magi.NewApprovalRepository(db)
+}
+
+func provideApprovalService(repo port.ApprovalRepository) *approval.Service {
+	return approval.NewService(repo)
 }
 
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {

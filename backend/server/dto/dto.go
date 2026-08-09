@@ -65,6 +65,7 @@ type ToolCallDTO struct {
 	Arguments  string `json:"arguments"`
 	Result     string `json:"result"`
 	Err        string `json:"err,omitempty"`
+	ApprovedBy string `json:"approved_by,omitempty"`
 	EvidenceID string `json:"evidence_id,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
 }
@@ -125,6 +126,41 @@ type ToolResponse struct {
 
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+type ApprovalRequestDTO struct {
+	ID          string `json:"id"`
+	CaseID      string `json:"case_id"`
+	RunID       string `json:"run_id,omitempty"`
+	AgentCode   string `json:"agent_code,omitempty"`
+	ToolName    string `json:"tool_name"`
+	Arguments   string `json:"arguments,omitempty"`
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+	DecidedBy   string `json:"decided_by,omitempty"`
+	RequestedAt string `json:"requested_at,omitempty"`
+	DecidedAt   string `json:"decided_at,omitempty"`
+}
+
+type ApprovalListResponse struct {
+	Approvals []ApprovalRequestDTO `json:"approvals"`
+}
+
+type ApprovalDecisionRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func FromApproval(a *entity.ApprovalRequest) ApprovalRequestDTO {
+	out := ApprovalRequestDTO{
+		ID: a.ID, CaseID: a.CaseID, RunID: a.RunID, AgentCode: string(a.AgentCode),
+		ToolName: a.ToolName, Arguments: a.Arguments, Status: string(a.Status),
+		Reason: a.Reason, DecidedBy: a.DecidedBy,
+		RequestedAt: a.RequestedAt.Format(time.RFC3339),
+	}
+	if a.DecidedAt != nil {
+		out.DecidedAt = a.DecidedAt.Format(time.RFC3339)
+	}
+	return out
 }
 
 func FromCase(c *entity.DecisionCase, resolution *entity.Resolution) CaseResponse {
@@ -257,6 +293,12 @@ func eventMessage(e *entity.MagiEvent) string {
 		return "Case completed"
 	case entity.EventCaseFailed:
 		return "Case failed"
+	case entity.EventToolApprovalRequested:
+		return "Tool approval requested"
+	case entity.EventToolApprovalResolved:
+		return "Tool approval resolved"
+	case entity.EventContextCompacted:
+		return "Context compacted"
 	default:
 		return string(e.Type)
 	}
@@ -320,6 +362,7 @@ func FromToolCall(t *entity.ToolCall) ToolCallDTO {
 		Arguments:  t.Arguments,
 		Result:     t.Result,
 		Err:        t.Err,
+		ApprovedBy: t.ApprovedBy,
 		EvidenceID: t.EvidenceID,
 		DurationMs: t.DurationMs,
 	}

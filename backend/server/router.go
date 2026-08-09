@@ -5,6 +5,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/jamespud/magi/backend/application/admin"
+	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
@@ -23,6 +24,7 @@ import (
 // RouteDeps holds all application services needed by the router.
 type RouteDeps struct {
 	Decision     *decision.Service
+	Approval     *approval.Service
 	Assistant    *assistant.Service
 	Auth         *auth.Service
 	Admin        *admin.Service
@@ -86,6 +88,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	toolH := handler.NewToolHandler(deps.Tool)
 	v1.GET("/tools", toolH.List)
 	v1.GET("/tools/:name", toolH.Get)
+
+	apprH := handler.NewApprovalHandler(deps.Approval, deps.Decision)
+	v1.GET("/approvals", apprH.List)
+	v1.GET("/approvals/:id", apprH.Get)
+	v1.POST("/approvals/:id/approve", apprH.Approve)
+	v1.POST("/approvals/:id/reject", apprH.Reject)
 
 	dsH := handler.NewDatasetHandler(deps.Dataset)
 	v1.POST("/datasets", dsH.Create)

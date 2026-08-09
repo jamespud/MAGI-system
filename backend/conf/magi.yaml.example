@@ -13,6 +13,9 @@ magi:
   max_steps: 12
   timeout_seconds: 600            # per-agent total loop budget
   call_timeout_seconds: 180       # per chat completion cap
+  approval_timeout_seconds: 3600  # how long a gated tool waits for a human decision (0 = until run cancel)
+  token_budget: 150000            # per-agent token budget; compaction triggers before this
+  compaction_threshold: 0.7       # fraction of token_budget that triggers history compaction (0 = disabled)
 
   melchior:
     persona: "You are Melchior, the scientist. You value correctness, efficiency, and empirical validity. Analyze data, benchmarks, and technical feasibility."

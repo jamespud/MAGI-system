@@ -14,6 +14,7 @@ type ToolCall struct {
 	Valid      bool
 	Result     string
 	Err        string
+	ApprovedBy string
 	EvidenceID string // namespaced persisted EV-ID this call produced (may be empty)
 	DurationMs int64
 	CreatedAt  time.Time

@@ -229,9 +229,6 @@ The agent loop is heavily tested with scripted models, including failure policie
 
 ## Known Limitations / Future Work
 
-- **Interactive HITL approval** - `tool_policy.require_approval` currently blocks gated tools in autonomous runs; there is no approval queue / approve-reject API / resume-on-approval yet.
-- **Cross-retry checkpoint resume** - agent checkpoints are persisted, but durable retries restart the case from DRAFT with attempt-namespaced run IDs; a retry does not yet resume at the interrupted step.
-- **Context compaction** - approaching the token budget stops the loop instead of summarizing history mid-run.
 - **LLM-as-a-Judge (evaluation layer)** - semantic review of report quality, evidence-chain consistency, and reflection validity is not implemented; decision voting intentionally stays deterministic (see `docs/harness-eva-design.md`).
 - **Counterfactual stability** - the function exists but is not wired into dataset benchmark runs yet.
 - **Multi-instance deployment** - per-user run concurrency and the recurring scheduler are single-process; multi-replica operation needs shared-state limits.
@@ -246,6 +243,9 @@ Personal project. See the repository for details.
 Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 
 - **Durable async execution** — decision jobs persist with leases, retries, cancellation, and startup recovery; agent runs checkpoint and resume.
+- **Human-in-the-loop approvals** â gated tools create persisted approval requests (`/api/v1/approvals`); the run parks and resumes after approve/reject, and the decision is recorded on the tool call for audit.
+- **Cross-retry checkpoint resume** â agent checkpoints are keyed per case/agent/round (not per attempt), so durable retries and restarts resume the interrupted step instead of restarting from scratch.
+- **Context compaction** â before hitting the token budget the agent history is summarized (with a deterministic fallback) so long runs continue.
 - **Multi-tenant API** — API-key auth (constant-time compare) with per-user ownership on cases, datasets, plugin bindings, and recurring templates. Health/docs/metrics stay public.
 - **Governance & safety** — per-user run concurrency limits, token cost accounting, Prometheus `/metrics`, code-runner guardrails (language/length/danger patterns/timeout) on top of the Coze WASM sandbox, an autonomous tool-approval gate (high-impact tools require admin auto-approval), prompt-injection framing of tool output, and secret redaction before events/audit/model messages leave the process.
 - **Observability** — OpenTelemetry spans on HTTP requests and decision runs with `X-Trace-ID` propagation (log sink by default, OTLP-ready), plus readiness/DB ping and config fail-fast validation.
@@ -263,6 +263,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | POST | `/assistant` | Run a decision from a message |
 | POST/GET | `/cases`, `/cases/:id` (+`/run`, `/cancel`, `/report`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
 | GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` | Ground-truth evaluation |
+| GET/POST | `/approvals`, `/approvals/:id`, `/approvals/:id/approve`, `/approvals/:id/reject` | Human-in-the-loop tool approvals |
 | GET/POST/PATCH/DELETE | `/plugins`, `/plugins/:id` | User plugin bindings |
 | GET/POST/PATCH/DELETE | `/recurring`, `/recurring/:id` (+`/:id/run`) | Recurring templates |
 | POST | `/evaluation`, `/evaluation/:id`, `/benchmark` | Evaluation |
@@ -277,6 +278,7 @@ auth: { enabled: true, api_keys: [...] }        # per-user API keys
 limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
+magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
 mcp:
   servers:
     - { name: "example", transport: "stdio", command: "/usr/local/bin/mcp-server", timeout_seconds: 60 }

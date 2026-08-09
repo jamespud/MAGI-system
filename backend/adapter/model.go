@@ -196,12 +196,30 @@ type ToolCallModel struct {
 	Valid      bool
 	Result     string `gorm:"type:text"`
 	Err        string `gorm:"type:text"`
+	ApprovedBy string
 	EvidenceID string
 	DurationMs int64
 	CreatedAt  time.Time
 }
 
 func (ToolCallModel) TableName() string { return "magi_tool_call" }
+
+type ApprovalModel struct {
+	ID          string `gorm:"primaryKey"`
+	CaseID      string `gorm:"index"`
+	RunID       string
+	AgentCode   string
+	ToolName    string
+	Arguments   string `gorm:"type:text"`
+	Status      string `gorm:"index"`
+	Reason      string `gorm:"type:text"`
+	DecidedBy   string
+	RequestedAt time.Time
+	DecidedAt   *time.Time
+	CreatedAt   time.Time
+}
+
+func (ApprovalModel) TableName() string { return "magi_approval_request" }
 
 type DatasetModel struct {
 	ID          string `gorm:"primaryKey"`
@@ -296,7 +314,7 @@ func AllModels() []any {
 		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
-		&ToolCallModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
+		&ToolCallModel{}, &ApprovalModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
 		&PluginBindingModel{},
 		&RecurringCaseModel{},
 	}

@@ -38,6 +38,7 @@ type RunManagerDeps struct {
 	MaxAttempts              int
 	RetryBase                time.Duration
 	Metrics                  *metrics.Registry
+	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
 }
 
@@ -53,6 +54,7 @@ type RunManager struct {
 	maxAttempts          int
 	retryBase            time.Duration
 	metrics              *metrics.Registry
+	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
 	userRuns             map[int64]int
 	mu                   sync.Mutex
@@ -79,7 +81,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 	return &RunManager{
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
-		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser,
+		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
 		userRuns: make(map[int64]int), runs: make(map[string]*runHandle),
 	}
 }
@@ -188,6 +190,9 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 		c.ExecutionAttempt = claimed.Attempt
 		if claimed.Attempt > 1 && c.Status != entity.CaseStatusResolved {
+			if m.cleaner != nil {
+				_ = m.cleaner.CleanupCaseArtifacts(context.Background(), c.ID)
+			}
 			c.Status = entity.CaseStatusDraft
 			if m.caseRepo != nil {
 				_ = m.caseRepo.UpdateStatus(context.Background(), c.ID, entity.CaseStatusDraft)

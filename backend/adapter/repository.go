@@ -39,6 +39,36 @@ func NewRepository(db *gorm.DB) port.Repository {
 	return &magiRepository{db: db}
 }
 
+// CleanupCaseArtifacts removes the persisted artifacts of a previous execution
+// attempt so a resumed retry does not leave duplicate evidence/claims/votes.
+// Checkpoints, events, approval history and resolutions are preserved.
+func (r *magiRepository) CleanupCaseArtifacts(ctx context.Context, caseID string) error {
+	if r.db == nil {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("case_id = ?", caseID).Delete(&ToolCallModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("case_id = ?", caseID).Delete(&VoteModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("case_id = ?", caseID).Delete(&ClaimModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("case_id = ?", caseID).Delete(&EvidenceModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("case_id = ?", caseID).Delete(&DebateRoundModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_run_id IN (SELECT id FROM magi_agent_run WHERE case_id = ?)", caseID).Delete(&ReflectionModel{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("case_id = ?", caseID).Delete(&AgentRunModel{}).Error
+	})
+}
+
 func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
 func (r *magiRepository) AgentRunRepo() port.AgentRunRepository     { return &agentRunRepo{db: r.db} }
 func (r *magiRepository) EvidenceRepo() port.EvidenceRepository     { return &evidenceRepo{db: r.db} }
@@ -481,7 +511,7 @@ type toolCallRepo struct{ db *gorm.DB }
 func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
 	m := ToolCallModel{
 		ID: t.ID, AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
-		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err,
+		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err, ApprovedBy: t.ApprovedBy,
 		EvidenceID: t.EvidenceID, DurationMs: t.DurationMs, CreatedAt: t.CreatedAt,
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
@@ -501,7 +531,7 @@ func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	for i, m := range models {
 		out[i] = &entity.ToolCall{
 			ID: m.ID, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
-			Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err,
+			Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err, ApprovedBy: m.ApprovedBy,
 			EvidenceID: m.EvidenceID, DurationMs: m.DurationMs, CreatedAt: m.CreatedAt,
 		}
 	}

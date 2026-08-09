@@ -40,6 +40,7 @@ Stop with `make web-down`; logs with `make web-logs`.
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
 | `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |
 | `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
+| `magi` budget | `approval_timeout_seconds` (default 3600), `token_budget` (150000), `compaction_threshold` (0.7) |
 | `tracing` | `enabled` + `service_name` (log sink; OTLP-ready) |
 
 Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
@@ -76,6 +77,8 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
    - Code execution requires approval unless `code_runner` is in
      `tool_policy.auto_approved`; language/length/pattern/timeout guardrails
      apply before any sandbox call.
+   - Gated tools create approval requests visible at `GET /api/v1/approvals`;
+     approving resumes the parked run, rejecting feeds the decision back to the agent.
    - The sandbox reuses Coze's Deno + Pyodide WASM runner: the image must
      contain `python3`, `deno`, and `/app/sandbox.py` (vendored from
      coze-studio), with the `jsr:@langchain/pyodide-sandbox` cache warmed at
@@ -115,8 +118,9 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
 - **Startup fails fast**: read the error — model must be configured, auth keys
   valid when enabled, limits non-negative.
 - **Case stuck in a state**: check `/api/v1/cases/<id>/events`; each transition
-  publishes an event. Restarting the server requeues expired jobs and recovers
-  checkpointed agent runs (attempt-namespaced artifacts, no duplicate writes).
+  publishes an event. Restarting the server requeues expired jobs, resumes
+  checkpointed agent runs per case/agent/round, and cleans stale attempt artifacts
+  so the retry does not duplicate evidence/claims/votes.
 - **Report fails with citation error**: the model did not cite collected
   evidence; retry the case (or improve prompts) — this is intentional.
 - **Plugin/workflow unavailable**: MAGI standalone degrades gracefully when

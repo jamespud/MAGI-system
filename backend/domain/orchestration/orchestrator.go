@@ -372,6 +372,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						Valid:      tc.Valid,
 						Result:     tc.Result,
 						Err:        tc.Err,
+			ApprovedBy: tc.ApprovedBy,
 						EvidenceID: evID,
 						DurationMs: tc.Duration.Milliseconds(),
 						CreatedAt:  now,

@@ -168,6 +168,15 @@ export const api = {
 
   listTools: () => request<{ name: string; desc: string }[]>(`/tools`),
 
+  listApprovals: (caseId?: string) =>
+    request<{ approvals: ApiApproval[] }>(`/approvals${caseId ? `?case_id=${encodeURIComponent(caseId)}` : ''}`),
+
+  approveApproval: (id: string, reason?: string) =>
+    request<ApiApproval>(`/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
+  rejectApproval: (id: string, reason?: string) =>
+    request<ApiApproval>(`/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
   getVersion: () => request<{ version: string }>(`/version`),
 
   getReady: () => request<{ status: string }>(`/ready`),
@@ -255,6 +264,20 @@ interface ApiBenchmarkDetail {
   results: ApiBenchmarkItemResult[];
 }
 
+interface ApiApproval {
+  id: string;
+  case_id: string;
+  run_id?: string;
+  agent_code?: string;
+  tool_name: string;
+  arguments?: string;
+  status: string;
+  reason?: string;
+  decided_by?: string;
+  requested_at?: string;
+  decided_at?: string;
+}
+
 export type {
   ApiCaseResponse,
   ApiDataset,
@@ -271,4 +294,5 @@ export type {
   ApiClaim,
   ApiVote,
   ApiEvent,
+  ApiApproval,
 };
