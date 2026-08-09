@@ -38,7 +38,7 @@ backend/conf/magi.local.yaml
 .env
 .env.local
 
-docs/
+docs/superpowers/
 
 # build artifacts
 backend/magi-server

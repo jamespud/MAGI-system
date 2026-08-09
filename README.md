@@ -124,7 +124,10 @@ Application  ->  Orchestration  ->  Agent Runtime  ->  Port/Adapter  ->  Coze In
 - **Agent Runtime** (`domain/runtime/agent_loop.go`) is MAGI's own loop - do not replace it with Eino ReAct/compose.
 - **Validation** (`domain/validation/`) - Go struct -> JSON Schema -> validates every LLM structured output (DecisionTask, EvidenceSummary, ClaimSubmission, Vote, Reflection, FinalReport) via `santhosh-tekuri/jsonschema/v6`.
 
-The frozen target architecture is `magi-design.md` (Chinese); all code targets that design.
+The frozen target architecture and design philosophy are documented in `docs/harness-eva-design.md`; all code targets that design.
+The EVA lineage and design philosophy — hard voting vs. judge-based synthesis,
+personality-as-executable-boundary, dissent as a first-class outcome — is documented
+in `docs/harness-eva-design.md`.
 
 > **Coze reuse:** `backend/go.mod` depends on the published `coze-dev/coze-studio` module from the Go proxy (see `backend/Dockerfile`). MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox - but only through `adapter/`, never by importing Coze domain types into `domain/`. The code sandbox reuses Coze's `infra/coderunner/impl/sandbox` (Deno + Pyodide WASM); `backend/sandbox.py` is a vendored copy of Coze's sandbox orchestrator (provenance pinned in its header), and the Docker image ships `python3` + `deno` with a warmed `jsr:@langchain/pyodide-sandbox` cache.
 
@@ -226,9 +229,13 @@ The agent loop is heavily tested with scripted models, including failure policie
 
 ## Known Limitations / Future Work
 
-- **Knowledge base + prior-conclusion retrieval** - `KnowledgePort` and `ContextBuilder` are wired but not yet retrieving past resolved cases during investigation.
-- **Coze local replace directive** - must be swapped to a published fork for production builds (see Architecture).
-- The standalone CLI mode referenced in some docs is not currently wired; run via the HTTP server + frontend.
+- **Interactive HITL approval** - `tool_policy.require_approval` currently blocks gated tools in autonomous runs; there is no approval queue / approve-reject API / resume-on-approval yet.
+- **Cross-retry checkpoint resume** - agent checkpoints are persisted, but durable retries restart the case from DRAFT with attempt-namespaced run IDs; a retry does not yet resume at the interrupted step.
+- **Context compaction** - approaching the token budget stops the loop instead of summarizing history mid-run.
+- **LLM-as-a-Judge (evaluation layer)** - semantic review of report quality, evidence-chain consistency, and reflection validity is not implemented; decision voting intentionally stays deterministic (see `docs/harness-eva-design.md`).
+- **Counterfactual stability** - the function exists but is not wired into dataset benchmark runs yet.
+- **Multi-instance deployment** - per-user run concurrency and the recurring scheduler are single-process; multi-replica operation needs shared-state limits.
+- The standalone CLI mode referenced in some older docs is not currently wired; run via the HTTP server + frontend.
 
 ## License
 

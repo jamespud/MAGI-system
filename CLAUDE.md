@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MAGI is an evidence-driven multi-agent decision engine (inspired by Evangelion's MAGI). Three agents — **Melchior** (scientist), **Balthasar** (protector), **Casper** (innovator) — each with a distinct objective function, evidence standard, and risk tendency, independently investigate a decision question, then vote, debate, reflect, and re-vote toward a consensus resolution. A **Commander** LLM handles only language tasks. The frozen target architecture is `magi-design.md` (Chinese); all code targets that design.
+MAGI is an evidence-driven multi-agent decision engine (inspired by Evangelion's MAGI). Three agents — **Melchior** (scientist), **Balthasar** (protector), **Casper** (innovator) — each with a distinct objective function, evidence standard, and risk tendency, independently investigate a decision question, then vote, debate, reflect, and re-vote toward a consensus resolution. A **Commander** LLM handles only language tasks. The frozen target architecture and design philosophy are documented in `docs/harness-eva-design.md`; all code targets that design.
 
 Go module at `backend/` (`github.com/jamespud/magi/backend`), Go 1.24+.
 
@@ -33,15 +33,14 @@ go vet ./...
 
 Config: `backend/conf/magi.yaml` (override path with `MAGI_CONFIG` env var; local overrides in `backend/conf/magi.local.yaml`, gitignored). The `model` block points at any OpenAI-compatible endpoint (default DeepSeek).
 
-## Critical: Coze Studio local replace directive
+## Critical: Coze Studio dependency
 
-`backend/go.mod` contains:
-
-```
-replace github.com/coze-dev/coze-studio/backend => /home/spud/proj/coze-studio/backend
-```
-
-The build **fails** if that local path is absent. MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and sandbox — but only through `adapter/`, never by importing Coze domain types into `domain/`. For production, swap the replace to a published fork (the go.mod comment shows the intended form). There is also a required `replace github.com/apache/thrift => ... v0.13.0` that must stay in sync with coze-studio.
+`backend/go.mod` depends on the published `github.com/coze-dev/coze-studio/backend`
+module (see `backend/Dockerfile`); the only replace directive is the required
+`github.com/apache/thrift => v0.13.0` pin that must stay in sync with coze-studio.
+MAGI reuses Coze Studio's model builder, plugin/tool registry, knowledge store, and
+sandbox — but only through `adapter/`, never by importing Coze domain types into
+`domain/`.
 
 The code sandbox is wired in `bootstrap/container.go`: `codeRunnerAdapter`
 builds `infra/coderunner/impl/sandbox.Config` from the `code_runner` config and
@@ -59,7 +58,9 @@ Four layers, strictly one-way dependencies:
 Application -> Orchestration -> Agent Runtime -> Port/Adapter -> Coze Infrastructure
 ```
 
-`domain/` depends only on `domain/port` interfaces + eino; Coze implementations live in `adapter/`. Reverse dependencies are forbidden (design §2). ADRs are referenced in code comments (ADR-002 … ADR-010) but not stored as files here — `magi-design.md` is authoritative.
+`domain/` depends only on `domain/port` interfaces + eino; Coze implementations live in `adapter/`. Reverse dependencies are forbidden (design §2). ADRs are referenced in code comments (ADR-002 … ADR-010) but not stored as files here — the code is authoritative and the design rationale lives in `docs/harness-eva-design.md`.
+
+Design philosophy and EVA mapping: `docs/harness-eva-design.md`.
 
 ### Governing principle: LLM = semantics, code = rules
 
@@ -104,4 +105,4 @@ Every transition publishes a `MagiEvent` (`domain/entity/event.go`, ADR-008) via
 
 - Conventional Commits (`fix:`, `feat:`, `test:`, `chore:`).
 - Larger change plans live under `docs/superpowers/plans/` using `- [ ]` checkbox steps.
-- Code comments and identifiers are English; `magi-design.md` is Chinese.
+- Code comments and identifiers are English; design docs (`docs/harness-eva-design.md`) are Chinese.
