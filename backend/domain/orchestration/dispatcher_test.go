@@ -28,9 +28,9 @@ type mockKnowledgePort struct {
 func (m *mockKnowledgePort) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
 	return port.RetrieveResult{Blocks: m.blocks}, nil
 }
-func (m *mockKnowledgePort) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+func (m *mockKnowledgePort) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
 	m.stored = append(m.stored, proj)
-	return nil
+	return port.StoreStats{}, nil
 }
 
 func TestDispatch_SetsInvestigateRunID(t *testing.T) {

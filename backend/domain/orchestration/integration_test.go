@@ -26,9 +26,9 @@ func (k *stubKnowledge) Retrieve(ctx context.Context, req port.RetrieveRequest) 
 	return port.RetrieveResult{}, nil
 }
 
-func (k *stubKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+func (k *stubKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
 	k.stored = append(k.stored, proj)
-	return nil
+	return port.StoreStats{}, nil
 }
 
 func TestIntegration_OrchestratorWithDB(t *testing.T) {

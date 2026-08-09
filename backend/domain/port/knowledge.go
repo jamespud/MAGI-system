@@ -35,8 +35,16 @@ type RetrieveResult struct {
 	Blocks []MergedBlock
 }
 
+// StoreStats reports how many chunks were persisted for one case-memory
+// projection. Used for observability (logs + MEMORY_INDEXED event payload).
+type StoreStats struct {
+	Chunks300  int
+	Chunks900  int
+	Chunks1800 int
+}
+
 // KnowledgePort wraps the RAG pipeline for retrieval + case-memory storage.
 type KnowledgePort interface {
 	Retrieve(ctx context.Context, req RetrieveRequest) (RetrieveResult, error)
-	Store(ctx context.Context, proj *entity.CaseMemoryProjection) error
+	Store(ctx context.Context, proj *entity.CaseMemoryProjection) (StoreStats, error)
 }

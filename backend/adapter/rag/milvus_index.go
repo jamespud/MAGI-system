@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
@@ -24,6 +25,14 @@ func NewMilvusIndexer(addr, collection string, dim int) (*MilvusIndexer, error) 
 	idx := &MilvusIndexer{client: c, collection: collection, dim: dim}
 	if err := idx.ensureCollection(context.Background()); err != nil {
 		return nil, err
+	}
+	// Load the collection into memory so Search works immediately. Milvus does
+	// not auto-load on restart; without this, vector retrieval would silently
+	// degrade (the retriever logs and falls back to lexical-only).
+	if err := idx.client.LoadCollection(context.Background(), collection, false); err != nil {
+		log.Printf("rag milvus: collection %q load FAILED (vector search will degrade to lexical-only): %v", collection, err)
+	} else {
+		log.Printf("rag milvus: collection %q loaded", collection)
 	}
 	return idx, nil
 }

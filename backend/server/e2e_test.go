@@ -39,8 +39,8 @@ func (k *stubKnowledge) Retrieve(ctx context.Context, req port.RetrieveRequest) 
 	return port.RetrieveResult{}, nil
 }
 
-func (k *stubKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
-	return nil
+func (k *stubKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
+	return port.StoreStats{}, nil
 }
 
 type e2eOrch struct{ repo port.Repository }

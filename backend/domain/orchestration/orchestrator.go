@@ -223,9 +223,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			ledger := o.mergeLedgers(results)
 			proj := memory.BuildProjection(case_, resolution, ledger, votes)
 			if o.knowledge != nil {
-				_ = o.knowledge.Store(ctx, proj)
+				// The knowledge adapter owns the MEMORY_INDEXED event: it is
+				// published after indexing actually completes (sync) or by the
+				// async worker, with chunk counts in the payload.
+				_, _ = o.knowledge.Store(ctx, proj)
 			}
-			o.publish(ctx, case_, entity.EventMemoryIndexed, nil)
 			status = entity.CaseStatusEvaluating
 
 		case entity.CaseStatusEvaluating:
@@ -372,7 +374,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						Valid:      tc.Valid,
 						Result:     tc.Result,
 						Err:        tc.Err,
-			ApprovedBy: tc.ApprovedBy,
+						ApprovedBy: tc.ApprovedBy,
 						EvidenceID: evID,
 						DurationMs: tc.Duration.Milliseconds(),
 						CreatedAt:  now,

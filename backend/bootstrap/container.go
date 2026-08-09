@@ -3,16 +3,21 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
 	crossplugin "github.com/coze-dev/coze-studio/backend/crossdomain/plugin"
 	crossworkflow "github.com/coze-dev/coze-studio/backend/crossdomain/workflow"
 	coderunnersandbox "github.com/coze-dev/coze-studio/backend/infra/coderunner/impl/sandbox"
-	"time"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	mcpadapter "github.com/jamespud/magi/backend/adapter/mcp"
@@ -23,8 +28,8 @@ import (
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
-	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/evaluation"
+	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/plugins"
@@ -233,7 +238,7 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 // fallback) - connection failure returns an error so misconfiguration is
 // visible. When addresses are empty, in-memory fakes are used (tests / pure
 // standalone). Store is async when store_async is enabled.
-func ProvideKnowledgePort(cfg *Config, db *gorm.DB) (port.KnowledgePort, error) {
+func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, error) {
 	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
 	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
 
@@ -264,9 +269,12 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB) (port.KnowledgePort, error) 
 		Thr900: cfg.RAG.MergeThreshold900, Thr1800: cfg.RAG.MergeThreshold1800,
 		Orphan: cfg.RAG.OrphanStrategy,
 	})
-	adapter := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever)
+	adapter := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, pub)
 	if cfg.RAG.StoreAsync {
-		return rag.NewAsyncIndexer(adapter, nil, cfg.RAG.StoreWorkers), nil
+		// Async path: the inner adapter must not publish MEMORY_INDEXED
+		// itself; the worker publishes once indexing actually completes.
+		adapter = rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, nil)
+		return rag.NewAsyncIndexer(adapter, pub, cfg.RAG.StoreWorkers), nil
 	}
 	return adapter, nil
 }
@@ -455,7 +463,16 @@ func (s *StubToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRe
 }
 
 func provideDB(cfg *Config) (*gorm.DB, error) {
-	db, err := gorm.Open(MysqlDialector(cfg.Database.DSN), &gorm.Config{})
+	glog := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             slowThreshold(cfg.Database.SlowThresholdMs),
+			LogLevel:                  gormLogLevel(cfg.Database.LogLevel),
+			Colorful:                  false,
+			IgnoreRecordNotFoundError: true,
+		},
+	)
+	db, err := gorm.Open(MysqlDialector(cfg.Database.DSN), &gorm.Config{Logger: glog})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
@@ -464,6 +481,30 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
 	return db, nil
+}
+
+// slowThreshold returns the configured GORM slow-query threshold, defaulting
+// to 200ms when unset/invalid.
+func slowThreshold(ms int) time.Duration {
+	if ms <= 0 {
+		return 200 * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// gormLogLevel maps a config string to a GORM logger level. Anything unknown
+// defaults to Warn (errors + slow queries only, keeps runtime logs readable).
+func gormLogLevel(s string) logger.LogLevel {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "silent":
+		return logger.Silent
+	case "error":
+		return logger.Error
+	case "info":
+		return logger.Info
+	default:
+		return logger.Warn
+	}
 }
 
 func provideRepository(db *gorm.DB) port.Repository {

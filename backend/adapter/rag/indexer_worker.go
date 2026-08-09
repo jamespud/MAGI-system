@@ -36,22 +36,27 @@ func NewAsyncIndexer(inner port.KnowledgePort, pub port.EventPublisher, workers 
 func (a *AsyncIndexer) worker() {
 	for job := range a.jobs {
 		ctx := context.Background()
-		if err := a.inner.Store(ctx, job.proj); err != nil {
+		stats, err := a.inner.Store(ctx, job.proj)
+		if err != nil {
 			a.logger.Printf("rag async store failed: %v", err)
 		} else if a.pub != nil && job.proj != nil {
-			_ = a.pub.Publish(ctx, entity.NewEvent(job.proj.CaseID, "", nil, entity.EventMemoryIndexed, nil))
+			a.logger.Printf("rag async store: indexed source_ref=%s chunks(300=%d 900=%d 1800=%d)", job.proj.CaseID, stats.Chunks300, stats.Chunks900, stats.Chunks1800)
+			_ = a.pub.Publish(ctx, entity.NewEvent(job.proj.CaseID, "", nil, entity.EventMemoryIndexed, map[string]any{
+				"source_ref": job.proj.CaseID, "chunks_300": stats.Chunks300,
+				"chunks_900": stats.Chunks900, "chunks_1800": stats.Chunks1800,
+			}))
 		}
 	}
 }
 
 // Store submits the projection for async indexing and returns immediately.
-func (a *AsyncIndexer) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+func (a *AsyncIndexer) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
 	select {
 	case a.jobs <- storeJob{proj: proj}:
 	default:
 		a.logger.Printf("rag async store: queue full, dropping job for %s", proj.CaseID)
 	}
-	return nil
+	return port.StoreStats{}, nil
 }
 
 // Retrieve delegates synchronously to the inner adapter.

@@ -2,6 +2,8 @@ package rag
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"sort"
 )
 
@@ -29,6 +31,7 @@ type Retriever struct {
 	emb  Embedder
 	repo *ChunkRepository
 	opts MergeOpts
+	log  *log.Logger
 }
 
 func NewRetriever(vec VectorIndex, lex LexicalIndex, emb Embedder, repo *ChunkRepository, opts MergeOpts) *Retriever {
@@ -47,7 +50,7 @@ func NewRetriever(vec VectorIndex, lex LexicalIndex, emb Embedder, repo *ChunkRe
 	if opts.Orphan == "" {
 		opts.Orphan = "keep_300"
 	}
-	return &Retriever{vec: vec, lex: lex, emb: emb, repo: repo, opts: opts}
+	return &Retriever{vec: vec, lex: lex, emb: emb, repo: repo, opts: opts, log: log.Default()}
 }
 
 // Retrieve runs hybrid recall + RRF + dynamic merge.
@@ -69,7 +72,14 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride Mer
 	vecHits, vecErr := r.vec.Search(ctx, queryVec, opts.TopK, nil)
 	lexHits, lexErr := r.lex.Search(ctx, query, opts.TopK, nil)
 	if vecErr != nil && lexErr != nil {
-		return nil, vecErr
+		r.logf("rag retrieve: BOTH indexes failed (query=%q): vector=%v lexical=%v", query, vecErr, lexErr)
+		return nil, fmt.Errorf("rag retrieve: vector %v; lexical %v", vecErr, lexErr)
+	}
+	if vecErr != nil {
+		r.logf("rag retrieve: vector index degraded, falling back to lexical only (query=%q): %v", query, vecErr)
+	}
+	if lexErr != nil {
+		r.logf("rag retrieve: lexical index degraded, falling back to vector only (query=%q): %v", query, lexErr)
 	}
 
 	fused := rrf(vecHits, lexHits, opts.RRFK, opts.TopK)
@@ -168,7 +178,18 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride Mer
 			blocks = append(blocks, MergedBlock{Level: 300, Content: r.repo.get300Content(ctx, id), SourceRef: "", ChunkIDs: []string{id}})
 		}
 	}
+	r.logf("rag retrieve: query=%q blocks=%d", query, len(blocks))
 	return blocks, nil
+}
+
+// logf logs through r.log, falling back to the default logger when the
+// Retriever was constructed directly (tests) without a logger.
+func (r *Retriever) logf(format string, args ...any) {
+	l := r.log
+	if l == nil {
+		l = log.Default()
+	}
+	l.Printf(format, args...)
 }
 
 // rrf fuses vector + lexical hits by Reciprocal Rank Fusion.

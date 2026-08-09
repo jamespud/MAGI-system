@@ -6,6 +6,13 @@ model:
   base_url: "https://api.deepseek.com"     # e.g. "https://api.openai.com/v1", "https://ark.cn-beijing.volces.com/api/v3"
   model_name: "deepseek-v4-flash"          # e.g. "gpt-4o", "doubao-pro-32k", "deepseek-chat"
 
+# Database (usually injected via env: MAGI_DB_DSN / MAGI_DB_DRIVER).
+database:
+  driver: "mysql"
+  dsn: ""                                # e.g. user:pass@tcp(127.0.0.1:3307)/magi?charset=utf8mb4&parseTime=True
+  log_level: "warn"                      # silent|error|warn|info — warn logs errors + slow queries only
+  slow_threshold_ms: 200                 # GORM slow-query threshold; queries slower than this are logged
+
 
 
 magi:

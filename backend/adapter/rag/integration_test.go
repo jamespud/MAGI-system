@@ -22,14 +22,14 @@ func TestStoreRetrieveRoundTrip(t *testing.T) {
 	ch := NewChunker(RuneTokenCounter{CharsPerToken: 1}, ChunkLevels{L1800: 300, L900: 150, L300: 50})
 	emb := FakeEmbedder{Dim: 3}
 	retriever := NewRetriever(fv, fl, emb, repo, MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
-	adapter := NewHybridKnowledgeAdapter(ch, emb, repo, fv, fl, retriever)
+	adapter := NewHybridKnowledgeAdapter(ch, emb, repo, fv, fl, retriever, nil)
 
 	proj := &entity.CaseMemoryProjection{
 		CaseID:          "case-int",
 		QuestionSummary: "Should we rewrite in Rust?",
 		ContextSummary:  "Team has 2 Rust engineers and latency concerns.",
 	}
-	if err := adapter.Store(context.Background(), proj); err != nil {
+	if _, err := adapter.Store(context.Background(), proj); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
@@ -64,4 +64,6 @@ func (r *recordingVectorIndex) Search(ctx context.Context, q []float32, topK int
 	}
 	return hits, nil
 }
-func (r *recordingVectorIndex) DeleteBySourceRef(ctx context.Context, source, sourceRef string) error { return nil }
+func (r *recordingVectorIndex) DeleteBySourceRef(ctx context.Context, source, sourceRef string) error {
+	return nil
+}

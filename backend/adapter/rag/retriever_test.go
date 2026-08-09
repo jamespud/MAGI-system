@@ -2,10 +2,15 @@ package rag
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
 func newRetrieverForTest(t *testing.T, vecHits []VectorHit, lexHits []TextHit) *Retriever {
+	return newRetrieverForTestFull(t, vecHits, nil, lexHits, nil)
+}
+
+func newRetrieverForTestFull(t *testing.T, vecHits []VectorHit, vecErr error, lexHits []TextHit, lexErr error) *Retriever {
 	t.Helper()
 	db := newTestDB(t)
 	repo := NewChunkRepository(db)
@@ -28,8 +33,8 @@ func newRetrieverForTest(t *testing.T, vecHits []VectorHit, lexHits []TextHit) *
 		t.Fatalf("seed: %v", err)
 	}
 	return &Retriever{
-		vec:  &FakeVectorIndex{Hits: vecHits},
-		lex:  &FakeLexicalIndex{Hits: lexHits},
+		vec:  &FakeVectorIndex{Hits: vecHits, Err: vecErr},
+		lex:  &FakeLexicalIndex{Hits: lexHits, Err: lexErr},
 		emb:  FakeEmbedder{Dim: 3},
 		repo: repo,
 		opts: MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"},
@@ -87,5 +92,50 @@ func TestRetrieverRRFFusion(t *testing.T) {
 	}
 	if !ids["c1"] || !ids["c4"] {
 		t.Errorf("RRF fusion missed chunks; got ids %v", ids)
+	}
+}
+
+func TestRetrieverVectorDegradedFallsBackToLexical(t *testing.T) {
+	// Milvus down (collection not loaded / outage): ES hits must still return.
+	r := newRetrieverForTestFull(t, nil, fmt.Errorf("collection not loaded"), []TextHit{{ChunkID: "c4"}}, nil)
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	if err != nil {
+		t.Fatalf("retrieve should fall back to lexical, got error: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, b := range blocks {
+		for _, id := range b.ChunkIDs {
+			ids[id] = true
+		}
+	}
+	if !ids["c4"] {
+		t.Errorf("expected lexical hit c4 after vector degradation, got %v", ids)
+	}
+}
+
+func TestRetrieverLexicalDegradedFallsBackToVector(t *testing.T) {
+	// ES down: vector hits must still return.
+	r := newRetrieverForTestFull(t, []VectorHit{{ChunkID: "c1"}}, nil, nil, fmt.Errorf("es connection refused"))
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	if err != nil {
+		t.Fatalf("retrieve should fall back to vector, got error: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, b := range blocks {
+		for _, id := range b.ChunkIDs {
+			ids[id] = true
+		}
+	}
+	if !ids["c1"] {
+		t.Errorf("expected vector hit c1 after lexical degradation, got %v", ids)
+	}
+}
+
+func TestRetrieverBothIndexesFail(t *testing.T) {
+	// Both backends down: retrieve must surface the error, not silently return empty.
+	r := newRetrieverForTestFull(t, nil, fmt.Errorf("milvus down"), nil, fmt.Errorf("es down"))
+	_, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	if err == nil {
+		t.Fatal("expected error when both indexes fail")
 	}
 }

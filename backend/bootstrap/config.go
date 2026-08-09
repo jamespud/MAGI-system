@@ -23,20 +23,22 @@ type Config struct {
 		PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
 	} `yaml:"model"`
 	Magi struct {
-		MaxDebateRounds  int      `yaml:"max_debate_rounds"`
-		MaxSteps         int      `yaml:"max_steps"`
-		TimeoutSeconds   int      `yaml:"timeout_seconds"`
-		CallTimeoutSeconds int    `yaml:"call_timeout_seconds"`
-		ApprovalTimeoutSeconds int    `yaml:"approval_timeout_seconds"`
-		TokenBudget            int    `yaml:"token_budget"`
-		CompactionThreshold    float64 `yaml:"compaction_threshold"`
-		Melchior         MagiSpec `yaml:"melchior"`
-		Balthasar       MagiSpec `yaml:"balthasar"`
-		Casper          MagiSpec `yaml:"casper"`
+		MaxDebateRounds        int      `yaml:"max_debate_rounds"`
+		MaxSteps               int      `yaml:"max_steps"`
+		TimeoutSeconds         int      `yaml:"timeout_seconds"`
+		CallTimeoutSeconds     int      `yaml:"call_timeout_seconds"`
+		ApprovalTimeoutSeconds int      `yaml:"approval_timeout_seconds"`
+		TokenBudget            int      `yaml:"token_budget"`
+		CompactionThreshold    float64  `yaml:"compaction_threshold"`
+		Melchior               MagiSpec `yaml:"melchior"`
+		Balthasar              MagiSpec `yaml:"balthasar"`
+		Casper                 MagiSpec `yaml:"casper"`
 	} `yaml:"magi"`
 	Database struct {
-		Driver string `yaml:"driver"`
-		DSN    string `yaml:"dsn"`
+		Driver          string `yaml:"driver"`
+		DSN             string `yaml:"dsn"`
+		LogLevel        string `yaml:"log_level"`         // silent|error|warn|info (default warn)
+		SlowThresholdMs int    `yaml:"slow_threshold_ms"` // GORM slow-query threshold (default 200ms)
 	} `yaml:"database"`
 	Tavily struct {
 		APIKey string `yaml:"api_key"`
@@ -80,16 +82,16 @@ type Config struct {
 	Elasticsearch ESConfig        `yaml:"elasticsearch"`
 	RAG           RAGConfig       `yaml:"rag"`
 	Benchmark     BenchmarkConfig `yaml:"benchmark"`
-	ToolQuota     ToolQuotaConfig  `yaml:"tool_quota"`
+	ToolQuota     ToolQuotaConfig `yaml:"tool_quota"`
 }
 
 type ToolQuotaConfig struct {
-	DefaultPerMinute int           `yaml:"default_per_minute"`
+	DefaultPerMinute int            `yaml:"default_per_minute"`
 	Tools            map[string]int `yaml:"tools"`
 }
 
 type BenchmarkConfig struct {
-	RunsPerItem        int     `yaml:"runs_per_item"`
+	RunsPerItem         int     `yaml:"runs_per_item"`
 	RegressionThreshold float64 `yaml:"regression_threshold"`
 }
 
@@ -112,7 +114,7 @@ type MCPServerConfig struct {
 	URL            string            `yaml:"url"` // http: base URL of the MCP endpoint
 	Env            map[string]string `yaml:"env"`
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
-  	Headers        map[string]string `yaml:"headers"`
+	Headers        map[string]string `yaml:"headers"`
 	RetryAttempts  int               `yaml:"retry_attempts"`
 }
 
@@ -291,6 +293,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MAGI_DB_DRIVER"); v != "" {
 		cfg.Database.Driver = v
+	}
+	if v := os.Getenv("MAGI_DB_LOG_LEVEL"); v != "" {
+		cfg.Database.LogLevel = v
+	}
+	if v := os.Getenv("MAGI_DB_SLOW_THRESHOLD_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Database.SlowThresholdMs = n
+		}
 	}
 	if v := os.Getenv("MAGI_MODEL_API_KEY"); v != "" {
 		cfg.Model.APIKey = v

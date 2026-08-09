@@ -15,8 +15,8 @@ type mockKnowledge struct{ blocks []port.MergedBlock }
 func (m *mockKnowledge) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
 	return port.RetrieveResult{Blocks: m.blocks}, nil
 }
-func (m *mockKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
-	return nil
+func (m *mockKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
+	return port.StoreStats{}, nil
 }
 
 func TestContextBuilder_WithKnowledge(t *testing.T) {

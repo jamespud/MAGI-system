@@ -20,6 +20,7 @@ type HybridKnowledgeAdapter struct {
 	vec       VectorIndex
 	lex       LexicalIndex
 	retriever *Retriever
+	pub       port.EventPublisher
 	logger    *log.Logger
 }
 
@@ -30,18 +31,19 @@ func NewHybridKnowledgeAdapter(
 	vec VectorIndex,
 	lex LexicalIndex,
 	retriever *Retriever,
+	pub port.EventPublisher,
 ) *HybridKnowledgeAdapter {
 	return &HybridKnowledgeAdapter{
 		chunker: chunker, embedder: embedder, repo: repo, vec: vec, lex: lex,
-		retriever: retriever, logger: log.Default(),
+		retriever: retriever, pub: pub, logger: log.Default(),
 	}
 }
 
 // Store renders the projection to a document, chunks it, embeds 300-level
 // blocks, and writes to MySQL + Milvus + ES. Idempotent by source_ref (case_id).
-func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
 	if proj == nil {
-		return fmt.Errorf("nil projection")
+		return port.StoreStats{}, fmt.Errorf("nil projection")
 	}
 	source := "case_memory"
 	sourceRef := proj.CaseID
@@ -50,12 +52,17 @@ func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMem
 	_ = a.vec.DeleteBySourceRef(ctx, source, sourceRef)
 	_ = a.lex.DeleteBySourceRef(ctx, source, sourceRef)
 	if err := a.repo.DeleteBySourceRef(ctx, source, sourceRef); err != nil {
-		return fmt.Errorf("delete old: %w", err)
+		return port.StoreStats{}, fmt.Errorf("delete old: %w", err)
 	}
 
 	// Render + chunk.
 	doc := memory.RenderDocument(proj)
 	chunked := a.chunker.Chunk(doc, source, sourceRef)
+	stats := port.StoreStats{
+		Chunks300:  len(chunked.Chunks300),
+		Chunks900:  len(chunked.Chunks900),
+		Chunks1800: len(chunked.Chunks1800),
+	}
 
 	// Embed 300-level blocks.
 	texts := make([]string, len(chunked.Chunks300))
@@ -64,13 +71,14 @@ func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMem
 	}
 	vecs, err := a.embedder.Embed(ctx, texts)
 	if err != nil {
-		return fmt.Errorf("embed: %w", err)
+		return port.StoreStats{}, fmt.Errorf("embed: %w", err)
 	}
 
 	// Write MySQL (source of truth) first.
 	if err := a.repo.WriteChunks(ctx, chunked); err != nil {
-		return fmt.Errorf("write mysql: %w", err)
+		return port.StoreStats{}, fmt.Errorf("write mysql: %w", err)
 	}
+	a.logger.Printf("rag store: mysql ok source_ref=%s chunks(300=%d 900=%d 1800=%d)", sourceRef, stats.Chunks300, stats.Chunks900, stats.Chunks1800)
 
 	// Write Milvus (best-effort).
 	if a.vec != nil && len(chunked.Chunks300) > 0 {
@@ -79,7 +87,9 @@ func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMem
 			recs[i] = VectorRecord{ChunkID: c.ID, Embedding: vecs[i], Source: c.Source, SourceRef: c.SourceRef}
 		}
 		if err := a.vec.Upsert(ctx, recs); err != nil {
-			a.logger.Printf("rag store: milvus upsert failed (re-indexable from mysql): %v", err)
+			a.logger.Printf("rag store: milvus upsert FAILED source_ref=%s chunks=%d (re-indexable from mysql): %v", sourceRef, len(recs), err)
+		} else {
+			a.logger.Printf("rag store: milvus upsert ok source_ref=%s chunks=%d", sourceRef, len(recs))
 		}
 	}
 
@@ -90,10 +100,18 @@ func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMem
 			recs[i] = TextRecord{ChunkID: c.ID, Content: c.Content, Source: c.Source, SourceRef: c.SourceRef}
 		}
 		if err := a.lex.Upsert(ctx, recs); err != nil {
-			a.logger.Printf("rag store: es upsert failed (re-indexable from mysql): %v", err)
+			a.logger.Printf("rag store: es upsert FAILED source_ref=%s chunks=%d (re-indexable from mysql): %v", sourceRef, len(recs), err)
+		} else {
+			a.logger.Printf("rag store: es upsert ok source_ref=%s chunks=%d", sourceRef, len(recs))
 		}
 	}
-	return nil
+	if a.pub != nil {
+		_ = a.pub.Publish(ctx, entity.NewEvent(sourceRef, "", nil, entity.EventMemoryIndexed, map[string]any{
+			"source_ref": sourceRef, "chunks_300": stats.Chunks300,
+			"chunks_900": stats.Chunks900, "chunks_1800": stats.Chunks1800,
+		}))
+	}
+	return stats, nil
 }
 
 // Retrieve delegates to the Retriever and maps rag.MergedBlock -> port.MergedBlock.

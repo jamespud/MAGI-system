@@ -71,7 +71,7 @@ func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.Embedding.Dim = 3
 	// Empty Milvus/ES addresses -> fake indexes; no real connections.
-	kp, err := bootstrap.ProvideKnowledgePort(cfg, db)
+	kp, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("ProvideKnowledgePort: %v", err)
 	}
