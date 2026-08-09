@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -16,11 +16,15 @@ FROM alpine:3.21
 
 # ca-certificates: outbound HTTPS (model API/Tavily). python3+deno run the
 # vendored Coze sandbox orchestrator (backend/sandbox.py -> pyodide-sandbox).
+# Build-arg so China builds can swap to a faster mirror (e.g. aliyun), same
+# idea as the GOPROXY build-arg above.
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+RUN printf '%s/v3.21/main\n%s/v3.21/community\n' "$ALPINE_MIRROR" "$ALPINE_MIRROR" > /etc/apk/repositories
 RUN apk add --no-cache ca-certificates python3 deno
 
 COPY --from=builder /app/magi-server /app/magi-server
 # Vendored Coze sandbox orchestrator (see backend/sandbox.py header for provenance).
-COPY --from=builder /app/backend/sandbox.py /app/sandbox.py
+COPY --from=builder /app/sandbox.py /app/sandbox.py
 # Bake only the structural config (placeholder secrets). Real secrets/DSN are
 # injected at runtime via env vars (see bootstrap.applyEnvOverrides).
 COPY --from=builder /app/conf/magi.yaml.example /app/conf/magi.yaml

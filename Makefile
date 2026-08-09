@@ -119,9 +119,6 @@ lint: fmt vet
 COMPOSE_DEBUG := docker/docker-compose-debug.yml
 COMPOSE_WEB := docker/docker-compose-web.yml
 
-web-up:
-	docker compose --project-directory . -f $(COMPOSE_WEB) up -d --build
-
 web-down:
 	docker compose --project-directory . -f $(COMPOSE_WEB) down
 

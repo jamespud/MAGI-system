@@ -19,10 +19,10 @@ db_up() {
     return 0
   fi
   echo "--- Starting MySQL middleware ---"
-  docker compose -f "$COMPOSE_FILE" up -d mysql
+  docker compose --project-directory "$PROJECT_ROOT" -f "$COMPOSE_FILE" up -d mysql
   echo "Waiting for MySQL to become healthy..."
   for _ in $(seq 1 30); do
-    if docker compose -f "$COMPOSE_FILE" ps --format '{{.Health}}' 2>/dev/null | grep -q 'healthy'; then
+    if docker compose --project-directory "$PROJECT_ROOT" -f "$COMPOSE_FILE" ps --format '{{.Health}}' 2>/dev/null | grep -q 'healthy'; then
       echo "MySQL healthy."
       DEBUG_STARTED_MYSQL=true
       return 0
@@ -35,7 +35,7 @@ db_up() {
 
 db_down() {
   echo "--- Stopping MySQL middleware ---"
-  docker compose -f "$COMPOSE_FILE" down
+  docker compose --project-directory "$PROJECT_ROOT" -f "$COMPOSE_FILE" down
 }
 
 # rag_up starts Milvus + Elasticsearch (and deps etcd/minio) and waits for
@@ -48,7 +48,7 @@ rag_up() {
   docker volume create magi-etcd-data 2>/dev/null || true
   docker volume create magi-minio-data 2>/dev/null || true
   echo "--- Starting RAG middleware (Milvus + Elasticsearch) ---"
-  docker compose -f "$RAG_COMPOSE_FILE" up -d milvus-standalone elasticsearch
+  docker compose --project-directory "$PROJECT_ROOT" -f "$RAG_COMPOSE_FILE" up -d milvus-standalone elasticsearch
   echo "Waiting for Milvus (9091/healthz)..."
   for _ in $(seq 1 60); do
     if curl -sf http://localhost:9091/healthz >/dev/null 2>&1; then
