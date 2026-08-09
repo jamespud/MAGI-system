@@ -169,6 +169,54 @@ func (s *Service) ListItems(ctx context.Context, ownerID int64, datasetID string
 	return s.datasets.ListItems(ctx, datasetID)
 }
 
+func (s *Service) UpdateItem(ctx context.Context, ownerID int64, datasetID, itemID string, it NewItem) error {
+	if _, err := s.requireDataset(ctx, ownerID, datasetID); err != nil {
+		return err
+	}
+	if it.Question == "" || it.ExpectedDecision == "" {
+		return fmt.Errorf("dataset: question and expected_decision are required")
+	}
+	item, err := s.datasets.GetItem(ctx, itemID)
+	if err != nil || item == nil || item.DatasetID != datasetID {
+		return fmt.Errorf("dataset: item not found")
+	}
+	item.Question = it.Question
+	item.Context = it.Background
+	item.Constraints = it.Constraints
+	item.ExpectedDecision = it.ExpectedDecision
+	if it.Weight > 0 {
+		item.Weight = it.Weight
+	}
+	item.Tags = it.Tags
+	return s.datasets.UpdateItem(ctx, item)
+}
+
+func (s *Service) DeleteItem(ctx context.Context, ownerID int64, datasetID, itemID string) error {
+	ds, err := s.requireDataset(ctx, ownerID, datasetID)
+	if err != nil {
+		return err
+	}
+	item, err := s.datasets.GetItem(ctx, itemID)
+	if err != nil || item == nil || item.DatasetID != datasetID {
+		return fmt.Errorf("dataset: item not found")
+	}
+	if err := s.datasets.DeleteItem(ctx, itemID); err != nil {
+		return err
+	}
+	ds.ItemCount--
+	if ds.ItemCount < 0 {
+		ds.ItemCount = 0
+	}
+	return s.datasets.UpdateDataset(ctx, ds)
+}
+
+func (s *Service) ExportItems(ctx context.Context, ownerID int64, datasetID string) ([]*entity.BenchmarkItem, error) {
+	if _, err := s.requireDataset(ctx, ownerID, datasetID); err != nil {
+		return nil, err
+	}
+	return s.datasets.ListItems(ctx, datasetID)
+}
+
 // StartRun enqueues an asynchronous benchmark run and returns immediately.
 // The worker executes each dataset item, persists results, and finalizes the
 // run; poll run detail for progress.
@@ -198,6 +246,16 @@ func (s *Service) StartRunWithOptions(ctx context.Context, ownerID int64, datase
 		}
 	}
 	run := &entity.BenchmarkRun{ID: "bench-" + uuid.NewString(), DatasetID: datasetID, Status: entity.BenchmarkRunQueued, Total: len(items), StartedAt: time.Now(), CreatedAt: time.Now()}
+	if opts.RunsPerItem > 0 {
+		run.RunsPerItem = opts.RunsPerItem
+	} else {
+		run.RunsPerItem = s.runsPerItem
+	}
+	thresholdOpt := opts.RegressionThreshold
+	if thresholdOpt == 0 {
+		thresholdOpt = s.regressionThreshold
+	}
+	run.RegressionThreshold = thresholdOpt
 	if err := s.datasets.CreateRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("dataset: create run: %w", err)
 	}
@@ -227,11 +285,43 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 	if opts.RunsPerItem > 0 {
 		runs = opts.RunsPerItem
 	}
+	if run.RunsPerItem > 0 {
+		runs = run.RunsPerItem
+	}
 	threshold := opts.RegressionThreshold
 	if threshold == 0 {
 		threshold = s.regressionThreshold
 	}
+	if run.RegressionThreshold > 0 {
+		threshold = run.RegressionThreshold
+	}
+	weights := make(map[string]float64, len(items))
+	for _, it := range items {
+		weights[it.ID] = it.Weight
+	}
+	done := map[string]bool{}
+	existing, _ := s.datasets.ListItemResults(ctx, runID)
+	for _, r := range existing {
+		if r == nil || r.DatasetItemID == "" {
+			continue
+		}
+		done[r.DatasetItemID] = true
+		completedItems++
+		sumConsistency += r.Consistency
+		if r.Matched {
+			matched++
+			w := weights[r.DatasetItemID]
+			if w <= 0 {
+				w = 1
+			}
+			matchedWeight += w
+			totalWeight += w
+		}
+	}
 	for _, item := range items {
+		if done[item.ID] {
+			continue
+		}
 		res := &entity.BenchmarkItemResult{RunID: run.ID, DatasetItemID: item.ID, ExpectedDecision: item.ExpectedDecision}
 		decisions := make([]entity.VoteDecision, 0, runs)
 		var firstCaseID string
@@ -373,15 +463,19 @@ func (s *Service) RecoverOrphanRuns(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
 	for _, r := range runs {
-		if r.Status == entity.BenchmarkRunQueued || r.Status == entity.BenchmarkRunRunning {
-			r.Status = entity.BenchmarkRunFailed
-			r.CompletedAt = &now
-			if err := s.datasets.UpdateRun(ctx, r); err != nil {
-				return err
-			}
+		if r.Status != entity.BenchmarkRunQueued && r.Status != entity.BenchmarkRunRunning {
+			continue
 		}
+		ds, err := s.datasets.GetDataset(ctx, r.DatasetID)
+		if err != nil {
+			continue
+		}
+		items, err := s.datasets.ListItems(ctx, r.DatasetID)
+		if err != nil || len(items) == 0 {
+			continue
+		}
+		go s.processRun(r.ID, items, ds.OwnerID, RunOptions{RunsPerItem: r.RunsPerItem, RegressionThreshold: r.RegressionThreshold})
 	}
 	return nil
 }

@@ -82,6 +82,47 @@ func (h *DatasetHandler) AddItems(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, map[string]int{"added": count})
 }
 
+func (h *DatasetHandler) UpdateItem(ctx context.Context, c *app.RequestContext) {
+	var req dto.DatasetItemDTO
+	if err := c.BindAndValidate(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid item"})
+		return
+	}
+	constraints := make([]entity.Constraint, len(req.Constraints))
+	for i, ct := range req.Constraints {
+		constraints[i] = entity.Constraint{Key: ct.Label, Value: ct.Value}
+	}
+	if err := h.svc.UpdateItem(ctx, CurrentUserID(ctx), c.Param("id"), c.Param("itemId"), dataset.NewItem{
+		Question: req.Question, Background: req.Background, Constraints: constraints,
+		ExpectedDecision: entity.VoteDecision(req.ExpectedDecision), Weight: req.Weight, Tags: req.Tags,
+	}); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, dto.ErrorResponse{Error: ""})
+}
+
+func (h *DatasetHandler) DeleteItem(ctx context.Context, c *app.RequestContext) {
+	if err := h.svc.DeleteItem(ctx, CurrentUserID(ctx), c.Param("id"), c.Param("itemId")); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusNoContent, nil)
+}
+
+func (h *DatasetHandler) ExportItems(ctx context.Context, c *app.RequestContext) {
+	items, err := h.svc.ExportItems(ctx, CurrentUserID(ctx), c.Param("id"))
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	out := make([]dto.DatasetItemDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, dto.FromItem(it))
+	}
+	c.JSON(consts.StatusOK, out)
+}
+
 func (h *DatasetHandler) ListItems(ctx context.Context, c *app.RequestContext) {
 	items, err := h.svc.ListItems(ctx, CurrentUserID(ctx), c.Param("id"))
 	if err != nil {

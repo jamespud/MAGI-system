@@ -41,6 +41,7 @@ type RouteDeps struct {
 	Broker       *EventBroker
 	EventRepo    port.EventRepository
 	HealthPinger handler.Pinger
+	ModelName    string
 	Tracing      *trace.TracerProvider
 }
 
@@ -93,6 +94,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	toolH := handler.NewToolHandler(deps.Tool)
 	v1.GET("/tools", toolH.List)
 	v1.GET("/tools/:name", toolH.Get)
+ 	statusH := handler.NewStatusHandler(deps.Metrics, deps.ModelName)
+	v1.GET("/status", statusH.Status)
 
 	apprH := handler.NewApprovalHandler(deps.Approval, deps.Decision)
 	v1.GET("/approvals", apprH.List)
@@ -106,6 +109,9 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/datasets/:id", dsH.Get)
 	v1.POST("/datasets/:id/items", dsH.AddItems)
 	v1.GET("/datasets/:id/items", dsH.ListItems)
+	v1.PATCH("/datasets/:id/items/:itemId", dsH.UpdateItem)
+	v1.DELETE("/datasets/:id/items/:itemId", dsH.DeleteItem)
+	v1.GET("/datasets/:id/items/export", dsH.ExportItems)
 	v1.POST("/datasets/:id/runs", dsH.Run)
 	v1.GET("/datasets/:id/runs", dsH.ListRuns)
 	v1.GET("/benchmarks/:runID", dsH.RunDetail)

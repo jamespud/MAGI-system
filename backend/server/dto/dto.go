@@ -468,6 +468,25 @@ func FromBenchmarkRun(r *entity.BenchmarkRun) BenchmarkRunResponse {
 	return resp
 }
 
+func FromItem(it *entity.BenchmarkItem) DatasetItemDTO {
+	constraints := make([]ConstraintDTO, len(it.Constraints))
+	for i, ct := range it.Constraints {
+		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
+	}
+	return DatasetItemDTO{
+		Question: it.Question, Background: it.Context, Constraints: constraints,
+		ExpectedDecision: string(it.ExpectedDecision), Weight: it.Weight, Tags: it.Tags,
+	}
+}
+
+type StatusResponse struct {
+	ModelName   string  `json:"model_name"`
+	TokensTotal int64   `json:"tokens_total"`
+	CostUSD     float64 `json:"cost_usd"`
+	RunsActive  int64   `json:"runs_active"`
+	Connected   bool    `json:"connected"`
+}
+
 func FromBenchmarkResult(r *entity.BenchmarkItemResult) BenchmarkItemResultResponse {
 	out := BenchmarkItemResultResponse{
 		ID: r.ID, CaseID: r.CaseID, ExpectedDecision: string(r.ExpectedDecision),

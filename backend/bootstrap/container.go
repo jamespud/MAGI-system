@@ -110,6 +110,7 @@ var Module = fx.Options(
 	),
 	fx.Invoke(func(
 		h *hzserver.Hertz,
+		cfg *Config,
 		apprSvc *approval.Service,
 		judgeSvc *judge.Service,
 		decSvc *decision.Service,
@@ -148,6 +149,7 @@ var Module = fx.Options(
 			EventRepo:    repo.EventRepo(),
 			HealthPinger: dbPing,
 			Tracing:      tp,
+			ModelName:    cfg.Model.ModelName,
 		})
 	}),
 	fx.Invoke(registerLifecycle),

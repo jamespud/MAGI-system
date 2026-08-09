@@ -97,6 +97,29 @@ func (r *datasetRepo) ListItems(ctx context.Context, datasetID string) ([]*entit
 	return out, nil
 }
 
+func (r *datasetRepo) GetItem(ctx context.Context, id string) (*entity.BenchmarkItem, error) {
+	var m DatasetItemModel
+	if err := r.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &entity.BenchmarkItem{
+		ID: m.ID, DatasetID: m.DatasetID, Question: m.Question, Context: m.Context,
+		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ExpectedDecision: entity.VoteDecision(m.ExpectedDecision),
+		Weight: m.Weight, Tags: fromJSON[[]string](m.TagsJSON), CreatedAt: m.CreatedAt,
+	}, nil
+}
+
+func (r *datasetRepo) UpdateItem(ctx context.Context, it *entity.BenchmarkItem) error {
+	return r.db.WithContext(ctx).Model(&DatasetItemModel{}).Where("id = ?", it.ID).Updates(map[string]any{
+		"question": it.Question, "context": it.Context, "constraints_json": toJSON(it.Constraints),
+		"expected_decision": string(it.ExpectedDecision), "weight": it.Weight, "tags_json": toJSON(it.Tags),
+	}).Error
+}
+
+func (r *datasetRepo) DeleteItem(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&DatasetItemModel{}).Error
+}
+
 func (r *datasetRepo) CreateRun(ctx context.Context, run *entity.BenchmarkRun) error {
 	if run.ID == "" {
 		run.ID = "bench-" + uuid.NewString()

@@ -17,6 +17,9 @@ type DatasetRepository interface {
 	UpdateDataset(ctx context.Context, d *entity.BenchmarkDataset) error
 	CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error
 	ListItems(ctx context.Context, datasetID string) ([]*entity.BenchmarkItem, error)
+	GetItem(ctx context.Context, id string) (*entity.BenchmarkItem, error)
+	UpdateItem(ctx context.Context, item *entity.BenchmarkItem) error
+	DeleteItem(ctx context.Context, id string) error
 	CreateRun(ctx context.Context, r *entity.BenchmarkRun) error
 	UpdateRun(ctx context.Context, r *entity.BenchmarkRun) error
 	GetRun(ctx context.Context, id string) (*entity.BenchmarkRun, error)

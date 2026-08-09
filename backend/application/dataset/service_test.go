@@ -59,6 +59,45 @@ func (s *stubDatasetRepo) UpdateDataset(ctx context.Context, d *entity.Benchmark
 	s.ds[d.ID] = d
 	return nil
 }
+func (s *stubDatasetRepo) GetItem(ctx context.Context, id string) (*entity.BenchmarkItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, list := range s.items {
+		for _, it := range list {
+			if it.ID == id {
+				return it, nil
+			}
+		}
+	}
+	return nil, errors.New("not found")
+}
+func (s *stubDatasetRepo) UpdateItem(ctx context.Context, it *entity.BenchmarkItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, list := range s.items {
+		for i, x := range list {
+			if x.ID == it.ID {
+				list[i] = it
+				return nil
+			}
+		}
+	}
+	return errors.New("not found")
+}
+func (s *stubDatasetRepo) DeleteItem(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, list := range s.items {
+		for i, it := range list {
+			if it.ID == id {
+				s.items[key] = append(list[:i], list[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return errors.New("not found")
+}
+
 func (s *stubDatasetRepo) CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -340,24 +379,20 @@ func TestService_RejectsSecondActiveRun(t *testing.T) {
 
 func TestService_RecoverOrphanRuns(t *testing.T) {
 	repo := newStubDatasetRepo()
-	orch := &gatedOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
+	orch := &stubOrch{}
 	svc := dataset.NewService(repo, &stubCaseRepo{}, orch, 1)
 	ctx := context.Background()
 	d, _ := svc.Create(ctx, 0, "eval", "")
 	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{{Question: "q", ExpectedDecision: entity.VoteDecisionApprove}})
-	run, err := svc.StartRun(ctx, 0, d.ID)
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	<-orch.started
+	run := &entity.BenchmarkRun{ID: "bench-orphan", DatasetID: d.ID, Status: entity.BenchmarkRunRunning, Total: 1, StartedAt: time.Now(), CreatedAt: time.Now()}
+	_ = repo.CreateRun(ctx, run)
 	if err := svc.RecoverOrphanRuns(ctx); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
-	got, _ := repo.GetRun(ctx, run.ID)
-	if got == nil || got.Status != entity.BenchmarkRunFailed {
-		t.Fatalf("orphan run should be failed, got %+v", got)
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+	if run.Accuracy != 1 || run.Stability != 1 {
+		t.Fatalf("resumed run: %+v", run)
 	}
-	close(orch.release)
 }
 
 func TestService_AddFeedbackOwnershipAndPersists(t *testing.T) {
