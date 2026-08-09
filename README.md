@@ -241,9 +241,9 @@ Personal project. See the repository for details.
 Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 
 - **Durable async execution** — decision jobs persist with leases, retries, cancellation, and startup recovery; agent runs checkpoint and resume.
-- **Human-in-the-loop approvals** â gated tools create persisted approval requests (`/api/v1/approvals`); the run parks and resumes after approve/reject, and the decision is recorded on the tool call for audit.
-- **Cross-retry checkpoint resume** â agent checkpoints are keyed per case/agent/round (not per attempt), so durable retries and restarts resume the interrupted step instead of restarting from scratch.
-- **Context compaction** â before hitting the token budget the agent history is summarized (with a deterministic fallback) so long runs continue.
+- **Human-in-the-loop approvals** — gated tools create persisted approval requests (`/api/v1/approvals`); the run parks and resumes after approve/reject, and the decision is recorded on the tool call for audit.
+- **Cross-retry checkpoint resume** — agent checkpoints are keyed per case/agent/round (not per attempt), so durable retries and restarts resume the interrupted step instead of restarting from scratch.
+- **Context compaction** — before hitting the token budget the agent history is summarized (with a deterministic fallback) so long runs continue.
 - **Multi-tenant API** — API-key auth (constant-time compare) with per-user ownership on cases, datasets, plugin bindings, and recurring templates. Health/docs/metrics stay public.
 - **Governance & safety** — per-user run concurrency limits, token cost accounting, Prometheus `/metrics`, code-runner guardrails (language/length/danger patterns/timeout) on top of the Coze WASM sandbox, an autonomous tool-approval gate (high-impact tools require admin auto-approval), prompt-injection framing of tool output, and secret redaction before events/audit/model messages leave the process.
 - **Observability** — OpenTelemetry spans on HTTP requests and decision runs with `X-Trace-ID` propagation (log sink by default, OTLP-ready), plus readiness/DB ping and config fail-fast validation.
