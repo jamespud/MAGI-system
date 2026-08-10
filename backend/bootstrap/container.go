@@ -425,7 +425,11 @@ func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.
 }
 
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
-	h := hzserver.Default(hzserver.WithHostPorts(":8080"))
+	addr := os.Getenv("MAGI_HTTP_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	h := hzserver.Default(hzserver.WithHostPorts(addr))
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go h.Spin()
