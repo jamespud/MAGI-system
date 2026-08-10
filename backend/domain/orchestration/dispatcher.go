@@ -145,6 +145,33 @@ func (d *Dispatcher) DispatchReconsider(
 	return results
 }
 
+// RetryAgent re-runs a single agent for the given round/phase. The RunID is
+// suffixed with the attempt so a failed attempt's checkpoint is not resumed
+// (the checkpoint store has no delete operation).
+func (d *Dispatcher) RetryAgent(
+	ctx context.Context,
+	case_ *entity.DecisionCase,
+	task *entity.DecisionTask,
+	cfg *entity.MagiConfig,
+	round, attempt int,
+	phase string,
+) *runtime.LoopResult {
+	base := d.buildBase(ctx, case_, task)
+	actx := *base
+	actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(cfg.Code), round, phase) + fmt.Sprintf("-retry%d", attempt)
+	r, _ := d.agentLoop.Run(ctx, cfg, &actx)
+	if r == nil {
+		r = &runtime.LoopResult{Status: runtime.LoopStatusError}
+	}
+	return r
+}
+
+// isCompleted reports whether a loop result represents a successful run with a
+// decision (used by the retry path to decide whether re-dispatch is needed).
+func isCompleted(r *runtime.LoopResult) bool {
+	return r != nil && r.Status == runtime.LoopStatusCompleted && r.Err == nil && r.Vote != nil
+}
+
 // checkpointRunID is the stable identity of an agent's working memory for a
 // (case, agent, round, phase). Unlike executionRunID it deliberately excludes
 // the execution attempt so durable retries resume the same checkpoint.

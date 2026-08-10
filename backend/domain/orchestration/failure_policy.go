@@ -8,10 +8,13 @@ import (
 )
 
 type FailurePolicy struct {
-	Mode string // "abstain_on_fail" (default) | "fail_case"
+	Mode       string // "abstain_on_fail" (default) | "fail_case"
+	RetryLimit int    // agent-level re-dispatch attempts before the policy applies (default 1)
 }
 
-func DefaultFailurePolicy() FailurePolicy { return FailurePolicy{Mode: "abstain_on_fail"} }
+func DefaultFailurePolicy() FailurePolicy {
+	return FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 1}
+}
 
 // ErrAgentFailed aborts the case when Mode == "fail_case": any agent failure
 // fails the whole decision instead of silently converting to an abstention.

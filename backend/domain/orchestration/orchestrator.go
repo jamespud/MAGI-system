@@ -136,6 +136,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		case entity.CaseStatusInvestigating:
 			o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": round})
 			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs, round)
+			results = o.retryFailedAgents(ctx, case_, task, results, round, "investigate")
 			status = entity.CaseStatusEvidenceGating
 
 		case entity.CaseStatusEvidenceGating:
@@ -189,6 +190,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 				})
 			}
 			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs, round)
+			results = o.retryFailedAgents(ctx, case_, task, results, round, "reconsider")
 			status = entity.CaseStatusReflecting
 
 		case entity.CaseStatusReflecting:
@@ -319,6 +321,40 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 		votes[i] = o.failPolicy.HandleFailure(r, cfg)
 	}
 	return votes
+}
+
+// retryFailedAgents re-dispatches agents that did not complete successfully,
+// up to the configured RetryLimit. Transient failures (one bad model call,
+// a flaky tool) then no longer fabricate ABSTAIN ties; a persistent failure
+// still falls through to the failure policy.
+func (o *Orchestrator) retryFailedAgents(
+	ctx context.Context,
+	case_ *entity.DecisionCase,
+	task *entity.DecisionTask,
+	results []*runtime.LoopResult,
+	round int,
+	phase string,
+) []*runtime.LoopResult {
+	limit := o.failPolicy.RetryLimit
+	if limit <= 0 || len(results) == 0 {
+		return results
+	}
+	for i, r := range results {
+		if isCompleted(r) {
+			continue
+		}
+		if i >= len(o.configs) || o.configs[i] == nil {
+			continue
+		}
+		for attempt := 1; attempt <= limit; attempt++ {
+			rr := o.dispatcher.RetryAgent(ctx, case_, task, o.configs[i], round, attempt, phase)
+			results[i] = rr
+			if isCompleted(rr) {
+				break
+			}
+		}
+	}
+	return results
 }
 
 // persistArtifacts writes agent runs, evidence, claims, and votes for one

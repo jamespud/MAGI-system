@@ -60,11 +60,12 @@ type mockMagiRuntime struct {
 	votes      map[string][]*entity.Vote // code -> [vote per round]
 	calls      map[string]int
 	errOn      map[string]bool    // code -> return error
+	failFirst  map[string]bool    // code -> fail only on the first run (retry test)
 	loopStatus runtime.LoopStatus // status to return (default Completed); 0 means Completed
 }
 
 func newMockMagiRuntime() *mockMagiRuntime {
-	return &mockMagiRuntime{votes: make(map[string][]*entity.Vote), calls: make(map[string]int), errOn: make(map[string]bool)}
+	return &mockMagiRuntime{votes: make(map[string][]*entity.Vote), calls: make(map[string]int), errOn: make(map[string]bool), failFirst: make(map[string]bool)}
 }
 
 func (m *mockMagiRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx *runtime.AgentContext) (*runtime.LoopResult, error) {
@@ -74,7 +75,7 @@ func (m *mockMagiRuntime) Run(ctx context.Context, cfg *entity.MagiConfig, actx 
 	m.calls[code]++
 	m.mu.Unlock()
 
-	if m.errOn[code] {
+	if m.errOn[code] || (m.failFirst[code] && round == 0) {
 		return &runtime.LoopResult{Status: runtime.LoopStatusError, Err: fmt.Errorf("mock error for %s", code)}, fmt.Errorf("mock error")
 	}
 
@@ -271,6 +272,73 @@ func TestOrchestrate_FailureCausedTieFailsCase(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "agent failed") && !strings.Contains(err.Error(), "failed") {
 		t.Fatalf("failure reason not surfaced: %v", err)
+	}
+}
+
+// TestOrchestrate_RetriesFailedAgent guards the retry path: an agent that
+// fails on its first attempt is re-dispatched (bounded) instead of being
+// immediately converted to an ABSTAIN, so transient failures do not
+// fabricate ties.
+func TestOrchestrate_RetriesFailedAgent(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.failFirst["melchior"] = true // first attempt fails, retry succeeds
+	mrt.votes["melchior"] = []*entity.Vote{reject(), reject(), reject()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 1},
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-retry", Question: "compute", MaxDebateRounds: 2})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected resolution after agent retry")
+	}
+	if mrt.calls["melchior"] < 2 {
+		t.Fatalf("expected melchior to be re-dispatched, calls=%d", mrt.calls["melchior"])
+	}
+}
+
+// TestOrchestrate_RetryExhaustedFallsBack guards the bounded-retry bound:
+// when the agent keeps failing, the failure policy still applies after the
+// retry budget is consumed.
+func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.errOn["melchior"] = true // always fails
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 2},
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-retry-exhausted", Question: "compute", MaxDebateRounds: 2})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected resolution via majority of the two healthy agents")
+	}
+	// investigate (1 initial + 2 retries) + reconsider (same) = 6; the retry
+	// budget is bounded per dispatch round, so the persistent failure still
+	// falls back to the failure policy instead of looping forever.
+	if mrt.calls["melchior"] != 6 {
+		t.Fatalf("expected 6 melchior attempts (2 rounds x 3), got %d", mrt.calls["melchior"])
 	}
 }
 
