@@ -5,6 +5,8 @@ import type { ApiAgentSnapshot } from '@/api/client';
 
 interface AgentState {
   agents: Record<AgentId, AgentSnapshot | null>;
+  maxSteps: number;
+  setMaxSteps: (n: number) => void;
   loadAgents: (agents: Record<AgentId, AgentSnapshot>) => void;
   loadAgentsFromApi: (snap: Record<string, ApiAgentSnapshot>) => void;
   patchAgent: (id: AgentId, patch: Partial<AgentSnapshot>) => void;
@@ -49,6 +51,8 @@ function safeParseArgs(args: string): Record<string, string> {
 
 export const useAgentStore = create<AgentState>((set) => ({
   agents: empty,
+  maxSteps: 12,
+  setMaxSteps: (n) => set({ maxSteps: n > 0 ? n : 12 }),
 
   loadAgents: (agents) => set({ agents }),
 
@@ -63,7 +67,7 @@ export const useAgentStore = create<AgentState>((set) => ({
         agentId: id,
         status: apiStatusToAgentStatus(v.status),
         step: v.step ?? 0,
-        maxSteps: 12,
+        maxSteps: useAgentStore.getState().maxSteps,
         thought: '',
         toolCalls: (v.tool_calls ?? []).map((tc) => ({
           id: tc.tool_call_id,

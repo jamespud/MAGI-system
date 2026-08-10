@@ -42,6 +42,7 @@ type RouteDeps struct {
 	EventRepo    port.EventRepository
 	HealthPinger handler.Pinger
 	ModelName    string
+	MaxSteps     int
 	Tracing      *trace.TracerProvider
 }
 
@@ -95,7 +96,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	toolH := handler.NewToolHandler(deps.Tool, deps.Plugins)
 	v1.GET("/tools", toolH.List)
 	v1.GET("/tools/:name", toolH.Get)
-	statusH := handler.NewStatusHandler(deps.Metrics, deps.ModelName)
+	statusH := handler.NewStatusHandler(deps.Metrics, deps.ModelName, deps.MaxSteps)
 	v1.GET("/status", statusH.Status)
 
 	apprH := handler.NewApprovalHandler(deps.Approval, deps.Decision)

@@ -484,6 +484,7 @@ func FromItem(it *entity.BenchmarkItem) DatasetItemDTO {
 
 type StatusResponse struct {
 	ModelName   string  `json:"model_name"`
+	MaxSteps    int     `json:"max_steps"`
 	TokensTotal int64   `json:"tokens_total"`
 	CostUSD     float64 `json:"cost_usd"`
 	RunsActive  int64   `json:"runs_active"`

@@ -15,15 +15,16 @@ import (
 type StatusHandler struct {
 	reg       *metrics.Registry
 	modelName string
+	maxSteps  int
 }
 
-func NewStatusHandler(reg *metrics.Registry, modelName string) *StatusHandler {
-	return &StatusHandler{reg: reg, modelName: modelName}
+func NewStatusHandler(reg *metrics.Registry, modelName string, maxSteps int) *StatusHandler {
+	return &StatusHandler{reg: reg, modelName: modelName, maxSteps: maxSteps}
 }
 
 // Status reports live harness state for the top navigation bar.
 func (h *StatusHandler) Status(ctx context.Context, c *app.RequestContext) {
-	resp := dto.StatusResponse{ModelName: h.modelName, Connected: true}
+	resp := dto.StatusResponse{ModelName: h.modelName, MaxSteps: h.maxSteps, Connected: true}
 	if h.reg != nil {
 		// Scoped to the authenticated caller: multi-tenant status must not leak
 		// other users' usage or the instance-wide cost picture.

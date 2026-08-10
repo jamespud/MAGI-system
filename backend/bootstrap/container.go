@@ -157,6 +157,7 @@ var Module = fx.Options(
 			HealthPinger: dbPing,
 			Tracing:      tp,
 			ModelName:    cfg.Model.ModelName,
+			MaxSteps:     cfg.Magi.MaxSteps,
 		})
 	}),
 	fx.Invoke(registerLifecycle),

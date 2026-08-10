@@ -290,6 +290,7 @@ interface ApiBenchmarkDetail {
 
 interface ApiStatus {
   model_name: string;
+  max_steps: number;
   tokens_total: number;
   cost_usd: number;
   runs_active: number;

@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Activity, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck } from 'lucide-react';
 import { PulseDot, MonoText } from '@/components/shared';
 import { api, type ApiStatus } from '@/api/client';
+import { useAgentStore } from '@/stores';
 
 const NAV_ITEMS = [
   { to: '/', icon: Activity, label: 'Decision' },
@@ -24,7 +25,7 @@ export default function TopNav() {
     const load = async () => {
       try {
         const s = await api.getStatus();
-        if (!cancelled) { setStatus(s); setOffline(false); }
+        if (!cancelled) { setStatus(s); setOffline(false); useAgentStore.getState().setMaxSteps(s.max_steps); }
       } catch {
         if (!cancelled) setOffline(true);
       }
