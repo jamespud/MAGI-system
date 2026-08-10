@@ -1,16 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type ApiBenchmarkDetail, type ApiDataset, type ApiDatasetItem } from '@/api/client';
 
-interface DemoItem {
-  question: string;
-  expected_decision: string;
-}
-
-const DEMO_ITEMS: DemoItem[] = [
-  { question: 'Should we adopt Rust for the core service?', expected_decision: 'approve' },
-  { question: 'Should we migrate to a new database now?', expected_decision: 'reject' },
-];
-
 export default function Dataset() {
   const [datasets, setDatasets] = useState<ApiDataset[]>([]);
   const [name, setName] = useState('');
@@ -22,6 +12,7 @@ export default function Dataset() {
   const [items, setItems] = useState<Record<string, ApiDatasetItem[]>>({});
   const [newQuestion, setNewQuestion] = useState('');
   const [newDecision, setNewDecision] = useState('approve');
+  const [editing, setEditing] = useState<{ datasetId: string; itemId: string; question: string; decision: string } | null>(null);
   const [importText, setImportText] = useState('');
   const [regressionThreshold, setRegressionThreshold] = useState(0);
   const [runs, setRuns] = useState<Record<string, ApiBenchmarkDetail | null>>({});
@@ -140,14 +131,21 @@ export default function Dataset() {
     } catch (e) { setError(e instanceof Error ? e.message : 'import failed'); }
   };
 
-  const addItems = async (id: string) => {
-    setBusy(`items-${id}`);
+  const saveEdit = async () => {
+    if (!editing || !editing.question.trim()) return;
+    setBusy(`items-${editing.datasetId}`);
     setError('');
     try {
-      await api.addDatasetItems(id, DEMO_ITEMS);
+      await api.updateDatasetItem(editing.datasetId, editing.itemId, {
+        question: editing.question.trim(),
+        expected_decision: editing.decision,
+      } as ApiDatasetItem);
+      setEditing(null);
+      const list = await api.listDatasetItems(editing.datasetId);
+      setItems((prev) => ({ ...prev, [editing.datasetId]: list }));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'add items failed');
+      setError(e instanceof Error ? e.message : 'save failed');
     } finally {
       setBusy('');
     }
@@ -218,13 +216,6 @@ export default function Dataset() {
                   >
                     {expanded === d.id ? 'Hide items' : 'Manage items'}
                   </button>
-                  <button
-                    className="rounded border border-border-dim px-3 py-1.5 text-sm disabled:opacity-50"
-                    disabled={busy === `items-${d.id}`}
-                    onClick={() => addItems(d.id)}
-                  >
-                    Add demo items
-                  </button>
                   <button className="rounded border border-border-dim px-3 py-1.5 text-sm" onClick={() => exportItems(d.id)}>
                     Export
                   </button>
@@ -285,13 +276,44 @@ export default function Dataset() {
                   <ul className="mt-2 space-y-1">
                     {(items[d.id] || []).map((it, i) => (
                       <li key={it.id || i} className="flex items-center justify-between rounded bg-raised px-3 py-1.5 text-sm">
-                        <span className="truncate">{it.question} → {it.expected_decision}</span>
+                        {editing && editing.itemId === it.id ? (
+                          <span className="flex flex-1 gap-2">
+                            <input
+                              className="flex-1 rounded border border-border-dim bg-background px-2 py-1 text-sm"
+                              value={editing.question}
+                              onChange={(e) => setEditing({ ...editing, question: e.target.value })}
+                            />
+                            <select
+                              className="rounded border border-border-dim bg-background px-2 py-1 text-sm"
+                              value={editing.decision}
+                              onChange={(e) => setEditing({ ...editing, decision: e.target.value })}
+                            >
+                              <option value="approve">approve</option>
+                              <option value="reject">reject</option>
+                              <option value="abstain">abstain</option>
+                            </select>
+                            <button className="rounded bg-accent px-2 py-1 text-xs" onClick={() => void saveEdit()}>Save</button>
+                            <button className="rounded border border-border-dim px-2 py-1 text-xs" onClick={() => setEditing(null)}>Cancel</button>
+                          </span>
+                        ) : (
+                          <span className="truncate">{it.question} → {it.expected_decision}</span>
+                        )}
+                        {!(editing && editing.itemId === it.id) && (
+                          <span className="flex gap-2">
+                            <button
+                              className="text-xs text-accent hover:underline"
+                              onClick={() => it.id && setEditing({ datasetId: d.id, itemId: it.id, question: it.question, decision: it.expected_decision })}
+                            >
+                              Edit
+                            </button>
                         <button
                           className="text-xs text-red-400 hover:underline"
                           onClick={() => { if (it.id) void deleteItem(d.id, it.id); }}
                         >
                           Delete
                         </button>
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
