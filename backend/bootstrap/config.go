@@ -234,9 +234,10 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Magi.TokenBudget == 0 {
 		cfg.Magi.TokenBudget = 150000
 	}
-	if cfg.Magi.CompactionThreshold == 0 {
-		cfg.Magi.CompactionThreshold = 0.7
-	}
+	// Compaction is disabled by default (0 = no limit / never compact).
+	// The 132k-token compaction window proved too small for long decisions:
+	// summaries degrade EV-ID fidelity and can cause repeated gate failures.
+	// Set compaction_threshold explicitly (e.g. 0.7) to re-enable.
 	if len(cfg.ToolPolicy.RequireApproval) == 0 {
 		cfg.ToolPolicy.RequireApproval = []string{"code_runner"}
 	}
