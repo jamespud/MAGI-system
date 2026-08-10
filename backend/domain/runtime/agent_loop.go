@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eino-contrib/jsonschema"
@@ -480,7 +481,13 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed, map[string]any{"violations": gateViolationsMsg(gateRes)})
 				ts.GateFail++
 				messages = append(messages, resp)
-				messages = append(messages, schema.UserMessage("Evidence gate failed: "+gateViolationsMsg(gateRes)+"; gather more evidence or fix your EvidenceSummary."))
+				// Tell the model which EV-IDs actually exist so it stops
+				// fabricating citations (the gate only reports what is missing).
+				fixHint := "Evidence gate failed: " + gateViolationsMsg(gateRes) + "; gather more evidence or fix your EvidenceSummary."
+				if h := AvailableEvidenceHint(ledger, 8); h != "" {
+					fixHint += " " + h
+				}
+				messages = append(messages, schema.UserMessage(fixHint))
 				trace.Steps = append(trace.Steps, st)
 			if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 					finalizeTrace(trace, result.Status)
@@ -625,6 +632,33 @@ func gateViolationsMsg(g *evidence.GateResult) string {
 		out += fmt.Sprintf("[%s] %s", v.Code, v.Message)
 	}
 	return out
+}
+
+// AvailableEvidenceHint builds the "which EV-IDs exist" feedback appended to
+// evidence-gate rejection messages. Models fabricate EV-IDs because nothing
+// tells them what the ledger actually contains; this closes that loop. An
+// empty ledger yields an empty hint.
+func AvailableEvidenceHint(ledger *evidence.EvidenceLedger, limit int) string {
+	if ledger == nil || limit <= 0 {
+		return ""
+	}
+	evs := ledger.List()
+	if len(evs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Available EV-IDs: ")
+	for i, ev := range evs {
+		if i >= limit {
+			b.WriteString("…")
+			break
+		}
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s (%.2f, %s)", ev.ID, ev.Reliability.Final, ev.ToolName)
+	}
+	return b.String()
 }
 
 // unwrapFunctionCall handles a model quirk observed in production: some models
