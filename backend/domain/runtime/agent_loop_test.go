@@ -350,6 +350,43 @@ func TestAgentLoop_Reconsider(t *testing.T) {
 	}
 }
 
+// TestAgentLoop_UnwrapFunctionWrappedReflection guards against models that
+// wrap structured output in a synthetic "function" tool call: the wrapped
+// Reflection must be consumed instead of failing as "tool not found: function".
+func TestAgentLoop_UnwrapFunctionWrappedReflection(t *testing.T) {
+	wrapped := fmt.Sprintf(`{"reflection":%s}`, reflectionJSON("change"))
+	loop := newAgentLoop(t, []*schema.Message{
+		finalMsg(summaryJSON("EV-001")),
+		callMsg("c1", "function", wrapped),
+		finalMsg(voteJSON("correctness")),
+	}, nil)
+	prevVote := &entity.Vote{Decision: entity.VoteDecisionReject, Confidence: 60}
+	actx := &runtime.AgentContext{
+		Task:          entity.DecisionTask{CanonicalQuestion: "reconsider"},
+		DebateContext: &runtime.DebateContext{PreviousVote: prevVote},
+	}
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), actx)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status: %v", res.Status)
+	}
+	if res.Reflection == nil || res.Reflection.PositionChange != entity.PositionChangeChange {
+		t.Fatalf("wrapped reflection not consumed: %+v", res.Reflection)
+	}
+	if res.Vote == nil {
+		t.Fatalf("no vote after wrapped reflection")
+	}
+	for _, st := range res.Trace.Steps {
+		for _, tc := range st.ToolCalls {
+			if tc.ToolName == "function" && tc.Err != "" {
+				t.Fatalf("synthetic call must not be recorded as failure: %+v", tc)
+			}
+		}
+	}
+}
+
 func TestAgentLoop_TokenBudget(t *testing.T) {
 	loop := newAgentLoop(t, []*schema.Message{
 		withUsage(callMsg("c1", "calc", `{"a":1,"b":2}`), 10, 5, 15),

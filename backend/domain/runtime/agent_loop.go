@@ -308,6 +308,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, result.Err
 		}
 
+		resp = unwrapFunctionCall(resp, phase, l.summaryVal, l.voteVal, l.claimVal, l.reflectionVal)
 		pr := parseResponse(resp, phase, l.summaryVal, l.voteVal, l.claimVal, l.reflectionVal)
 
 		switch pr.Type {
@@ -342,8 +343,12 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				td, ok := nameToDef[tc.Function.Name]
 				if !ok {
 					tcr.Err = "tool not found: " + tc.Function.Name
-					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
 					ts.ConsecToolFail++
+					l.metrics.IncToolCall(false)
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{
+						"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err, "reason": "tool_not_found",
+					})
+					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
@@ -620,4 +625,86 @@ func gateViolationsMsg(g *evidence.GateResult) string {
 		out += fmt.Sprintf("[%s] %s", v.Code, v.Message)
 	}
 	return out
+}
+
+// unwrapFunctionCall handles a model quirk observed in production: some models
+// wrap structured output (Reflection/Vote/EvidenceSummary) in a synthetic tool
+// call named "function" whose arguments carry the real JSON. Without unwrapping
+// this is treated as "tool not found: function" and counts as a tool failure.
+// When the wrapper is recognized and the inner JSON validates against the
+// current phase, the response is replaced with an equivalent text message so
+// the normal parser consumes it.
+func unwrapFunctionCall(resp *schema.Message, phase string, sumVal *validation.TypedValidator[entity.EvidenceSummary], voteVal *validation.TypedValidator[entity.Vote], claimVal *validation.TypedValidator[entity.ClaimSubmission], reflectionVal *validation.TypedValidator[entity.Reflection]) *schema.Message {
+	if resp == nil || len(resp.ToolCalls) != 1 {
+		return resp
+	}
+	tc := resp.ToolCalls[0]
+	if tc.Function.Name != "function" && tc.Function.Name != "reflect" && tc.Function.Name != "output" {
+		return resp
+	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &wrapper); err != nil {
+		return resp
+	}
+	var candidate json.RawMessage
+	var validateAgainst string // which validator to try: reflection|vote|summary
+	switch {
+	case len(wrapper) == 1:
+		// Single-key wrapper: use its value as the structured output.
+		for _, v := range wrapper {
+			candidate = v
+			break
+		}
+		validateAgainst = singleKeyKind(wrapper)
+	case wrapper["reflection"] != nil:
+		candidate = wrapper["reflection"]
+		validateAgainst = "reflection"
+	case wrapper["vote"] != nil:
+		candidate = wrapper["vote"]
+		validateAgainst = "vote"
+	case wrapper["evidence_summary"] != nil:
+		candidate = wrapper["evidence_summary"]
+		validateAgainst = "summary"
+	case wrapper["summary"] != nil:
+		candidate = wrapper["summary"]
+		validateAgainst = "summary"
+	default:
+		return resp
+	}
+	if len(candidate) == 0 {
+		return resp
+	}
+	// Route by the wrapper key rather than the current phase: models emit the
+	// synthetic call at the phase boundary and phase alone is unreliable.
+	switch validateAgainst {
+	case "reflection":
+		if _, vr := reflectionVal.ValidateAndUnmarshal(candidate); vr != nil && vr.Valid {
+			return schema.AssistantMessage(string(candidate), nil)
+		}
+	case "summary":
+		if _, vr := sumVal.ValidateAndUnmarshal(candidate); vr != nil && vr.Valid {
+			return schema.AssistantMessage(string(candidate), nil)
+		}
+	case "vote":
+		if _, vr := voteVal.ValidateAndUnmarshal(candidate); vr != nil && vr.Valid {
+			return schema.AssistantMessage(string(candidate), nil)
+		}
+	}
+	return resp
+}
+
+// singleKeyKind guesses the structured-output kind for a single-key wrapper
+// by inspecting the key name.
+func singleKeyKind(wrapper map[string]json.RawMessage) string {
+	for k := range wrapper {
+		switch {
+		case k == "reflection":
+			return "reflection"
+		case k == "vote" || k == "decision":
+			return "vote"
+		case k == "evidence_summary" || k == "summary" || k == "evidence":
+			return "summary"
+		}
+	}
+	return ""
 }
