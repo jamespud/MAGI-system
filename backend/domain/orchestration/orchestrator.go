@@ -301,7 +301,7 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 		if i < len(o.configs) {
 			cfg = o.configs[i]
 		}
-		if o.failPolicy.Mode == "fail_case" && (r == nil || r.Err != nil || r.Vote == nil) {
+		if o.failPolicy.Mode == "fail_case" && (r == nil || r.Err != nil || r.Vote == nil || r.Status != runtime.LoopStatusCompleted) {
 			votes[i] = &entity.Vote{Decision: entity.VoteDecisionAbstain, ReasoningSummary: "agent failed under fail_case policy"}
 			// The loop below reports the failure so the durable worker retries
 			// or fails the case per its own retry policy.

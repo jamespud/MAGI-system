@@ -22,10 +22,7 @@ func (p FailurePolicy) HandleFailure(result *runtime.LoopResult, cfg *entity.Mag
 	if result != nil && result.Vote != nil && result.Err == nil {
 		return result.Vote
 	}
-	reason := "agent completed"
-	if result != nil && result.Err != nil {
-		reason = result.Err.Error()
-	}
+	reason := runtime.LoopFailureReason(result)
 	return &entity.Vote{
 		Decision:         entity.VoteDecisionAbstain,
 		Confidence:       0,

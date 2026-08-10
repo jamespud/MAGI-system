@@ -29,6 +29,7 @@ import (
 type scriptedChatModel struct {
 	responses []*schema.Message
 	calls     int
+	tools     []*schema.ToolInfo // recorded on WithTools for assertions
 }
 
 func (s *scriptedChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
@@ -43,6 +44,7 @@ func (s *scriptedChatModel) Stream(ctx context.Context, input []*schema.Message,
 	return nil, fmt.Errorf("not implemented")
 }
 func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	s.tools = tools
 	return s, nil
 }
 

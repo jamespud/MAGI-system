@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/eino-contrib/jsonschema"
 	"github.com/cloudwego/eino/schema"
 	"go.opentelemetry.io/otel/attribute"
 
@@ -121,7 +122,7 @@ func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode
 
 // saveCheckpoint persists the working-memory snapshot for resume (§18).
 // Nil-safe: no-op when checkpointRepo is nil or runID is empty.
-func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *terminationState, phase string) {
+func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *TerminationState, phase string) {
 	if l.checkpointRepo == nil || runID == "" {
 		return
 	}
@@ -133,7 +134,7 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		RunID:        runID,
 		MessagesJSON: string(msgsJSON),
 		StepCount:    step,
-		TokenUsed:    int(ts.tokenUsed),
+		TokenUsed:    int(ts.TokenUsed),
 		Phase:        phase,
 	})
 }
@@ -183,7 +184,18 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	infos := make([]*schema.ToolInfo, 0, len(defs))
 	for _, d := range defs {
 		nameToDef[d.Name] = d
-		infos = append(infos, &schema.ToolInfo{Name: d.Name, Desc: d.Desc})
+		info := &schema.ToolInfo{Name: d.Name, Desc: d.Desc}
+		// Pass the tool's real parameter schema to the model. Without
+		// ParamsOneOf, eino treats the tool as taking NO arguments, so models
+		// send empty payloads that then fail runtime validation (observed with
+		// MCP tools that require "symbol").
+		if len(d.ArgsSchema) > 0 {
+			var js jsonschema.Schema
+			if err := json.Unmarshal(d.ArgsSchema, &js); err == nil {
+				info.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(&js)
+			}
+		}
+		infos = append(infos, info)
 	}
 	bound := cm
 	if len(infos) > 0 {
@@ -223,7 +235,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if actx.DebateContext != nil {
 		phase = "reconsider_gather"
 	}
-	ts := &terminationState{}
+	ts := &TerminationState{}
 	compacted := false
 	agentCode := entity.MagiCode(cfg.Code)
 
@@ -234,7 +246,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			var restored []*schema.Message
 			if json.Unmarshal([]byte(cp.MessagesJSON), &restored) == nil && len(restored) > 0 {
 				messages = restored
-				ts.tokenUsed = int64(cp.TokenUsed)
+				ts.TokenUsed = int64(cp.TokenUsed)
 				phase = cp.Phase
 				startStep = cp.StepCount + 1
 			}
@@ -243,16 +255,16 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 
 	for step := startStep; step <= maxSteps; step++ {
 		if cfg.LoopPolicy.TokenBudget > 0 && cfg.LoopPolicy.TokenCompactionThreshold > 0 && !compacted &&
-			float64(ts.tokenUsed) >= float64(cfg.LoopPolicy.TokenBudget)*cfg.LoopPolicy.TokenCompactionThreshold {
+			float64(ts.TokenUsed) >= float64(cfg.LoopPolicy.TokenBudget)*cfg.LoopPolicy.TokenCompactionThreshold {
 			compactedMsgs, usage, cerr := compactHistory(ctx, cm, messages)
 			if cerr == nil && len(compactedMsgs) > 0 {
 				messages = compactedMsgs
 				compacted = true
 				if usage != nil {
 					result.Usage = addUsage(result.Usage, usage)
-					ts.tokenUsed += usage.TotalTokens
+					ts.TokenUsed += usage.TotalTokens
 				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.tokenUsed})
+				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.TokenUsed})
 			}
 		}
 		l.saveCheckpoint(ctx, actx.RunID, messages, step-1, ts, phase)
@@ -289,8 +301,8 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		st.ModelOutput = resp
 		st.ModelUsage = extractUsage(resp)
 		result.Usage = addUsage(result.Usage, st.ModelUsage)
-		ts.tokenUsed += st.ModelUsage.TotalTokens
-		if checkTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
+		ts.TokenUsed += st.ModelUsage.TotalTokens
+		if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 			trace.Steps = append(trace.Steps, st)
 			finalizeTrace(trace, result.Status)
 			return result, result.Err
@@ -304,7 +316,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			// Force convergence: once MaxToolCalls is reached, refuse further tool
 			// calls and demand an EvidenceSummary. The LLM often ignores soft
 			// prompt limits, so this is a deterministic cutoff.
-			if cfg.LoopPolicy.MaxToolCalls > 0 && ts.toolCalls >= cfg.LoopPolicy.MaxToolCalls {
+			if cfg.LoopPolicy.MaxToolCalls > 0 && ts.ToolCalls >= cfg.LoopPolicy.MaxToolCalls {
 				// The assistant message above carries tool_calls; the OpenAI-compatible
 				// API requires a tool message for every tool_call_id, else the next
 				// request fails with 400 "insufficient tool messages following
@@ -321,7 +333,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				continue
 			}
 			for _, tc := range resp.ToolCalls {
-				ts.toolCalls++
+				ts.ToolCalls++
 				tcr := ToolCallRecord{ToolCallID: tc.ID, ToolName: tc.Function.Name, Arguments: l.redactor.String(tc.Function.Arguments)}
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "arguments": tc.Function.Arguments})
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to
@@ -331,7 +343,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				if !ok {
 					tcr.Err = "tool not found: " + tc.Function.Name
 					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-					ts.consecToolFail++
+					ts.ConsecToolFail++
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
@@ -340,7 +352,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					if aerr != nil {
 						tcr.Err = "approval check failed: " + aerr.Error()
 						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.consecToolFail++
+						ts.ConsecToolFail++
 						st.ToolCalls = append(st.ToolCalls, tcr)
 						continue
 					}
@@ -348,7 +360,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						tcr.Err = "tool rejected by human: " + reason
 						tcr.ApprovedBy = decidedBy
 						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.consecToolFail++
+						ts.ConsecToolFail++
 						st.ToolCalls = append(st.ToolCalls, tcr)
 						continue
 					}
@@ -359,7 +371,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					if qerr == nil && !allowed {
 						tcr.Err = "tool quota exceeded: " + td.Name
 						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.consecToolFail++
+						ts.ConsecToolFail++
 						st.ToolCalls = append(st.ToolCalls, tcr)
 						continue
 					}
@@ -370,7 +382,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					tcr.Valid = false
 					tcr.Violations = vr.Violations
 					tcr.Err = l.redactor.String(vr.Error())
-					ts.consecToolFail++
+					ts.ConsecToolFail++
+					l.metrics.IncToolCall(false)
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{
+						"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err, "reason": "args_invalid",
+					})
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s args invalid: %s", tc.Function.Name, tcr.Err), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
@@ -392,14 +408,14 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				toolSpan.End()
 				if execErr != nil {
 					tcr.Err = l.redactor.String(execErr.Error())
-					ts.consecToolFail++
+					ts.ConsecToolFail++
 					l.metrics.IncToolCall(false)
 					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err})
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				ts.consecToolFail = 0
+				ts.ConsecToolFail = 0
 				tcr.Valid = true
 				tcr.Result = l.redactor.String(execRes.Output)
 				l.metrics.IncToolCall(true)
@@ -417,7 +433,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				st.ToolCalls = append(st.ToolCalls, tcr)
 			}
 			trace.Steps = append(trace.Steps, st)
-			if checkTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
+			if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 				finalizeTrace(trace, result.Status)
 				return result, result.Err
 			}
@@ -457,11 +473,11 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			}
 			if !gateRes.Passed {
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceGateFailed, map[string]any{"violations": gateViolationsMsg(gateRes)})
-				ts.gateFail++
+				ts.GateFail++
 				messages = append(messages, resp)
 				messages = append(messages, schema.UserMessage("Evidence gate failed: "+gateViolationsMsg(gateRes)+"; gather more evidence or fix your EvidenceSummary."))
 				trace.Steps = append(trace.Steps, st)
-				if checkTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
+			if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 					finalizeTrace(trace, result.Status)
 					return result, result.Err
 				}
@@ -516,7 +532,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, nil
 
 		default: // invalid
-			ts.validationFail++
+			ts.ValidationFail++
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Invalid response. In gather phase output EvidenceSummary JSON; in vote phase output Vote JSON."))
 			trace.Steps = append(trace.Steps, st)
