@@ -177,6 +177,27 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	return out, nil
 }
 
+// SumUsageByUser aggregates token/cost usage across all agent runs owned by
+// userID, joining magi_agent_run to decision_case on user_id. Usage is stored
+// as JSON (toJSON marshals struct fields with their Go names).
+func (r *agentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
+	var row struct {
+		Tokens int64
+		Cost   float64
+	}
+	q := r.db.WithContext(ctx).Table("magi_agent_run AS ar").
+		Select(`
+			COALESCE(SUM(CAST(JSON_EXTRACT(ar.usage_json, '$.TotalTokens') AS SIGNED)), 0) AS tokens,
+			COALESCE(SUM(CAST(JSON_EXTRACT(ar.usage_json, '$.CostUSD') AS DECIMAL(18,6))), 0) AS cost
+		`).
+		Joins("JOIN decision_case AS c ON c.id = ar.case_id").
+		Where("c.user_id = ? AND ar.usage_json IS NOT NULL AND ar.usage_json <> ''", userID)
+	if err := q.Scan(&row).Error; err != nil {
+		return 0, 0, err
+	}
+	return row.Tokens, row.Cost, nil
+}
+
 // --- EvidenceRepository ---
 
 type evidenceRepo struct{ db *gorm.DB }

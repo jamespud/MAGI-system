@@ -578,6 +578,9 @@ func (r *stubAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun
 func (r *stubAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	return nil, nil
 }
+func (r *stubAgentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
+	return 0, 0, nil
+}
 
 type stubEvidenceRepo struct{ s *stubRepo }
 

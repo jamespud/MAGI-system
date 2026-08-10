@@ -75,6 +75,10 @@ func (h *DecisionHandler) Run(ctx context.Context, c *app.RequestContext) {
 			c.JSON(consts.StatusConflict, dto.ErrorResponse{Error: "case already running"})
 			return
 		}
+		if errors.Is(err, decision.ErrBudgetExceeded) {
+			c.JSON(consts.StatusTooManyRequests, dto.ErrorResponse{Error: err.Error()})
+			return
+		}
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -94,6 +98,10 @@ func (h *DecisionHandler) Fork(ctx context.Context, c *app.RequestContext) {
 	}
 	forked, err := h.svc.ForkAndRun(ctx, CurrentUserID(ctx), id)
 	if err != nil {
+		if errors.Is(err, decision.ErrBudgetExceeded) {
+			c.JSON(consts.StatusTooManyRequests, dto.ErrorResponse{Error: err.Error()})
+			return
+		}
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}

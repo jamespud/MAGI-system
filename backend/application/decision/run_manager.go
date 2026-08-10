@@ -25,6 +25,23 @@ var ErrAlreadyCompleted = errors.New("case already completed")
 // ErrRateLimited is returned when the user exceeds the configured concurrent run limit.
 var ErrRateLimited = errors.New("rate limit exceeded")
 
+// ErrBudgetExceeded is returned when the user has exhausted a configured
+// per-user token or cost budget.
+var ErrBudgetExceeded = errors.New("budget exceeded")
+
+// BudgetExceededInfo describes which budget dimension blocked the run.
+type BudgetExceededInfo struct {
+	TokensExceeded bool
+	CostExceeded   bool
+}
+
+// BudgetChecker reports whether a user may start a new run given their
+// cumulative token/cost usage. Implementations are supplied by the container
+// (admin usage + config); a nil checker means budgets are not configured.
+type BudgetChecker interface {
+	CheckBudget(ctx context.Context, userID int64) (*BudgetExceededInfo, error)
+}
+
 type runHandle struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
@@ -42,6 +59,7 @@ type RunManagerDeps struct {
 	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
 	RunCounter               port.RunCounter
+	BudgetChecker            BudgetChecker
 }
 
 // RunManager owns async case execution. With a JobRepo it uses a durable
@@ -59,6 +77,7 @@ type RunManager struct {
 	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
 	runCounter           port.RunCounter
+	budgetChecker        BudgetChecker
 	userRuns             map[int64]int
 	mu                   sync.Mutex
 	runs                 map[string]*runHandle
@@ -86,6 +105,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
 		runCounter: d.RunCounter,
+		budgetChecker: d.BudgetChecker,
 		userRuns:   make(map[int64]int), runs: make(map[string]*runHandle),
 	}
 }
@@ -114,6 +134,15 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 	m.mu.Unlock()
 	if local {
 		return ErrAlreadyRunning
+	}
+	if m.budgetChecker != nil && c.UserID != 0 {
+		info, err := m.budgetChecker.CheckBudget(ctx, c.UserID)
+		if err != nil {
+			return fmt.Errorf("run manager: budget check: %w", err)
+		}
+		if info != nil && (info.TokensExceeded || info.CostExceeded) {
+			return fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetDetail(info))
+		}
 	}
 	if m.maxConcurrentPerUser > 0 && c.UserID != 0 {
 		if m.runCounter != nil {
@@ -179,6 +208,19 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 		return ErrAlreadyRunning
 	}
 	return nil
+}
+
+func budgetDetail(info *BudgetExceededInfo) string {
+	switch {
+	case info == nil:
+		return "unknown"
+	case info.TokensExceeded && info.CostExceeded:
+		return "token and cost limits"
+	case info.TokensExceeded:
+		return "token limit"
+	default:
+		return "cost limit"
+	}
 }
 
 func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob, slotHeld bool) bool {

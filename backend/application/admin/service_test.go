@@ -44,6 +44,9 @@ func (s *stubAdminRuns) ListByCase(ctx context.Context, caseID string) ([]*entit
 	defer s.mu.Unlock()
 	return s.runs[caseID], nil
 }
+func (s *stubAdminRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
+	return 0, 0, nil
+}
 
 func TestAdminUsage_AggregatesPerUser(t *testing.T) {
 	cases := &stubAdminCases{cases: []*entity.DecisionCase{

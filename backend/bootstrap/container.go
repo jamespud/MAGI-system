@@ -85,6 +85,7 @@ var Module = fx.Options(
 		provideToolQuotaRepository,
 		provideToolQuotaService,
 		provideRunCounter,
+		provideBudgetChecker,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -366,11 +367,38 @@ func provideRunCounter(db *gorm.DB) port.RunCounter {
 	return magi.NewRunCounterRepository(db)
 }
 
-func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config, counter port.RunCounter) *decision.RunManager {
+// usageBudgetChecker adapts admin usage aggregates to decision.BudgetChecker.
+type usageBudgetChecker struct {
+	admin   *admin.Service
+	maxTok  int64
+	maxCost float64
+}
+
+func (b *usageBudgetChecker) CheckBudget(ctx context.Context, userID int64) (*decision.BudgetExceededInfo, error) {
+	if b == nil || b.admin == nil || (b.maxTok <= 0 && b.maxCost <= 0) {
+		return &decision.BudgetExceededInfo{}, nil
+	}
+	budget, err := b.admin.Budget(ctx, userID, b.maxTok, b.maxCost)
+	if err != nil {
+		return nil, err
+	}
+	tokens, cost := budget.Exceeds()
+	return &decision.BudgetExceededInfo{TokensExceeded: tokens, CostExceeded: cost}, nil
+}
+
+func provideBudgetChecker(adminSvc *admin.Service, cfg *Config) decision.BudgetChecker {
+	if adminSvc == nil || (cfg.Limits.MaxTokensPerUser <= 0 && cfg.Limits.MaxCostUSDPerUser <= 0) {
+		return nil
+	}
+	return &usageBudgetChecker{admin: adminSvc, maxTok: cfg.Limits.MaxTokensPerUser, maxCost: cfg.Limits.MaxCostUSDPerUser}
+}
+
+func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config, counter port.RunCounter, budget decision.BudgetChecker) *decision.RunManager {
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
 		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
 		RunCounter:               counter,
+		BudgetChecker:            budget,
 	})
 }
 

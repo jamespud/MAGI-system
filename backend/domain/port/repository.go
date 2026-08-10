@@ -49,6 +49,9 @@ type AgentRunRepository interface {
 	Create(ctx context.Context, r *entity.AgentRun) error
 	Get(ctx context.Context, id string) (*entity.AgentRun, error)
 	ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error)
+	// SumUsageByUser returns the cumulative token usage and estimated cost for
+	// all of a user's agent runs, used for per-user budget enforcement.
+	SumUsageByUser(ctx context.Context, userID int64) (tokens int64, costUSD float64, err error)
 }
 
 type EvidenceRepository interface {

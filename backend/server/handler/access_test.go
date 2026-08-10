@@ -72,6 +72,9 @@ func (stubAdminAgentRuns) Get(ctx context.Context, id string) (*entity.AgentRun,
 func (stubAdminAgentRuns) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	return nil, nil
 }
+func (stubAdminAgentRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
+	return 0, 0, nil
+}
 
 func TestRequireRole_AdminGate(t *testing.T) {
 	adminSvc := admin.NewService(&ownedCaseRepo{}, stubAdminAgentRuns{})

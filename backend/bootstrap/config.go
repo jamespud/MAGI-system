@@ -49,6 +49,8 @@ type Config struct {
 	} `yaml:"auth"`
 	Limits struct {
 		MaxConcurrentRunsPerUser int `yaml:"max_concurrent_runs_per_user"`
+		MaxTokensPerUser         int64  `yaml:"max_tokens_per_user"`
+		MaxCostUSDPerUser        float64 `yaml:"max_cost_usd_per_user"`
 	} `yaml:"limits"`
 	CodeRunner struct {
 		Enabled          *bool    `yaml:"enabled"`
@@ -476,6 +478,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.MaxConcurrentRunsPerUser < 0 {
 		return fmt.Errorf("limits: max_concurrent_runs_per_user cannot be negative")
+	}
+	if c.Limits.MaxTokensPerUser < 0 {
+		return fmt.Errorf("limits: max_tokens_per_user cannot be negative")
+	}
+	if c.Limits.MaxCostUSDPerUser < 0 {
+		return fmt.Errorf("limits: max_cost_usd_per_user cannot be negative")
 	}
 	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
 		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")

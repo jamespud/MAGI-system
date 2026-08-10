@@ -116,6 +116,9 @@ auth:
 # Per-user governance.
 limits:
   max_concurrent_runs_per_user: 3
+  # Cumulative per-user budgets across completed runs (0 = unlimited).
+  # max_tokens_per_user: 5000000
+  # max_cost_usd_per_user: 20.0
 
 # Code runner: MAGI reuses the Coze Deno + Pyodide WASM sandbox (see
 # backend/sandbox.py). Guardrails below are defense-in-depth on top of it.
