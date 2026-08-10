@@ -49,8 +49,8 @@ type AgentLoop struct {
 	toolPolicy     *toolpolicy.Policy
 	metrics        *metrics.Registry
 	redactor       *redact.Redactor
-	approvalRepo    port.ApprovalRepository
-	quota           port.ToolQuotaPort
+	approvalRepo   port.ApprovalRepository
+	quota          port.ToolQuotaPort
 }
 
 type AgentLoopDeps struct {
@@ -215,6 +215,8 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			result.Usage.CostUSD = result.Usage.Cost(cfg.Model.PricePerMInputUSD, cfg.Model.PricePerMOutputUSD)
 			l.metrics.AddCostUSD(result.Usage.CostUSD)
 			l.metrics.AddTokens(result.Usage.TotalTokens)
+			l.metrics.AddCostUSDForUser(actx.UserID, result.Usage.CostUSD)
+			l.metrics.AddTokensForUser(actx.UserID, result.Usage.TotalTokens)
 		}
 	}()
 	phase := "gather"
@@ -378,16 +380,16 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				toolStart := time.Now()
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
 
-    				toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
+				toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
 
-    				execRes, execErr := l.toolExec.Execute(toolCtx, port.ToolExecutionRequest{
+				execRes, execErr := l.toolExec.Execute(toolCtx, port.ToolExecutionRequest{
 					ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments,
 					UserID: actx.UserID, Binding: td.Binding,
 				})
 
-    				tcr.Duration = time.Since(toolStart)
+				tcr.Duration = time.Since(toolStart)
 
-    				toolSpan.End()
+				toolSpan.End()
 				if execErr != nil {
 					tcr.Err = l.redactor.String(execErr.Error())
 					ts.consecToolFail++

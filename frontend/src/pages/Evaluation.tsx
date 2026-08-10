@@ -31,11 +31,22 @@ export default function Evaluation() {
       const ev = await api.evaluateCase(caseId.trim());
       setResult(ev);
       setJudgeResult(null);
+      void loadJudge(caseId.trim());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'evaluation failed');
       setResult(null);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Preload a previously persisted judge result when a case is entered, so a
+  // page reload does not lose the verdict.
+  const loadJudge = async (id: string) => {
+    try {
+      setJudgeResult(await api.getJudgeResult(id));
+    } catch {
+      setJudgeResult(null);
     }
   };
 

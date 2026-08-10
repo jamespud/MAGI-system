@@ -46,7 +46,8 @@ func (r *fakeApprovalRepo) Get(_ context.Context, id string) (*entity.ApprovalRe
 	if !ok {
 		return nil, nil
 	}
-	return a, nil
+	cp := *a // snapshot: the poller reads status outside the lock
+	return &cp, nil
 }
 
 func (r *fakeApprovalRepo) FindByKey(_ context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {

@@ -114,12 +114,22 @@ function applyIncremental(raw: ApiEvent) {
 // connection.
 export function subscribeCaseStream(caseId: string, onTerminal?: () => void): () => void {
   const es = new EventSource(`/api/v1/cases/${caseId}/stream`);
+  let lastSeq = 0;
   es.onmessage = (msg: MessageEvent) => {
     let raw: ApiEvent;
     try {
       raw = JSON.parse(msg.data) as ApiEvent;
     } catch {
       return; // ignore malformed frames
+    }
+    // Sequence gaps mean the broker dropped frames for a slow consumer;
+    // refetch the authoritative state instead of rendering a hole.
+    if (typeof raw.seq === 'number' && raw.seq > 0) {
+      if (lastSeq > 0 && raw.seq > lastSeq + 1) {
+        void useCaseStore.getState().fetchCase(caseId, { silent: true });
+        if (onTerminal) onTerminal(); // refetch artifacts as well
+      }
+      lastSeq = Math.max(lastSeq, raw.seq);
     }
     if (raw.type === 'CASE_STATUS_CHANGED') {
       const status = raw.payload?.status;

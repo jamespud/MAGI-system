@@ -2,6 +2,7 @@ package magi
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -151,6 +152,35 @@ func (r *datasetRepo) GetRun(ctx context.Context, id string) (*entity.BenchmarkR
 	return runFromModel(&m), nil
 }
 
+// ClaimRun claims a run for one worker: only a run that is queued/running with
+// no unexpired lease can be claimed, and the status flip happens in the same
+// UPDATE, so two replicas cannot both win.
+func (r *datasetRepo) ClaimRun(ctx context.Context, runID, owner string, leaseUntil *time.Time) (bool, error) {
+	if owner == "" || leaseUntil == nil {
+		return false, fmt.Errorf("claim run: owner and lease are required")
+	}
+	res := r.db.WithContext(ctx).Model(&BenchmarkRunModel{}).
+		Where("id = ? AND status IN ? AND (lease_until IS NULL OR lease_until < ?)",
+			runID, []string{"queued", "running"}, time.Now()).
+		Updates(map[string]any{
+			"status":      "running",
+			"lease_owner": owner,
+			"lease_until": *leaseUntil,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// ExpireRunLeases releases expired leases back to "queued" so recovery can
+// resume interrupted runs.
+func (r *datasetRepo) ExpireRunLeases(ctx context.Context, now time.Time) error {
+	return r.db.WithContext(ctx).Model(&BenchmarkRunModel{}).
+		Where("status = ? AND lease_until IS NOT NULL AND lease_until < ?", "running", now).
+		Updates(map[string]any{"lease_owner": "", "lease_until": nil, "status": "queued"}).Error
+}
+
 func (r *datasetRepo) ListRuns(ctx context.Context, datasetID string) ([]*entity.BenchmarkRun, error) {
 	var models []BenchmarkRunModel
 	if err := r.db.WithContext(ctx).Where("dataset_id = ?", datasetID).Order("created_at DESC").Find(&models).Error; err != nil {
@@ -210,7 +240,7 @@ func datasetFromModel(m *DatasetModel) *entity.BenchmarkDataset {
 }
 
 func runFromModel(m *BenchmarkRunModel) *entity.BenchmarkRun {
-	return &entity.BenchmarkRun{ID: m.ID, DatasetID: m.DatasetID, Status: entity.BenchmarkRunStatus(m.Status), Total: m.Total, Matched: m.Matched, Accuracy: m.Accuracy, WeightedAccuracy: m.WeightedAccuracy, RunsPerItem: m.RunsPerItem, Stability: m.Stability, RegressionThreshold: m.RegressionThreshold, RegressionFailed: m.RegressionFailed, FailureReason: m.FailureReason, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt, CreatedAt: m.CreatedAt}
+	return &entity.BenchmarkRun{ID: m.ID, DatasetID: m.DatasetID, Status: entity.BenchmarkRunStatus(m.Status), LeaseOwner: m.LeaseOwner, LeaseUntil: m.LeaseUntil, Total: m.Total, Matched: m.Matched, Accuracy: m.Accuracy, WeightedAccuracy: m.WeightedAccuracy, RunsPerItem: m.RunsPerItem, Stability: m.Stability, RegressionThreshold: m.RegressionThreshold, RegressionFailed: m.RegressionFailed, FailureReason: m.FailureReason, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt, CreatedAt: m.CreatedAt}
 }
 
 var _ port.DatasetRepository = (*datasetRepo)(nil)

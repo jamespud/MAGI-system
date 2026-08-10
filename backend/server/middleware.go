@@ -23,8 +23,10 @@ func Recovery() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		defer func() {
 			if r := recover(); r != nil {
+				// Do not echo panic internals to clients: they may contain
+				// stack traces or sensitive values. Log server-side instead.
 				c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{
-					Error: fmt.Sprintf("internal error: %v", r),
+					Error: "internal server error",
 				})
 				c.Abort()
 			}

@@ -19,18 +19,19 @@ func NewService(dec *decision.Service) *Service {
 	return &Service{dec: dec}
 }
 
-// Ask runs a decision synchronously and returns the case with its resolution.
-func (s *Service) Ask(ctx context.Context, userID int64, message, background string, constraints []entity.Constraint) (*entity.DecisionCase, *entity.Resolution, error) {
+// AskAsync creates a case and hands it to the governed async runner
+// (concurrency limits, budgets, leases, retries all apply). The caller polls
+// the returned case ID for the final resolution.
+func (s *Service) AskAsync(ctx context.Context, userID int64, message, background string, constraints []entity.Constraint) (*entity.DecisionCase, error) {
 	if message == "" {
-		return nil, nil, fmt.Errorf("assistant: message is required")
+		return nil, fmt.Errorf("assistant: message is required")
 	}
 	case_, err := s.dec.Create(ctx, userID, message, background, constraints)
 	if err != nil {
-		return nil, nil, fmt.Errorf("assistant: create case: %w", err)
+		return nil, fmt.Errorf("assistant: create case: %w", err)
 	}
-	res, err := s.dec.Run(ctx, case_)
-	if err != nil {
-		return case_, nil, fmt.Errorf("assistant: decision failed: %w", err)
+	if err := s.dec.StartRun(ctx, case_); err != nil {
+		return case_, fmt.Errorf("assistant: start run: %w", err)
 	}
-	return case_, res, nil
+	return case_, nil
 }

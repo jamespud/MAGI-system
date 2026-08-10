@@ -1,6 +1,8 @@
 package orchestration
 
 import (
+	"errors"
+
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/runtime"
 )
@@ -10,6 +12,10 @@ type FailurePolicy struct {
 }
 
 func DefaultFailurePolicy() FailurePolicy { return FailurePolicy{Mode: "abstain_on_fail"} }
+
+// ErrAgentFailed aborts the case when Mode == "fail_case": any agent failure
+// fails the whole decision instead of silently converting to an abstention.
+var ErrAgentFailed = errors.New("agent failed: case aborted by failure policy")
 
 // HandleFailure produces an ABSTAIN vote for a failed Magi.
 func (p FailurePolicy) HandleFailure(result *runtime.LoopResult, cfg *entity.MagiConfig) *entity.Vote {

@@ -212,7 +212,7 @@ The agent loop is heavily tested with scripted models, including failure policie
 
 ## Tech Stack
 
-**Backend:** Go 1.24 · Hertz (HTTP) · GORM/MySQL · Uber Fx (DI) · eino (LLM) · santhosh-tekuri/jsonschema/v6 · Atlas (migrations).
+**Backend:** Go 1.25 · Hertz (HTTP) · GORM/MySQL · Uber Fx (DI) · eino (LLM) · santhosh-tekuri/jsonschema/v6 · GORM AutoMigrate (schema source of truth; `docker/atlas/migrations/` holds baseline snapshots).
 
 **Frontend:** React 18 · TypeScript 5.6 · Vite 6 · Zustand 5 · d3 v7 (graph) · Tailwind v4 · Vitest · MSW.
 

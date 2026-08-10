@@ -275,11 +275,16 @@ func TestE2E_HarnessFlow(t *testing.T) {
 		t.Fatalf("memory search: %s", mbody2)
 	}
 
-	// Ask MAGI (conversational decision)
+	// Ask MAGI (conversational decision): returns 202 + case id; the run is
+	// executed through the governed async runner.
 	code, body = post(t, h, "/api/v1/assistant", `{"message":"Should we migrate the database?","background":"scale concerns"}`, "k7")
-	if code != 200 || !strings.Contains(body, `"decision":"approve"`) {
-		t.Fatalf("ask: %d %s", code, body)
+	if code != 202 || !strings.Contains(body, `"id":"case-`) {
+		t.Fatalf("ask async: %d %s", code, body)
 	}
+	// The async run executes on the run manager goroutine; wait for it to
+	// finish before asserting aggregates so the counts are deterministic.
+	askID := field(t, body, "id")
+	waitFor(t, h, "/api/v1/cases/"+askID, "k7", "status", "RESOLVED")
 
 	// Admin usage (admin role token)
 	code, body = get(t, h, "/api/v1/admin/usage", "k7")

@@ -7,6 +7,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type judgeRepo struct {
@@ -30,7 +31,12 @@ func (r *judgeRepo) Save(ctx context.Context, j *entity.JudgeResult) error {
 		ReflectionValidity: j.ReflectionValidity, Overall: j.Overall, Rationale: j.Rationale,
 		ModelName: j.ModelName, CreatedAt: j.CreatedAt,
 	}
-	return r.db.WithContext(ctx).Create(&m).Error
+	// One verdict per case: re-judging replaces the previous row instead of
+	// accumulating unbounded history.
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "case_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"report_quality", "evidence_consistency", "reflection_validity", "overall", "rationale", "model_name", "created_at"}),
+	}).Create(&m).Error
 }
 
 func (r *judgeRepo) GetLatest(ctx context.Context, caseID string) (*entity.JudgeResult, error) {

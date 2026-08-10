@@ -36,22 +36,19 @@ func (askOrch) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity
 func TestAsk_RunsDecisionAndReturnsResolution(t *testing.T) {
 	dec := decision.NewService(askOrch{}, decision.ServiceConfig{MaxDebateRounds: 1}, decision.WithCaseRepo(&askCaseRepo{}))
 	svc := assistant.NewService(dec)
-	cs, res, err := svc.Ask(context.Background(), 7, "Should we adopt Rust?", "", nil)
+	cs, err := svc.AskAsync(context.Background(), 7, "Should we adopt Rust?", "", nil)
 	if err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 	if cs.UserID != 7 {
 		t.Fatalf("case owner: %d", cs.UserID)
 	}
-	if res == nil || res.FinalDecision != entity.VoteDecisionApprove || res.FinalReport == "" {
-		t.Fatalf("resolution: %+v", res)
-	}
 }
 
 func TestAsk_RequiresMessage(t *testing.T) {
 	dec := decision.NewService(askOrch{}, decision.ServiceConfig{})
 	svc := assistant.NewService(dec)
-	if _, _, err := svc.Ask(context.Background(), 1, "", "", nil); err == nil {
+	if _, err := svc.AskAsync(context.Background(), 1, "", "", nil); err == nil {
 		t.Fatal("expected error for empty message")
 	}
 }

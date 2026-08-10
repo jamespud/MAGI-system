@@ -37,3 +37,23 @@ func (h *JudgeHandler) Judge(ctx context.Context, c *app.RequestContext) {
 	}
 	c.JSON(consts.StatusOK, dto.FromJudge(res))
 }
+
+// Get returns the latest persisted judge result for a case (or 404).
+func (h *JudgeHandler) Get(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	cs, err := h.caseSvc.Get(ctx, id)
+	if err != nil || cs == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !CaseAllowed(ctx, cs) {
+		Forbidden(c)
+		return
+	}
+	res, err := h.svc.Latest(ctx, id)
+	if err != nil || res == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "judge result not found"})
+		return
+	}
+	c.JSON(consts.StatusOK, dto.FromJudge(res))
+}

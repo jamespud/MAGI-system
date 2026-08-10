@@ -104,6 +104,7 @@ type DecisionReport struct {
 
 type ReplayEvent struct {
 	ID        string          `json:"id"`
+	Seq       uint64          `json:"seq,omitempty"`
 	Type      string          `json:"type"`
 	AgentCode string          `json:"agent_code,omitempty"`
 	RunID     string          `json:"run_id,omitempty"`
@@ -248,6 +249,7 @@ func FromEvent(e *entity.MagiEvent) ReplayEvent {
 	}
 	return ReplayEvent{
 		ID:        e.ID,
+		Seq:       e.Seq,
 		Type:      string(e.Type),
 		AgentCode: code,
 		RunID:     e.RunID,
@@ -619,22 +621,6 @@ type AskRequest struct {
 	Message     string          `json:"message"`
 	Background  string          `json:"background,omitempty"`
 	Constraints []ConstraintDTO `json:"constraints,omitempty"`
-}
-
-type AskResponse struct {
-	CaseID   string `json:"case_id"`
-	Status   string `json:"status"`
-	Decision string `json:"decision"`
-	Report   string `json:"report"`
-}
-
-func FromAsk(c *entity.DecisionCase, res *entity.Resolution) AskResponse {
-	out := AskResponse{CaseID: c.ID, Status: string(c.Status)}
-	if res != nil {
-		out.Decision = string(res.FinalDecision)
-		out.Report = res.FinalReport
-	}
-	return out
 }
 
 type MemorySearchResponse struct {

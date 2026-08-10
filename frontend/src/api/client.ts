@@ -82,6 +82,7 @@ interface ApiVote {
 
 interface ApiEvent {
   id: string;
+  seq?: number;
   type: string;
   agent_code?: string;
   run_id?: string;
@@ -155,6 +156,7 @@ export const api = {
   evaluateCase: (id: string) => request<ApiEvaluation>(`/evaluation/${id}`, { method: 'POST' }),
 
   judgeCase: (id: string) => request<ApiJudgeResult>(`/evaluation/${id}/judge`, { method: 'POST' }),
+  getJudgeResult: (id: string) => request<ApiJudgeResult>(`/evaluation/${id}/judge`),
 
   listRecurring: () => request<ApiRecurring[]>(`/recurring`),
 

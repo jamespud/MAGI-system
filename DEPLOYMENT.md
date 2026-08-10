@@ -30,6 +30,15 @@ Stop with `make web-down`; logs with `make web-logs`.
 
 ## Configuration
 
+### Schema management
+
+**AutoMigrate is the source of truth for the database schema.** The server runs
+`db.AutoMigrate(AllModels()...)` at startup, so upgrading the binary is
+sufficient for additive changes. `docker/atlas/migrations/` contains baseline
+SQL snapshots (s6-s14); they are documentation, not the applied migration
+path, and can drift from the GORM models. When they do, regenerate them from
+`backend/adapter/model.go` rather than hand-editing.
+
 `backend/conf/magi.yaml` (or env overrides via `MAGI_*`):
 
 | Section | Purpose |

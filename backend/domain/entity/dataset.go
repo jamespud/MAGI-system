@@ -28,21 +28,23 @@ type BenchmarkItem struct {
 
 // BenchmarkRun is one execution of a dataset against the orchestrator.
 type BenchmarkRun struct {
-	ID               string
-	DatasetID        string
-	Status           BenchmarkRunStatus
-	Total            int
-	Matched          int
-	Accuracy         float64
-	WeightedAccuracy float64
-	RunsPerItem      int
-	Stability         float64
+	ID                  string
+	DatasetID           string
+	Status              BenchmarkRunStatus
+	LeaseOwner          string
+	LeaseUntil          *time.Time
+	Total               int
+	Matched             int
+	Accuracy            float64
+	WeightedAccuracy    float64
+	RunsPerItem         int
+	Stability           float64
 	RegressionThreshold float64
-	RegressionFailed   bool
-	FailureReason      string
-	StartedAt        time.Time
-	CompletedAt      *time.Time
-	CreatedAt        time.Time
+	RegressionFailed    bool
+	FailureReason       string
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	CreatedAt           time.Time
 }
 
 type BenchmarkRunStatus string

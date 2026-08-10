@@ -84,6 +84,7 @@ var Module = fx.Options(
 		provideSchedulerLock,
 		provideToolQuotaRepository,
 		provideToolQuotaService,
+		provideRunCounter,
 
 		// Agent runtime
 		provideAgentLoop,
@@ -361,10 +362,15 @@ func provideToolQuotaService(cfg *Config, repo port.ToolQuotaRepository) *toolqu
 	return toolquota.NewService(repo, cfg.ToolQuota.DefaultPerMinute, cfg.ToolQuota.Tools)
 }
 
-func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config) *decision.RunManager {
+func provideRunCounter(db *gorm.DB) port.RunCounter {
+	return magi.NewRunCounterRepository(db)
+}
+
+func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config, counter port.RunCounter) *decision.RunManager {
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
 		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
+		RunCounter:               counter,
 	})
 }
 

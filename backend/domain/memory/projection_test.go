@@ -12,6 +12,7 @@ func TestBuildProjection_SetsCaseID(t *testing.T) {
 		&entity.Resolution{FinalReport: "report", Consensus: entity.ConsensusResult{Outcome: entity.ConsensusStrongApproval}},
 		nil,
 		nil,
+		nil,
 	)
 	if proj == nil || proj.CaseID != "c1" {
 		t.Fatalf("CaseID missing: %+v", proj)

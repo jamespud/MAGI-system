@@ -17,18 +17,19 @@ import (
 )
 
 type Orchestrator struct {
-	dispatcher *Dispatcher
-	consensus  *consensus.ConsensusEngine
-	debate     *debate.DebateEngine
-	commander  *service.Commander
-	eventPub   port.EventPublisher
-	caseRepo   port.CaseRepository
-	repo       port.Repository
-	knowledge  port.KnowledgePort
-	memRepo    port.MemoryRepository
-	policy     consensus.ConsensusPolicy
-	failPolicy FailurePolicy
-	configs    []*entity.MagiConfig
+	dispatcher   *Dispatcher
+	consensus    *consensus.ConsensusEngine
+	debate       *debate.DebateEngine
+	commander    *service.Commander
+	eventPub     port.EventPublisher
+	caseRepo     port.CaseRepository
+	repo         port.Repository
+	knowledge    port.KnowledgePort
+	memRepo      port.MemoryRepository
+	policy       consensus.ConsensusPolicy
+	failPolicy   FailurePolicy
+	lastAgentErr error
+	configs      []*entity.MagiConfig
 }
 
 type OrchestratorDeps struct {
@@ -54,18 +55,19 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		fp = DefaultFailurePolicy()
 	}
 	return &Orchestrator{
-		dispatcher: NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
-		consensus:  d.Consensus,
-		debate:     d.Debate,
-		commander:  d.Commander,
-		eventPub:   d.EventPub,
-		caseRepo:   d.CaseRepo,
-		repo:       d.Repo,
-		knowledge:  d.Knowledge,
-		memRepo:    d.MemoryRepo,
-		policy:     d.Policy,
-		failPolicy: fp,
-		configs:    d.Configs,
+		dispatcher:   NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
+		consensus:    d.Consensus,
+		debate:       d.Debate,
+		commander:    d.Commander,
+		eventPub:     d.EventPub,
+		caseRepo:     d.CaseRepo,
+		repo:         d.Repo,
+		knowledge:    d.Knowledge,
+		memRepo:      d.MemoryRepo,
+		policy:       d.Policy,
+		failPolicy:   fp,
+		lastAgentErr: nil,
+		configs:      d.Configs,
 	}
 }
 
@@ -83,6 +85,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	var votes []*entity.Vote
 	var consResult entity.ConsensusResult
 	var resolution *entity.Resolution
+	var artifactRemap *ArtifactRemap // old in-memory ID -> persisted ID, latest round
+	var allRemaps []*ArtifactRemap   // every round's remap, for report/reflection rewriting
 	round := 1
 
 	status := case_.Status
@@ -139,7 +143,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 
 		case entity.CaseStatusCollectingVotes:
 			votes = o.extractVotes(results)
-			o.persistArtifacts(ctx, case_, results, votes, round, "investigate")
+			if o.failPolicy.Mode == "fail_case" && o.lastAgentErr != nil {
+				return o.fail(ctx, case_, o.lastAgentErr.Error())
+			}
+			artifactRemap = o.persistArtifacts(ctx, case_, results, votes, round, "investigate")
+			allRemaps = append(allRemaps, artifactRemap)
 			o.publish(ctx, case_, entity.EventVoteSubmitted, map[string]any{"round": round, "votes": len(votes)})
 			status = entity.CaseStatusConsensusCheck
 
@@ -182,6 +190,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		case entity.CaseStatusRevoting:
 			o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": round})
 			newVotes := o.extractVotes(results)
+			artifactRemap = o.persistArtifacts(ctx, case_, results, newVotes, round, "reconsider")
+			allRemaps = append(allRemaps, artifactRemap)
 			reflections := EnforceReflectionRule(votes, newVotes, results, o.configs, round)
 			if o.repo != nil {
 				for idx, rf := range reflections {
@@ -191,21 +201,24 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 					if rf.AgentRunID == "" && idx < len(newVotes) && newVotes[idx] != nil {
 						rf.AgentRunID = newVotes[idx].AgentRunID
 					}
+					remapReflection(rf, artifactRemap)
 					_ = o.repo.ReflectionRepo().Create(ctx, rf)
 				}
 			}
-			o.persistArtifacts(ctx, case_, results, newVotes, round, "reconsider")
 			votes = newVotes
 			round++
 			status = entity.CaseStatusConsensusCheck
 
 		case entity.CaseStatusResolving:
 			consResult.Round = round
+			// Remap the resolution's cited IDs so the persisted record points
+			// at the same namespaced artifacts the vote/evidence tables hold.
+			remap := mergeRemaps(allRemaps)
 			resolution = &entity.Resolution{
 				Consensus:      consResult,
 				FinalDecision:  finalDecision(consResult),
-				KeyEvidenceIDs: o.collectEvidenceIDs(results),
-				KeyClaimIDs:    o.collectClaimIDs(results),
+				KeyEvidenceIDs: remap.RemapList(o.collectEvidenceIDs(results)),
+				KeyClaimIDs:    remap.RemapList(o.collectClaimIDs(results)),
 				VoteIDs:        voteIDs(votes),
 			}
 			resolution.ID = fmt.Sprintf("res-%s", case_.ID)
@@ -219,13 +232,15 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			if err != nil {
 				return o.fail(ctx, case_, fmt.Sprintf("report generation: %v", err))
 			}
-			resolution.FinalReport = report
+			// The report body cites IDs as free text; rewrite them to the
+			// persisted namespaced forms so citations resolve in the DB.
+			resolution.FinalReport = mergeRemaps(allRemaps).RemapText(report)
 			o.publish(ctx, case_, entity.EventResolutionCreated, map[string]any{"final_decision": string(resolution.FinalDecision)})
 			status = entity.CaseStatusSavingMemory
 
 		case entity.CaseStatusSavingMemory:
 			ledger := o.mergeLedgers(results)
-			proj := memory.BuildProjection(case_, resolution, ledger, votes)
+			proj := memory.BuildProjection(case_, resolution, ledger, votes, mergeRemaps(allRemaps))
 			if o.knowledge != nil {
 				// The knowledge adapter owns the MEMORY_INDEXED event: it is
 				// published after indexing actually completes (sync) or by the
@@ -286,6 +301,13 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 		if i < len(o.configs) {
 			cfg = o.configs[i]
 		}
+		if o.failPolicy.Mode == "fail_case" && (r == nil || r.Err != nil || r.Vote == nil) {
+			votes[i] = &entity.Vote{Decision: entity.VoteDecisionAbstain, ReasoningSummary: "agent failed under fail_case policy"}
+			// The loop below reports the failure so the durable worker retries
+			// or fails the case per its own retry policy.
+			o.lastAgentErr = ErrAgentFailed
+			continue
+		}
 		votes[i] = o.failPolicy.HandleFailure(r, cfg)
 	}
 	return votes
@@ -303,9 +325,10 @@ func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vot
 // which would collide on the shared table's primary key. Supports/contradicts/
 // evidence_ids references are rewritten to the namespaced IDs so intra-agent
 // links stay consistent. The in-memory ledger is not mutated (copies persisted).
-func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int, phase string) {
+func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int, phase string) *ArtifactRemap {
+	remap := newArtifactRemap()
 	if o.repo == nil {
-		return
+		return remap
 	}
 	now := time.Now()
 	for i, r := range results {
@@ -336,13 +359,11 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
 		// persist copies so the ledger is left untouched for any later use.
 		prefix := executionRunID(case_.ID, code, case_.ExecutionAttempt, round, phase)
-		evRemap := map[string]string{}
-		clRemap := map[string]string{}
 		if r.Ledger != nil {
 			evidence := r.Ledger.List()
 			for _, ev := range evidence {
 				newID := prefix + "-" + ev.ID
-				evRemap[ev.ID] = newID
+				remap.AddEvidence(ev.ID, newID)
 				cp := *ev
 				cp.ID = newID
 				cp.CaseID = case_.ID
@@ -352,15 +373,15 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 			claims := r.Ledger.ListClaims()
 			for _, cl := range claims {
 				newID := prefix + "-" + cl.ID
-				clRemap[cl.ID] = newID
+				remap.AddClaim(cl.ID, newID)
 			}
 			for _, cl := range claims {
 				cp := *cl
-				cp.ID = clRemap[cl.ID]
+				cp.ID = remap.ClaimMap()[cl.ID]
 				cp.CaseID = case_.ID
 				cp.AgentRunID = run.ID
-				cp.Supports = remapRefs(cl.Supports, evRemap)
-				cp.Contradicts = remapRefs(cl.Contradicts, clRemap)
+				cp.Supports = remapRefs(cl.Supports, remap.EvidenceMap())
+				cp.Contradicts = remapRefs(cl.Contradicts, remap.ClaimMap())
 				_ = o.repo.ClaimRepo().Create(ctx, &cp)
 			}
 		}
@@ -373,7 +394,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				for _, tc := range st.ToolCalls {
 					toolIdx++
 					evID := tc.EvidenceID
-					if remapped, ok := evRemap[evID]; ok {
+					if remapped, ok := remap.EvidenceMap()[evID]; ok {
 						evID = remapped
 					}
 					toolCall := &entity.ToolCall{
@@ -398,8 +419,8 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		// Remap this agent's vote evidence/claim references too, and link the
 		// vote to its agent run so /agents can join votes to agents.
 		if i < len(votes) && votes[i] != nil {
-			votes[i].EvidenceIDs = remapRefs(votes[i].EvidenceIDs, evRemap)
-			votes[i].KeyClaimIDs = remapRefs(votes[i].KeyClaimIDs, clRemap)
+			votes[i].EvidenceIDs = remap.RemapList(votes[i].EvidenceIDs)
+			votes[i].KeyClaimIDs = remap.RemapList(votes[i].KeyClaimIDs)
 			votes[i].AgentRunID = run.ID
 		}
 	}
@@ -416,6 +437,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		v.Round = round
 		_ = o.repo.VoteRepo().Create(ctx, v)
 	}
+	return remap
 }
 
 func (o *Orchestrator) configAt(i int) *entity.MagiConfig {

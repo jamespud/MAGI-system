@@ -12,6 +12,7 @@ func BuildProjection(
 	resolution *entity.Resolution,
 	ledger *evidence.EvidenceLedger,
 	votes []*entity.Vote,
+	remap *entity.ArtifactRemap,
 ) *entity.CaseMemoryProjection {
 	proj := &entity.CaseMemoryProjection{ProjectionVersion: 1}
 
@@ -35,8 +36,15 @@ func BuildProjection(
 			if i >= 5 {
 				break
 			}
+			persisted := remapID(remap, ev.ID)
+			if remap != nil && persisted == ev.ID {
+				// Merged ledgers re-number evidence (EV-001, EV-002, ...); the
+				// remap only knows the per-agent original IDs, so entries that
+				// were never persisted must not leak into the projection.
+				continue
+			}
 			proj.KeyEvidence = append(proj.KeyEvidence, entity.MemoryEvidence{
-				EvidenceID:  ev.ID,
+				EvidenceID:  persisted,
 				Observation: ev.Observation,
 				Reliability: ev.Reliability.Final,
 			})
@@ -46,8 +54,12 @@ func BuildProjection(
 			if i >= 5 {
 				break
 			}
+			persisted := remapID(remap, cl.ID)
+			if remap != nil && persisted == cl.ID {
+				continue
+			}
 			proj.KeyClaims = append(proj.KeyClaims, entity.MemoryClaim{
-				ClaimID:   cl.ID,
+				ClaimID:   persisted,
 				Statement: cl.Statement,
 			})
 		}
@@ -55,7 +67,7 @@ func BuildProjection(
 
 	for _, v := range votes {
 		proj.Votes = append(proj.Votes, entity.MemoryVote{
-			MagiCode:   entity.MagiCode(voteMagiCode(v)),
+			MagiCode:   entity.CodeOfRun(v.AgentRunID),
 			Decision:   v.Decision,
 			Confidence: v.Confidence,
 		})
@@ -64,9 +76,15 @@ func BuildProjection(
 	return proj
 }
 
-func voteMagiCode(v *entity.Vote) string {
-	// AgentRunID doesn't carry MagiCode in S4; S5 Orchestrator can set it.
-	return ""
+func remapID(remap *entity.ArtifactRemap, id string) string {
+	if remap == nil {
+		return id
+	}
+	out := remap.RemapList([]string{id})
+	if len(out) == 1 {
+		return out[0]
+	}
+	return id
 }
 
 func truncateRunes(s string, n int) string {

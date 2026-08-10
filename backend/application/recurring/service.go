@@ -3,6 +3,7 @@ package recurring
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,7 +96,11 @@ func (s *Service) Tick(ctx context.Context, now time.Time) error {
 			continue
 		}
 		if _, err := s.createAndRun(ctx, rc); err != nil {
-			continue // one template failing must not block the scheduler
+			// A failed launch (e.g. rate-limited or budget-rejected) must NOT
+			// advance last_run: the template stays due so the next tick retries
+			// instead of silently skipping an interval.
+			log.Printf("recurring: template %s (%s) failed to launch: %v", rc.ID, rc.Name, err)
+			continue
 		}
 		_ = s.repo.UpdateLastRun(ctx, rc.ID, now)
 	}

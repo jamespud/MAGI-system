@@ -1,3 +1,7 @@
+# NOTE: this root-level Dockerfile is superseded by backend/Dockerfile.
+# All build paths (docker-compose-web.yml, scripts/build.sh) use the backend
+# context; the root file is kept only as a historical reference and may drift
+# from go.mod. Delete it once nothing references it.
 FROM golang:1.24-alpine AS builder
 
 WORKDIR /app

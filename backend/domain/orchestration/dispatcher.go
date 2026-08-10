@@ -3,11 +3,11 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/runtime"
-	"golang.org/x/sync/errgroup"
 )
 
 type Dispatcher struct {
@@ -87,21 +87,26 @@ func (d *Dispatcher) Dispatch(
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
-	g, gctx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
+	wg.Add(len(configs))
 	for i, cfg := range configs {
 		i, c := i, cfg
-		g.Go(func() error {
+		// Each agent runs under its own derived context: one agent failing
+		// (model timeout, gate exhaustion) must not cancel the other agents'
+		// investigation. Failures surface through LoopResult.Status and are
+		// handled deterministically by the FailurePolicy.
+		go func() {
+			defer wg.Done()
 			actx := *base
 			actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(c.Code), round, "investigate")
-			r, _ := d.agentLoop.Run(gctx, c, &actx)
+			r, _ := d.agentLoop.Run(ctx, c, &actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
 			}
 			results[i] = r
-			return nil
-		})
+		}()
 	}
-	_ = g.Wait()
+	wg.Wait()
 	return results
 }
 
@@ -116,10 +121,12 @@ func (d *Dispatcher) DispatchReconsider(
 ) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
-	g, gctx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
+	wg.Add(len(configs))
 	for i, cfg := range configs {
 		i, c := i, cfg
-		g.Go(func() error {
+		go func() {
+			defer wg.Done()
 			var prevVote *entity.Vote
 			if i < len(prevResults) && prevResults[i] != nil {
 				prevVote = prevResults[i].Vote
@@ -127,15 +134,14 @@ func (d *Dispatcher) DispatchReconsider(
 			actx := *base
 			actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(c.Code), round, "reconsider")
 			actx.DebateContext = &runtime.DebateContext{Packet: packet, PreviousVote: prevVote}
-			r, _ := d.agentLoop.Run(gctx, c, &actx)
+			r, _ := d.agentLoop.Run(ctx, c, &actx)
 			if r == nil {
 				r = &runtime.LoopResult{Status: runtime.LoopStatusError}
 			}
 			results[i] = r
-			return nil
-		})
+		}()
 	}
-	_ = g.Wait()
+	wg.Wait()
 	return results
 }
 

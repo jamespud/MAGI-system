@@ -26,8 +26,9 @@ var ErrAlreadyCompleted = errors.New("case already completed")
 var ErrRateLimited = errors.New("rate limit exceeded")
 
 type runHandle struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
+	slotTaken bool
 }
 
 type RunManagerDeps struct {
@@ -40,6 +41,7 @@ type RunManagerDeps struct {
 	Metrics                  *metrics.Registry
 	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
+	RunCounter               port.RunCounter
 }
 
 // RunManager owns async case execution. With a JobRepo it uses a durable
@@ -56,6 +58,7 @@ type RunManager struct {
 	metrics              *metrics.Registry
 	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
+	runCounter           port.RunCounter
 	userRuns             map[int64]int
 	mu                   sync.Mutex
 	runs                 map[string]*runHandle
@@ -82,12 +85,20 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
-		userRuns: make(map[int64]int), runs: make(map[string]*runHandle),
+		runCounter: d.RunCounter,
+		userRuns:   make(map[int64]int), runs: make(map[string]*runHandle),
 	}
 }
 
 func (d RunManagerDeps) OrchOrNil(orch Orchestrator) Orchestrator {
 	return orch
+}
+
+func userIDString(userID int64) string {
+	if userID == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", userID)
 }
 
 // Start persists and launches a case job. The originating HTTP context is
@@ -97,6 +108,7 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 	if c == nil || c.ID == "" {
 		return fmt.Errorf("run manager: case is required")
 	}
+	slotHeld := false
 	m.mu.Lock()
 	_, local := m.runs[c.ID]
 	m.mu.Unlock()
@@ -104,7 +116,19 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 		return ErrAlreadyRunning
 	}
 	if m.maxConcurrentPerUser > 0 && c.UserID != 0 {
-		if m.jobRepo != nil {
+		if m.runCounter != nil {
+			// Atomic cross-instance slot: the counter increments and checks the
+			// limit in one statement, closing the check-then-act race between
+			// replicas. The slot is released when the run finishes.
+			ok, err := m.runCounter.Acquire(ctx, c.UserID, m.maxConcurrentPerUser)
+			if err != nil {
+				return fmt.Errorf("run manager: acquire run slot: %w", err)
+			}
+			if !ok {
+				return ErrRateLimited
+			}
+			slotHeld = true
+		} else if m.jobRepo != nil {
 			active, err := m.jobRepo.CountActiveByUser(ctx, c.UserID)
 			if err != nil {
 				return fmt.Errorf("run manager: count active runs: %w", err)
@@ -130,24 +154,36 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 		var err error
 		job, err = m.jobRepo.Enqueue(ctx, c.ID, m.maxAttempts)
 		if err != nil {
+			if slotHeld {
+				_ = m.runCounter.Release(context.Background(), c.UserID)
+			}
 			return fmt.Errorf("run manager: enqueue: %w", err)
 		}
 		switch job.Status {
 		case entity.DecisionJobSucceeded:
+			if slotHeld {
+				_ = m.runCounter.Release(context.Background(), c.UserID)
+			}
 			return ErrAlreadyCompleted
 		case entity.DecisionJobRunning:
+			if slotHeld {
+				_ = m.runCounter.Release(context.Background(), c.UserID)
+			}
 			return ErrAlreadyRunning
 		}
 	}
-	if !m.launch(c, job) {
+	if !m.launch(c, job, slotHeld) {
+		if slotHeld {
+			_ = m.runCounter.Release(context.Background(), c.UserID)
+		}
 		return ErrAlreadyRunning
 	}
 	return nil
 }
 
-func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) bool {
+func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob, slotHeld bool) bool {
 	runCtx, cancel := context.WithCancel(context.Background())
-	h := &runHandle{cancel: cancel, done: make(chan struct{})}
+	h := &runHandle{cancel: cancel, done: make(chan struct{}), slotTaken: slotHeld}
 	m.mu.Lock()
 	if _, exists := m.runs[c.ID]; exists {
 		m.mu.Unlock()
@@ -163,6 +199,9 @@ func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) boo
 	go func() {
 		defer close(h.done)
 		defer func() {
+			if h.slotTaken && m.runCounter != nil && c.UserID != 0 {
+				_ = m.runCounter.Release(context.Background(), c.UserID)
+			}
 			m.mu.Lock()
 			delete(m.runs, c.ID)
 			m.mu.Unlock()
@@ -183,8 +222,10 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 	if m.jobRepo == nil {
 		runStart := time.Now()
 		m.metrics.RunStart()
+		m.metrics.RunStartForUser(userIDString(c.UserID))
 		_, err := m.orch.Orchestrate(ctx, c)
 		m.metrics.RunFinish(err == nil)
+		m.metrics.RunFinishForUser(userIDString(c.UserID))
 		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		return
 	}
@@ -213,8 +254,10 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		stopHeartbeat := m.startHeartbeat(ctx, claimed.ID)
 		runStart := time.Now()
 		m.metrics.RunStart()
+		m.metrics.RunStartForUser(userIDString(c.UserID))
 		_, runErr := m.orch.Orchestrate(ctx, c)
 		m.metrics.RunFinish(runErr == nil)
+		m.metrics.RunFinishForUser(userIDString(c.UserID))
 		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		stopHeartbeat()
 
@@ -311,7 +354,7 @@ func (m *RunManager) Recover(ctx context.Context) error {
 		if err != nil || c == nil {
 			continue
 		}
-		m.launch(c, job)
+		m.launch(c, job, false)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,13 +28,15 @@ type Orchestrator interface {
 // a worker that executes each item as a real DecisionCase through the
 // orchestrator, persists per-item results, and finalizes accuracy metrics.
 type Service struct {
-	datasets        port.DatasetRepository
-	cases           port.CaseRepository
-	orch            Orchestrator
-	maxDebateRounds    int
-	workerSlots        chan struct{}
-	runsPerItem        int
+	datasets            port.DatasetRepository
+	cases               port.CaseRepository
+	orch                Orchestrator
+	maxDebateRounds     int
+	workerSlots         chan struct{}
+	runsPerItem         int
 	regressionThreshold float64
+	workerID            string
+	leaseDuration       time.Duration
 }
 
 // Option configures a dataset.Service.
@@ -57,7 +60,9 @@ func WithRegressionThreshold(t float64) Option {
 func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch Orchestrator, maxDebateRounds int, opts ...Option) *Service {
 	s := &Service{
 		datasets: datasets, cases: cases, orch: orch, maxDebateRounds: maxDebateRounds, runsPerItem: 1,
-		workerSlots: make(chan struct{}, 2),
+		workerSlots:   make(chan struct{}, 2),
+		workerID:      "bench-worker-" + uuid.NewString(),
+		leaseDuration: 10 * time.Minute,
 	}
 	for _, o := range opts {
 		o(s)
@@ -67,7 +72,7 @@ func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch
 
 // RunOptions controls one benchmark run.
 type RunOptions struct {
-	RunsPerItem        int
+	RunsPerItem         int
 	RegressionThreshold float64
 }
 
@@ -259,7 +264,7 @@ func (s *Service) StartRunWithOptions(ctx context.Context, ownerID int64, datase
 	if err := s.datasets.CreateRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("dataset: create run: %w", err)
 	}
- 	go s.processRun(run.ID, items, ds.OwnerID, opts)
+	go s.processRun(run.ID, items, ds.OwnerID, opts)
 	return run, nil
 }
 
@@ -267,14 +272,23 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 	s.workerSlots <- struct{}{}
 	defer func() { <-s.workerSlots }()
 	ctx := context.Background()
+	// Atomic multi-instance claim: only the replica that wins the lease
+	// executes this run. A crashed owner's lease expires and the run is
+	// requeued by RecoverOrphanRuns for the next replica.
+	leaseUntil := time.Now().Add(s.leaseDuration)
+	claimed, err := s.datasets.ClaimRun(ctx, runID, s.workerID, &leaseUntil)
+	if err != nil {
+		log.Printf("dataset: claim run %s: %v", runID, err)
+		return
+	}
+	if !claimed {
+		return // another replica owns this run
+	}
 	run, err := s.datasets.GetRun(ctx, runID)
 	if err != nil || run == nil {
 		return
 	}
 	run.Status = entity.BenchmarkRunRunning
-	if err := s.datasets.UpdateRun(ctx, run); err != nil {
-		return
-	}
 	matched := 0
 	totalWeight := 0.0
 	matchedWeight := 0.0
@@ -459,6 +473,9 @@ func (s *Service) RunDetail(ctx context.Context, ownerID int64, runID string) (*
 // RecoverOrphanRuns marks queued/running runs as failed; called at startup to
 // clean up runs interrupted by a process restart.
 func (s *Service) RecoverOrphanRuns(ctx context.Context) error {
+	if err := s.datasets.ExpireRunLeases(ctx, time.Now()); err != nil {
+		return fmt.Errorf("dataset: expire run leases: %w", err)
+	}
 	runs, err := s.datasets.ListAllRuns(ctx)
 	if err != nil {
 		return err

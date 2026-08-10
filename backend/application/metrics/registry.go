@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 )
 
@@ -26,6 +27,14 @@ type Registry struct {
 	RunDurationCount   atomic.Int64
 	RunDurationBuckets [8]atomic.Int64 // 7 bounded buckets + +Inf
 	CostTotalMicro     atomic.Int64    // USD * 1e6
+
+	perUser sync.Map // userID -> *userUsage
+}
+
+type userUsage struct {
+	tokens     atomic.Int64
+	costMicro  atomic.Int64
+	runsActive atomic.Int64
 }
 
 func New() *Registry { return &Registry{} }
@@ -49,6 +58,62 @@ func (r *Registry) AddTokens(n int64) {
 	if r != nil {
 		r.TokensTotal.Add(n)
 	}
+}
+
+// AddTokensForUser records token usage against a specific user (per-user
+// status display). Falls back to the global counter when userID is empty.
+func (r *Registry) AddTokensForUser(userID string, n int64) {
+	if r == nil {
+		return
+	}
+	r.AddTokens(n)
+	if userID == "" {
+		return
+	}
+	u := r.userUsage(userID)
+	u.tokens.Add(n)
+}
+
+// AddCostUSDForUser records cost against a specific user.
+func (r *Registry) AddCostUSDForUser(userID string, usd float64) {
+	if r == nil {
+		return
+	}
+	r.AddCostUSD(usd)
+	if userID == "" {
+		return
+	}
+	r.userUsage(userID).costMicro.Add(int64(usd * 1e6))
+}
+
+// RunStartForUser marks a run active for a user.
+func (r *Registry) RunStartForUser(userID string) {
+	if r == nil || userID == "" {
+		return
+	}
+	r.userUsage(userID).runsActive.Add(1)
+}
+
+// RunFinishForUser marks a run inactive for a user.
+func (r *Registry) RunFinishForUser(userID string) {
+	if r == nil || userID == "" {
+		return
+	}
+	r.userUsage(userID).runsActive.Add(-1)
+}
+
+// UserStatus returns the per-user usage snapshot for the status endpoint.
+func (r *Registry) UserStatus(userID string) (tokens int64, costUSD float64, runsActive int64) {
+	if r == nil || userID == "" {
+		return r.TokensTotal.Load(), float64(r.CostTotalMicro.Load()) / 1e6, r.RunsActive.Load()
+	}
+	u := r.userUsage(userID)
+	return u.tokens.Load(), float64(u.costMicro.Load()) / 1e6, u.runsActive.Load()
+}
+
+func (r *Registry) userUsage(userID string) *userUsage {
+	v, _ := r.perUser.LoadOrStore(userID, &userUsage{})
+	return v.(*userUsage)
 }
 
 func (r *Registry) RunFinish(ok bool) {

@@ -24,18 +24,18 @@ type JudgeOutput struct {
 
 // Service runs semantic evaluation of a completed case via an LLM judge.
 type Service struct {
-	modelPort port.ModelPort
-	modelRef  entity.ModelRef
-	gen       validation.SchemaGenerator
-	val       validation.Validator
-	judgeVal  *validation.TypedValidator[JudgeOutput]
-	repo      port.JudgeRepository
-	agentRuns port.AgentRunRepository
-	evidence  port.EvidenceRepository
-	votes     port.VoteRepository
-	claims    port.ClaimRepository
+	modelPort   port.ModelPort
+	modelRef    entity.ModelRef
+	gen         validation.SchemaGenerator
+	val         validation.Validator
+	judgeVal    *validation.TypedValidator[JudgeOutput]
+	repo        port.JudgeRepository
+	agentRuns   port.AgentRunRepository
+	evidence    port.EvidenceRepository
+	votes       port.VoteRepository
+	claims      port.ClaimRepository
 	reflections port.ReflectionRepository
-	resolution port.ResolutionRepository
+	resolution  port.ResolutionRepository
 }
 
 func NewService(modelPort port.ModelPort, modelRef entity.ModelRef, gen validation.SchemaGenerator, val validation.Validator, repo port.JudgeRepository) (*Service, error) {
@@ -118,6 +118,17 @@ func (s *Service) Judge(ctx context.Context, caseID string) (*entity.JudgeResult
 	return res, nil
 }
 
+// Latest returns the most recent persisted judge result for a case.
+func (s *Service) Latest(ctx context.Context, caseID string) (*entity.JudgeResult, error) {
+	if caseID == "" {
+		return nil, fmt.Errorf("judge: case ID is required")
+	}
+	if s.repo == nil {
+		return nil, fmt.Errorf("judge: repository is not configured")
+	}
+	return s.repo.GetLatest(ctx, caseID)
+}
+
 func buildJudgePrompt(caseID string, resolution *entity.Resolution, votes []*entity.Vote, evidence []*entity.EvidenceRecord, claims []*entity.Claim, reflections []*entity.Reflection) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Case: %s\n", caseID)
@@ -160,7 +171,7 @@ func buildJudgePrompt(caseID string, resolution *entity.Resolution, votes []*ent
 	b.WriteString("\nScore: report_quality, evidence_consistency (do cited evidence support votes/report?), reflection_validity (are position changes justified?), overall; add a short rationale.")
 	return b.String()
 }
- 
+
 func validateScores(out JudgeOutput) error {
 	for name, v := range map[string]float64{
 		"report_quality": out.ReportQuality, "evidence_consistency": out.EvidenceConsistency,

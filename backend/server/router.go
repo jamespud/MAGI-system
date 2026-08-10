@@ -88,13 +88,14 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/evaluation/:id", evalH.Evaluate)
 
 	judgeH := handler.NewJudgeHandler(deps.Judge, deps.Decision)
+	v1.GET("/evaluation/:id/judge", judgeH.Get)
 	v1.POST("/evaluation/:id/judge", judgeH.Judge)
 	v1.POST("/benchmark", evalH.Benchmark)
 
-	toolH := handler.NewToolHandler(deps.Tool)
+	toolH := handler.NewToolHandler(deps.Tool, deps.Plugins)
 	v1.GET("/tools", toolH.List)
 	v1.GET("/tools/:name", toolH.Get)
- 	statusH := handler.NewStatusHandler(deps.Metrics, deps.ModelName)
+	statusH := handler.NewStatusHandler(deps.Metrics, deps.ModelName)
 	v1.GET("/status", statusH.Status)
 
 	apprH := handler.NewApprovalHandler(deps.Approval, deps.Decision)

@@ -117,6 +117,33 @@ func (s *stubDatasetRepo) CreateRun(ctx context.Context, r *entity.BenchmarkRun)
 	s.runs[r.ID] = r
 	return nil
 }
+func (s *stubDatasetRepo) ClaimRun(ctx context.Context, runID, owner string, leaseUntil *time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[runID]
+	if !ok {
+		return false, errors.New("not found")
+	}
+	if r.LeaseUntil != nil && r.LeaseUntil.After(time.Now()) {
+		return false, nil // another replica holds the lease
+	}
+	r.LeaseOwner = owner
+	r.LeaseUntil = leaseUntil
+	r.Status = entity.BenchmarkRunRunning
+	return true, nil
+}
+func (s *stubDatasetRepo) ExpireRunLeases(ctx context.Context, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, r := range s.runs {
+		if r.LeaseUntil != nil && r.LeaseUntil.Before(now) {
+			r.LeaseOwner = ""
+			r.LeaseUntil = nil
+			r.Status = entity.BenchmarkRunQueued
+		}
+	}
+	return nil
+}
 func (s *stubDatasetRepo) UpdateRun(ctx context.Context, r *entity.BenchmarkRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -422,4 +449,85 @@ func TestService_AddFeedbackOwnershipAndPersists(t *testing.T) {
 	if got[0].Feedback != "agree with the call" || got[0].FeedbackAt == nil {
 		t.Fatalf("feedback not persisted: %+v", got[0])
 	}
+}
+
+// countingOrchForClaims counts orchestrations so a test can prove that only
+// one replica executes a claimed benchmark run.
+type countingOrchForClaims struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *countingOrchForClaims) Orchestrate(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return &entity.Resolution{CaseID: case_.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+func TestService_RecoverOrphanRunsRespectsUnexpiredLease(t *testing.T) {
+	repo := newStubDatasetRepo()
+	orch := &countingOrchForClaims{}
+	svc := dataset.NewService(repo, &stubCaseRepo{}, orch, 1)
+	ctx := context.Background()
+	d, _ := svc.Create(ctx, 0, "recover", "")
+	_, _ = svc.AddItems(ctx, 0, d.ID, []dataset.NewItem{
+		{Question: "q1", ExpectedDecision: entity.VoteDecisionApprove},
+	})
+	run, err := svc.StartRun(ctx, 0, d.ID)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+	if run.Status != entity.BenchmarkRunSucceeded {
+		t.Fatalf("run: %+v", run)
+	}
+
+	// Simulate a crashed owner with an unexpired lease: recovery must not
+	// re-execute the run.
+	repo.mu.Lock()
+	stored := repo.runs[run.ID]
+	future := time.Now().Add(time.Hour)
+	stored.Status = entity.BenchmarkRunQueued
+	stored.LeaseOwner = "dead-worker"
+	stored.LeaseUntil = &future
+	repo.mu.Unlock()
+	if err := svc.RecoverOrphanRuns(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if !waitCalls(t, orch, 1) {
+		t.Fatalf("run must not be re-executed while lease is held")
+	}
+
+	// Once the lease expires, recovery resumes the run.
+	repo.mu.Lock()
+	past := time.Now().Add(-time.Minute)
+	repo.runs[run.ID].LeaseUntil = &past
+	repo.mu.Unlock()
+	if err := svc.RecoverOrphanRuns(ctx); err != nil {
+		t.Fatalf("recover after expiry: %v", err)
+	}
+	run = waitRun(t, repo, run.ID, entity.BenchmarkRunSucceeded)
+	// Completed items are skipped on resume (the done map is rebuilt from
+	// persisted results), so no additional orchestration is needed here.
+	if !waitCalls(t, orch, 1) {
+		t.Fatalf("resume must not re-run completed items")
+	}
+}
+
+func waitCalls(t *testing.T, orch *countingOrchForClaims, want int) bool {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		orch.mu.Lock()
+		calls := orch.calls
+		orch.mu.Unlock()
+		if calls == want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	return orch.calls == want
 }

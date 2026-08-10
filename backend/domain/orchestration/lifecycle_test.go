@@ -141,7 +141,7 @@ func TestIntegration_OrchestratorPersistsCompleteLifecycle(t *testing.T) {
 
 	// 2. Resolution persisted with report + evaluation.
 	resGot, err := repo.ResolutionRepo().Get(ctx, "c-audit")
-	if err != nil || resGot == nil || !strings.Contains(resGot.FinalReport, "EV-001") || resGot.Evaluation == nil {
+	if err != nil || resGot == nil || resGot.FinalReport == "" || resGot.Evaluation == nil {
 		t.Fatalf("resolution persisted: %+v err=%v", resGot, err)
 	}
 
@@ -168,6 +168,54 @@ func TestIntegration_OrchestratorPersistsCompleteLifecycle(t *testing.T) {
 	if err != nil || len(evs) != 3 {
 		t.Fatalf("evidence: %d err=%v", len(evs), err)
 	}
+	evIDSet := make(map[string]bool, len(evs))
+	clIDSet := make(map[string]bool, len(claims))
+	for _, e := range evs {
+		evIDSet[e.ID] = true
+	}
+	for _, c := range claims {
+		clIDSet[c.ID] = true
+		for _, sid := range c.Supports {
+			if !evIDSet[sid] {
+				t.Fatalf("claim %s supports unknown evidence %q", c.ID, sid)
+			}
+		}
+	}
+	// Every ID the resolution cites must resolve to a persisted artifact row.
+	for _, id := range resGot.KeyEvidenceIDs {
+		if !evIDSet[id] {
+			t.Fatalf("resolution cites unknown evidence %q", id)
+		}
+	}
+	for _, id := range resGot.KeyClaimIDs {
+		if !clIDSet[id] {
+			t.Fatalf("resolution cites unknown claim %q", id)
+		}
+	}
+	// The report body must cite persisted namespaced IDs (each citation
+	// resolves to a row in the evidence/claim tables, checked below).
+	reportIDs := findIDs(resGot.FinalReport)
+	if len(reportIDs) == 0 {
+		t.Fatalf("report does not cite any EV-ID: %s", resGot.FinalReport)
+	}
+	for _, id := range reportIDs {
+		if !evIDSet[id] && !clIDSet[id] {
+			t.Fatalf("report cites unknown ID %q", id)
+		}
+	}
+	// Votes must reference persisted evidence/claims.
+	for _, v := range votes {
+		for _, id := range v.EvidenceIDs {
+			if !evIDSet[id] {
+				t.Fatalf("vote references unknown evidence %q", id)
+			}
+		}
+		for _, id := range v.KeyClaimIDs {
+			if !clIDSet[id] {
+				t.Fatalf("vote references unknown claim %q", id)
+			}
+		}
+	}
 
 	// 7. Tool calls persisted (one per agent).
 	toolCalls, err := repo.ToolCallRepo().ListByCase(ctx, "c-audit")
@@ -182,6 +230,17 @@ func TestIntegration_OrchestratorPersistsCompleteLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(proj.QuestionSummary, "compute full lifecycle audit") || proj.Resolution == "" || len(proj.Votes) != 3 {
 		t.Fatalf("memory projection content: %+v", proj)
+	}
+	// Memory projection must carry namespaced IDs and role-attributed votes.
+	for _, ev := range proj.KeyEvidence {
+		if !evIDSet[ev.EvidenceID] {
+			t.Fatalf("memory projection references unknown evidence %q", ev.EvidenceID)
+		}
+	}
+	for _, v := range proj.Votes {
+		if v.MagiCode != entity.MagiCodeMelchior && v.MagiCode != entity.MagiCodeBalthasar && v.MagiCode != entity.MagiCodeCasper {
+			t.Fatalf("memory projection vote missing role: %+v", v)
+		}
 	}
 	searchRes, err := repo.MemoryRepo().Search(ctx, "lifecycle audit", 10)
 	if err != nil || len(searchRes) == 0 || searchRes[0].CaseID != "c-audit" {
@@ -237,4 +296,21 @@ func TestIntegration_OrchestratorPersistsCompleteLifecycle(t *testing.T) {
 	if len(retr.Blocks) == 0 {
 		t.Fatal("expected retrieval blocks from stored memory")
 	}
+}
+
+// findIDs extracts EV-/CL- artifact IDs from free text (report citations).
+// Persisted IDs are namespaced ("<case>-<code>-r<n>-<phase>-EV-001"), so the
+// matcher recognizes both the bare in-memory form and the full persisted form.
+func findIDs(s string) []string {
+	var out []string
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ' ' || r == ',' || r == '"' || r == '[' || r == ']' || r == '\n' || r == ':' || r == '(' || r == ')'
+	})
+	for _, f := range fields {
+		f = strings.Trim(f, `",.`)
+		if strings.Contains(f, "EV-") || strings.Contains(f, "CL-") {
+			out = append(out, f)
+		}
+	}
+	return out
 }

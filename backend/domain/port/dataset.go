@@ -21,6 +21,12 @@ type DatasetRepository interface {
 	UpdateItem(ctx context.Context, item *entity.BenchmarkItem) error
 	DeleteItem(ctx context.Context, id string) error
 	CreateRun(ctx context.Context, r *entity.BenchmarkRun) error
+	// ClaimRun atomically transitions a queued/running run into the caller's
+	// lease, returning false when another replica already owns it.
+	ClaimRun(ctx context.Context, runID, owner string, leaseUntil *time.Time) (bool, error)
+	// ExpireRunLeases requeues runs whose lease expired (owner crashed), so a
+	// replica can claim and resume them.
+	ExpireRunLeases(ctx context.Context, now time.Time) error
 	UpdateRun(ctx context.Context, r *entity.BenchmarkRun) error
 	GetRun(ctx context.Context, id string) (*entity.BenchmarkRun, error)
 	ListRuns(ctx context.Context, datasetID string) ([]*entity.BenchmarkRun, error)

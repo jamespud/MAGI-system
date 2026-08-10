@@ -251,6 +251,8 @@ type BenchmarkRunModel struct {
 	ID               string `gorm:"primaryKey"`
 	DatasetID        string `gorm:"index"`
 	Status           string `gorm:"index"`
+	LeaseOwner       string `gorm:"column:lease_owner"`
+	LeaseUntil       *time.Time
 	Total            int
 	Matched          int
 	Accuracy         float64
@@ -320,7 +322,7 @@ func (ToolQuotaCounterModel) TableName() string { return "magi_tool_quota_counte
 
 type JudgeModel struct {
 	ID                  uint `gorm:"primaryKey;autoIncrement"`
-	CaseID              string `gorm:"index"`
+	CaseID              string `gorm:"uniqueIndex"`
 	ReportQuality       float64
 	EvidenceConsistency float64
 	ReflectionValidity  float64
@@ -360,5 +362,6 @@ func AllModels() []any {
 		&JudgeModel{},
 		&SchedulerLockModel{},
 		&ToolQuotaCounterModel{},
+		&RunCounterModel{},
 	}
 }

@@ -20,21 +20,26 @@ func NewAssistantHandler(svc *assistant.Service) *AssistantHandler {
 }
 
 // Ask turns a natural-language decision question into a full MAGI decision
-// run and returns the final decision with its report.
+// run. It returns 202 + case ID; the run executes through the governed async
+// runner (concurrency limits, budgets, leases, retries).
 func (h *AssistantHandler) Ask(ctx context.Context, c *app.RequestContext) {
 	var req dto.AskRequest
 	if err := c.BindAndValidate(&req); err != nil || req.Message == "" {
 		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "message is required"})
 		return
 	}
-	constraints := make([]entity.Constraint, len(req.Constraints))
-	for i, ct := range req.Constraints {
-		constraints[i] = entity.Constraint{Key: ct.Label, Value: ct.Value}
-	}
-	cs, res, err := h.svc.Ask(ctx, CurrentUserID(ctx), req.Message, req.Background, constraints)
+	cs, err := h.svc.AskAsync(ctx, CurrentUserID(ctx), req.Message, req.Background, toConstraints(req.Constraints))
 	if err != nil {
-		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(consts.StatusOK, dto.FromAsk(cs, res))
+	c.JSON(consts.StatusAccepted, dto.CaseResponse{ID: cs.ID, Status: string(cs.Status)})
+}
+
+func toConstraints(dtos []dto.ConstraintDTO) []entity.Constraint {
+	out := make([]entity.Constraint, len(dtos))
+	for i, ct := range dtos {
+		out[i] = entity.Constraint{Key: ct.Label, Value: ct.Value}
+	}
+	return out
 }
