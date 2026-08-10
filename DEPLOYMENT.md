@@ -36,6 +36,25 @@ behind a reverse proxy that allows only the Prometheus server (e.g. nginx
 `allow` rules or a separate scrape port). Example alert rules live in
 `deploy/prometheus-alerts.example.yml`.
 
+### Multi-tenant boundaries and sandbox egress
+
+- **Per-user limits are cumulative and independent**: run concurrency
+  (`limits.max_concurrent_runs_per_user`), token/cost budgets
+  (`limits.max_tokens_per_user`, `limits.max_cost_usd_per_user`), and tool
+  rate limits (`tool_quota`) each cap a user without affecting others. All are
+  backed by shared DB state so they hold across replicas.
+- **Sandbox egress is deny-by-default**: `code_runner.allow_net` maps to Deno
+  permission flags; an empty list means no network access. For a controlled
+  egress proxy, run MAGI behind a proxy and populate `allow_net` with only the
+  proxy's address.
+- **MCP credentials**: external MCP servers are configured in `mcp.servers`;
+  HTTP servers accept static auth via `headers` (e.g. `Authorization`). OAuth
+  flows are not built in — terminate OAuth at a gateway and inject the token
+  via headers.
+- **Coze integration mode**: plugin/workflow tools require Coze `DefaultSVC`
+  services. In standalone deployments those tools degrade gracefully; embed
+  MAGI in the Coze process when plugin/workflow capability is required.
+
 ## Configuration
 
 ### Schema management
