@@ -1,0 +1,34 @@
+# MAGI Prometheus alert rules (example).
+# Pair with backend /metrics and the OTLP/HTTP tracing exporter. Alertmanager
+# wiring is deployment-specific; these are the thresholds that matter.
+groups:
+  - name: magi-runtime
+    rules:
+      - alert: MagiRunFailuresHigh
+        expr: rate(magi_runs_failed_total[5m]) / clamp_min(rate(magi_runs_completed_total[5m]) + rate(magi_runs_failed_total[5m]), 1) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 30% of MAGI runs failing in the last 5 minutes"
+      - alert: MagiRunQueueBacklog
+        expr: magi_runs_active > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusually many active runs"
+      - alert: MagiToolFailureSpike
+        expr: rate(magi_tool_call_failures_total[5m]) / clamp_min(rate(magi_tool_calls_total[5m]), 1) > 0.4
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tool failure rate above 40%"
+      - alert: MagiCostRunaway
+        expr: increase(magi_cost_usd_total[1h]) > 5
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spending more than $5/hour on model calls"

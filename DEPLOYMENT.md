@@ -28,6 +28,14 @@ make web-up                        # mysql + magi-server + nginx (port 80)
 
 Stop with `make web-down`; logs with `make web-logs`.
 
+### Metrics endpoint exposure
+
+`GET /metrics` is intentionally unauthenticated (Prometheus scraping cannot
+send bearer tokens). Do not expose it directly to the public internet: put it
+behind a reverse proxy that allows only the Prometheus server (e.g. nginx
+`allow` rules or a separate scrape port). Example alert rules live in
+`deploy/prometheus-alerts.example.yml`.
+
 ## Configuration
 
 ### Schema management
