@@ -465,7 +465,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					}
 				}
 			}
-			messages = append(messages, schema.UserMessage("Claims recorded. Continue investigating or output EvidenceSummary when ready."))
+			messages = append(messages, schema.UserMessage(BuildClaimFeedback(pr.Claims.Claims, ledger)))
 			trace.Steps = append(trace.Steps, st)
 			continue
 
@@ -659,6 +659,34 @@ func AvailableEvidenceHint(ledger *evidence.EvidenceLedger, limit int) string {
 		fmt.Fprintf(&b, "%s (%.2f, %s)", ev.ID, ev.Reliability.Final, ev.ToolName)
 	}
 	return b.String()
+}
+
+// BuildClaimFeedback produces the user-message sent after an incremental
+// claim submission. Claims that cite unknown EV-IDs are rejected explicitly
+// (with the available-ID hint) instead of being silently dropped, so the model
+// learns which IDs are real and can correct course.
+func BuildClaimFeedback(claims []entity.EvidenceSummaryClaim, ledger *evidence.EvidenceLedger) string {
+	const suffix = " Continue investigating or output EvidenceSummary when ready."
+	if len(claims) == 0 {
+		return "No claims submitted." + suffix
+	}
+	var rejected []string
+	for _, c := range claims {
+		for _, evID := range c.Supports {
+			if !ledger.ExistsCollected(evID, "") {
+				rejected = append(rejected, evID)
+				break
+			}
+		}
+	}
+	if len(rejected) == 0 {
+		return "Claims recorded." + suffix
+	}
+	msg := fmt.Sprintf("%d claim(s) rejected: unknown EV-ID(s) %s.", len(rejected), strings.Join(rejected, ", "))
+	if h := AvailableEvidenceHint(ledger, 8); h != "" {
+		msg += " " + h
+	}
+	return msg + suffix
 }
 
 // unwrapFunctionCall handles a model quirk observed in production: some models
