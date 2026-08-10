@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/consensus"
@@ -164,6 +165,13 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 					status = entity.CaseStatusResolving
 				}
 			case entity.ConsensusDeadlock, entity.ConsensusInsufficientQuorum:
+				// A tie caused by agent FAILURES is not a genuine deadlock: it
+				// means the decision could not be reached because an agent
+				// malfunctioned. Surface that as a case failure with the
+				// reasons instead of a misleading DEADLOCKED terminal state.
+				if reasons := failedAgentReasons(votes); len(reasons) > 0 {
+					return o.fail(ctx, case_, "deadlock caused by agent failures: "+strings.Join(reasons, "; "))
+				}
 				status = entity.CaseStatusDeadlocked
 			default:
 				status = entity.CaseStatusResolving
@@ -621,6 +629,19 @@ func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg
 		_ = o.caseRepo.UpdateStatus(ctx, case_.ID, entity.CaseStatusFailed)
 	}
 	return nil, fmt.Errorf("%s", msg)
+}
+
+// failedAgentReasons collects the failure reasons carried by ABSTAIN votes
+// produced through the failure policy (their reasoning starts with
+// "agent failed"). Genuine model abstentions do not match and are ignored.
+func failedAgentReasons(votes []*entity.Vote) []string {
+	var out []string
+	for _, v := range votes {
+		if v != nil && v.Decision == entity.VoteDecisionAbstain && strings.HasPrefix(v.ReasoningSummary, "agent failed") {
+			out = append(out, v.ReasoningSummary)
+		}
+	}
+	return out
 }
 
 func finalDecision(c entity.ConsensusResult) entity.VoteDecision {

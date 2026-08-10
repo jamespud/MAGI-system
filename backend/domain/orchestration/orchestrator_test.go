@@ -242,6 +242,38 @@ func TestOrchestrate_Deadlock(t *testing.T) {
 	}
 }
 
+// TestOrchestrate_FailureCausedTieFailsCase guards deadlock semantics: when a
+// 1:1:1 tie is produced by an agent FAILURE (ABSTAIN from failure policy)
+// rather than by a genuine abstention, the case must end FAILED with the
+// failure reason visible instead of a misleading DEADLOCKED.
+func TestOrchestrate_FailureCausedTieFailsCase(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.errOn["melchior"] = true // melchior fails -> ABSTAIN via failure policy
+	mrt.votes["balthasar"] = []*entity.Vote{reject()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	c := &entity.DecisionCase{ID: "c-fail-tie", Question: "compute", MaxDebateRounds: 1}
+	_, err := orch.Orchestrate(context.Background(), c)
+	if err == nil {
+		t.Fatal("expected case failure when a tie is caused by agent failure")
+	}
+	if c.Status != entity.CaseStatusFailed {
+		t.Fatalf("expected case status FAILED, got %s", c.Status)
+	}
+	if !strings.Contains(err.Error(), "agent failed") && !strings.Contains(err.Error(), "failed") {
+		t.Fatalf("failure reason not surfaced: %v", err)
+	}
+}
+
 func TestOrchestrate_FailurePolicy(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // melchior fails
