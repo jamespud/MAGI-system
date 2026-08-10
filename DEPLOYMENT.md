@@ -60,6 +60,35 @@ Secrets are injected at runtime: `MAGI_MODEL_API_KEY`, `MAGI_TAVILY_API_KEY`,
 
 ## Verification checklist (real credentials required)
 
+## Quality gates before release
+
+MAGI ships three complementary gates. Run them before any release that changes
+prompts, tools, role contracts or the agent loop; treat a failed gate as a
+release blocker.
+
+1. **Ground-truth benchmark + regression threshold** — build a dataset of
+   expected decisions, then run a benchmark. The run reports
+   `accuracy`, `weighted_accuracy`, `stability` (consistency across N repeats
+   per item) and fails with `regression_failed: true` when accuracy falls below
+   `benchmark.regression_threshold` (e.g. 0.8). This catches decision
+   regressions cheaply.
+   ```bash
+   curl -s -X POST http://localhost/api/v1/datasets -H "Authorization: Bearer <key>" \
+     -H "Content-Type: application/json" -d '{"name":"release-gate"}'
+   # add items, then:
+   curl -s -X POST http://localhost/api/v1/datasets/<id>/runs?runs_per_item=3 -H "Authorization: Bearer <key>"
+   curl -s http://localhost/api/v1/benchmarks/<runID> -H "Authorization: Bearer <key>"
+   ```
+2. **LLM-as-a-Judge semantic gate** — after a benchmark, judge the resolved
+   cases for report quality / evidence consistency / reflection validity
+   (`POST /api/v1/evaluation/:id/judge`, then `GET .../judge`). Establish a
+   baseline score on the current release; block releases whose mean `overall`
+   drops below it by more than a few points.
+3. **Counterfactual stability** — with `runs_per_item >= 3`, the benchmark's
+   per-item consistency rate is itself the counterfactual stability measure;
+   a stability drop (e.g. below 0.7) indicates prompt/model sensitivity that
+   should be investigated before release.
+
 1. Stack is healthy:
    ```bash
    curl -s http://localhost/ready     # {"status":"ready"}
