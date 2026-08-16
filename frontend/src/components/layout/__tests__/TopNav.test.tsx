@@ -4,9 +4,10 @@ import { MemoryRouter } from 'react-router-dom';
 
 const { mockGetStatus } = vi.hoisted(() => ({ mockGetStatus: vi.fn() }));
 
-vi.mock('@/api/client', () => ({
-  api: { getStatus: mockGetStatus },
-}));
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>();
+  return { ...actual, api: { ...actual.api, getStatus: mockGetStatus } };
+});
 
 import TopNav from '@/components/layout/TopNav';
 

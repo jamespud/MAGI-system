@@ -73,17 +73,19 @@
 
 ### P0（正确性 / 安全 / 多租户）
 
-**D1. 前端无认证通道，多租户 Web UI 不可用**
+> **状态：2026-08-16 已全部修复并验证**（backend `go test ./...` 全通过 + `go vet` 干净；frontend vitest 全通过；e2e 新增跨用户隔离与分页断言）。
+
+**D1. 前端无认证通道，多租户 Web UI 不可用** — ✅ 已修复：`frontend/src/api/client.ts` 新增 API-Key 存取（localStorage）+ `X-API-Key` header 注入 + 401 统一 `magi:unauthorized` 事件；新增 `/login` 页（`frontend/src/pages/Login.tsx`）与 `authStore`；AppShell 监听 401 跳转登录；SSE 改为 fetch-streaming 以携带认证头（`frontend/src/api/stream.ts`）；Settings 页新增登录/登出卡片。
 - 位置：`frontend/src/api/client.ts`（`request()` 只发 `Content-Type`）、`backend/server/auth.go`（支持 `Authorization: Bearer` / `X-API-Key`）
 - 问题：后端已实现完善的 API-Key 认证，但前端从不带认证头、也没有登录/API-Key 输入页。一旦 `auth.enabled=true`，浏览器 UI 所有 `/api/v1/*` 请求全部 401，多租户只能纯 API 使用。
 - 影响：宣称的"multi-tenant API"与 Web UI 脱节；UI 实际只能跑在 open 模式。
 
-**D2. case 列表全表加载 + 内存内越权过滤**
+**D2. case 列表全表加载 + 内存内越权过滤** — ✅ 已修复：`port.CaseListFilter` 可选接口 + `adapter` 的 `ListForUser`（SQL `WHERE user_id` + LIMIT/OFFSET 分页）；`GET /cases` 支持 `limit`/`offset` 并移除处理器内内存过滤；未实现该接口的旧/测试仓库保留兼容回退（`decision.Service.ListScoped`）。
 - 位置：`backend/adapter/repository.go`（`caseRepo.List` → `Order("created_at DESC").Find(&models)` 无 WHERE、无分页）、`backend/server/handler/decision.go`（`List` 循环 `AuthorizeCase`）
 - 问题：把所有用户的全部 case 行读进内存再逐条过滤。数据量增长后是 O(N) 全表扫描 + 大内存 + 大响应体；且"先拉全量再过滤"在多租户下违背最小数据读取原则。前端 `PaginatedSection` 的分页只是客户端 slice。
 - 同类问题：`memory` 搜索也是先查后按用户过滤（有 LIMIT 缓解）。
 
-**D3. RAG 检索错误被静默吞掉**
+**D3. RAG 检索错误被静默吞掉** — ✅ 已修复：`domain/memory/context_builder.go` 检索失败时显式 log + 新增 `magi_memory_retrieval_failures_total` 指标 + 发布 `MEMORY_RETRIEVAL_FAILED` 事件（container 已接线）。
 - 位置：`backend/domain/memory/context_builder.go`（`if err == nil { ... }`）
 - 问题：`knowledge.Retrieve` 出错时直接降级为空上下文，无日志、无事件、无指标。长期记忆在 Milvus/ES 故障时会静默失效，排查成本极高（与该用户之前诊断的 Codex 日志风暴同类隐患：静默失败最危险）。
 

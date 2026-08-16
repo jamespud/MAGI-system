@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type ApiMeResponse, type ApiMeUsage, type ApiAdminUsage } from '@/api/client';
+import { useAuthStore } from '@/stores';
 import { Button } from '@/components/ui';
 import { useT } from '@/i18n';
 
@@ -17,6 +19,8 @@ export default function Settings() {
   const [usage, setUsage] = useState<ApiMeUsage | null>(null);
   const [adminUsage, setAdminUsage] = useState<ApiAdminUsage | null>(null);
   const [error, setError] = useState('');
+  const hasKey = useAuthStore((s) => s.hasKey);
+  const clearStoredKey = useAuthStore((s) => s.clearApiKey);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +86,38 @@ export default function Settings() {
             </p>
           )}
         </div>
+      </div>
+
+      <div className="rounded border border-border-dim bg-raised p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-text-muted">API key</p>
+            <p className="text-sm font-medium mt-1">
+              {hasKey ? 'Signed in (API key stored in this browser)' : 'Not signed in — open mode'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasKey && (
+              <button
+                type="button"
+                onClick={() => clearStoredKey()}
+                className="rounded border border-border-dim px-3 py-1.5 text-sm text-text-secondary hover:bg-base"
+              >
+                Sign out
+              </button>
+            )}
+            <Link
+              to="/login"
+              className="rounded bg-accent px-3 py-1.5 text-sm font-medium"
+            >
+              {hasKey ? 'Change key' : 'Sign in'}
+            </Link>
+          </div>
+        </div>
+        <p className="text-xs text-text-muted mt-2">
+          The API key is sent as the <span className="font-mono">X-API-Key</span> header and stored
+          only in localStorage.
+        </p>
       </div>
 
       {usage && (

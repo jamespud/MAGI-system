@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
 import DecisionWorkspace from '@/pages/DecisionWorkspace';
+import Login from '@/pages/Login';
 import Dataset from '@/pages/Dataset';
 import Memory from '@/pages/Memory';
 import Approvals from '@/pages/Approvals';
@@ -35,4 +36,5 @@ export const router = createBrowserRouter([
       { path: 'admin/users', element: <Users /> },
     ],
   },
+  { path: 'login', element: <Login /> },
 ]);

@@ -173,3 +173,132 @@ func TestService_Cancel(t *testing.T) {
 		t.Fatalf("expected cancel c1, got %s", repo.cancelledID)
 	}
 }
+
+// multiCaseRepo implements port.CaseRepository but NOT port.CaseListFilter, so
+// ListScoped must fall back to the full List + in-memory owner filter + paging.
+type multiCaseRepo struct {
+	cases []*entity.DecisionCase
+}
+
+func (s *multiCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
+func (s *multiCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return nil, nil
+}
+func (s *multiCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
+	return s.cases, nil
+}
+func (s *multiCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
+	return nil
+}
+func (s *multiCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
+func (s *multiCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *multiCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *multiCaseRepo) Delete(ctx context.Context, id string) error { return nil }
+
+// scopedCaseRepo implements port.CaseListFilter; ListScoped must delegate to it.
+type scopedCaseRepo struct {
+	lastUserID int64
+	lastLimit  int
+	lastOffset int
+	cases      []*entity.DecisionCase
+}
+
+func (s *scopedCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
+func (s *scopedCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return nil, nil
+}
+func (s *scopedCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return s.cases, nil }
+func (s *scopedCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
+	return nil
+}
+func (s *scopedCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
+func (s *scopedCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *scopedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *scopedCaseRepo) Delete(ctx context.Context, id string) error { return nil }
+func (s *scopedCaseRepo) ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error) {
+	s.lastUserID, s.lastLimit, s.lastOffset = userID, limit, offset
+	return s.cases, nil
+}
+
+// TestService_ListScoped_FallbackFiltersByOwner verifies the in-memory fallback
+// (repos without port.CaseListFilter) scopes by owner and pages (P0: D2).
+func TestService_ListScoped_FallbackFiltersByOwner(t *testing.T) {
+	repo := &multiCaseRepo{cases: []*entity.DecisionCase{
+		{ID: "mine", UserID: 7},
+		{ID: "other", UserID: 8},
+		{ID: "open", UserID: 0},
+		{ID: "mine2", UserID: 7},
+	}}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))
+
+	out, err := svc.ListScoped(context.Background(), 7, 100, 0)
+	if err != nil {
+		t.Fatalf("list scoped: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 (own+open), got %d", len(out))
+	}
+	for _, c := range out {
+		if c.ID == "other" {
+			t.Fatalf("must not return another user's case")
+		}
+	}
+
+	// open mode sees everything
+	outOpen, err := svc.ListScoped(context.Background(), 0, 100, 0)
+	if err != nil || len(outOpen) != 4 {
+		t.Fatalf("open mode expected 4, got %d err=%v", len(outOpen), err)
+	}
+}
+
+func TestService_ListScoped_FallbackPaginates(t *testing.T) {
+	repo := &multiCaseRepo{cases: []*entity.DecisionCase{
+		{ID: "c1", UserID: 7}, {ID: "c2", UserID: 7}, {ID: "c3", UserID: 7}, {ID: "c4", UserID: 7},
+	}}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))
+
+	page1, err := svc.ListScoped(context.Background(), 7, 2, 0)
+	if err != nil || len(page1) != 2 {
+		t.Fatalf("page1: %v %d", err, len(page1))
+	}
+	page2, err := svc.ListScoped(context.Background(), 7, 2, 2)
+	if err != nil || len(page2) != 2 {
+		t.Fatalf("page2: %v %d", err, len(page2))
+	}
+	seen := map[string]bool{}
+	for _, p := range [][]*entity.DecisionCase{page1, page2} {
+		for _, c := range p {
+			seen[c.ID] = true
+		}
+	}
+	if len(seen) != 4 {
+		t.Fatalf("expected 4 unique across pages, got %d", len(seen))
+	}
+}
+
+// TestService_ListScoped_DelegatesToRepo verifies repos implementing
+// port.CaseListFilter are called directly with the principal's userID (the SQL
+// scoping path; P0: D2).
+func TestService_ListScoped_DelegatesToRepo(t *testing.T) {
+	repo := &scopedCaseRepo{cases: []*entity.DecisionCase{{ID: "mine", UserID: 7}}}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))
+
+	out, err := svc.ListScoped(context.Background(), 7, 25, 10)
+	if err != nil {
+		t.Fatalf("list scoped: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected delegation result, got %d", len(out))
+	}
+	if repo.lastUserID != 7 || repo.lastLimit != 25 || repo.lastOffset != 10 {
+		t.Fatalf("ListForUser not called with expected args: %d %d %d", repo.lastUserID, repo.lastLimit, repo.lastOffset)
+	}
+}

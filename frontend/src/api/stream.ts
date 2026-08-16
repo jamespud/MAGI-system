@@ -1,6 +1,6 @@
 import { useCaseStore, useEventStore, useAgentStore } from '@/stores';
 import { mapBackendEvent } from './eventMapper';
-import type { ApiEvent } from './client';
+import { getApiKey, UNAUTHORIZED_EVENT, type ApiEvent } from './client';
 import type { AgentId, AgentStatus } from '@/types/agent';
 import type { CaseStatus } from '@/types/case';
 import { normalizeStance } from '@/lib/stance';
@@ -112,13 +112,21 @@ function applyIncremental(raw: ApiEvent) {
 // once when a terminal event (CASE_COMPLETED/CASE_FAILED) arrives so the caller
 // can refresh case detail + artifacts. Returns an unsubscribe that closes the
 // connection.
+//
+// SSE is consumed over fetch (ReadableStream) instead of EventSource so the
+// API key can be sent as the X-API-Key header under multi-tenant auth — the
+// browser EventSource API cannot set request headers (P0: D1). Network errors
+// retry with backoff like EventSource; a 401 stops and routes to /login.
 export function subscribeCaseStream(caseId: string, onTerminal?: () => void): () => void {
-  const es = new EventSource(`/api/v1/cases/${caseId}/stream`);
+  const controller = new AbortController();
+  let closed = false;
+  let retryMs = 500;
   let lastSeq = 0;
-  es.onmessage = (msg: MessageEvent) => {
+
+  const processEvent = (data: string) => {
     let raw: ApiEvent;
     try {
-      raw = JSON.parse(msg.data) as ApiEvent;
+      raw = JSON.parse(data) as ApiEvent;
     } catch {
       return; // ignore malformed frames
     }
@@ -154,8 +162,51 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       onTerminal();
     }
   };
-  es.onerror = () => {
-    // EventSource auto-reconnects; nothing to surface here.
+
+  const connect = async () => {
+    const headers: Record<string, string> = { Accept: 'text/event-stream' };
+    const key = getApiKey();
+    if (key) headers['X-API-Key'] = key;
+    try {
+      const res = await fetch(`/api/v1/cases/${caseId}/stream`, { headers, signal: controller.signal });
+      if (res.status === 401) {
+        // Bad/expired key: surface the auth problem and stop reconnecting.
+        if (!closed) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+        return;
+      }
+      if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
+      retryMs = 500; // successful connect resets backoff
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || closed) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLines = frame
+            .split('\n')
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).trimStart());
+          if (dataLines.length) processEvent(dataLines.join('\n'));
+        }
+      }
+    } catch (e) {
+      if (closed || controller.signal.aborted) return;
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      // Transient network failure: reconnect with backoff like EventSource.
+      await new Promise((r) => setTimeout(r, retryMs));
+      retryMs = Math.min(retryMs * 2, 10_000);
+      if (!closed) void connect();
+    }
   };
-  return () => es.close();
+
+  void connect();
+  return () => {
+    closed = true;
+    controller.abort();
+  };
 }

@@ -458,8 +458,11 @@ func provideEventPublisher(repo port.Repository, broker *appserver.EventBroker, 
 	return magi.NewEventPublisherAdapterWithRedaction(repo.EventRepo(), broker, red)
 }
 
-func provideContextBuilder(knowledge port.KnowledgePort) *domainmemory.ContextBuilder {
-	return domainmemory.NewContextBuilder(knowledge)
+func provideContextBuilder(knowledge port.KnowledgePort, reg *metrics.Registry, eventPub port.EventPublisher) *domainmemory.ContextBuilder {
+	return domainmemory.NewContextBuilder(knowledge,
+		domainmemory.WithMetrics(reg),
+		domainmemory.WithEventPublisher(eventPub),
+	)
 }
 func provideEvaluationService(repo port.Repository) *evaluation.Service {
 	return evaluation.NewService(evaluation.WithRepository(repo))

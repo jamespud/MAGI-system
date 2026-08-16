@@ -97,12 +97,62 @@ interface ApiEvent {
 }
 
 const BASE_URL = '/api/v1';
+export const AUTH_STORAGE_KEY = 'magi.apiKey';
+export const UNAUTHORIZED_EVENT = 'magi:unauthorized';
+
+// --- API-key auth channel (P0: D1) ---
+// The backend authenticates via `Authorization: Bearer <key>` or `X-API-Key`.
+// The web UI stores the user's API key in localStorage and injects it as the
+// X-API-Key header on every request. On a 401 the stored key is cleared and a
+// `magi:unauthorized` event is dispatched so the app can route to /login.
+
+export function getApiKey(): string {
+  try {
+    return localStorage.getItem(AUTH_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setApiKey(key: string): void {
+  try {
+    if (key) {
+      localStorage.setItem(AUTH_STORAGE_KEY, key);
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  } catch {
+    // localStorage unavailable (private mode / tests): keep the session value only
+  }
+}
+
+export function clearApiKey(): void {
+  setApiKey('');
+}
+
+function authHeaders(): Record<string, string> {
+  const key = getApiKey();
+  return key ? { 'X-API-Key': key } : {};
+}
+
+function notifyUnauthorized(): void {
+  clearApiKey();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+  }
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(options?.headers ?? {}) },
   });
+  if (res.status === 401) {
+    // Invalid/expired API key: drop it and ask the user to sign back in.
+    notifyUnauthorized();
+    const err = await res.json().catch(() => ({ error: 'unauthorized' }));
+    throw new Error(err.error || 'unauthorized');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -111,6 +161,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // verifyAuth returns true when the currently stored API key authenticates
+  // against the protected /status endpoint (200). It is used by the login page.
+  verifyAuth: async (): Promise<boolean> => {
+    const res = await fetch(`${BASE_URL}/status`, {
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    });
+    return res.ok;
+  },
+
   getCases: async (): Promise<ApiCaseResponse[]> => {
     const r = await request<ApiCaseListResponse | ApiCaseResponse[]>('/cases');
     return Array.isArray(r) ? r : r.cases;

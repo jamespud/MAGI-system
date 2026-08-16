@@ -189,13 +189,62 @@ func (s *Service) CancelRun(caseID string) bool {
 	return s.runs.Cancel(caseID)
 }
 
-// List returns all decision cases (requires CaseRepository). Used by admin
-// aggregates; the user-facing list goes through ListPaged.
+// List returns all decision cases (requires CaseRepository). Legacy helper
+// retained for in-memory/test repositories and admin aggregates; the
+// user-facing list goes through ListPaged (P2 D10).
 func (s *Service) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 	if s.caseRepo != nil {
 		return s.caseRepo.List(ctx)
 	}
 	return nil, nil
+}
+
+// ListScoped returns a user-scoped, paginated page of cases. It prefers the
+// database-side multi-tenant query (port.CaseListFilter, P0: D2); repositories
+// that do not implement it fall back to the legacy full List plus in-memory
+// owner filtering and paging.
+func (s *Service) ListScoped(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error) {
+	if s.caseRepo == nil {
+		return nil, nil
+	}
+	if f, ok := s.caseRepo.(port.CaseListFilter); ok {
+		return f.ListForUser(ctx, userID, limit, offset)
+	}
+	all, err := s.caseRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterCasesByUser(all, userID, limit, offset), nil
+}
+
+// filterCasesByUser applies owner scoping and paging in memory. It is only the
+// fallback for repositories that do not implement port.CaseListFilter (test
+// stubs, legacy in-memory repos); production repositories scope in SQL.
+func filterCasesByUser(all []*entity.DecisionCase, userID int64, limit, offset int) []*entity.DecisionCase {
+	var out []*entity.DecisionCase
+	for _, cs := range all {
+		if cs == nil {
+			continue
+		}
+		if userID != 0 && cs.UserID != 0 && cs.UserID != userID {
+			continue
+		}
+		out = append(out, cs)
+	}
+	if limit <= 0 {
+		limit = len(out)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(out) {
+		return nil
+	}
+	end := offset + limit
+	if end > len(out) {
+		end = len(out)
+	}
+	return out[offset:end]
 }
 
 // ListPaged returns one page of cases owned by userID (0 = open mode lists
@@ -222,7 +271,6 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 	return s.caseRepo.Delete(ctx, id)
 }
-
 // Get retrieves a DecisionCase by ID.
 func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	if s.caseRepo != nil {

@@ -56,6 +56,16 @@ type CaseRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// CaseListFilter is an optional capability for multi-tenant, paginated case
+// listing. Repositories implementing it scope the SQL query to the owner and
+// page it in the database instead of loading the whole table and filtering in
+// memory (P0: D2). userID == 0 is open mode and returns all cases; a non-zero
+// userID returns the user's own cases plus unowned (owner 0) cases, mirroring
+// auth.CanAccess semantics.
+type CaseListFilter interface {
+	ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error)
+}
+
 type AgentRunRepository interface {
 	Create(ctx context.Context, r *entity.AgentRun) error
 	Get(ctx context.Context, id string) (*entity.AgentRun, error)

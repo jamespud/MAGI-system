@@ -1,6 +1,7 @@
 package metrics_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -32,5 +33,19 @@ func TestRegistry_CountersAndPrometheus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
+	}
+}
+
+func TestRegistry_MemoryRetrievalFailures(t *testing.T) {
+	reg := metrics.New()
+	reg.IncMemoryRetrievalFailure()
+	reg.IncMemoryRetrievalFailure()
+	if reg.MemoryRetrievalFailures.Load() != 2 {
+		t.Fatalf("expected 2 retrieval failures, got %d", reg.MemoryRetrievalFailures.Load())
+	}
+	var buf bytes.Buffer
+	reg.WritePrometheus(&buf)
+	if !strings.Contains(buf.String(), "magi_memory_retrieval_failures_total 2") {
+		t.Fatalf("prometheus output missing retrieval failure counter:\n%s", buf.String())
 	}
 }

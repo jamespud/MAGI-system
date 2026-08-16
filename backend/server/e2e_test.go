@@ -99,7 +99,7 @@ func newE2EServer(t *testing.T) *hzserver.Hertz {
 	admSvc := admin.NewService(repo.CaseRepo(), repo.AgentRunRepo())
 	recSvc := recurring.NewService(magi.NewRecurringRepository(db), repo.CaseRepo(), rm, 1)
 	askSvc := assistant.NewService(decSvc)
-	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "admin", Key: "k7", UserID: 7, Role: "admin"}})
+	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "admin", Key: "k7", UserID: 7, Role: "admin"}, {Name: "u8", Key: "k8", UserID: 8, Role: "user"}})
 	broker := server.NewEventBroker()
 	knowledge := &stubKnowledge{}
 
@@ -115,7 +115,7 @@ func newE2EServer(t *testing.T) *hzserver.Hertz {
 		Assistant:  askSvc,
 		Replay:     replay.NewService(repo.EventRepo()),
 		Evaluation: evaluation.NewService(evaluation.WithRepository(repo)),
-		Memory:     memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo())),
+		Memory:     memory.NewService(knowledge, repo.MemoryRepo()),
 		Tool:       tool.NewService(nil),
 		Broker:     broker,
 		EventRepo:  repo.EventRepo(),
@@ -193,6 +193,18 @@ func TestE2E_HarnessFlow(t *testing.T) {
 		t.Fatalf("run case: %d", code)
 	}
 	waitFor(t, h, "/api/v1/cases/"+caseID, "k7", "status", "RESOLVED")
+
+	// Multi-tenant case-list isolation (P0: D2): user 8 must not see user 7's
+	// case, user 7 sees their own, and limit/offset pagination is honored.
+	if code, body = get(t, h, "/api/v1/cases", "k8"); code != 200 || strings.Contains(body, caseID) {
+		t.Fatalf("user 8 must not see user 7's case: %d %s", code, body)
+	}
+	if code, body = get(t, h, "/api/v1/cases", "k7"); code != 200 || !strings.Contains(body, caseID) {
+		t.Fatalf("user 7 should see own case: %d %s", code, body)
+	}
+	if code, body = get(t, h, "/api/v1/cases?limit=1&offset=0", "k7"); code != 200 || strings.Count(body, `"id":"case-`) != 1 {
+		t.Fatalf("pagination limit=1 should return exactly 1 case: %d %s", code, body)
+	}
 
 	// Dataset benchmark
 	code, body = post(t, h, "/api/v1/datasets", `{"name":"launch-eval","description":"launch decisions"}`, "k7")

@@ -2,7 +2,10 @@ package memory_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/jamespud/magi/backend/application/metrics"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/memory"
@@ -62,5 +65,48 @@ func TestContextBuilder_WithDebate(t *testing.T) {
 	actx, _ := b.Build(context.Background(), &entity.DecisionCase{ID: "c1"}, nil, dc, nil)
 	if actx.DebateContext == nil {
 		t.Fatalf("expected debate context")
+	}
+}
+
+type failingKnowledge struct{}
+
+func (f *failingKnowledge) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
+	return port.RetrieveResult{}, fmt.Errorf("milvus down")
+}
+func (f *failingKnowledge) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
+	return port.StoreStats{}, nil
+}
+
+type captureEventPublisher struct {
+	events []entity.MagiEvent
+}
+
+func (p *captureEventPublisher) Publish(ctx context.Context, e entity.MagiEvent) error {
+	p.events = append(p.events, e)
+	return nil
+}
+
+// TestContextBuilder_SurfacesRetrievalFailure verifies a RAG failure is NOT
+// silently swallowed: it logs, increments the metric and publishes a
+// MEMORY_RETRIEVAL_FAILED event (P0: D3).
+func TestContextBuilder_SurfacesRetrievalFailure(t *testing.T) {
+	reg := metrics.New()
+	pub := &captureEventPublisher{}
+	b := memory.NewContextBuilder(&failingKnowledge{}, memory.WithMetrics(reg), memory.WithEventPublisher(pub))
+	actx, err := b.Build(context.Background(),
+		&entity.DecisionCase{ID: "c1", Question: "q"},
+		&entity.DecisionTask{CanonicalQuestion: "compute"},
+		nil, nil)
+	if err != nil {
+		t.Fatalf("build should not fail even when retrieval fails: %v", err)
+	}
+	if len(actx.KnowledgeCtx) != 0 {
+		t.Fatalf("expected no knowledge chunks on failure, got %+v", actx.KnowledgeCtx)
+	}
+	if reg.MemoryRetrievalFailures.Load() != 1 {
+		t.Fatalf("expected 1 retrieval failure metric, got %d", reg.MemoryRetrievalFailures.Load())
+	}
+	if len(pub.events) != 1 || pub.events[0].Type != entity.EventMemoryRetrievalFailed || pub.events[0].CaseID != "c1" {
+		t.Fatalf("expected MEMORY_RETRIEVAL_FAILED event for c1, got %+v", pub.events)
 	}
 }

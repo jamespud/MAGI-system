@@ -151,6 +151,36 @@ func (r *caseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize i
 	return cases, total, nil
 }
 
+// ListForUser returns a user-scoped, paginated page of cases
+// (port.CaseListFilter, P0: D2). userID == 0 is open mode (all cases); a
+// non-zero userID returns the user's own cases plus unowned (owner 0) cases,
+// mirroring auth.CanAccess semantics. The filter and paging happen in SQL so a
+// large case table is never loaded fully into memory or filtered per-row in Go.
+func (r *caseRepo) ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var models []CaseModel
+	q := r.db.WithContext(ctx)
+	if userID != 0 {
+		q = q.Where("user_id = ? OR user_id = 0", userID)
+	}
+	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	cases := make([]*entity.DecisionCase, len(models))
+	for i, m := range models {
+		cases[i] = caseFromModel(&m)
+	}
+	return cases, nil
+}
+
 // UpdateFlags updates pinned/archived. A nil pointer leaves the flag unchanged.
 func (r *caseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
 	updates := map[string]any{}
@@ -167,14 +197,11 @@ func (r *caseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived 
 }
 
 // Delete removes a case and every artifact keyed by case_id (P2 D16). Tool
-// calls are keyed by agent_run_id, so they are removed via a subquery.
+// calls and reflections are keyed by agent_run_id, so they are removed via a
+// subquery against magi_agent_run.
 func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
-		return tx.Error
-	}
-	rollback := func() error {
-		_ = tx.Rollback()
 		return tx.Error
 	}
 	tables := []any{
@@ -188,7 +215,6 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	// tool calls and reflections are keyed by agent_run_id -> case_id.
 	if err := tx.Where("agent_run_id IN (?)",
 		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
 	).Delete(&ToolCallModel{}).Error; err != nil {
@@ -209,10 +235,8 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 		return err
 	}
-	_ = rollback
 	return nil
 }
-
 func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
@@ -710,5 +734,6 @@ func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 }
 
 var _ port.CaseRepository = (*caseRepo)(nil)
+var _ port.CaseListFilter = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
 var _ port.ToolCallRepository = (*toolCallRepo)(nil)

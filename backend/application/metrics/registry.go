@@ -23,6 +23,8 @@ type Registry struct {
 	TokensTotal      atomic.Int64
 	RequestsTotal    atomic.Int64
 
+	MemoryRetrievalFailures atomic.Int64
+
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
 	RunDurationBuckets [8]atomic.Int64 // 7 bounded buckets + +Inf
@@ -47,6 +49,15 @@ func (r *Registry) IncCasesCreated() {
 func (r *Registry) IncRequests() {
 	if r != nil {
 		r.RequestsTotal.Add(1)
+	}
+}
+
+// IncMemoryRetrievalFailure records a failed long-term-memory retrieval. RAG
+// failures are surfaced here (plus logs/events) instead of silently degrading
+// the agent context (P0: D3).
+func (r *Registry) IncMemoryRetrievalFailure() {
+	if r != nil {
+		r.MemoryRetrievalFailures.Add(1)
 	}
 }
 func (r *Registry) RunStart() {
@@ -173,6 +184,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_tool_call_failures_total counter\nmagi_tool_call_failures_total %d\n", r.ToolCallFailures.Load())
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
+	fmt.Fprintf(w, "# TYPE magi_memory_retrieval_failures_total counter\nmagi_memory_retrieval_failures_total %d\n", r.MemoryRetrievalFailures.Load())
 
 	fmt.Fprintf(w, "# TYPE magi_run_duration_ms histogram\n")
 	fmt.Fprintf(w, "magi_run_duration_ms_sum %d\n", r.RunDurationSumMs.Load())

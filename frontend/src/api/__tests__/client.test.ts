@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, type ApiCaseResponse } from '../client';
+import {
+  api,
+  setApiKey,
+  clearApiKey,
+  getApiKey,
+  AUTH_STORAGE_KEY,
+  UNAUTHORIZED_EVENT,
+  type ApiCaseResponse,
+} from '../client';
 
 const MOCK_CASE: ApiCaseResponse = {
   id: 'case-001',
@@ -17,6 +25,7 @@ const MOCK_CASE: ApiCaseResponse = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  clearApiKey(); // ensure no API key leaks into header assertions
 });
 
 describe('api.getCases', () => {
@@ -230,6 +239,70 @@ describe('api.searchMemory', () => {
     } as Response);
     await expect(api.searchMemory('stack choice', 5)).resolves.toEqual(results);
     expect(fetch).toHaveBeenCalledWith('/api/v1/memory?q=stack%20choice&limit=5', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+});
+
+
+describe('api auth channel (P0: D1)', () => {
+  it('injects X-API-Key header when a key is stored', async () => {
+    setApiKey('sk-test');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([MOCK_CASE]),
+    } as Response);
+
+    await api.getCases();
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases', {
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'sk-test' },
+    });
+  });
+
+  it('does not send X-API-Key when no key is stored', async () => {
+    clearApiKey();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([]),
+    } as Response);
+
+    await api.getCases();
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('clears the stored key and dispatches UNAUTHORIZED_EVENT on 401', async () => {
+    setApiKey('sk-expired');
+    const dispatched: string[] = [];
+    const onEvent = (e: Event) => dispatched.push(e.type);
+    window.addEventListener(UNAUTHORIZED_EVENT, onEvent);
+    try {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ error: 'unauthorized' }),
+      } as Response);
+
+      await expect(api.getCases()).rejects.toThrow('unauthorized');
+    } finally {
+      window.removeEventListener(UNAUTHORIZED_EVENT, onEvent);
+    }
+    expect(getApiKey()).toBe('');
+    expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull();
+    expect(dispatched).toContain(UNAUTHORIZED_EVENT);
+  });
+
+  it('verifyAuth returns true on 200 and false on 401', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ok' }) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) } as Response);
+
+    expect(await api.verifyAuth()).toBe(true);
+    expect(await api.verifyAuth()).toBe(false);
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/status', {
       headers: { 'Content-Type': 'application/json' },
     });
   });

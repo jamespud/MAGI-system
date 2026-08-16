@@ -28,6 +28,7 @@ const (
 	EventCaseStatusChanged     EventType = "CASE_STATUS_CHANGED"
 	EventTaskNormalized        EventType = "TASK_NORMALIZED"
 	EventMemoryRetrieved       EventType = "MEMORY_RETRIEVED"
+	EventMemoryRetrievalFailed EventType = "MEMORY_RETRIEVAL_FAILED"
 	EventAgentStarted          EventType = "AGENT_STARTED"
 	EventModelRequested        EventType = "MODEL_REQUESTED"
 	EventModelResponded        EventType = "MODEL_RESPONDED"
