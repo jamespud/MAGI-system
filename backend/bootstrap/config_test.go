@@ -383,3 +383,101 @@ database:
 		t.Fatalf("Model.APIKey: got %q want yaml-key", cfg.Model.APIKey)
 	}
 }
+
+func TestLoadConfig_PerRoleModelOverrides(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "roles.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "global-key"
+  base_url: "https://global.example.com"
+  model_name: "global-model"
+magi:
+  max_debate_rounds: 1
+  max_steps: 1
+  timeout_seconds: 1
+  call_timeout_seconds: 1
+  melchior:
+    model:
+      api_key: "mel-key"
+      base_url: "https://mel.example.com"
+      model_name: "mel-model"
+  casper:
+    model:
+      model_id: 99
+      price_per_m_input_usd: 4.0
+commander:
+  model:
+    model_name: "commander-model"
+judge:
+  model:
+    base_url: "https://judge.example.com"
+    model_name: "judge-model"
+`), 0644)
+
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	mel := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	if mel.Model.APIKey != "mel-key" || mel.Model.BaseURL != "https://mel.example.com" || mel.Model.ModelName != "mel-model" {
+		t.Fatalf("melchior model override wrong: %+v", mel.Model)
+	}
+	if mel.Model.ModelID != 0 || mel.Model.PricePerMInputUSD != 2.5 {
+		t.Fatalf("melchior should inherit default price/coze-id: %+v", mel.Model)
+	}
+
+	bal := cfg.Magi.Balthasar.ToConfig("balthasar", cfg)
+	if bal.Model.APIKey != "global-key" || bal.Model.ModelName != "global-model" || bal.Model.BaseURL != "https://global.example.com" {
+		t.Fatalf("balthasar should fall back to global model: %+v", bal.Model)
+	}
+
+	cas := cfg.Magi.Casper.ToConfig("casper", cfg)
+	if cas.Model.ModelID != 99 || cas.Model.PricePerMInputUSD != 4.0 {
+		t.Fatalf("casper coze-mode override wrong: %+v", cas.Model)
+	}
+	if cas.Model.APIKey != "global-key" || cas.Model.ModelName != "global-model" {
+		t.Fatalf("casper should inherit api_key/model_name from global: %+v", cas.Model)
+	}
+
+	if cm := cfg.CommanderModelRef(); cm.ModelName != "commander-model" || cm.APIKey != "global-key" || cm.BaseURL != "https://global.example.com" {
+		t.Fatalf("commander override wrong: %+v", cm)
+	}
+	if j := cfg.JudgeModelRef(); j.ModelName != "judge-model" || j.BaseURL != "https://judge.example.com" || j.APIKey != "global-key" {
+		t.Fatalf("judge override wrong: %+v", j)
+	}
+}
+
+func TestConfigValidate_PerRoleModelOverride(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	// api_key without model_name on a role override must fail fast.
+	cfg.Magi.Melchior.Model = &bootstrap.ModelSpec{APIKey: "role-key"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "melchior model") {
+		t.Fatalf("expected melchior model validation error, got %v", err)
+	}
+	cfg.Magi.Melchior.Model = nil
+
+	// judge override api_key without model_name must fail fast.
+	cfg.Judge.Model = &bootstrap.ModelSpec{APIKey: "judge-key"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "judge model") {
+		t.Fatalf("expected judge model validation error, got %v", err)
+	}
+	cfg.Judge.Model = nil
+
+	// an empty override is a no-op and must pass.
+	cfg.Judge.Model = &bootstrap.ModelSpec{}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("empty judge override should pass, got %v", err)
+	}
+}

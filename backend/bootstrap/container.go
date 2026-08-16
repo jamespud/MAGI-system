@@ -290,7 +290,7 @@ func provideCommander(
 ) (*service.Commander, error) {
 	return service.NewCommander(
 		service.CommanderConfig{
-			Model:   entity.ModelRef{APIKey: cfg.Model.APIKey, BaseURL: cfg.Model.BaseURL, ModelName: cfg.Model.ModelName},
+			Model:   cfg.CommanderModelRef(),
 			Persona: "commander",
 		},
 		modelPort, gen, val,
@@ -345,7 +345,7 @@ func provideJudgeRepository(db *gorm.DB) port.JudgeRepository {
 }
 
 func provideJudgeService(cfg *Config, modelPort *magi.ModelAdapter, gen validation.SchemaGenerator, val validation.Validator, repo port.Repository, judgeRepo port.JudgeRepository) (*judge.Service, error) {
-	j, err := judge.NewService(modelPort, entity.ModelRef{APIKey: cfg.Model.APIKey, BaseURL: cfg.Model.BaseURL, ModelName: cfg.Model.ModelName}, gen, val, judgeRepo)
+	j, err := judge.NewService(modelPort, cfg.JudgeModelRef(), gen, val, judgeRepo)
 	if err != nil {
 		return nil, err
 	}

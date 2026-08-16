@@ -282,10 +282,20 @@ limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
 magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
+# per-role model overrides (inherit unset fields from the global `model` block)
+magi.melchior.model: { model_name: "...", api_key: "...", base_url: "..." }
+commander.model: { model_name: "..." }
+judge.model: { model_name: "..." }
 mcp:
   servers:
     - { name: "example", transport: "stdio", command: "/usr/local/bin/mcp-server", timeout_seconds: 60 }
 ```
+
+Each of the three Magi roles (and the Commander / semantic Judge) may override
+the global `model` on a per-field basis under `magi.<role>.model`, `commander.model`
+and `judge.model` respectively — unset fields inherit from the global block. This
+enables genuine cognitive diversity by running different roles on different models
+(see `backend/conf/magi.yaml.example`).
 
 `code_runner` maps its `allow_env/allow_read/allow_write/allow_net/allow_run/allow_ffi` lists into the Deno sandbox permission flags (empty = deny all). `Config.Validate()` runs at startup and fails fast on missing model, invalid auth, negative limits, or invalid MCP server definitions (empty/duplicate names, bad transport, missing command/url); `/ready` performs a live database ping.
 

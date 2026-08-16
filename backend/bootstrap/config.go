@@ -48,8 +48,8 @@ type Config struct {
 		APIKeys []APIKeySpec `yaml:"api_keys"`
 	} `yaml:"auth"`
 	Limits struct {
-		MaxConcurrentRunsPerUser int `yaml:"max_concurrent_runs_per_user"`
-		MaxTokensPerUser         int64  `yaml:"max_tokens_per_user"`
+		MaxConcurrentRunsPerUser int     `yaml:"max_concurrent_runs_per_user"`
+		MaxTokensPerUser         int64   `yaml:"max_tokens_per_user"`
 		MaxCostUSDPerUser        float64 `yaml:"max_cost_usd_per_user"`
 	} `yaml:"limits"`
 	CodeRunner struct {
@@ -85,6 +85,8 @@ type Config struct {
 	RAG           RAGConfig       `yaml:"rag"`
 	Benchmark     BenchmarkConfig `yaml:"benchmark"`
 	ToolQuota     ToolQuotaConfig `yaml:"tool_quota"`
+	Commander     CommanderSpec   `yaml:"commander"`
+	Judge         JudgeSpec       `yaml:"judge"`
 }
 
 type ToolQuotaConfig struct {
@@ -148,6 +150,31 @@ type RAGConfig struct {
 	StoreWorkers       int    `yaml:"store_workers"`
 }
 
+type ModelSpec struct {
+	APIKey             string  `yaml:"api_key"`
+	BaseURL            string  `yaml:"base_url"`
+	ModelName          string  `yaml:"model_name"`
+	ModelID            int64   `yaml:"model_id"`
+	PricePerMInputUSD  float64 `yaml:"price_per_m_input_usd"`
+	PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
+}
+
+// empty reports whether an override is entirely unset. An empty override is a
+// no-op that falls back to the global model; it is not a validation error.
+func (m *ModelSpec) empty() bool {
+	return m == nil ||
+		(m.APIKey == "" && m.BaseURL == "" && m.ModelName == "" && m.ModelID == 0 &&
+			m.PricePerMInputUSD == 0 && m.PricePerMOutputUSD == 0)
+}
+
+type CommanderSpec struct {
+	Model *ModelSpec `yaml:"model"`
+}
+
+type JudgeSpec struct {
+	Model *ModelSpec `yaml:"model"`
+}
+
 type MagiSpec struct {
 	Persona          string               `yaml:"persona"`
 	PersonaDef       PersonaDefSpec       `yaml:"persona_def"`
@@ -157,6 +184,7 @@ type MagiSpec struct {
 	RolePolicy       RolePolicySpec       `yaml:"role_policy"`
 	Evidence         EvidenceSpec         `yaml:"evidence"`
 	ReflectionPolicy ReflectionPolicySpec `yaml:"reflection_policy"`
+	Model            *ModelSpec           `yaml:"model"`
 }
 
 type PersonaDefSpec struct {
@@ -367,6 +395,75 @@ func parseAPIKeys(raw string) []APIKeySpec {
 	return out
 }
 
+// modelRef builds the default ModelRef from the global model config.
+func (c *Config) modelRef() entity.ModelRef {
+	return entity.ModelRef{
+		APIKey:             c.Model.APIKey,
+		BaseURL:            c.Model.BaseURL,
+		ModelName:          c.Model.ModelName,
+		ModelID:            c.Model.ModelID,
+		PricePerMInputUSD:  c.Model.PricePerMInputUSD,
+		PricePerMOutputUSD: c.Model.PricePerMOutputUSD,
+	}
+}
+
+// resolveModelRef returns the fallback ModelRef overlaid with any fields set
+// on the override. Zero values on the override fall back to the global model,
+// so a per-role override may specify only api_key/base_url/model_name (or a
+// model_id in Coze mode) and inherit the remaining fields.
+func resolveModelRef(fallback entity.ModelRef, override *ModelSpec) entity.ModelRef {
+	ref := fallback
+	if override == nil || override.empty() {
+		return ref
+	}
+	if override.APIKey != "" {
+		ref.APIKey = override.APIKey
+	}
+	if override.BaseURL != "" {
+		ref.BaseURL = override.BaseURL
+	}
+	if override.ModelName != "" {
+		ref.ModelName = override.ModelName
+	}
+	if override.ModelID != 0 {
+		ref.ModelID = override.ModelID
+	}
+	if override.PricePerMInputUSD != 0 {
+		ref.PricePerMInputUSD = override.PricePerMInputUSD
+	}
+	if override.PricePerMOutputUSD != 0 {
+		ref.PricePerMOutputUSD = override.PricePerMOutputUSD
+	}
+	return ref
+}
+
+// CommanderModelRef returns the commander's resolved model ref: the
+// commander.model override if set, otherwise the global model.
+func (c *Config) CommanderModelRef() entity.ModelRef {
+	return resolveModelRef(c.modelRef(), c.Commander.Model)
+}
+
+// JudgeModelRef returns the judge's resolved model ref: the judge.model
+// override if set, otherwise the global model.
+func (c *Config) JudgeModelRef() entity.ModelRef {
+	return resolveModelRef(c.modelRef(), c.Judge.Model)
+}
+
+// validateModelOverride returns an error for an invalid non-empty model
+// override. Empty overrides fall back to the global model and are valid.
+func validateModelOverride(scope string, m *ModelSpec) error {
+	if m == nil || m.empty() {
+		return nil
+	}
+	// The override inherits unset fields from the global model, so the only
+	// invalid shape is a partial direct-mode override: api_key set without a
+	// model_name (and no coze model_id to fall back on).
+	if m.APIKey != "" && m.ModelName == "" && m.ModelID == 0 {
+		return fmt.Errorf("%s model: model_name is required when api_key is set (or set model_id for coze mode)", scope)
+	}
+	return nil
+}
+
 // ToConfig converts a MagiSpec to an entity.MagiConfig.
 func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 	dims := make([]entity.UtilityDimension, len(s.Dimensions))
@@ -427,14 +524,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			RequiredTypes:        reqTypes,
 			CustomRules:          customRules,
 		},
-		Model: entity.ModelRef{
-			APIKey:             cfg.Model.APIKey,
-			BaseURL:            cfg.Model.BaseURL,
-			ModelName:          cfg.Model.ModelName,
-			ModelID:            cfg.Model.ModelID,
-			PricePerMInputUSD:  cfg.Model.PricePerMInputUSD,
-			PricePerMOutputUSD: cfg.Model.PricePerMOutputUSD,
-		},
+		Model: resolveModelRef(cfg.modelRef(), s.Model),
 		ReflectionPolicy: entity.ReflectionPolicy{
 			RequireJustification: s.ReflectionPolicy.RequireJustification,
 			RequireNewEvidence:   s.ReflectionPolicy.RequireNewEvidence,
@@ -487,6 +577,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
 		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")
+	}
+	for name, spec := range map[string]MagiSpec{"melchior": c.Magi.Melchior, "balthasar": c.Magi.Balthasar, "casper": c.Magi.Casper} {
+		if err := validateModelOverride("magi."+name, spec.Model); err != nil {
+			return err
+		}
+	}
+	if err := validateModelOverride("commander", c.Commander.Model); err != nil {
+		return err
+	}
+	if err := validateModelOverride("judge", c.Judge.Model); err != nil {
+		return err
 	}
 	seenMCP := make(map[string]bool, len(c.MCP.Servers))
 	for i, s := range c.MCP.Servers {

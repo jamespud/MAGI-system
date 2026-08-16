@@ -24,6 +24,19 @@ magi:
   token_budget: 150000            # per-agent token budget; compaction triggers before this
   compaction_threshold: 0         # fraction of token_budget that triggers history compaction (0 = disabled, default)
 
+  # Optional per-role model overrides: each role (melchior/balthasar/casper)
+  # may override any model field; unset fields inherit from the global `model`
+  # block above. Use it for genuine cognitive diversity (different models per
+  # agent). Example for melchior:
+  #   melchior:
+  #     model:
+  #       base_url: "https://api.openai.com/v1"
+  #       model_name: "gpt-4o"
+  #       api_key: "sk-..."
+  # Example coze-mode override (model_id only):
+  #   casper:
+  #     model:
+  #       model_id: 42
   melchior:
     persona: "You are Melchior, the scientist. You value correctness, efficiency, and empirical validity. Analyze data, benchmarks, and technical feasibility."
     dimensions:
@@ -202,3 +215,13 @@ rag:
   orphan_strategy: "keep_300"
   store_async: true
   store_workers: 4
+
+# Optional model overrides for the Commander (task normalization + report
+# drafting) and the semantic Judge (LLM-as-a-Judge evaluation). Unset fields
+# inherit from the global `model` block.
+# commander:
+#   model:
+#     model_name: "deepseek-chat"
+# judge:
+#   model:
+#     model_name: "deepseek-chat"
