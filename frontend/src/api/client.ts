@@ -214,6 +214,28 @@ export const api = {
       throw new Error(err.error || `HTTP ${res.status}`);
     }
   },
+
+  createKnowledge: (title: string, content: string) =>
+    request<ApiKnowledgeDoc>('/knowledge', {
+      method: 'POST',
+      body: JSON.stringify({ title, content }),
+    }),
+
+  listKnowledge: (limit = 100, offset = 0) =>
+    request<{ documents: ApiKnowledgeDoc[]; total: number }>(`/knowledge?limit=${limit}&offset=${offset}`),
+
+  getKnowledge: (id: string) => request<ApiKnowledgeDoc>(`/knowledge/${id}`),
+
+  deleteKnowledge: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/knowledge/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
 };
 
 interface ApiRecurring {
@@ -341,7 +363,20 @@ interface ApiApproval {
   decided_at?: string;
 }
 
+interface ApiKnowledgeDoc {
+  id: string;
+  title: string;
+  source_kind: string;
+  source_url?: string;
+  status: string;
+  error?: string;
+  chunks: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export type {
+  ApiKnowledgeDoc,
   ApiCaseResponse,
   ApiDataset,
   ApiBenchmarkRun,

@@ -48,3 +48,27 @@ type KnowledgePort interface {
 	Retrieve(ctx context.Context, req RetrieveRequest) (RetrieveResult, error)
 	Store(ctx context.Context, proj *entity.CaseMemoryProjection) (StoreStats, error)
 }
+
+// RAG source namespaces. Case memories and uploaded knowledge documents live
+// in separate namespaces so retrieval can be scoped to one or the other.
+const (
+	SourceCaseMemory   = "case_memory"
+	SourceKnowledgeDoc = "knowledge_doc"
+)
+
+// DocumentIndexer indexes and deletes arbitrary knowledge documents in the
+// RAG pipeline. It is intentionally separate from KnowledgePort so existing
+// case-memory fakes stay valid.
+type DocumentIndexer interface {
+	StoreDocument(ctx context.Context, doc *entity.KnowledgeDoc) (StoreStats, error)
+	DeleteSource(ctx context.Context, source, sourceRef string) error
+}
+
+// KnowledgeRepository persists user-uploaded knowledge documents.
+type KnowledgeRepository interface {
+	Create(ctx context.Context, doc *entity.KnowledgeDoc) error
+	Get(ctx context.Context, id string) (*entity.KnowledgeDoc, error)
+	ListByUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.KnowledgeDoc, error)
+	Update(ctx context.Context, doc *entity.KnowledgeDoc) error
+	Delete(ctx context.Context, id string) error
+}

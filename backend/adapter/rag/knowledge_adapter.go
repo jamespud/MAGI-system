@@ -39,15 +39,42 @@ func NewHybridKnowledgeAdapter(
 	}
 }
 
-// Store renders the projection to a document, chunks it, embeds 300-level
-// blocks, and writes to MySQL + Milvus + ES. Idempotent by source_ref (case_id).
+// Store renders the projection to a document and indexes it into the RAG
+// pipeline. Idempotent by source_ref (case_id).
 func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
 	if proj == nil {
 		return port.StoreStats{}, fmt.Errorf("nil projection")
 	}
-	source := "case_memory"
-	sourceRef := proj.CaseID
+	return a.storeRaw(ctx, port.SourceCaseMemory, proj.CaseID, memory.RenderDocument(proj))
+}
 
+// StoreDocument indexes a user-uploaded knowledge document (title + content)
+// into the RAG pipeline so agents and the memory search can retrieve it.
+func (a *HybridKnowledgeAdapter) StoreDocument(ctx context.Context, doc *entity.KnowledgeDoc) (port.StoreStats, error) {
+	if doc == nil {
+		return port.StoreStats{}, fmt.Errorf("nil document")
+	}
+	render := doc.Title
+	if doc.Content != "" {
+		if render != "" {
+			render += "\n\n"
+		}
+		render += doc.Content
+	}
+	return a.storeRaw(ctx, port.SourceKnowledgeDoc, doc.ID, render)
+}
+
+// DeleteSource removes every chunk of a source (case memory or knowledge doc)
+// from MySQL + Milvus + ES.
+func (a *HybridKnowledgeAdapter) DeleteSource(ctx context.Context, source, sourceRef string) error {
+	_ = a.vec.DeleteBySourceRef(ctx, source, sourceRef)
+	_ = a.lex.DeleteBySourceRef(ctx, source, sourceRef)
+	return a.repo.DeleteBySourceRef(ctx, source, sourceRef)
+}
+
+// storeRaw renders, chunks, embeds, and writes one document to MySQL + Milvus
+// + ES. Idempotent by (source, source_ref).
+func (a *HybridKnowledgeAdapter) storeRaw(ctx context.Context, source, sourceRef, render string) (port.StoreStats, error) {
 	// Delete old chunks first (idempotent).
 	_ = a.vec.DeleteBySourceRef(ctx, source, sourceRef)
 	_ = a.lex.DeleteBySourceRef(ctx, source, sourceRef)
@@ -56,7 +83,7 @@ func (a *HybridKnowledgeAdapter) Store(ctx context.Context, proj *entity.CaseMem
 	}
 
 	// Render + chunk.
-	doc := memory.RenderDocument(proj)
+	doc := render
 	chunked := a.chunker.Chunk(doc, source, sourceRef)
 	stats := port.StoreStats{
 		Chunks300:  len(chunked.Chunks300),

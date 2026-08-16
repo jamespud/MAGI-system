@@ -30,6 +30,7 @@ import (
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/judge"
+	"github.com/jamespud/magi/backend/application/knowledge"
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/plugins"
@@ -99,6 +100,8 @@ var Module = fx.Options(
 		provideReplayService,
 		provideEvaluationService,
 		provideMemoryService,
+		provideKnowledgeRepository,
+		provideKnowledgeService,
 		provideToolService,
 		provideDatasetService,
 		providePluginsService,
@@ -126,6 +129,7 @@ var Module = fx.Options(
 		repSvc *replay.Service,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
+		knowSvc *knowledge.Service,
 		toolSvc *tool.Service,
 		broker *appserver.EventBroker,
 		repo port.Repository,
@@ -151,6 +155,7 @@ var Module = fx.Options(
 			Replay:       repSvc,
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
+			Knowledge:    knowSvc,
 			Tool:         toolSvc,
 			Broker:       broker,
 			EventRepo:    repo.EventRepo(),
@@ -241,7 +246,12 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 // fallback) - connection failure returns an error so misconfiguration is
 // visible. When addresses are empty, in-memory fakes are used (tests / pure
 // standalone). Store is async when store_async is enabled.
-func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, error) {
+// ProvideKnowledgePort builds the HybridKnowledgeAdapter and returns it both
+// as the case-memory KnowledgePort and as the DocumentIndexer used by the
+// knowledge service. When async store is enabled, the KnowledgePort is the
+// AsyncIndexer while the DocumentIndexer stays the synchronous adapter (doc
+// uploads are user-triggered and return their index status immediately).
+func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, port.DocumentIndexer, error) {
 	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
 	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
 
@@ -249,7 +259,7 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 	if cfg.Milvus.Address != "" {
 		real, err := rag.NewMilvusIndexer(cfg.Milvus.Address, cfg.Milvus.Collection, cfg.Embedding.Dim)
 		if err != nil {
-			return nil, fmt.Errorf("milvus connect %q: %w (set milvus.address empty to use fake index)", cfg.Milvus.Address, err)
+			return nil, nil, fmt.Errorf("milvus connect %q: %w (set milvus.address empty to use fake index)", cfg.Milvus.Address, err)
 		}
 		vec = real
 	} else {
@@ -259,7 +269,7 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 	if len(cfg.Elasticsearch.Addresses) > 0 {
 		real, err := rag.NewESIndexer(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Index)
 		if err != nil {
-			return nil, fmt.Errorf("elasticsearch connect %v: %w (set elasticsearch.addresses empty to use fake index)", cfg.Elasticsearch.Addresses, err)
+			return nil, nil, fmt.Errorf("elasticsearch connect %v: %w (set elasticsearch.addresses empty to use fake index)", cfg.Elasticsearch.Addresses, err)
 		}
 		lex = real
 	} else {
@@ -276,10 +286,10 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 	if cfg.RAG.StoreAsync {
 		// Async path: the inner adapter must not publish MEMORY_INDEXED
 		// itself; the worker publishes once indexing actually completes.
-		adapter = rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, nil)
-		return rag.NewAsyncIndexer(adapter, pub, cfg.RAG.StoreWorkers), nil
+		inner := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, nil)
+		return rag.NewAsyncIndexer(inner, pub, cfg.RAG.StoreWorkers), adapter, nil
 	}
-	return adapter, nil
+	return adapter, adapter, nil
 }
 
 func provideCommander(
@@ -438,6 +448,14 @@ func provideReplayService(repo port.Repository) *replay.Service {
 
 func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository) *memory.Service {
 	return memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo()))
+}
+
+func provideKnowledgeRepository(db *gorm.DB) port.KnowledgeRepository {
+	return magi.NewKnowledgeRepository(db)
+}
+
+func provideKnowledgeService(repo port.KnowledgeRepository, idx port.DocumentIndexer) *knowledge.Service {
+	return knowledge.NewService(repo, idx)
 }
 
 func provideToolService(toolReg port.ToolRegistryPort) *tool.Service {

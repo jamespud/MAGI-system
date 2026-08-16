@@ -8,9 +8,6 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
-// caseMemorySource is the RAG source name used for resolved-case projections.
-const caseMemorySource = "case_memory"
-
 // Service is the application-layer service for case memory.
 type Service struct {
 	knowledge port.KnowledgePort
@@ -69,7 +66,7 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 		res, err := s.knowledge.Retrieve(ctx, port.RetrieveRequest{
 			Query:   query,
 			TopK:    limit * 3,
-			Sources: []string{caseMemorySource},
+			Sources: []string{port.SourceCaseMemory},
 		})
 		if err == nil {
 			for _, blk := range res.Blocks {

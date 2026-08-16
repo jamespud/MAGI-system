@@ -12,6 +12,7 @@ import (
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/judge"
+	"github.com/jamespud/magi/backend/application/knowledge"
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/plugins"
@@ -37,6 +38,7 @@ type RouteDeps struct {
 	Evaluation   *evaluation.Service
 	Judge        *judge.Service
 	Memory       *memory.Service
+	Knowledge    *knowledge.Service
 	Tool         *tool.Service
 	Broker       *EventBroker
 	EventRepo    port.EventRepository
@@ -83,6 +85,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)
 	v1.GET("/memory", memH.Search)
 	v1.GET("/memory/:id", memH.Get)
+
+	knowH := handler.NewKnowledgeHandler(deps.Knowledge)
+	v1.POST("/knowledge", knowH.Create)
+	v1.GET("/knowledge", knowH.List)
+	v1.GET("/knowledge/:id", knowH.Get)
+	v1.DELETE("/knowledge/:id", knowH.Delete)
 
 	evalH := handler.NewEvaluationHandler(deps.Evaluation, deps.Decision)
 	v1.POST("/evaluation", evalH.Evaluate)

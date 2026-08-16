@@ -24,7 +24,7 @@ type CaseResponse struct {
 	ParentCaseID  string          `json:"parent_case_id,omitempty"`
 	Status        string          `json:"status"`
 	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
-	Dissent       []DissentDTO     `json:"dissent,omitempty"`
+	Dissent       []DissentDTO    `json:"dissent,omitempty"`
 	FinalDecision string          `json:"final_decision,omitempty"`
 	Confidence    float64         `json:"confidence"`
 	Round         int             `json:"round"`
@@ -179,10 +179,10 @@ func fromCase(c *entity.DecisionCase, resolution *entity.Resolution, dissent []e
 		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
 	}
 	resp := CaseResponse{
-		ID:          c.ID,
-		Question:    c.Question,
-		Background:  c.Context,
-		Constraints: constraints,
+		ID:           c.ID,
+		Question:     c.Question,
+		Background:   c.Context,
+		Constraints:  constraints,
 		Status:       string(c.Status),
 		ParentCaseID: c.ParentCaseID,
 		Round:        0,
@@ -432,18 +432,18 @@ type BenchmarkRunResponse struct {
 }
 
 type BenchmarkItemResultResponse struct {
-	ID               string  `json:"id"`
-	CaseID           string  `json:"case_id"`
-	ExpectedDecision string  `json:"expected_decision"`
-	ActualDecision   string  `json:"actual_decision"`
-	Matched          bool    `json:"matched"`
-	Score            float64 `json:"score"`
-	Runs             int     `json:"runs"`
-	Consistency      float64 `json:"consistency"`
+	ID               string   `json:"id"`
+	CaseID           string   `json:"case_id"`
+	ExpectedDecision string   `json:"expected_decision"`
+	ActualDecision   string   `json:"actual_decision"`
+	Matched          bool     `json:"matched"`
+	Score            float64  `json:"score"`
+	Runs             int      `json:"runs"`
+	Consistency      float64  `json:"consistency"`
 	Decisions        []string `json:"decisions,omitempty"`
-	Error            string  `json:"error,omitempty"`
-	Feedback         string  `json:"feedback,omitempty"`
-	FeedbackAt       string  `json:"feedback_at,omitempty"`
+	Error            string   `json:"error,omitempty"`
+	Feedback         string   `json:"feedback,omitempty"`
+	FeedbackAt       string   `json:"feedback_at,omitempty"`
 }
 
 type BenchmarkDetailResponse struct {
@@ -477,7 +477,7 @@ func FromItem(it *entity.BenchmarkItem) DatasetItemDTO {
 		constraints[i] = ConstraintDTO{Label: ct.Key, Value: ct.Value}
 	}
 	return DatasetItemDTO{
-		ID: it.ID, 		Question: it.Question, Background: it.Context, Constraints: constraints,
+		ID: it.ID, Question: it.Question, Background: it.Context, Constraints: constraints,
 		ExpectedDecision: string(it.ExpectedDecision), Weight: it.Weight, Tags: it.Tags,
 	}
 }
@@ -626,4 +626,44 @@ type AskRequest struct {
 
 type MemorySearchResponse struct {
 	Results []*entity.CaseMemoryProjection `json:"results"`
+}
+
+// KnowledgeDocDTO is the API representation of a knowledge document.
+type KnowledgeDocDTO struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	SourceKind string `json:"source_kind"`
+	SourceURL  string `json:"source_url,omitempty"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	Chunks     int    `json:"chunks"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type CreateKnowledgeRequest struct {
+	Title      string `json:"title"`
+	Content    string `json:"content,omitempty"`
+	SourceKind string `json:"source_kind,omitempty"`
+	SourceURL  string `json:"source_url,omitempty"`
+}
+
+type KnowledgeListResponse struct {
+	Documents []KnowledgeDocDTO `json:"documents"`
+	Total     int               `json:"total"`
+}
+
+// FromKnowledgeDoc maps a knowledge document entity to its DTO.
+func FromKnowledgeDoc(d *entity.KnowledgeDoc) KnowledgeDocDTO {
+	out := KnowledgeDocDTO{
+		ID: d.ID, Title: d.Title, SourceKind: d.SourceKind, SourceURL: d.SourceURL,
+		Status: d.Status, Error: d.Error, Chunks: d.Chunks,
+	}
+	if !d.CreatedAt.IsZero() {
+		out.CreatedAt = d.CreatedAt.Format(time.RFC3339)
+	}
+	if !d.UpdatedAt.IsZero() {
+		out.UpdatedAt = d.UpdatedAt.Format(time.RFC3339)
+	}
+	return out
 }

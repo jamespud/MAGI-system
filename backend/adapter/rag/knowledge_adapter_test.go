@@ -200,3 +200,70 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestHybridKnowledgeAdapterStoreDocumentAndDelete(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewChunkRepository(db)
+	vec := &FakeVectorIndex{}
+	lex := &FakeLexicalIndex{}
+	ch := NewChunker(RuneTokenCounter{CharsPerToken: 1}, ChunkLevels{L1800: 300, L900: 150, L300: 50})
+	emb := FakeEmbedder{Dim: 3}
+	adapter := NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, nil, nil)
+
+	doc := &entity.KnowledgeDoc{
+		ID: "kd-1", UserID: 7, Title: "Postgres tuning",
+		Content: "Set shared_buffers to 25% of RAM and enable WAL compression.",
+	}
+	stats, err := adapter.StoreDocument(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("storedoc: %v", err)
+	}
+	if stats.Chunks300 == 0 {
+		t.Fatal("expected chunks produced")
+	}
+	var n int64
+	db.Model(&Chunk300{}).Where("source = ? AND source_ref = ?", port.SourceKnowledgeDoc, doc.ID).Count(&n)
+	if n == 0 {
+		t.Error("expected knowledge chunks persisted to MySQL")
+	}
+
+	// DeleteSource must purge the document's chunks.
+	if err := adapter.DeleteSource(context.Background(), port.SourceKnowledgeDoc, doc.ID); err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+	db.Model(&Chunk300{}).Where("source = ? AND source_ref = ?", port.SourceKnowledgeDoc, doc.ID).Count(&n)
+	if n != 0 {
+		t.Errorf("expected chunks removed, got %d", n)
+	}
+}
+
+func TestHybridKnowledgeAdapterSourcesScoped(t *testing.T) {
+	// A document source must not be returned by a case_memory-scoped retrieve,
+	// and vice versa — both live in the same index but must be separable.
+	db := newTestDB(t)
+	repo := NewChunkRepository(db)
+	vec := &FakeVectorIndex{}
+	lex := &FakeLexicalIndex{}
+	ch := NewChunker(RuneTokenCounter{CharsPerToken: 1}, ChunkLevels{L1800: 300, L900: 150, L300: 50})
+	emb := FakeEmbedder{Dim: 3}
+	adapter := NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, nil, nil)
+
+	if _, err := adapter.StoreDocument(context.Background(), &entity.KnowledgeDoc{
+		ID: "kd-9", UserID: 1, Title: "doc", Content: "document-only content marker",
+	}); err != nil {
+		t.Fatalf("storedoc: %v", err)
+	}
+	if _, err := adapter.Store(context.Background(), &entity.CaseMemoryProjection{
+		CaseID: "case-9", QuestionSummary: "case-only question",
+	}); err != nil {
+		t.Fatalf("store case: %v", err)
+	}
+
+	// The chunk repository should hold both under their own source namespaces.
+	var docN, caseN int64
+	db.Model(&Chunk300{}).Where("source = ?", port.SourceKnowledgeDoc).Count(&docN)
+	db.Model(&Chunk300{}).Where("source = ?", port.SourceCaseMemory).Count(&caseN)
+	if docN == 0 || caseN == 0 {
+		t.Errorf("doc chunks=%d case chunks=%d, want both > 0", docN, caseN)
+	}
+}

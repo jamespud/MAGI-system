@@ -22,19 +22,19 @@ type CaseModel struct {
 func (CaseModel) TableName() string { return "decision_case" }
 
 type AgentRunModel struct {
-	ID             string `gorm:"primaryKey"`
-	CaseID         string `gorm:"index"`
-	MagiConfigID   string
-	MagiCode       string
-	Round          int
-	Status         string
-	UsageJSON      string `gorm:"type:text"`
+	ID              string `gorm:"primaryKey"`
+	CaseID          string `gorm:"index"`
+	MagiConfigID    string
+	MagiCode        string
+	Round           int
+	Status          string
+	UsageJSON       string `gorm:"type:text"`
 	EnvironmentJSON string `gorm:"type:text"`
-	Err            string `gorm:"type:text"`
-	CheckpointJSON string `gorm:"type:text"`
-	SummaryJSON    string `gorm:"type:text"`
-	StartedAt      time.Time
-	CompletedAt    *time.Time
+	Err             string `gorm:"type:text"`
+	CheckpointJSON  string `gorm:"type:text"`
+	SummaryJSON     string `gorm:"type:text"`
+	StartedAt       time.Time
+	CompletedAt     *time.Time
 }
 
 func (AgentRunModel) TableName() string { return "magi_agent_run" }
@@ -248,23 +248,23 @@ type DatasetItemModel struct {
 func (DatasetItemModel) TableName() string { return "magi_dataset_item" }
 
 type BenchmarkRunModel struct {
-	ID               string `gorm:"primaryKey"`
-	DatasetID        string `gorm:"index"`
-	Status           string `gorm:"index"`
-	LeaseOwner       string `gorm:"column:lease_owner"`
-	LeaseUntil       *time.Time
-	Total            int
-	Matched          int
-	Accuracy         float64
-	WeightedAccuracy float64
-	RunsPerItem      int
-	Stability        float64
+	ID                  string `gorm:"primaryKey"`
+	DatasetID           string `gorm:"index"`
+	Status              string `gorm:"index"`
+	LeaseOwner          string `gorm:"column:lease_owner"`
+	LeaseUntil          *time.Time
+	Total               int
+	Matched             int
+	Accuracy            float64
+	WeightedAccuracy    float64
+	RunsPerItem         int
+	Stability           float64
 	RegressionThreshold float64
-	RegressionFailed bool
-	FailureReason    string
-	StartedAt        time.Time
-	CompletedAt      *time.Time
-	CreatedAt        time.Time
+	RegressionFailed    bool
+	FailureReason       string
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	CreatedAt           time.Time
 }
 
 func (BenchmarkRunModel) TableName() string { return "magi_benchmark_run" }
@@ -312,8 +312,8 @@ type SchedulerLockModel struct {
 func (SchedulerLockModel) TableName() string { return "magi_scheduler_lock" }
 
 type ToolQuotaCounterModel struct {
-	UserID      int64 `gorm:"primaryKey"`
-	ToolName    string `gorm:"primaryKey"`
+	UserID      int64     `gorm:"primaryKey"`
+	ToolName    string    `gorm:"primaryKey"`
 	WindowStart time.Time `gorm:"primaryKey"`
 	Calls       int
 }
@@ -321,7 +321,7 @@ type ToolQuotaCounterModel struct {
 func (ToolQuotaCounterModel) TableName() string { return "magi_tool_quota_counter" }
 
 type JudgeModel struct {
-	ID                  uint `gorm:"primaryKey;autoIncrement"`
+	ID                  uint   `gorm:"primaryKey;autoIncrement"`
 	CaseID              string `gorm:"uniqueIndex"`
 	ReportQuality       float64
 	EvidenceConsistency float64
@@ -363,5 +363,23 @@ func AllModels() []any {
 		&SchedulerLockModel{},
 		&ToolQuotaCounterModel{},
 		&RunCounterModel{},
+		&KnowledgeDocModel{},
 	}
 }
+
+// KnowledgeDocModel persists a user-uploaded knowledge document.
+type KnowledgeDocModel struct {
+	ID         string `gorm:"primaryKey;size:64"`
+	UserID     int64  `gorm:"index"`
+	Title      string
+	Content    string `gorm:"type:longtext"`
+	SourceKind string `gorm:"size:16"`
+	SourceURL  string
+	Status     string `gorm:"size:16"`
+	Error      string
+	Chunks     int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+func (KnowledgeDocModel) TableName() string { return "knowledge_docs" }
