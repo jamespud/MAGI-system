@@ -3,17 +3,15 @@ import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LeftNav from '../LeftNav';
 
-const { mockFetchCases } = vi.hoisted(() => ({
+const { mockFetchCases, mockLoadMore, mockStoreState } = vi.hoisted(() => ({
   mockFetchCases: vi.fn(),
+  mockLoadMore: vi.fn(),
+  mockStoreState: { cases: [] as unknown[], hasMore: false, loadMoreCases: undefined as unknown, fetchCases: undefined as unknown },
 }));
 
 vi.mock('@/stores', () => {
-  const storeHook = vi.fn(() => []);
-  Object.assign(storeHook, {
-    getState: () => ({
-      fetchCases: mockFetchCases,
-    }),
-  });
+  const storeHook = vi.fn((sel: (s: typeof mockStoreState) => unknown) => (typeof sel === 'function' ? sel(mockStoreState) : undefined));
+  Object.assign(storeHook, { getState: () => mockStoreState });
   return {
     useCaseStore: storeHook,
     useAgentStore: vi.fn(() => ({})),
@@ -24,6 +22,28 @@ vi.mock('@/stores', () => {
 describe('LeftNav', () => {
   beforeEach(() => {
     mockFetchCases.mockReset();
+    mockLoadMore.mockReset();
+    mockStoreState.hasMore = false;
+    mockStoreState.loadMoreCases = mockLoadMore;
+    mockStoreState.fetchCases = mockFetchCases;
+  });
+
+  it('renders Load more and triggers loadMoreCases when hasMore is true', () => {
+    render(
+      <MemoryRouter>
+        <LeftNav cases={[]} />
+      </MemoryRouter>
+    );
+    expect(document.body.textContent).not.toContain('Load more');
+    mockStoreState.hasMore = true;
+    const second = render(
+      <MemoryRouter>
+        <LeftNav cases={[]} />
+      </MemoryRouter>
+    );
+    const btn = second.getByText('Load more…');
+    fireEvent.click(btn);
+    expect(mockLoadMore).toHaveBeenCalled();
   });
 
   it('calls fetchCases on mount', () => {
@@ -50,7 +70,7 @@ describe('LeftNav', () => {
   it('shows in-progress statuses (e.g. NORMALIZING) in the Running section', () => {
     const { getByText } = render(
       <MemoryRouter>
-        <LeftNav cases={[{ id: 'c1', question: 'Active question', status: 'NORMALIZING' as const, round: 1, createdAt: 't', pinned: false }]} />
+        <LeftNav cases={[{ id: 'c1', question: 'Active question', status: 'NORMALIZING' as const, round: 1, createdAt: 't', pinned: false, archived: false }]} />
       </MemoryRouter>
     );
     expect(getByText('Running')).toBeDefined();
@@ -59,7 +79,7 @@ describe('LeftNav', () => {
   it('paginates the Completed section when many cases are resolved', () => {
     const resolved = Array.from({ length: 12 }, (_, i) => ({
       id: `c-${i}`, question: `Question ${i}`, status: 'RESOLVED' as const,
-      round: 1, createdAt: 't', pinned: false,
+      round: 1, createdAt: 't', pinned: false, archived: false,
     }));
     const { getByText, queryByText, getByLabelText, getByRole } = render(
       <MemoryRouter>
@@ -83,7 +103,7 @@ describe('LeftNav', () => {
   it('paginates the Pinned section when many cases are pinned', () => {
     const pinned = Array.from({ length: 12 }, (_, i) => ({
       id: `p-${i}`, question: `Pinned ${i}`, status: 'RESOLVED' as const,
-      round: 1, createdAt: 't', pinned: true,
+      round: 1, createdAt: 't', pinned: true, archived: false,
     }));
     const { getByText, queryByText, getByLabelText } = render(
       <MemoryRouter>

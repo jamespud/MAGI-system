@@ -53,6 +53,7 @@ type AgentLoop struct {
 	redactor       *redact.Redactor
 	approvalRepo   port.ApprovalRepository
 	quota          port.ToolQuotaPort
+	prompts        port.PromptProvider
 }
 
 type AgentLoopDeps struct {
@@ -70,6 +71,7 @@ type AgentLoopDeps struct {
 	Redactor       *redact.Redactor
 	ApprovalRepo   port.ApprovalRepository
 	Quota          port.ToolQuotaPort
+	Prompts        port.PromptProvider
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -218,7 +220,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if question == "" {
 		question = ""
 	}
-	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPrompt(cfg, summarySchema, voteSchema, reflectionSchema, actx.DebateContext, hasTools, actx.KnowledgeCtx))}
+	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPromptCtx(runCtx, l.prompts, cfg, summarySchema, voteSchema, reflectionSchema, actx.DebateContext, hasTools, actx.KnowledgeCtx))}
 	messages = append(messages, schema.UserMessage(question))
 
 	trace := &LoopTrace{StartedAt: time.Now()}

@@ -215,6 +215,34 @@ func (s *Service) DeleteItem(ctx context.Context, ownerID int64, datasetID, item
 	return s.datasets.UpdateDataset(ctx, ds)
 }
 
+// Delete removes a dataset the caller owns, including items, runs, and run
+// results (P2 D16). An in-flight run on another replica is cancelled by
+// marking its lease expired so it will not be resumed.
+func (s *Service) Delete(ctx context.Context, ownerID int64, id string) error {
+	ds, err := s.requireDataset(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	runs, err := s.datasets.ListRuns(ctx, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, r := range runs {
+		if r != nil && (r.Status == entity.BenchmarkRunQueued || r.Status == entity.BenchmarkRunRunning) {
+			r.Status = entity.BenchmarkRunFailed
+			r.FailureReason = "dataset deleted"
+			if r.LeaseUntil != nil && r.LeaseUntil.After(now) {
+				r.LeaseUntil = &now
+			}
+			if err := s.datasets.UpdateRun(ctx, r); err != nil {
+				return err
+			}
+		}
+	}
+	return s.datasets.DeleteDataset(ctx, ds.ID)
+}
+
 func (s *Service) ExportItems(ctx context.Context, ownerID int64, datasetID string) ([]*entity.BenchmarkItem, error) {
 	if _, err := s.requireDataset(ctx, ownerID, datasetID); err != nil {
 		return nil, err

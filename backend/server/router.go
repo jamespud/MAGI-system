@@ -44,16 +44,33 @@ type RouteDeps struct {
 	Tool         *tool.Service
 	Broker       *EventBroker
 	EventRepo    port.EventRepository
+	Export       *handler.ExportHandler
 	HealthPinger handler.Pinger
 	ModelName    string
 	MaxSteps     int
 	Tracing      *trace.TracerProvider
+	// RateLimit configures per-minute HTTP rate limiting on /api/v1 (P2 D13).
+	RateLimit RateLimitConfig
+	// MetricsAuth requires the admin role for /metrics when true (P2 D17).
+	MetricsAuth bool
+	// MaxTokensPerUser / MaxCostUSDPerUser feed /me/usage budget display (P2 D9).
+	MaxTokensPerUser int64
+	MaxCostUSDPerUser float64
+	// PromptRepo backs the admin prompt registry (P2 D12).
+	PromptRepo port.PromptRepository
 }
 
 // RegisterRoutesWithDeps registers all HTTP routes with injected services.
 func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	h.Use(RequestID(), Tracing(deps.Tracing), Logger(), Recovery(), Metrics(deps.Metrics), Auth(deps.Auth))
-	h.GET("/metrics", MetricsHandler(deps.Metrics))
+	if deps.MetricsAuth {
+		// /metrics normally sits in publicPaths; drop it so Auth runs first,
+		// then gate the handler on the admin role (open mode still passes).
+		delete(publicPaths, "/metrics")
+		h.GET("/metrics", RequireRole("admin"), MetricsHandler(deps.Metrics))
+	} else {
+		h.GET("/metrics", MetricsHandler(deps.Metrics))
+	}
 
 	healthH := handler.NewHealthHandler(deps.HealthPinger)
 	h.GET("/health", healthH.Health)
@@ -62,6 +79,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	h.GET("/openapi.json", OpenAPIHandler)
 
 	v1 := h.Group("/api/v1")
+	v1.Use(RateLimit(deps.RateLimit))
 
 	decH := handler.NewDecisionHandler(deps.Decision, deps.Metrics)
 	v1.POST("/cases", decH.Create)
@@ -69,6 +87,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/cases/:id/fork", decH.Fork)
 	v1.POST("/cases/:id/cancel", decH.Cancel)
 	v1.GET("/cases/:id", decH.Get)
+	v1.PATCH("/cases/:id", decH.Patch)
+	v1.DELETE("/cases/:id", decH.Delete)
 	v1.GET("/cases/:id/report", decH.Report)
 	v1.GET("/cases", decH.List)
 
@@ -119,6 +139,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/datasets", dsH.Create)
 	v1.GET("/datasets", dsH.List)
 	v1.GET("/datasets/:id", dsH.Get)
+	v1.DELETE("/datasets/:id", dsH.Delete)
 	v1.POST("/datasets/:id/items", dsH.AddItems)
 	v1.GET("/datasets/:id/items", dsH.ListItems)
 	v1.PATCH("/datasets/:id/items/:itemId", dsH.UpdateItem)
@@ -135,8 +156,19 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.PATCH("/plugins/:id", plugH.SetEnabled)
 	v1.DELETE("/plugins/:id", plugH.Delete)
 
-	adminH := handler.NewAdminHandler(deps.Admin)
+	adminH := handler.NewAdminHandler(deps.Admin, admin.UsageLimits{
+		MaxTokens: deps.MaxTokensPerUser, MaxCostUSD: deps.MaxCostUSDPerUser,
+	})
 	v1.GET("/admin/usage", RequireRole("admin"), adminH.Usage)
+	v1.GET("/me/usage", adminH.MeUsage)
+
+	if deps.PromptRepo != nil {
+		promptH := handler.NewPromptHandler(deps.PromptRepo)
+		v1.GET("/admin/prompts", RequireRole("admin"), promptH.List)
+		v1.GET("/admin/prompts/:key", RequireRole("admin"), promptH.Get)
+		v1.PUT("/admin/prompts/:key", RequireRole("admin"), promptH.Update)
+		v1.POST("/admin/prompts/:key/restore", RequireRole("admin"), promptH.Restore)
+	}
 
 	usersH := handler.NewUsersHandler(deps.Users)
 	v1.GET("/me", usersH.Me)
@@ -159,4 +191,10 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 
 	askH := handler.NewAssistantHandler(deps.Assistant)
 	v1.POST("/assistant", askH.Ask)
+
+	if deps.Export != nil {
+		v1.GET("/cases/:id/export", deps.Export.Case)
+		v1.GET("/memory/export", deps.Export.Memory)
+		v1.GET("/evaluation/:id/export", deps.Export.Evaluation)
+	}
 }

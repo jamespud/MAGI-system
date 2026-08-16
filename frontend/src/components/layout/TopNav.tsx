@@ -4,21 +4,24 @@ import { Activity, BookOpen, Database, Play, BarChart3, Wrench, Settings, Layers
 import { PulseDot, MonoText } from '@/components/shared';
 import { api, type ApiStatus } from '@/api/client';
 import { useAgentStore } from '@/stores';
+import { useT, useLang } from '@/i18n';
 
 const NAV_ITEMS = [
-  { to: '/', icon: Activity, label: 'Decision' },
-  { to: '/memory', icon: Layers, label: 'Memory' },
-  { to: '/replay', icon: Play, label: 'Replay' },
-  { to: '/approvals', icon: ShieldCheck, label: 'Approvals' },
-  { to: '/evaluation', icon: BarChart3, label: 'Evaluation' },
-  { to: '/dataset', icon: Database, label: 'Dataset' },
-  { to: '/tools', icon: Wrench, label: 'Tools' },
-  { to: '/knowledge', icon: BookOpen, label: 'Knowledge' },
-  { to: '/admin/users', icon: UsersIcon, label: 'Users' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/', icon: Activity, label: 'nav.decision' },
+  { to: '/memory', icon: Layers, label: 'nav.memory' },
+  { to: '/replay', icon: Play, label: 'nav.replay' },
+  { to: '/approvals', icon: ShieldCheck, label: 'nav.approvals' },
+  { to: '/evaluation', icon: BarChart3, label: 'nav.evaluation' },
+  { to: '/dataset', icon: Database, label: 'nav.dataset' },
+  { to: '/tools', icon: Wrench, label: 'nav.tools' },
+  { to: '/knowledge', icon: BookOpen, label: 'nav.knowledge' },
+  { to: '/admin/users', icon: UsersIcon, label: 'nav.users' },
+  { to: '/settings', icon: Settings, label: 'nav.settings' },
 ];
 
 export default function TopNav() {
+  const t = useT();
+  const { lang, setLang } = useLang();
   const [status, setStatus] = useState<ApiStatus | null>(null);
   const [offline, setOffline] = useState(false);
 
@@ -58,7 +61,7 @@ export default function TopNav() {
               }
             >
               <Icon size={14} />
-              {label}
+              {t(label)}
             </NavLink>
           ))}
         </nav>
@@ -76,6 +79,14 @@ export default function TopNav() {
           <span className={`inline-block w-1.5 h-1.5 rounded-full ${offline ? 'bg-error' : 'bg-success'}`} />
           <MonoText size="sm" muted>{offline ? 'Offline' : 'Connected'}</MonoText>
         </div>
+        <button
+          type="button"
+          onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+          className="rounded border border-border-dim px-2 py-0.5 text-[10px] text-text-muted hover:text-text-primary hover:bg-raised transition-colors cursor-pointer"
+          title="Switch language"
+        >
+          {lang === 'en' ? '中文' : 'EN'}
+        </button>
       </div>
     </header>
   );

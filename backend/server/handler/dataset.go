@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -46,6 +47,19 @@ func (h *DatasetHandler) List(ctx context.Context, c *app.RequestContext) {
 		out = append(out, dto.FromDataset(d))
 	}
 	c.JSON(consts.StatusOK, dto.DatasetListResponse{Datasets: out})
+}
+
+// Delete removes a dataset and its artifacts (P2 D16).
+func (h *DatasetHandler) Delete(ctx context.Context, c *app.RequestContext) {
+	if err := h.svc.Delete(ctx, CurrentUserID(ctx), c.Param("id")); err != nil {
+		if strings.Contains(err.Error(), "forbidden") {
+			Forbidden(c)
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]string{"id": c.Param("id"), "status": "deleted"})
 }
 
 func (h *DatasetHandler) Get(ctx context.Context, c *app.RequestContext) {

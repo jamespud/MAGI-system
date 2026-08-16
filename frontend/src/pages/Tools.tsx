@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/api/client';
+import { useT } from '@/i18n';
 
 interface ToolInfo {
   name: string;
@@ -7,6 +8,7 @@ interface ToolInfo {
 }
 
 export default function Tools() {
+  const t = useT();
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
@@ -28,9 +30,9 @@ export default function Tools() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Tools</h1>
+      <h1 className="text-xl font-semibold">{t('tools.title')}</h1>
       {error && <p className="text-red-500">{error}</p>}
-      {busy && <p className="text-sm text-text-muted">Loading…</p>}
+      {busy && <p className="text-sm text-text-muted">{t('tools.loading')}</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {tools.map((t) => (
           <div key={t.name} className="rounded border border-border-dim bg-raised p-4">
@@ -38,7 +40,7 @@ export default function Tools() {
             <p className="text-sm text-text-muted mt-1">{t.desc}</p>
           </div>
         ))}
-        {!busy && tools.length === 0 && <p className="text-sm text-text-muted">No tools available.</p>}
+        {!busy && tools.length === 0 && <p className="text-sm text-text-muted">{t('tools.noTools')}</p>}
       </div>
     </div>
   );

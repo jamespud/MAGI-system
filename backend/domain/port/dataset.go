@@ -15,6 +15,9 @@ type DatasetRepository interface {
 	GetDataset(ctx context.Context, id string) (*entity.BenchmarkDataset, error)
 	ListDatasets(ctx context.Context) ([]*entity.BenchmarkDataset, error)
 	UpdateDataset(ctx context.Context, d *entity.BenchmarkDataset) error
+	// DeleteDataset removes a dataset and its items, runs, and run results
+	// (P2 D16). Active runs are cancelled by the caller before deletion.
+	DeleteDataset(ctx context.Context, id string) error
 	CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error
 	ListItems(ctx context.Context, datasetID string) ([]*entity.BenchmarkItem, error)
 	GetItem(ctx context.Context, id string) (*entity.BenchmarkItem, error)

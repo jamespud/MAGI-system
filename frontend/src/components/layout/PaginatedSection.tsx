@@ -3,6 +3,7 @@ import type { ComponentType } from 'react';
 import { NavLink } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react';
 import { MonoText } from '@/components/shared';
+import { useT } from '@/i18n';
 import type { CaseSummary } from '@/types/case';
 
 interface PaginatedSectionProps {
@@ -19,6 +20,7 @@ export default function PaginatedSection({
   title, icon: Icon, items, pageSize = 10,
   collapsible = false, defaultExpanded = true,
 }: PaginatedSectionProps) {
+  const t = useT();
   const maxPage = Math.max(1, Math.ceil(items.length / pageSize));
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -61,7 +63,7 @@ export default function PaginatedSection({
       {!isCollapsed && (
         <>
           {isEmpty ? (
-            <p className="px-6 py-1.5 text-xs text-text-muted italic">No cases</p>
+            <p className="px-6 py-1.5 text-xs text-text-muted italic">{t('app.noCases')}</p>
           ) : (
             <>
               <div ref={listRef} data-testid="page-list" className={maxPage > 1 ? 'h-[340px] overflow-y-auto' : ''}>

@@ -21,6 +21,8 @@ func (s *stubBudgetRuns) Get(ctx context.Context, id string) (*entity.AgentRun, 
 func (s *stubBudgetRuns) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	return nil, nil
 }
+func (s *stubBudgetRuns) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
+
 func (s *stubBudgetRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return s.tokens, s.cost, nil
 }

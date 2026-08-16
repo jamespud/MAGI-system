@@ -24,6 +24,7 @@ func (s *stubMemoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjec
 func (s *stubMemoryRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
 	return nil, nil
 }
+func (s *stubMemoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) { return nil, nil }
 
 func TestMemoryService_Get(t *testing.T) {
 	want := &entity.CaseMemoryProjection{QuestionSummary: "test"}
@@ -64,6 +65,9 @@ func (s *searchMemRepo) Save(ctx context.Context, proj *entity.CaseMemoryProject
 func (s *searchMemRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
 	return s.results, nil
 }
+func (s *searchMemRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
 
 type memCaseRepo struct {
 	byID map[string]*entity.DecisionCase
@@ -80,6 +84,11 @@ func (s *memCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.Cas
 func (s *memCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return nil
 }
+func (s *memCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *memCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *memCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 func TestMemoryService_SearchFiltersByOwner(t *testing.T) {
 	repo := &searchMemRepo{results: []*entity.CaseMemoryProjection{{CaseID: "c1"}, {CaseID: "c2"}}}
@@ -127,6 +136,16 @@ func (s *mapMemRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 }
 func (s *mapMemRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
 	return s.like, s.likeErr
+}
+func (s *mapMemRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	if s.byID == nil {
+		return nil, nil
+	}
+	out := make([]*entity.CaseMemoryProjection, 0, len(s.byID))
+	for _, v := range s.byID {
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 func TestMemoryService_SearchFusesSemanticThenLike(t *testing.T) {

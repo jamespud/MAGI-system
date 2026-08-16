@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Pin, Play, CheckCircle, Archive, FileText, FlaskConical, Database, History } from 'lucide-react';
 import PaginatedSection from './PaginatedSection';
 import { useCaseStore } from '@/stores';
+import { useT } from '@/i18n';
 import { ACTIVE_CASE_STATUSES, type CaseSummary } from '@/types/case';
 
 interface LeftNavProps {
@@ -10,10 +11,10 @@ interface LeftNavProps {
 }
 
 const SECTIONS: { title: string; icon: typeof Pin; filter: (c: CaseSummary) => boolean }[] = [
-  { title: 'Pinned', icon: Pin, filter: (c) => c.pinned },
-  { title: 'Running', icon: Play, filter: (c) => ACTIVE_CASE_STATUSES.includes(c.status) },
-  { title: 'Completed', icon: CheckCircle, filter: (c) => c.status === 'RESOLVED' },
-  { title: 'Archived', icon: Archive, filter: () => false },
+  { title: 'app.pinned', icon: Pin, filter: (c) => c.pinned && !c.archived },
+  { title: 'app.running', icon: Play, filter: (c) => !c.archived && ACTIVE_CASE_STATUSES.includes(c.status) },
+  { title: 'app.completed', icon: CheckCircle, filter: (c) => !c.archived && c.status === 'RESOLVED' },
+  { title: 'app.archived', icon: Archive, filter: (c) => c.archived },
 ];
 
 const FOOTER_ITEMS = [
@@ -24,6 +25,10 @@ const FOOTER_ITEMS = [
 ];
 
 export default function LeftNav({ cases = [] }: LeftNavProps) {
+  const t = useT();
+  const hasMore = useCaseStore((s) => s.hasMore);
+  const loadMore = useCaseStore((s) => s.loadMoreCases);
+
   useEffect(() => {
     useCaseStore.getState().fetchCases();
   }, []);
@@ -37,19 +42,29 @@ export default function LeftNav({ cases = [] }: LeftNavProps) {
       <div className="flex-1 overflow-y-auto">
         {SECTIONS.map(({ title, icon: Icon, filter }) => {
           const filtered = cases.filter(filter);
-          if (filtered.length === 0 && title !== 'Pinned' && title !== 'Archived') return null;
+          if (filtered.length === 0 && title !== 'app.pinned' && title !== 'app.archived') return null;
 
           return (
             <PaginatedSection
               key={title}
-              title={title}
+              title={t(title)}
               icon={Icon}
               items={filtered}
-              collapsible={title === 'Completed'}
-              defaultExpanded={title !== 'Completed'}
+              collapsible={title === 'app.completed'}
+              defaultExpanded={title !== 'app.completed'}
             />
           );
         })}
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            className="w-full px-4 py-2 text-xs text-text-muted hover:text-text-secondary hover:bg-raised transition-colors"
+
+          >
+            {t('app.loadMore')}
+          </button>
+        )}
       </div>
 
       <div className="border-t border-border-dim py-2">

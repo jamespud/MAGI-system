@@ -20,7 +20,7 @@ const setAgents = (a: Record<string, AgentSnapshot | null>) => { _agents = a; };
 const baseCase = (overrides: Partial<Case> = {}): Case => ({
   id: 'c1', question: 'q', background: '', constraints: [], status: 'RESOLVED',
   round: 1, consensus: { approve: 2, reject: 1, abstain: 0, majority: 'Approve', needReflection: false },
-  confidence: 80, finalDecision: 'approve', createdAt: 't', updatedAt: 't', ...overrides,
+  confidence: 80, finalDecision: 'approve', pinned: false, archived: false, createdAt: 't', updatedAt: 't', ...overrides,
 });
 
 const votedAgent = (id: string, stance: Stance, confidence: number): AgentSnapshot => ({

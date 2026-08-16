@@ -540,6 +540,7 @@ func (s *stubRepo) ResolutionRepo() port.ResolutionRepository { return &stubResR
 func (s *stubRepo) EventRepo() port.EventRepository           { return &stubEventRepo{} }
 func (s *stubRepo) CheckpointRepo() port.CheckpointRepository { return &stubCpRepo{} }
 func (s *stubRepo) MemoryRepo() port.MemoryRepository         { return &stubMemRepo{} }
+func (s *stubRepo) PromptRepo() port.PromptRepository          { return nil }
 func (s *stubRepo) ToolCallRepo() port.ToolCallRepository     { return &stubToolCallRepo{s: s} }
 
 type stubCaseRepo struct{ s *stubRepo }
@@ -564,6 +565,13 @@ func (r *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.D
 	return nil
 }
 
+func (r *stubCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (r *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (r *stubCaseRepo) Delete(ctx context.Context, id string) error { return nil }
+
+
 type stubAgentRunRepo struct{ s *stubRepo }
 
 func (r *stubAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
@@ -578,6 +586,8 @@ func (r *stubAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun
 func (r *stubAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	return nil, nil
 }
+func (r *stubAgentRunRepo) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
+
 func (r *stubAgentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
@@ -689,6 +699,7 @@ func (stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error { r
 func (stubMemRepo) Search(context.Context, string, int) ([]*entity.CaseMemoryProjection, error) {
 	return nil, nil
 }
+func (stubMemRepo) List(context.Context) ([]*entity.CaseMemoryProjection, error) { return nil, nil }
 
 func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 	mrt := newMockMagiRuntime()

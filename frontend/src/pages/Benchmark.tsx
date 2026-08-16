@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { api, type ApiBenchmarkDetail, type ApiEvaluation } from '@/api/client';
+import { useT } from '@/i18n';
 
 export default function Benchmark() {
+  const t = useT();
   const [input, setInput] = useState('');
   const [results, setResults] = useState<Record<string, ApiEvaluation> | null>(null);
   const [error, setError] = useState('');
@@ -37,7 +39,7 @@ export default function Benchmark() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Benchmark</h1>
+      <h1 className="text-xl font-semibold">{t('benchmark.title')}</h1>
       <div className="space-y-2">
         <textarea
           className="w-full h-28 rounded border border-border-dim bg-background px-3 py-2 text-sm font-mono"

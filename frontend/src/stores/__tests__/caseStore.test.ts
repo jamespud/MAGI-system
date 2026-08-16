@@ -6,11 +6,14 @@ import type { Case } from '@/types/case';
 vi.mock('@/api/client', () => ({
   api: {
     getCases: vi.fn(),
+    getCasesPaged: vi.fn(),
     getCase: vi.fn(),
     createCase: vi.fn(),
     forkCase: vi.fn(),
     runCase: vi.fn(),
     cancelCase: vi.fn(),
+    patchCase: vi.fn(),
+    deleteCase: vi.fn(),
   },
 }));
 
@@ -24,6 +27,8 @@ const mockCase: Case = {
   consensus: null,
   confidence: 0,
   finalDecision: '',
+  pinned: false,
+  archived: false,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -41,7 +46,7 @@ describe('caseStore', () => {
 
   it('loads case list', () => {
     useCaseStore.getState().loadCaseList([
-      { id: '1', question: 'Q1', status: 'DRAFT', round: 1, createdAt: '', pinned: false },
+      { id: '1', question: 'Q1', status: 'DRAFT', round: 1, createdAt: '', pinned: false, archived: false },
     ]);
     expect(useCaseStore.getState().cases).toHaveLength(1);
   });
@@ -65,7 +70,9 @@ describe('caseStore', () => {
       { id: 'c1', question: 'Q1?', background: '', constraints: [], status: 'DRAFT', consensus: null, confidence: 0, round: 1, final_decision: '', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
       { id: 'c2', question: 'Q2?', background: '', constraints: [], status: 'RESOLVED', consensus: null, confidence: 0, round: 2, final_decision: 'approve', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
     ];
-    vi.mocked(api.getCases).mockResolvedValueOnce(mockApiCases);
+    vi.mocked(api.getCasesPaged).mockResolvedValueOnce({
+      cases: mockApiCases, total: mockApiCases.length, page: 1, page_size: 20,
+    });
 
     await useCaseStore.getState().fetchCases();
 
@@ -78,7 +85,7 @@ describe('caseStore', () => {
   });
 
   it('fetchCases sets error on failure', async () => {
-    vi.mocked(api.getCases).mockRejectedValueOnce(new Error('network error'));
+    vi.mocked(api.getCasesPaged).mockRejectedValueOnce(new Error('network error'));
 
     await useCaseStore.getState().fetchCases();
 
@@ -184,7 +191,7 @@ describe('caseStore sidebar list sync', () => {
 
   it('runCase patches the list entry so Running appears without refresh', async () => {
     useCaseStore.getState().loadCaseList([
-      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false },
+      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false, archived: false },
     ]);
     useCaseStore.getState().loadCase(mockCase);
     vi.mocked(api.runCase).mockResolvedValueOnce({ id: 'test-1', status: 'INVESTIGATING' });
@@ -209,7 +216,7 @@ describe('caseStore sidebar list sync', () => {
 
   it('fetchCase upserts the list entry with latest status', async () => {
     useCaseStore.getState().loadCaseList([
-      { id: 'case-001', question: 'Rust?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false },
+      { id: 'case-001', question: 'Rust?', status: 'DRAFT', round: 1, createdAt: '2026-01-01T00:00:00Z', pinned: false, archived: false },
     ]);
     const apiCase = {
       id: 'case-001', question: 'Rust?', background: 'Java team',
@@ -228,7 +235,7 @@ describe('caseStore sidebar list sync', () => {
   it('updateCaseStatus patches the list entry too', () => {
     useCaseStore.getState().loadCase(mockCase);
     useCaseStore.getState().loadCaseList([
-      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '', pinned: false },
+      { id: 'test-1', question: 'Test question?', status: 'DRAFT', round: 1, createdAt: '', pinned: false, archived: false },
     ]);
     useCaseStore.getState().updateCaseStatus('test-1', 'DEBATING', 2);
     expect(useCaseStore.getState().cases.find((c) => c.id === 'test-1')?.status).toBe('DEBATING');

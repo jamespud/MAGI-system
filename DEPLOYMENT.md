@@ -230,3 +230,40 @@ docker compose -f docker/docker-compose-dev.yml config   # compose validity
 `backend/server/e2e_test.go` exercises the full harness flow (auth, cases,
 dataset evaluation, plugins, recurring, assistant, metrics, admin usage)
 against a real SQLite-backed stack with a stubbed orchestrator.
+
+## P2 additions (2026-08-16)
+
+### HTTP rate limiting
+`http_rate_limit: { enabled, per_user_per_minute, per_ip_per_minute }` applies a
+per-minute in-memory limit to all `/api/v1` routes, keyed by authenticated user
+id (client IP in open mode). It returns `429` + `Retry-After`. The limiter is
+per-instance; in multi-replica deployments keep it disabled and rely on the
+DB-backed run concurrency and tool quotas, which already hold across replicas.
+
+### Metrics exposure control
+`metrics.auth_required: true` moves `/metrics` out of the public path and
+requires the admin role (open mode still passes). Default remains public for
+Prometheus scraping; keep it behind a reverse-proxy allow-list in production.
+
+### Versioned prompt registry
+Prompt templates are seeded from built-in defaults and stored in the
+`prompt_template` table. Admin API:
+
+```
+GET  /api/v1/admin/prompts              # all versions
+GET  /api/v1/admin/prompts/:key         # active version
+PUT  /api/v1/admin/prompts/:key         # {content} -> new version becomes active
+POST /api/v1/admin/prompts/:key/restore # reset to the built-in default
+```
+
+Keys: `commander.normalize`, `commander.report`, `agent.workflow_tools`,
+`agent.workflow_notools`. Runtime falls back to built-ins when the table is
+empty. Prompts use `{{PLACEHOLDER}}` tokens; malformed overrides degrade to the
+built-in rather than failing the run.
+
+### Case list pagination
+`GET /api/v1/cases?page=&page_size=` is scoped to the caller and returns
+`{cases,total,page,page_size}`; `PATCH /cases/:id` toggles `pinned`/`archived`
+and `DELETE /cases/:id` removes a case with all artifacts in one transaction.
+`DELETE /datasets/:id` cancels in-flight runs and removes the dataset, items,
+runs and results.

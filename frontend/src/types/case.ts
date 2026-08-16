@@ -70,6 +70,8 @@ export interface Case {
   dissent?: Dissent[];
   confidence: number;
   finalDecision: string;
+  pinned: boolean;
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -82,6 +84,7 @@ export interface CaseSummary {
   round: number;
   createdAt: string;
   pinned: boolean;
+  archived: boolean;
 }
 
 export interface Constraint {

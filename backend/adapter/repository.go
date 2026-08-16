@@ -82,6 +82,7 @@ func (r *magiRepository) EventRepo() port.EventRepository           { return &ev
 func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{db: r.db} }
 func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
 func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
+func (r *magiRepository) PromptRepo() port.PromptRepository        { return NewPromptRepository(r.db) }
 
 var _ port.Repository = (*magiRepository)(nil)
 
@@ -118,12 +119,107 @@ func (r *caseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 	return cases, nil
 }
 
+// ListPaged returns one page of cases scoped to userID (0 = all) plus the
+// total matching count. Archived cases are still listed but marked so the UI
+// can bucket them (P2 D10/D11).
+func (r *caseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	q := r.db.WithContext(ctx).Model(&CaseModel{})
+	if userID != 0 {
+		q = q.Where("user_id = ?", userID)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var models []CaseModel
+	if err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&models).Error; err != nil {
+		return nil, 0, err
+	}
+	cases := make([]*entity.DecisionCase, len(models))
+	for i, m := range models {
+		cases[i] = caseFromModel(&m)
+	}
+	return cases, total, nil
+}
+
+// UpdateFlags updates pinned/archived. A nil pointer leaves the flag unchanged.
+func (r *caseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	updates := map[string]any{}
+	if pinned != nil {
+		updates["pinned"] = *pinned
+	}
+	if archived != nil {
+		updates["archived"] = *archived
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// Delete removes a case and every artifact keyed by case_id (P2 D16). Tool
+// calls are keyed by agent_run_id, so they are removed via a subquery.
+func (r *caseRepo) Delete(ctx context.Context, id string) error {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	rollback := func() error {
+		_ = tx.Rollback()
+		return tx.Error
+	}
+	tables := []any{
+		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
+		&ResolutionModel{}, &EventModel{}, &DebateRoundModel{},
+		&MemoryProjectionModel{}, &DecisionJobModel{}, &ApprovalModel{}, &JudgeModel{},
+	}
+	for _, t := range tables {
+		if err := tx.Where("case_id = ?", id).Delete(t).Error; err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	// tool calls and reflections are keyed by agent_run_id -> case_id.
+	if err := tx.Where("agent_run_id IN (?)",
+		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
+	).Delete(&ToolCallModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Where("agent_run_id IN (?)",
+		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
+	).Delete(&ReflectionModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Where("id = ?", id).Delete(&CaseModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	_ = rollback
+	return nil
+}
+
 func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
 		ConstraintsJSON: toJSON(c.Constraints), ParentCaseID: c.ParentCaseID, Status: string(c.Status),
 		CurrentPhase:    string(c.CurrentPhase),
 		MaxDebateRounds: c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Pinned: c.Pinned, Archived: c.Archived,
 	}
 }
 func caseFromModel(m *CaseModel) *entity.DecisionCase {
@@ -132,6 +228,7 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ParentCaseID: m.ParentCaseID,
 		Status:       entity.CaseStatus(m.Status),
 		CurrentPhase: entity.CasePhase(m.CurrentPhase), MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
+		Pinned: m.Pinned, Archived: m.Archived,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }
@@ -176,6 +273,18 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 		}
 	}
 	return out, nil
+}
+
+// CountByUser counts agent runs owned by a user, joining through decision_case
+// because agent runs carry case_id, not user_id (P2 D9).
+func (r *agentRunRepo) CountByUser(ctx context.Context, userID int64) (int64, error) {
+	var n int64
+	err := r.db.WithContext(ctx).
+		Model(&AgentRunModel{}).
+		Joins("JOIN decision_case AS c ON c.id = magi_agent_run.case_id").
+		Where("c.user_id = ?", userID).
+		Count(&n).Error
+	return n, err
 }
 
 // SumUsageByUser aggregates token/cost usage across all agent runs owned by
@@ -508,6 +617,29 @@ func (r *memoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 		ProjectionVersion: proj.ProjectionVersion,
 	}
 	return r.db.WithContext(ctx).Save(&m).Error
+}
+
+func memoryProjectionFromModel(m *MemoryProjectionModel) *entity.CaseMemoryProjection {
+	return &entity.CaseMemoryProjection{
+		CaseID: m.CaseID, QuestionSummary: m.QuestionSummary, ContextSummary: m.ContextSummary,
+		KeyEvidence: fromJSON[[]entity.MemoryEvidence](m.KeyEvidenceJSON),
+		KeyClaims:   fromJSON[[]entity.MemoryClaim](m.KeyClaimsJSON),
+		Votes:       fromJSON[[]entity.MemoryVote](m.VotesJSON), Resolution: m.Resolution,
+		Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), ProjectionVersion: m.ProjectionVersion,
+	}
+}
+
+// List returns all memory projections (P2 D15 export).
+func (r *memoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	var models []MemoryProjectionModel
+	if err := r.db.WithContext(ctx).Order("projection_version DESC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.CaseMemoryProjection, len(models))
+	for i := range models {
+		out[i] = memoryProjectionFromModel(&models[i])
+	}
+	return out, nil
 }
 
 // Search provides a deterministic local fallback for historical decision

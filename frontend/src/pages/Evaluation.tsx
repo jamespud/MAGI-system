@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, type ApiEvaluation, type ApiJudgeResult } from '@/api/client';
+import { useT } from '@/i18n';
 
 interface MetricProps {
   label: string;
@@ -16,6 +17,7 @@ function Metric({ label, value }: MetricProps) {
 }
 
 export default function Evaluation() {
+  const t = useT();
   const [caseId, setCaseId] = useState('');
   const [result, setResult] = useState<ApiEvaluation | null>(null);
   const [judgeResult, setJudgeResult] = useState<ApiJudgeResult | null>(null);
@@ -66,11 +68,11 @@ export default function Evaluation() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Evaluation</h1>
+      <h1 className="text-xl font-semibold">{t('evaluation.title')}</h1>
       <div className="flex gap-2">
         <input
           className="w-full rounded border border-border-dim bg-background px-3 py-2 text-sm"
-          placeholder="Case ID (e.g. case-…)"
+          placeholder={t('evaluation.placeholder')}
           value={caseId}
           onChange={(e) => setCaseId(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void run(); }}
@@ -80,36 +82,45 @@ export default function Evaluation() {
           disabled={!caseId.trim() || busy}
           onClick={() => void run()}
         >
-          {busy ? 'Evaluating…' : 'Evaluate'}
+          {busy ? t('evaluation.evaluating') : t('evaluation.evaluate')}
         </button>
       </div>
       {error && <p className="text-red-500">{error}</p>}
 
       {result && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Metric label="Tool success rate" value={`${(result.tool_success_rate * 100).toFixed(0)}%`} />
-          <Metric label="Gate failures" value={String(result.gate_failures)} />
-          <Metric label="Total tokens" value={result.total_tokens.toLocaleString()} />
-          <Metric label="Consensus round" value={String(result.consensus_round)} />
-          <Metric label="First-round consensus" value={result.first_round_consensus ? 'Yes' : 'No'} />
+          <Metric label={t('evaluation.toolSuccess')} value={`${(result.tool_success_rate * 100).toFixed(0)}%`} />
+          <Metric label={t('evaluation.gateFailures')} value={String(result.gate_failures)} />
+          <Metric label={t('evaluation.totalTokens')} value={result.total_tokens.toLocaleString()} />
+          <Metric label={t('evaluation.consensusRound')} value={String(result.consensus_round)} />
+          <Metric label={t('evaluation.firstRound')} value={result.first_round_consensus ? t('evaluation.yes') : t('evaluation.no')} />
         </div>
       )}
 
-      <button
-        className="rounded border border-accent/50 px-3 py-1.5 text-sm disabled:opacity-50"
-        disabled={judgeBusy || !caseId.trim()}
-        onClick={() => void judge()}
-      >
-        {judgeBusy ? 'Judging…' : 'Run LLM Judge'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          className="rounded border border-accent/50 px-3 py-1.5 text-sm disabled:opacity-50"
+          disabled={judgeBusy || !caseId.trim()}
+          onClick={() => void judge()}
+        >
+          {judgeBusy ? t('evaluation.judging') : t('evaluation.judge')}
+        </button>
+        <button
+          className="rounded border border-accent/50 px-3 py-1.5 text-sm disabled:opacity-50"
+          disabled={!caseId.trim()}
+          onClick={() => void api.exportEvaluation(caseId.trim()).catch(() => {})}
+        >
+          {t('evaluation.export')}
+        </button>
+      </div>
 
       {judgeResult && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Metric label="Report quality" value={`${judgeResult.report_quality.toFixed(0)}/100`} />
-          <Metric label="Evidence consistency" value={`${judgeResult.evidence_consistency.toFixed(0)}/100`} />
-          <Metric label="Reflection validity" value={`${judgeResult.reflection_validity.toFixed(0)}/100`} />
-          <Metric label="Overall" value={`${judgeResult.overall.toFixed(0)}/100`} />
-          <Metric label="Model" value={judgeResult.model_name || '-'} />
+          <Metric label={t('evaluation.reportQuality')} value={`${judgeResult.report_quality.toFixed(0)}/100`} />
+          <Metric label={t('evaluation.evidenceConsistency')} value={`${judgeResult.evidence_consistency.toFixed(0)}/100`} />
+          <Metric label={t('evaluation.reflectionValidity')} value={`${judgeResult.reflection_validity.toFixed(0)}/100`} />
+          <Metric label={t('evaluation.overall')} value={`${judgeResult.overall.toFixed(0)}/100`} />
+          <Metric label={t('evaluation.model')} value={judgeResult.model_name || '-'} />
         </div>
       )}
       {judgeResult?.rationale && <p className="text-sm text-text-muted">{judgeResult.rationale}</p>}

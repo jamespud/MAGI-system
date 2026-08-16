@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -161,17 +162,81 @@ func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, dto.DecisionReport{Report: report})
 }
 
+// List returns one page of cases owned by the caller (P2 D10). Pagination is
+// applied in the database (scoped to the caller's user id), not after loading
+// every row.
 func (h *DecisionHandler) List(ctx context.Context, c *app.RequestContext) {
-	cases, err := h.svc.List(ctx)
+	page, pageSize := 1, 20
+	if v := c.Query("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			page = n
+		}
+	}
+	if v := c.Query("page_size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 200 {
+			pageSize = n
+		}
+	}
+	cases, total, err := h.svc.ListPaged(ctx, CurrentUserID(ctx), page, pageSize)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
 	out := make([]dto.CaseResponse, 0, len(cases))
 	for _, cs := range cases {
-		if AuthorizeCase(ctx, cs.UserID) {
-			out = append(out, dto.FromCase(cs, nil))
-		}
+		out = append(out, dto.FromCase(cs, nil))
 	}
-	c.JSON(consts.StatusOK, dto.CaseListResponse{Cases: out})
+	c.JSON(consts.StatusOK, dto.CaseListResponse{Cases: out, Total: total, Page: page, PageSize: pageSize})
+}
+
+// Patch updates list-management flags (pinned/archived) on a case (P2 D11).
+func (h *DecisionHandler) Patch(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	case_, err := h.svc.Get(ctx, id)
+	if err != nil || case_ == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, case_.UserID) {
+		Forbidden(c)
+		return
+	}
+	var req dto.UpdateCaseRequest
+	if err := c.BindAndValidate(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.svc.UpdateFlags(ctx, id, req.Pinned, req.Archived); err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	updated, err := h.svc.Get(ctx, id)
+	if err != nil || updated == nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: "case not found after update"})
+		return
+	}
+	res, _ := h.svc.Resolution(ctx, id)
+	c.JSON(consts.StatusOK, dto.FromCaseWithDissent(updated, res, h.dissent(ctx, id, res)))
+}
+
+// Delete removes a case and its persisted artifacts (P2 D16).
+func (h *DecisionHandler) Delete(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	case_, err := h.svc.Get(ctx, id)
+	if err != nil || case_ == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, case_.UserID) {
+		Forbidden(c)
+		return
+	}
+	if h.svc.CancelRun(id) {
+		_ = h.svc.Cancel(ctx, id)
+	}
+	if err := h.svc.Delete(ctx, id); err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]string{"id": id, "status": "deleted"})
 }

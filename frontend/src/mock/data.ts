@@ -21,6 +21,8 @@ export function createMockCase(): Case {
     consensus: null,
     confidence: 0,
     finalDecision: '',
+    pinned: false,
+    archived: false,
     createdAt: '2026-07-18T10:00:00Z',
     updatedAt: '2026-07-18T10:05:00Z',
   };
@@ -28,11 +30,11 @@ export function createMockCase(): Case {
 
 export function createMockCaseList(): CaseSummary[] {
   return [
-    { id: 'case-001', question: 'Should we migrate the Java backend to Rust?', status: 'RESOLVED', round: 2, createdAt: '2026-07-18T10:00:00Z', pinned: true },
-    { id: 'case-002', question: 'Which cloud provider for ML workloads?', status: 'DEBATING', round: 1, createdAt: '2026-07-17T14:00:00Z', pinned: false },
-    { id: 'case-003', question: 'Monorepo vs polyrepo for team of 15?', status: 'RESOLVED', round: 1, createdAt: '2026-07-16T09:00:00Z', pinned: false },
-    { id: 'case-004', question: 'Should we adopt event sourcing?', status: 'INVESTIGATING', round: 1, createdAt: '2026-07-15T11:00:00Z', pinned: false },
-    { id: 'case-005', question: 'GraphQL or REST for public API?', status: 'RESOLVED', round: 2, createdAt: '2026-07-14T08:00:00Z', pinned: false },
+    { id: 'case-001', question: 'Should we migrate the Java backend to Rust?', status: 'RESOLVED', round: 2, createdAt: '2026-07-18T10:00:00Z', pinned: true, archived: false },
+    { id: 'case-002', question: 'Which cloud provider for ML workloads?', status: 'DEBATING', round: 1, createdAt: '2026-07-17T14:00:00Z', pinned: false, archived: false },
+    { id: 'case-003', question: 'Monorepo vs polyrepo for team of 15?', status: 'RESOLVED', round: 1, createdAt: '2026-07-16T09:00:00Z', pinned: false, archived: false },
+    { id: 'case-004', question: 'Should we adopt event sourcing?', status: 'INVESTIGATING', round: 1, createdAt: '2026-07-15T11:00:00Z', pinned: false, archived: false },
+    { id: 'case-005', question: 'GraphQL or REST for public API?', status: 'RESOLVED', round: 2, createdAt: '2026-07-14T08:00:00Z', pinned: false, archived: false },
   ];
 }
 

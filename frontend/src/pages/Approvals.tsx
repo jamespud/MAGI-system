@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, type ApiApproval } from '@/api/client';
+import { useT } from '@/i18n';
 
 export default function Approvals() {
+  const t = useT();
   const [approvals, setApprovals] = useState<ApiApproval[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -40,7 +42,7 @@ export default function Approvals() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Approvals</h1>
+      <h1 className="text-xl font-semibold">{t('approvals.title')}</h1>
       {error && <p className="text-red-500">{error}</p>}
       <div className="space-y-3">
         {approvals.length === 0 && <p className="text-sm text-text-muted">No approval requests.</p>}

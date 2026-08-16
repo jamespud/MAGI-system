@@ -120,6 +120,7 @@ func (r *memAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*ent
 func (r *memAgentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
+func (r *memAgentRunRepo) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
 
 type memToolCallRepo struct{ items []*entity.ToolCall }
 

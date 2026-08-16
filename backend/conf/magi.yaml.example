@@ -225,3 +225,24 @@ rag:
 # judge:
 #   model:
 #     model_name: "deepseek-chat"
+
+# HTTP rate limiting on /api/v1 (P2 D13). Keyed by authenticated user id, falling
+# back to client IP in open mode. In-memory per-instance; disable in multi-replica
+# deployments where DB-backed run/tool limits already provide governance.
+http_rate_limit:
+  enabled: false
+  per_user_per_minute: 0   # 0 = disabled dimension
+  per_ip_per_minute: 0     # 0 = disabled dimension
+
+# /metrics exposure (P2 D17). When auth_required is true and auth.enabled, /metrics
+# requires the admin role; open mode still serves it unauthenticated for local dev.
+metrics:
+  auth_required: false
+
+# Versioned prompt registry (P2 D12). Prompts are seeded from built-in defaults on
+# first boot and can be inspected/edited via the admin API:
+#   GET  /api/v1/admin/prompts            list all versions
+#   GET  /api/v1/admin/prompts/:key       active version
+#   PUT  /api/v1/admin/prompts/:key       {content} -> bumps version, becomes active
+#   POST /api/v1/admin/prompts/:key/restore  reset to built-in default
+# Keys: commander.normalize, commander.report, agent.workflow_tools, agent.workflow_notools

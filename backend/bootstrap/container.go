@@ -48,11 +48,13 @@ import (
 	"github.com/jamespud/magi/backend/domain/evidence"
 	domainmemory "github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/orchestration"
+	promptpkg "github.com/jamespud/magi/backend/domain/prompt"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/validation"
 	appserver "github.com/jamespud/magi/backend/server"
+	"github.com/jamespud/magi/backend/server/handler"
 )
 
 // Module is the Uber Fx module that wires all MAGI dependencies.
@@ -79,6 +81,8 @@ var Module = fx.Options(
 		// Database
 		provideDB,
 		provideRepository,
+		providePromptRepository,
+		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
 		providePluginBindingRepository,
@@ -169,6 +173,16 @@ var Module = fx.Options(
 			Tracing:      tp,
 			ModelName:    cfg.Model.ModelName,
 			MaxSteps:     cfg.Magi.MaxSteps,
+			Export:       handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
+			RateLimit:    appserver.RateLimitConfig{
+				Enabled:          cfg.HTTPRateLimit.Enabled,
+				PerUserPerMinute: cfg.HTTPRateLimit.PerUserPerMinute,
+				PerIPPerMinute:   cfg.HTTPRateLimit.PerIPPerMinute,
+			},
+			MetricsAuth:      cfg.Metrics.AuthRequired,
+			MaxTokensPerUser: cfg.Limits.MaxTokensPerUser,
+			MaxCostUSDPerUser: cfg.Limits.MaxCostUSDPerUser,
+			PromptRepo:        repo.PromptRepo(),
 		})
 	}),
 	fx.Invoke(registerLifecycle),
@@ -192,6 +206,7 @@ func provideAgentLoop(
 	red *redact.Redactor,
 	approvalRepo port.ApprovalRepository,
 	quota *toolquota.Service,
+	prompts port.PromptProvider,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -201,7 +216,7 @@ func provideAgentLoop(
 	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts,
 	})
 }
 
@@ -303,11 +318,13 @@ func provideCommander(
 	modelPort *magi.ModelAdapter,
 	gen validation.SchemaGenerator,
 	val validation.Validator,
+	prompts port.PromptProvider,
 ) (*service.Commander, error) {
 	return service.NewCommander(
 		service.CommanderConfig{
 			Model:   cfg.CommanderModelRef(),
 			Persona: "commander",
+			Prompts: prompts,
 		},
 		modelPort, gen, val,
 	)
@@ -709,4 +726,41 @@ func registerTracingShutdown(lc fx.Lifecycle, tp *trace.TracerProvider) {
 			return tp.Shutdown(ctx)
 		},
 	})
+}
+
+// providePromptRepository builds the DB-backed prompt store and seeds the
+// built-in templates when the table is empty (P2 D12).
+func providePromptRepository(db *gorm.DB) (port.PromptRepository, error) {
+	repo := magi.NewPromptRepository(db)
+	if err := seedPrompts(context.Background(), repo); err != nil {
+		return nil, err
+	}
+	return repo, nil
+}
+
+func seedPrompts(ctx context.Context, repo port.PromptRepository) error {
+	existing, err := repo.List(ctx)
+	if err != nil {
+		return fmt.Errorf("prompts: list: %w", err)
+	}
+	have := map[string]bool{}
+	for _, t := range existing {
+		if t != nil && t.Active {
+			have[t.Key] = true
+		}
+	}
+	defaults := promptpkg.Default()
+	for key, content := range defaults {
+		if have[key] {
+			continue
+		}
+		if _, err := repo.Restore(ctx, key, content); err != nil {
+			return fmt.Errorf("prompts: seed %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func providePromptProvider(repo port.PromptRepository) port.PromptProvider {
+	return magi.NewDBPromptProvider(repo)
 }

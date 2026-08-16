@@ -16,6 +16,12 @@ type UsageRow struct {
 	CostUSD float64
 }
 
+// UsageLimits carries the configured per-user budget ceilings for display.
+type UsageLimits struct {
+	MaxTokens  int64
+	MaxCostUSD float64
+}
+
 // UsageSummary is the admin-facing aggregate across all users.
 type UsageSummary struct {
 	TotalCases   int
@@ -105,6 +111,29 @@ func (s *Service) Usage(ctx context.Context) (*UsageSummary, error) {
 		sum.ByUser = append(sum.ByUser, *byUser[uid])
 	}
 	return sum, nil
+}
+
+// UserUsage aggregates one user's cases, runs, tokens, and cost for the
+// /me/usage endpoint (P2 D9). It is efficient: case count uses a COUNT query
+// and run/token totals come from the same join the budget path uses.
+func (s *Service) UserUsage(ctx context.Context, userID int64) (*UsageRow, error) {
+	row := &UsageRow{UserID: userID}
+	if s.cases != nil {
+		if _, total, err := s.cases.ListPaged(ctx, userID, 1, 1); err == nil {
+			row.Cases = int(total)
+		}
+	}
+	if s.runs != nil {
+		if n, err := s.runs.CountByUser(ctx, userID); err == nil {
+			row.Runs = int(n)
+		}
+		tokens, cost, err := s.runs.SumUsageByUser(ctx, userID)
+		if err == nil {
+			row.Tokens = tokens
+			row.CostUSD = cost
+		}
+	}
+	return row, nil
 }
 
 // Budget reports a user's cumulative usage and whether it exceeds the given

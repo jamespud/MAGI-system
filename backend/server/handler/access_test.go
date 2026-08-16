@@ -33,12 +33,17 @@ func (r *ownedCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error
 	}
 	return nil, nil
 }
+func (r *ownedCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
 func (r *ownedCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
 	return nil
 }
 func (r *ownedCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return nil
 }
+func (r *ownedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (r *ownedCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 func TestDecisionHandler_EnforcesCaseOwnership(t *testing.T) {
 	svc := decision.NewService(nil, decision.ServiceConfig{}, decision.WithCaseRepo(&ownedCaseRepo{
@@ -75,6 +80,7 @@ func (stubAdminAgentRuns) ListByCase(ctx context.Context, caseID string) ([]*ent
 func (stubAdminAgentRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
+func (stubAdminAgentRuns) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
 
 func TestRequireRole_AdminGate(t *testing.T) {
 	adminSvc := admin.NewService(&ownedCaseRepo{}, stubAdminAgentRuns{})

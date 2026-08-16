@@ -192,3 +192,23 @@ P1 级缺陷（D4–D8）已全部实现并随测试提交，提交均通过 `go
 | D8 无用户体系 | DB 用户 + API Key 生命周期：`/admin/users`、`/admin/keys/:id/revoke|rotate`、`/me`；密钥仅存 SHA-256，明文仅展示一次；auth 中间件静态密钥优先、DB 密钥按哈希认证；前端 Users 管理页 + Settings 显示当前身份 | `6fc4712` |
 
 > 以上修复与 `docs/ai-harness-gap-analysis.md` 第三、四、五章逐条对应；P0 缺陷（D1–D3）与 Phase 2/3 缺口不在本次"完成 P1"目标范围内。
+
+---
+
+## 附：P2 缺陷修复记录（2026-08-16，分支 `codex/p2-harness`）
+
+P2 级缺陷（D9–D17）已全部实现，通过 `go build` / `go vet` / `go test ./...`（38 包）与前端 `tsc --noEmit` / `vitest`（28 文件 / 146 用例）：
+
+| 缺陷 | 修复 | 关键文件 |
+| --- | --- | --- |
+| D9 Settings 静态页/无用量查看 | 新增 `GET /me/usage`（当前用户累计 cases/runs/tokens/cost + 预算上限与超限标志）；Settings 页展示我的用量，admin 角色展示 `GET /admin/usage` 全用户表格；新增 `AgentRunRepository.CountByUser` | `application/admin/service.go`、`server/handler/admin.go`、`frontend/src/pages/Settings.tsx` |
+| D10 case 列表无服务端分页 | `GET /cases?page=&page_size=` 在 DB 内按 `user_id` 过滤 + LIMIT/OFFSET + 总数（`CaseRepository.ListPaged`），返回 `{cases,total,page,page_size}`；前端 caseStore 分页拉取 + LeftNav “Load more” | `adapter/repository.go`、`server/handler/decision.go`、`frontend/src/stores/caseStore.ts`、`LeftNav.tsx` |
+| D11 Pinned/Archived 死 UI | `DecisionCase` 增加 `pinned/archived`，`PATCH /cases/:id` 更新标志；前端 CaseSummary/Case 增加字段，LeftNav Pinned/Running/Completed/Archived 分区真实生效，CaseHeader 增加置顶/归档/取消归档按钮 | `domain/entity/case.go`、`adapter/model.go`、`server/handler/decision.go`、`frontend/src/components/workspace/CaseHeader.tsx` |
+| D12 提示词硬编码 | 版本化提示词注册表：`prompt_template` 表 + `PromptRepository/Provider`，启动从内置默认种子，`GET/PUT /admin/prompts/:key`、`POST /admin/prompts/:key/restore`；Commander（normalize/report）与 agent workflow 模板运行时经 provider 加载、内置兜底 | `domain/prompt/`、`adapter/prompt_repository.go`、`domain/service/commander.go`、`domain/runtime/prompt.go` |
+| D13 无 HTTP 限流 | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After，含单测 | `server/ratelimit.go`、`bootstrap/config.go`、`server/ratelimit_test.go` |
+| D14 无 i18n | 内置轻量 i18n（无新依赖）：`frontend/src/i18n/`，en/zh 字典 + `t()/useT()/useLang()`，TopNav 语言切换器（localStorage 持久化），导航/侧栏/工作台/记忆/工具/审批/历史/模板/基准/评测/数据集/设置等主要页面完成字符串抽取 | `frontend/src/i18n/`、`frontend/src/components/layout/TopNav.tsx`、各 pages |
+| D15 数据导出弱 | `GET /cases/:id/export`（case+resolution+report+agents+evidence+claims+votes+tool_calls+events+memory 全量 JSON）、`GET /memory/export`（本人全部记忆）、`GET /evaluation/:id/export`（评测+judge）；前端 CaseHeader/记忆/评测页导出按钮 | `server/handler/export.go`、`server/dto/dto.go`、`frontend/src/api/client.ts` |
+| D16 CRUD 不完整 | `DELETE /cases/:id`（级联清理全部 case_id 产物 + tool_call/reflection 经 agent_run 子查询）、`DELETE /datasets/:id`（级联 items/runs/results，先中止进行中 run） | `adapter/repository.go`、`adapter/dataset_repository.go`、`application/decision/service.go`、`application/dataset/service.go` |
+| D17 可观测性默认弱 | `/metrics` 增加 `metrics.auth_required`（开启后要求 admin 角色，open 模式放行），限流/评测/导出等均接入日志；文档补充 alert 与授权说明 | `server/router.go`、`bootstrap/config.go`、`backend/conf/magi.yaml.example` |
+
+> 以上修复与 `docs/ai-harness-gap-analysis.md` 第三章 P2 缺陷（D9–D17）逐条对应；P0（D1–D3）、P1（D4–D8）与 Phase 3 缺口不在本次“完成 P2”范围内。

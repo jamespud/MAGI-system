@@ -21,6 +21,8 @@ type Repository interface {
 	CheckpointRepo() CheckpointRepository
 	MemoryRepo() MemoryRepository
 	ToolCallRepo() ToolCallRepository
+	// PromptRepo exposes the versioned prompt registry (P2 D12).
+	PromptRepo() PromptRepository
 }
 
 // DecisionJobRepository persists and leases asynchronous case execution.
@@ -41,8 +43,17 @@ type CaseRepository interface {
 	Create(ctx context.Context, c *entity.DecisionCase) error
 	Get(ctx context.Context, id string) (*entity.DecisionCase, error)
 	List(ctx context.Context) ([]*entity.DecisionCase, error)
+	// ListPaged returns one page of cases ordered by created_at DESC, scoped to
+	// userID when nonzero, plus the total number of matching cases. It replaces
+	// the all-rows-then-filter pattern (P2 D10).
+	ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error)
 	UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error
 	UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error
+	// UpdateFlags updates list-management flags (pinned/archived). A nil
+	// pointer leaves that flag unchanged.
+	UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error
+	// Delete removes a case and its artifacts (P2 D16).
+	Delete(ctx context.Context, id string) error
 }
 
 type AgentRunRepository interface {
@@ -52,6 +63,8 @@ type AgentRunRepository interface {
 	// SumUsageByUser returns the cumulative token usage and estimated cost for
 	// all of a user's agent runs, used for per-user budget enforcement.
 	SumUsageByUser(ctx context.Context, userID int64) (tokens int64, costUSD float64, err error)
+	// CountByUser returns the number of agent runs owned by a user (P2 D9).
+	CountByUser(ctx context.Context, userID int64) (int64, error)
 }
 
 type EvidenceRepository interface {
@@ -104,6 +117,9 @@ type MemoryRepository interface {
 	Get(ctx context.Context, caseID string) (*entity.CaseMemoryProjection, error)
 	Save(ctx context.Context, proj *entity.CaseMemoryProjection) error
 	Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error)
+	// List returns all memory projections ordered by projection_version DESC
+	// (P2 D15 export).
+	List(ctx context.Context) ([]*entity.CaseMemoryProjection, error)
 }
 
 type ToolCallRepository interface {

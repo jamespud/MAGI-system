@@ -15,6 +15,8 @@ type CaseModel struct {
 	MaxDebateRounds int
 	Deadline        *time.Time
 	TaskJSON        string `gorm:"type:text"`
+	Pinned          bool
+	Archived        bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -366,6 +368,7 @@ func AllModels() []any {
 		&KnowledgeDocModel{},
 		&UserModel{},
 		&ApiKeyModel{},
+		&PromptTemplateModel{},
 	}
 }
 

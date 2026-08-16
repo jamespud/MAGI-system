@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, type ApiRecurring } from '@/api/client';
+import { useT } from '@/i18n';
 
 export default function Templates() {
+  const t = useT();
   const [templates, setTemplates] = useState<ApiRecurring[]>([]);
   const [name, setName] = useState('');
   const [question, setQuestion] = useState('');
@@ -80,7 +82,7 @@ export default function Templates() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Templates</h1>
+      <h1 className="text-xl font-semibold">{t('templates.title')}</h1>
       {error && <p className="text-red-500">{error}</p>}
 
       <div className="rounded border border-border-dim bg-raised p-4 space-y-2">

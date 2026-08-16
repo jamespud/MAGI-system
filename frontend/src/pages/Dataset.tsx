@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type ApiBenchmarkDetail, type ApiDataset, type ApiDatasetItem } from '@/api/client';
+import { useT } from '@/i18n';
 
 export default function Dataset() {
+  const t = useT();
   const [datasets, setDatasets] = useState<ApiDataset[]>([]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -172,7 +174,7 @@ export default function Dataset() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Dataset Evaluation</h1>
+      <h1 className="text-xl font-semibold">{t('dataset.title')}</h1>
       {error && <p className="text-red-500">{error}</p>}
 
       <div className="rounded border border-border-dim bg-raised p-4 space-y-2">

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ApiCaseResponse } from '@/api/client';
+import { useT } from '@/i18n';
 
 export default function History() {
+  const t = useT();
   const [cases, setCases] = useState<ApiCaseResponse[]>([]);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
@@ -38,7 +40,7 @@ export default function History() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">History</h1>
+        <h1 className="text-xl font-semibold">{t('history.title')}</h1>
         <input
           className="w-64 rounded border border-border-dim bg-background px-3 py-2 text-sm"
           placeholder="Filter by question/status/decision"

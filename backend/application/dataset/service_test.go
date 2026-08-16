@@ -98,6 +98,8 @@ func (s *stubDatasetRepo) DeleteItem(ctx context.Context, id string) error {
 	return errors.New("not found")
 }
 
+func (s *stubDatasetRepo) DeleteDataset(ctx context.Context, id string) error { return nil }
+
 func (s *stubDatasetRepo) CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -229,6 +231,11 @@ func (s *stubCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.Ca
 func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return nil
 }
+func (s *stubCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 type stubOrch struct {
 	mu   sync.Mutex

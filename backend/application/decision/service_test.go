@@ -44,6 +44,13 @@ func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.D
 	return nil
 }
 
+func (s *stubCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubCaseRepo) Delete(ctx context.Context, id string) error { return nil }
+
+
 func TestService_Create(t *testing.T) {
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 2})
 	c, err := svc.Create(context.Background(), 0, "test question", "", nil)

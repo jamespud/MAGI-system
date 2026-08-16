@@ -105,7 +105,7 @@ describe('subscribeCaseStream', () => {
     const unsub = subscribeCaseStream('c1');
     const es = FakeEventSource.last!;
     useCaseStore.getState().loadCaseList([
-      { id: 'c1', question: 'Q?', status: 'DRAFT', round: 0, createdAt: 't', pinned: false },
+      { id: 'c1', question: 'Q?', status: 'DRAFT', round: 0, createdAt: 't', pinned: false, archived: false },
     ]);
     es.onmessage!({
       data: JSON.stringify({ id: 'e1', type: 'CASE_STATUS_CHANGED', message: 'status', payload: { status: 'DEBATING', round: 2 }, timestamp: 't' }),

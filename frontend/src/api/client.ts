@@ -19,12 +19,17 @@ interface ApiCaseResponse {
   final_decision: string;
   confidence: number;
   round: number;
+  pinned?: boolean;
+  archived?: boolean;
   created_at: string;
   updated_at: string;
 }
 
 interface ApiCaseListResponse {
   cases: ApiCaseResponse[];
+  total?: number;
+  page?: number;
+  page_size?: number;
 }
 
 interface ApiRunResponse {
@@ -276,6 +281,65 @@ export const api = {
 
   rotateKey: (keyId: string) =>
     request<ApiIssuedKey>(`/admin/keys/${keyId}/rotate`, { method: 'POST' }),
+
+  // --- P2 additions ---
+  getCasesPaged: (page: number, pageSize: number) =>
+    request<ApiCaseListResponse>(`/cases?page=${page}&page_size=${pageSize}`),
+
+  patchCase: (id: string, patch: { pinned?: boolean; archived?: boolean }) =>
+    request<ApiCaseResponse>(`/cases/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  deleteCase: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/cases/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
+
+  deleteDataset: async (id: string) => {
+    const res = await fetch(`${BASE_URL}/datasets/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
+
+  getMeUsage: () => request<ApiMeUsage>('/me/usage'),
+
+  getAdminUsage: () => request<ApiAdminUsage>('/admin/usage'),
+
+  listPrompts: () => request<ApiPromptList>('/admin/prompts'),
+
+  updatePrompt: (key: string, content: string) =>
+    request<ApiPrompt>(`/admin/prompts/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+
+  restorePrompt: (key: string) =>
+    request<ApiPrompt>(`/admin/prompts/${encodeURIComponent(key)}/restore`, { method: 'POST' }),
+
+  exportCase: async (id: string) => {
+    const r = await fetch(`${BASE_URL}/cases/${id}/export`, { headers: { 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({ error: 'export failed' }))).error || 'export failed');
+    return downloadJson(await r.json(), `case-${id}.json`);
+  },
+
+  exportMemory: async () => {
+    const r = await fetch(`${BASE_URL}/memory/export`, { headers: { 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({ error: 'export failed' }))).error || 'export failed');
+    return downloadJson(await r.json(), 'memory-export.json');
+  },
+
+  exportEvaluation: async (id: string) => {
+    const r = await fetch(`${BASE_URL}/evaluation/${id}/export`, { headers: { 'Content-Type': 'application/json' } });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({ error: 'export failed' }))).error || 'export failed');
+    return downloadJson(await r.json(), `evaluation-${id}.json`);
+  },
 };
 
 interface ApiRecurring {
@@ -470,3 +534,54 @@ export type {
   ApiStatus,
   ApiDatasetItem,
 };
+
+
+function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export interface ApiMeUsage {
+  user_id: number;
+  cases: number;
+  runs: number;
+  tokens: number;
+  cost_usd: number;
+  max_tokens: number;
+  max_cost_usd: number;
+  tokens_exceeded: boolean;
+  cost_exceeded: boolean;
+}
+
+export interface ApiAdminUsageRow {
+  user_id: number;
+  cases: number;
+  runs: number;
+  tokens: number;
+  cost_usd: number;
+}
+
+export interface ApiAdminUsage {
+  total_cases: number;
+  total_runs: number;
+  total_tokens: number;
+  total_cost_usd: number;
+  by_user: ApiAdminUsageRow[];
+}
+
+export interface ApiPrompt {
+  key: string;
+  version: number;
+  active: boolean;
+  content: string;
+  updated_at: string;
+}
+
+export interface ApiPromptList {
+  prompts: ApiPrompt[];
+}

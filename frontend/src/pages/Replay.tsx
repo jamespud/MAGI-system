@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, type ApiEvent } from '@/api/client';
+import { useT } from '@/i18n';
 
 function groupByRun(events: ApiEvent[]): Record<string, ApiEvent[]> {
   const out: Record<string, ApiEvent[]> = {};
@@ -11,6 +12,7 @@ function groupByRun(events: ApiEvent[]): Record<string, ApiEvent[]> {
 }
 
 export default function Replay() {
+  const t = useT();
   const [caseId, setCaseId] = useState('');
   const [events, setEvents] = useState<ApiEvent[] | null>(null);
   const [error, setError] = useState('');
@@ -33,7 +35,7 @@ export default function Replay() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-xl font-semibold">Replay</h1>
+      <h1 className="text-xl font-semibold">{t('nav.replay')}</h1>
       <div className="flex gap-2">
         <input
           className="w-full rounded border border-border-dim bg-background px-3 py-2 text-sm"

@@ -9,12 +9,16 @@ import (
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/prompt"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 type CommanderConfig struct {
 	Model   entity.ModelRef
 	Persona string
+	// Prompts is the optional versioned prompt source (P2 D12). When nil the
+	// commander falls back to the built-in default templates.
+	Prompts port.PromptProvider
 }
 
 // Commander makes validated structured-output LLM calls (no loop, no tools).
@@ -25,6 +29,18 @@ type Commander struct {
 	val       validation.Validator
 	taskVal   *validation.TypedValidator[entity.DecisionTask]
 	reportVal *validation.TypedValidator[entity.FinalReportData]
+}
+
+// render resolves a versioned prompt template (registry first, built-in
+// fallback) and substitutes the given placeholders.
+func (c *Commander) render(ctx context.Context, key string, vars map[string]string) string {
+	tmpl := prompt.Default()[key]
+	if c.cfg.Prompts != nil {
+		if s, ok := c.cfg.Prompts.Load(ctx, key); ok && s != "" {
+			tmpl = s
+		}
+	}
+	return prompt.Render(tmpl, vars)
 }
 
 func NewCommander(cfg CommanderConfig, model port.ModelPort, gen validation.SchemaGenerator, val validation.Validator) (*Commander, error) {
@@ -47,21 +63,12 @@ func (c *Commander) Normalize(ctx context.Context, case_ *entity.DecisionCase) (
 	if err != nil {
 		return nil, fmt.Errorf("commander: build model: %w", err)
 	}
-	prompt := fmt.Sprintf(`%s
-
-Normalize this decision question into a DecisionTask JSON. You MUST include ALL fields:
-- canonical_question: the standardized, unambiguous form of the question
-- decision_type: the type of decision (adopt/migrate/launch/strategic/generic)
-- background: relevant context for understanding the decision
-- dimensions: key decision dimensions, each with code + description (at least 2)
-- information_needs: information gaps to fill, each with topic + rationale
-- success_criteria: how to evaluate the decision, each with code + description
-- unknowns: what is currently unknown or uncertain
-
-Question: %s
-Context: %s
-Constraints: %v`,
-		c.cfg.Persona, case_.Question, case_.Context, case_.Constraints)
+	prompt := c.render(ctx, prompt.KeyCommanderNormalize, map[string]string{
+		"PERSONA":     c.cfg.Persona,
+		"QUESTION":    case_.Question,
+		"CONTEXT":     case_.Context,
+		"CONSTRAINTS": fmt.Sprintf("%v", case_.Constraints),
+	})
 	for attempt := 0; attempt < 3; attempt++ {
 		resp, err := cm.Generate(ctx, []*schema.Message{
 			schema.SystemMessage(prompt),
@@ -90,22 +97,14 @@ func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCa
 	if err != nil {
 		return "", fmt.Errorf("commander: build model: %w", err)
 	}
-	prompt := fmt.Sprintf(`%s
-
-Generate a FinalReportData JSON for this decision. You MUST include ALL fields:
-- decision: the final decision (approve/reject/conditional_approve)
-- summary: a one-paragraph summary of the decision
-- key_reasons: main reasoning points (array of strings)
-- risks: risks or dissenting points (array of strings)
-- next_steps: recommended next steps (array of strings)
-- key_evidence_ids: array of evidence IDs this decision relies on
-- key_claim_ids: array of claim IDs this decision relies on
-
-Question: %s. Consensus: %s. Votes: %d.
-Available evidence IDs: %v
-Available claim IDs: %v
-When evidence or claim IDs are available you MUST cite at least one of them in key_evidence_ids/key_claim_ids.`,
-		c.cfg.Persona, case_.Question, resolution.Consensus.Outcome, len(votes), evidenceIDs, claimIDs)
+	prompt := c.render(ctx, prompt.KeyCommanderReport, map[string]string{
+		"PERSONA":      c.cfg.Persona,
+		"QUESTION":     case_.Question,
+		"CONSENSUS":    string(resolution.Consensus.Outcome),
+		"VOTES":        fmt.Sprintf("%d", len(votes)),
+		"EVIDENCE_IDS": fmt.Sprintf("%v", evidenceIDs),
+		"CLAIM_IDS":    fmt.Sprintf("%v", claimIDs),
+	})
 	for attempt := 0; attempt < 3; attempt++ {
 		msgs := []*schema.Message{schema.SystemMessage(prompt)}
 		if attempt > 0 {

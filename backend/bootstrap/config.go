@@ -79,6 +79,14 @@ type Config struct {
 		ServiceName  string `yaml:"service_name"`
 		OTLPEndpoint string `yaml:"otlp_endpoint"`
 	} `yaml:"tracing"`
+	HTTPRateLimit struct {
+		Enabled          bool `yaml:"enabled"`
+		PerUserPerMinute int  `yaml:"per_user_per_minute"`
+		PerIPPerMinute   int  `yaml:"per_ip_per_minute"`
+	} `yaml:"http_rate_limit"`
+	Metrics struct {
+		AuthRequired bool `yaml:"auth_required"` // /metrics requires an admin role when true
+	} `yaml:"metrics"`
 	Embedding     EmbeddingConfig `yaml:"embedding"`
 	Milvus        MilvusConfig    `yaml:"milvus"`
 	Elasticsearch ESConfig        `yaml:"elasticsearch"`
@@ -574,6 +582,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.MaxCostUSDPerUser < 0 {
 		return fmt.Errorf("limits: max_cost_usd_per_user cannot be negative")
+	}
+	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
+		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")
 	}
 	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
 		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")

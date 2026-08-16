@@ -189,12 +189,38 @@ func (s *Service) CancelRun(caseID string) bool {
 	return s.runs.Cancel(caseID)
 }
 
-// List returns all decision cases (requires CaseRepository).
+// List returns all decision cases (requires CaseRepository). Used by admin
+// aggregates; the user-facing list goes through ListPaged.
 func (s *Service) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 	if s.caseRepo != nil {
 		return s.caseRepo.List(ctx)
 	}
 	return nil, nil
+}
+
+// ListPaged returns one page of cases owned by userID (0 = open mode lists
+// all), ordered by created_at DESC, plus the total count (P2 D10).
+func (s *Service) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	if s.caseRepo == nil {
+		return nil, 0, nil
+	}
+	return s.caseRepo.ListPaged(ctx, userID, page, pageSize)
+}
+
+// UpdateFlags updates pinned/archived list-management flags on a case (P2 D11).
+func (s *Service) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	if s.caseRepo == nil {
+		return fmt.Errorf("case repository not configured")
+	}
+	return s.caseRepo.UpdateFlags(ctx, id, pinned, archived)
+}
+
+// Delete removes a case and its artifacts (P2 D16).
+func (s *Service) Delete(ctx context.Context, id string) error {
+	if s.caseRepo == nil {
+		return fmt.Errorf("case repository not configured")
+	}
+	return s.caseRepo.Delete(ctx, id)
 }
 
 // Get retrieves a DecisionCase by ID.

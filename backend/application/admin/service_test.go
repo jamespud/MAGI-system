@@ -29,6 +29,11 @@ func (s *stubAdminCases) UpdateStatus(ctx context.Context, id string, st entity.
 func (s *stubAdminCases) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return nil
 }
+func (s *stubAdminCases) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *stubAdminCases) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubAdminCases) Delete(ctx context.Context, id string) error { return nil }
 
 type stubAdminRuns struct {
 	mu   sync.Mutex
@@ -47,6 +52,8 @@ func (s *stubAdminRuns) ListByCase(ctx context.Context, caseID string) ([]*entit
 func (s *stubAdminRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
+func (s *stubAdminRuns) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
+
 
 func TestAdminUsage_AggregatesPerUser(t *testing.T) {
 	cases := &stubAdminCases{cases: []*entity.DecisionCase{

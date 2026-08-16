@@ -7,7 +7,7 @@ import type { CaseSummary } from '@/types/case';
 
 const mkCases = (n: number): CaseSummary[] =>
   Array.from({ length: n }, (_, i) => ({
-    id: `c-${i}`, question: `Question ${i}`, status: 'RESOLVED', round: 1, createdAt: 't', pinned: false,
+    id: `c-${i}`, question: `Question ${i}`, status: 'RESOLVED', round: 1, createdAt: 't', pinned: false, archived: false,
   }));
 
 const renderSection = (items: CaseSummary[]) =>

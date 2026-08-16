@@ -121,6 +121,39 @@ func (r *datasetRepo) DeleteItem(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&DatasetItemModel{}).Error
 }
 
+// DeleteDataset removes the dataset plus its items, runs, and per-run results
+// in one transaction (P2 D16).
+func (r *datasetRepo) DeleteDataset(ctx context.Context, id string) error {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	if err := tx.Where("dataset_id = ?", id).Delete(&DatasetItemModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	var runIDs []string
+	if err := tx.Model(&BenchmarkRunModel{}).Where("dataset_id = ?", id).Pluck("id", &runIDs).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if len(runIDs) > 0 {
+		if err := tx.Where("run_id IN ?", runIDs).Delete(&BenchmarkItemResultModel{}).Error; err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Where("dataset_id = ?", id).Delete(&BenchmarkRunModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Where("id = ?", id).Delete(&DatasetModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit().Error
+}
+
 func (r *datasetRepo) CreateRun(ctx context.Context, run *entity.BenchmarkRun) error {
 	if run.ID == "" {
 		run.ID = "bench-" + uuid.NewString()

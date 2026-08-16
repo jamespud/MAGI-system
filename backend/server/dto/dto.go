@@ -28,8 +28,24 @@ type CaseResponse struct {
 	FinalDecision string          `json:"final_decision,omitempty"`
 	Confidence    float64         `json:"confidence"`
 	Round         int             `json:"round"`
+	Pinned        bool            `json:"pinned"`
+	Archived      bool            `json:"archived"`
 	CreatedAt     string          `json:"created_at"`
 	UpdatedAt     string          `json:"updated_at"`
+}
+
+// UpdateCaseRequest carries optional flag updates for PATCH /cases/:id.
+type UpdateCaseRequest struct {
+	Pinned   *bool `json:"pinned"`
+	Archived *bool `json:"archived"`
+}
+
+// CaseListResponse now carries pagination metadata (P2 D10).
+type CaseListResponse struct {
+	Cases    []CaseResponse `json:"cases"`
+	Total    int64          `json:"total"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"page_size"`
 }
 
 type ConstraintDTO struct {
@@ -43,10 +59,6 @@ type ConsensusDTO struct {
 	Abstain        int    `json:"abstain"`
 	Majority       string `json:"majority"`
 	NeedReflection bool   `json:"need_reflection"`
-}
-
-type CaseListResponse struct {
-	Cases []CaseResponse `json:"cases"`
 }
 
 type AgentSnapshotDTO struct {
@@ -186,6 +198,8 @@ func fromCase(c *entity.DecisionCase, resolution *entity.Resolution, dissent []e
 		Status:       string(c.Status),
 		ParentCaseID: c.ParentCaseID,
 		Round:        0,
+		Pinned:       c.Pinned,
+		Archived:     c.Archived,
 		CreatedAt:    c.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    c.UpdatedAt.Format(time.RFC3339),
 	}
@@ -567,6 +581,19 @@ type AdminUsageRow struct {
 	CostUSD float64 `json:"cost_usd"`
 }
 
+// MeUsageResponse is the authenticated user's own usage and budget (P2 D9).
+type MeUsageResponse struct {
+	UserID         int64   `json:"user_id"`
+	Cases          int     `json:"cases"`
+	Runs           int     `json:"runs"`
+	Tokens         int64   `json:"tokens"`
+	CostUSD        float64 `json:"cost_usd"`
+	MaxTokens      int64   `json:"max_tokens"`   // 0 = unlimited
+	MaxCostUSD     float64 `json:"max_cost_usd"` // 0 = unlimited
+	TokensExceeded bool    `json:"tokens_exceeded"`
+	CostExceeded   bool    `json:"cost_exceeded"`
+}
+
 type AdminUsageResponse struct {
 	TotalCases   int             `json:"total_cases"`
 	TotalRuns    int             `json:"total_runs"`
@@ -742,4 +769,94 @@ func FromApiKey(k *entity.ApiKey) ApiKeyDTO {
 		out.CreatedAt = k.CreatedAt.Format(time.RFC3339)
 	}
 	return out
+}
+
+// --- P2 D15: Export DTOs ---
+
+// CaseExport is the full audit bundle for one case.
+type CaseExport struct {
+	Case       CaseResponse               `json:"case"`
+	Resolution *ResolutionExport          `json:"resolution,omitempty"`
+	Report     string                     `json:"report,omitempty"`
+	Agents     []*entity.AgentRun         `json:"agents"`
+	Evidence   []*entity.EvidenceRecord   `json:"evidence"`
+	Claims     []*entity.Claim            `json:"claims"`
+	Votes      []*entity.Vote             `json:"votes"`
+	ToolCalls  []*entity.ToolCall         `json:"tool_calls"`
+	Events     []*entity.MagiEvent        `json:"events"`
+	Memory     *entity.CaseMemoryProjection `json:"memory,omitempty"`
+	ExportedAt string                     `json:"exported_at"`
+}
+
+// ResolutionExport is a JSON-friendly view of the resolution.
+type ResolutionExport struct {
+	ID             string   `json:"id"`
+	CaseID         string   `json:"case_id"`
+	Outcome        string   `json:"outcome"`
+	Round          int      `json:"round"`
+	Detail         string   `json:"detail"`
+	FinalDecision  string   `json:"final_decision"`
+	FinalReport    string   `json:"final_report"`
+	KeyEvidenceIDs []string `json:"key_evidence_ids"`
+	KeyClaimIDs    []string `json:"key_claim_ids"`
+	VoteIDs        []string `json:"vote_ids"`
+	Conditions     []string `json:"conditions,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+}
+
+// FromResolutionExport maps a resolution to its export DTO (nil-safe).
+func FromResolutionExport(r *entity.Resolution) *ResolutionExport {
+	if r == nil {
+		return nil
+	}
+	cond := make([]string, 0, len(r.Consensus.Conditions))
+	for _, cd := range r.Consensus.Conditions {
+		cond = append(cond, cd.Statement)
+	}
+	return &ResolutionExport{
+		ID: r.ID, CaseID: r.CaseID, Outcome: string(r.Consensus.Outcome),
+		Round: r.Consensus.Round, Detail: r.Consensus.Detail,
+		FinalDecision: string(r.FinalDecision), FinalReport: r.FinalReport,
+		KeyEvidenceIDs: r.KeyEvidenceIDs, KeyClaimIDs: r.KeyClaimIDs, VoteIDs: r.VoteIDs,
+		Conditions: cond, CreatedAt: r.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+// MemoryExport is the full memory projection list for a user.
+type MemoryExport struct {
+	Results    []*entity.CaseMemoryProjection `json:"results"`
+	ExportedAt string                         `json:"exported_at"`
+}
+
+// EvaluationExport bundles quantitative evaluation and the latest judge verdict.
+type EvaluationExport struct {
+	CaseID     string             `json:"case_id"`
+	Evaluation *entity.Evaluation `json:"evaluation,omitempty"`
+	Judge      *entity.JudgeResult `json:"judge,omitempty"`
+	ExportedAt string             `json:"exported_at"`
+}
+
+// --- P2 D12: Prompt registry DTOs ---
+
+type PromptDTO struct {
+	Key       string `json:"key"`
+	Version   int    `json:"version"`
+	Active    bool   `json:"active"`
+	Content   string `json:"content"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type PromptListResponse struct {
+	Prompts []PromptDTO `json:"prompts"`
+}
+
+type UpdatePromptRequest struct {
+	Content string `json:"content"`
+}
+
+func FromPrompt(t *entity.PromptTemplate) PromptDTO {
+	return PromptDTO{
+		Key: t.Key, Version: t.Version, Active: t.Active, Content: t.Content,
+		UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
+	}
 }

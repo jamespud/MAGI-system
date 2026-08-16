@@ -116,6 +116,32 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 	return out, nil
 }
 
+// ListOwn returns every memory projection the user may access, newest
+// projection version first (P2 D15 export).
+func (s *Service) ListOwn(ctx context.Context, userID int64, limit int) ([]*entity.CaseMemoryProjection, error) {
+	if s.memRepo == nil {
+		return nil, nil
+	}
+	all, err := s.memRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*entity.CaseMemoryProjection, 0, len(all))
+	for _, proj := range all {
+		if proj == nil {
+			continue
+		}
+		if !s.allowed(ctx, userID, proj.CaseID) {
+			continue
+		}
+		out = append(out, proj)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // allowed reports whether the user may see a projection. Open mode (userID 0)
 // and unowned cases pass; when a case repository is configured and the case
 // cannot be resolved the projection is treated as inaccessible.

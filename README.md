@@ -264,13 +264,16 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/assistant` | Run a decision from a message |
-| POST/GET | `/cases`, `/cases/:id` (+`/run`, `/cancel`, `/report`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
-| GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` | Ground-truth evaluation |
+| POST/GET/PATCH/DELETE | `/cases`, `/cases/:id` (`?page=&page_size=`; `PATCH` pin/archive; `DELETE` cascade; +`/run`, `/cancel`, `/fork`, `/report`, `/export`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
+| GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` (+`DELETE /datasets/:id`) | Ground-truth evaluation |
+| GET | `/memory`, `/memory/:id`, `/memory/export` | Case-memory search (semantic + LIKE) and full export |
+| GET | `/evaluation/:id/export` | Export evaluation + judge verdict |
 | GET/POST | `/approvals`, `/approvals/:id`, `/approvals/:id/approve`, `/approvals/:id/reject` | Human-in-the-loop tool approvals |
 | GET/POST/PATCH/DELETE | `/plugins`, `/plugins/:id` | User plugin bindings |
 | GET/POST/PATCH/DELETE | `/recurring`, `/recurring/:id` (+`/:id/run`) | Recurring templates |
 | POST | `/evaluation`, `/evaluation/:id`, `/benchmark` | Evaluation |
-| GET | `/admin/usage` | Admin usage aggregate |
+| GET | `/admin/usage`, `/me/usage` | Admin usage aggregate / own usage + budget |
+| GET/PUT/POST | `/admin/prompts`, `/admin/prompts/:key` (+`/restore`) | Versioned prompt registry (P2) |
 | POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
 | GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
 | POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |

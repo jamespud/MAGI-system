@@ -10,7 +10,8 @@ function mapToSummary(c: ApiCaseResponse): CaseSummary {
     status: c.status as CaseStatus,
     round: c.round,
     createdAt: c.created_at,
-    pinned: false,
+    pinned: c.pinned ?? false,
+    archived: c.archived ?? false,
   };
 }
 
@@ -40,6 +41,8 @@ function mapToCase(c: ApiCaseResponse): Case {
       conditions: d.conditions ?? [],
     })),
     finalDecision: c.final_decision ?? '',
+    pinned: c.pinned ?? false,
+    archived: c.archived ?? false,
     createdAt: c.created_at,
     updatedAt: c.updated_at,
   };
@@ -60,6 +63,9 @@ function patchSummary(list: CaseSummary[], id: string, patch: Partial<CaseSummar
 interface CaseState {
   case: Case | null;
   cases: CaseSummary[];
+  total: number;
+  page: number;
+  hasMore: boolean;
   loading: boolean;
   error: string | null;
   loadCase: (c: Case) => void;
@@ -68,7 +74,10 @@ interface CaseState {
   updateConsensus: (consensus: Case['consensus'], confidence: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  fetchCases: () => Promise<void>;
+  fetchCases: (opts?: { reset?: boolean }) => Promise<void>;
+  loadMoreCases: () => Promise<void>;
+  updateCaseFlags: (caseId: string, patch: { pinned?: boolean; archived?: boolean }) => Promise<void>;
+  deleteCase: (caseId: string) => Promise<void>;
   fetchCase: (id: string, opts?: { silent?: boolean }) => Promise<void>;
   createCase: (question: string, background?: string) => Promise<ApiCaseResponse>;
   forkCase: (id: string) => Promise<ApiCaseResponse>;
@@ -76,9 +85,14 @@ interface CaseState {
   cancelCase: (id: string) => Promise<void>;
 }
 
-export const useCaseStore = create<CaseState>((set) => ({
+const PAGE_SIZE = 20;
+
+export const useCaseStore = create<CaseState>((set, get) => ({
   case: null,
   cases: [],
+  total: 0,
+  page: 0,
+  hasMore: false,
   loading: false,
   error: null,
 
@@ -99,14 +113,70 @@ export const useCaseStore = create<CaseState>((set) => ({
 
   setError: (error) => set({ error }),
 
-  fetchCases: async () => {
+  fetchCases: async (opts?: { reset?: boolean }) => {
+    const reset = opts?.reset ?? true;
     set({ loading: true, error: null });
     try {
-      const list = await api.getCases();
-      set({ cases: list.map(mapToSummary), loading: false });
+      const r = await api.getCasesPaged(1, PAGE_SIZE);
+      set({
+        cases: r.cases.map(mapToSummary),
+        total: r.total ?? r.cases.length,
+        page: 1,
+        hasMore: (r.total ?? r.cases.length) > r.cases.length,
+        loading: false,
+      });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
+    void reset;
+  },
+
+  loadMoreCases: async () => {
+    const { page, cases } = get();
+    try {
+      const next = page + 1;
+      const r = await api.getCasesPaged(next, PAGE_SIZE);
+      const merged = [...cases];
+      const seen = new Set(merged.map((c) => c.id));
+      for (const c of r.cases) {
+        if (!seen.has(c.id)) {
+          merged.push(mapToSummary(c));
+          seen.add(c.id);
+        }
+      }
+      set({
+        cases: merged,
+        total: r.total ?? merged.length,
+        page: next,
+        hasMore: (r.total ?? merged.length) > merged.length,
+      });
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  updateCaseFlags: async (caseId, patch) => {
+    const updated = await api.patchCase(caseId, patch);
+    set((s) => ({
+      case: s.case && s.case.id === caseId
+        ? { ...s.case, pinned: updated.pinned ?? s.case.pinned, archived: updated.archived ?? s.case.archived }
+        : s.case,
+      cases: s.cases.map((x) =>
+        x.id === caseId
+          ? { ...x, pinned: updated.pinned ?? x.pinned, archived: updated.archived ?? x.archived }
+          : x,
+      ),
+    }));
+  },
+
+  deleteCase: async (caseId) => {
+    await api.deleteCase(caseId);
+    set((s) => ({
+      case: s.case && s.case.id === caseId ? null : s.case,
+      cases: s.cases.filter((x) => x.id !== caseId),
+      total: Math.max(0, s.total - 1),
+      hasMore: s.total - 1 > s.cases.length - 1,
+    }));
   },
 
   fetchCase: async (id: string, opts?: { silent?: boolean }) => {
