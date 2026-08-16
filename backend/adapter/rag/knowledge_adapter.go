@@ -126,7 +126,11 @@ func (a *HybridKnowledgeAdapter) Retrieve(ctx context.Context, req port.Retrieve
 	opts.Thr900 = 3
 	opts.Thr1800 = 2
 	opts.Orphan = "keep_300"
-	blocks, err := a.retriever.Retrieve(ctx, req.Query, opts)
+	var filter *IndexFilter
+	if len(req.Sources) > 0 || len(req.SourceRefs) > 0 {
+		filter = &IndexFilter{Sources: req.Sources, SourceRefs: req.SourceRefs}
+	}
+	blocks, err := a.retriever.Retrieve(ctx, req.Query, opts, filter)
 	if err != nil {
 		return port.RetrieveResult{}, err
 	}

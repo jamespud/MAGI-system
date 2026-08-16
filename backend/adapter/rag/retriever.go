@@ -53,8 +53,9 @@ func NewRetriever(vec VectorIndex, lex LexicalIndex, emb Embedder, repo *ChunkRe
 	return &Retriever{vec: vec, lex: lex, emb: emb, repo: repo, opts: opts, log: log.Default()}
 }
 
-// Retrieve runs hybrid recall + RRF + dynamic merge.
-func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride MergeOpts) ([]MergedBlock, error) {
+// Retrieve runs hybrid recall + RRF + dynamic merge. A non-nil filter
+// narrows both the vector and lexical recalls by source metadata.
+func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride MergeOpts, filter *IndexFilter) ([]MergedBlock, error) {
 	opts := r.opts
 	if optsOverride.TopK != 0 {
 		opts = optsOverride
@@ -69,8 +70,8 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride Mer
 		queryVec = qvec[0]
 	}
 
-	vecHits, vecErr := r.vec.Search(ctx, queryVec, opts.TopK, nil)
-	lexHits, lexErr := r.lex.Search(ctx, query, opts.TopK, nil)
+	vecHits, vecErr := r.vec.Search(ctx, queryVec, opts.TopK, filter)
+	lexHits, lexErr := r.lex.Search(ctx, query, opts.TopK, filter)
 	if vecErr != nil && lexErr != nil {
 		r.logf("rag retrieve: BOTH indexes failed (query=%q): vector=%v lexical=%v", query, vecErr, lexErr)
 		return nil, fmt.Errorf("rag retrieve: vector %v; lexical %v", vecErr, lexErr)

@@ -44,7 +44,7 @@ func newRetrieverForTestFull(t *testing.T, vecHits []VectorHit, vecErr error, le
 func TestRetrieverUnanimousMergeTo900(t *testing.T) {
 	// All 3 of 900a's children (c1,c2,c3) recalled -> pull 900a, discard 300s.
 	r := newRetrieverForTest(t, []VectorHit{{ChunkID: "c1"}, {ChunkID: "c2"}, {ChunkID: "c3"}}, nil)
-	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestRetrieverUnanimousMergeTo900(t *testing.T) {
 func TestRetrieverOrphanKeep300(t *testing.T) {
 	// Only c1 recalled (no unanimity) -> keep c1 as 300.
 	r := newRetrieverForTest(t, []VectorHit{{ChunkID: "c1"}}, nil)
-	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRetrieverOrphanKeep300(t *testing.T) {
 func TestRetrieverRRFFusion(t *testing.T) {
 	// Vector returns c1; ES returns c4 (different). Both should be fused (orphans).
 	r := newRetrieverForTest(t, []VectorHit{{ChunkID: "c1"}}, []TextHit{{ChunkID: "c4"}})
-	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err != nil {
 		t.Fatalf("retrieve: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRetrieverRRFFusion(t *testing.T) {
 func TestRetrieverVectorDegradedFallsBackToLexical(t *testing.T) {
 	// Milvus down (collection not loaded / outage): ES hits must still return.
 	r := newRetrieverForTestFull(t, nil, fmt.Errorf("collection not loaded"), []TextHit{{ChunkID: "c4"}}, nil)
-	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err != nil {
 		t.Fatalf("retrieve should fall back to lexical, got error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRetrieverVectorDegradedFallsBackToLexical(t *testing.T) {
 func TestRetrieverLexicalDegradedFallsBackToVector(t *testing.T) {
 	// ES down: vector hits must still return.
 	r := newRetrieverForTestFull(t, []VectorHit{{ChunkID: "c1"}}, nil, nil, fmt.Errorf("es connection refused"))
-	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	blocks, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err != nil {
 		t.Fatalf("retrieve should fall back to vector, got error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRetrieverLexicalDegradedFallsBackToVector(t *testing.T) {
 func TestRetrieverBothIndexesFail(t *testing.T) {
 	// Both backends down: retrieve must surface the error, not silently return empty.
 	r := newRetrieverForTestFull(t, nil, fmt.Errorf("milvus down"), nil, fmt.Errorf("es down"))
-	_, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	_, err := r.Retrieve(context.Background(), "q", MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"}, nil)
 	if err == nil {
 		t.Fatal("expected error when both indexes fail")
 	}
