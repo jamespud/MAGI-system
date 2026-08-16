@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -114,6 +115,18 @@ func (b *EventBroker) ListByCase(ctx context.Context, caseID string) ([]*entity.
 	events := b.stored[caseID]
 	out := make([]*entity.MagiEvent, len(events))
 	copy(out, events)
+	return out, nil
+}
+
+func (b *EventBroker) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []*entity.MagiEvent
+	for _, e := range b.stored[caseID] {
+		if !e.Timestamp.Before(after) {
+			out = append(out, e)
+		}
+	}
 	return out, nil
 }
 

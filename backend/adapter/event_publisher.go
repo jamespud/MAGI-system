@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/coze-dev/coze-studio/backend/infra/sse"
 	hertzsse "github.com/hertz-contrib/sse"
@@ -86,6 +87,18 @@ func (r *InMemoryEventRepo) ListByCase(ctx context.Context, caseID string) ([]*e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.events[caseID], nil
+}
+
+func (r *InMemoryEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*entity.MagiEvent
+	for _, e := range r.events[caseID] {
+		if !e.Timestamp.Before(after) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 var _ port.EventRepository = (*InMemoryEventRepo)(nil)

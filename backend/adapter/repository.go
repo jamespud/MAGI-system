@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -121,7 +122,7 @@ func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
 		ConstraintsJSON: toJSON(c.Constraints), ParentCaseID: c.ParentCaseID, Status: string(c.Status),
-		CurrentPhase: string(c.CurrentPhase),
+		CurrentPhase:    string(c.CurrentPhase),
 		MaxDebateRounds: c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
@@ -129,7 +130,7 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 	return &entity.DecisionCase{
 		ID: m.ID, UserID: m.UserID, Question: m.Question, Context: m.Context,
 		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ParentCaseID: m.ParentCaseID,
-		Status: entity.CaseStatus(m.Status),
+		Status:       entity.CaseStatus(m.Status),
 		CurrentPhase: entity.CasePhase(m.CurrentPhase), MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
@@ -157,7 +158,7 @@ func (r *agentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, er
 		ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
 		Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
 		Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
-		Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+		Err:         m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
 	}, nil
 }
 func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
@@ -171,7 +172,7 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 			ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
 			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
 			Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
-			Err: m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+			Err:         m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
 		}
 	}
 	return out, nil
@@ -353,11 +354,7 @@ func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
 }
-func (r *eventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
-	var models []EventModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Find(&models).Error; err != nil {
-		return nil, err
-	}
+func eventsFromModels(models []EventModel) []*entity.MagiEvent {
 	out := make([]*entity.MagiEvent, len(models))
 	for i := range models {
 		m := &models[i]
@@ -371,7 +368,28 @@ func (r *eventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Ma
 			Payload: json.RawMessage(m.PayloadJSON), Timestamp: m.Timestamp,
 		}
 	}
-	return out, nil
+	return out
+}
+
+func (r *eventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
+	var models []EventModel
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("timestamp ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return eventsFromModels(models), nil
+}
+
+// ListAfter returns events for a case with Timestamp >= after, ordered by
+// Timestamp ascending. The inclusive lower bound combined with caller-side
+// ID dedup makes boundary events safe across poll ticks and clock skew.
+func (r *eventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
+	var models []EventModel
+	if err := r.db.WithContext(ctx).
+		Where("case_id = ? AND timestamp >= ?", caseID, after).
+		Order("timestamp ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return eventsFromModels(models), nil
 }
 
 // --- DebateRepository (DB) ---

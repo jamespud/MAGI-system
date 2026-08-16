@@ -89,6 +89,10 @@ type ResolutionRepository interface {
 type EventRepository interface {
 	Create(ctx context.Context, e *entity.MagiEvent) error
 	ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error)
+	// ListAfter returns events for a case with Timestamp >= after, ordered by
+	// Timestamp ascending. Used by SSE subscribers to poll for events that
+	// other worker instances persisted (cross-instance live streaming).
+	ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error)
 }
 
 type CheckpointRepository interface {

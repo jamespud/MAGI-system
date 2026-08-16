@@ -287,12 +287,12 @@ func TestOrchestrate_RetriesFailedAgent(t *testing.T) {
 	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		AgentLoop: mrt,
-		Consensus: consensus.NewConsensusEngine(),
-		Debate:    debate.NewDebateEngine(nil),
-		Commander: newCommander(t),
-		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
-		Policy:    consensus.DefaultConsensusPolicy(),
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
 		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 1},
 	})
 
@@ -318,12 +318,12 @@ func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
 	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		AgentLoop: mrt,
-		Consensus: consensus.NewConsensusEngine(),
-		Debate:    debate.NewDebateEngine(nil),
-		Commander: newCommander(t),
-		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
-		Policy:    consensus.DefaultConsensusPolicy(),
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
 		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 2},
 	})
 
@@ -669,6 +669,9 @@ type stubEventRepo struct{}
 
 func (stubEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error { return nil }
 func (stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
+	return nil, nil
+}
+func (stubEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
 	return nil, nil
 }
 

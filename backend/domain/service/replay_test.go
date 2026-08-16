@@ -21,6 +21,15 @@ func (s *stubEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 func (s *stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
 	return s.events[caseID], nil
 }
+func (s *stubEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
+	var out []*entity.MagiEvent
+	for _, e := range s.events[caseID] {
+		if !e.Timestamp.Before(after) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
 
 var _ port.EventRepository = (*stubEventRepo)(nil)
 

@@ -17,6 +17,9 @@ func (s *stubEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 func (s *stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
 	return s.events, nil
 }
+func (s *stubEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
+	return s.events, nil
+}
 
 func TestReplayService_Replay(t *testing.T) {
 	t1 := time.Now()
