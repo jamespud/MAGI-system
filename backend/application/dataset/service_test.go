@@ -19,6 +19,7 @@ type stubDatasetRepo struct {
 	runs    map[string]*entity.BenchmarkRun
 	results map[string][]*entity.BenchmarkItemResult
 	byItem  map[string]string // runID -> itemID prefix for GetRun
+	deletedDatasets []string
 }
 
 func newStubDatasetRepo() *stubDatasetRepo {
@@ -98,7 +99,13 @@ func (s *stubDatasetRepo) DeleteItem(ctx context.Context, id string) error {
 	return errors.New("not found")
 }
 
-func (s *stubDatasetRepo) DeleteDataset(ctx context.Context, id string) error { return nil }
+func (s *stubDatasetRepo) DeleteDataset(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.ds, id)
+	s.deletedDatasets = append(s.deletedDatasets, id)
+	return nil
+}
 
 func (s *stubDatasetRepo) CreateItems(ctx context.Context, items []*entity.BenchmarkItem) error {
 	s.mu.Lock()
@@ -537,4 +544,48 @@ func waitCalls(t *testing.T, orch *countingOrchForClaims, want int) bool {
 	orch.mu.Lock()
 	defer orch.mu.Unlock()
 	return orch.calls == want
+}
+
+func TestService_DeleteCancelsRunsAndRemovesDataset(t *testing.T) {
+	repo := newStubDatasetRepo()
+	svc := dataset.NewService(repo, &stubCaseRepo{}, &stubOrch{}, 1)
+	ctx := context.Background()
+
+	ds, err := svc.Create(ctx, 7, "launch", "desc")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// An in-flight queued run.
+	run := &entity.BenchmarkRun{ID: "bench-act", DatasetID: ds.ID, Status: entity.BenchmarkRunQueued}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := svc.Delete(ctx, 7, ds.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Dataset is gone.
+	if _, err := svc.Get(ctx, 7, ds.ID); err == nil {
+		t.Fatal("dataset should be deleted")
+	}
+	// The active run was marked failed (cancelled), not left queued.
+	got, err := repo.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != entity.BenchmarkRunFailed {
+		t.Fatalf("expected in-flight run to be failed after dataset delete, got %s", got.Status)
+	}
+
+	// A different owner cannot delete (principal in context enforces access).
+	otherCtx := auth.WithPrincipal(ctx, &auth.Principal{UserID: 9, Role: "user"})
+	other, err := svc.Create(otherCtx, 9, "other", "")
+	if err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	ownerCtx := auth.WithPrincipal(ctx, &auth.Principal{UserID: 7, Role: "admin"})
+	if err := svc.Delete(ownerCtx, 7, other.ID); err == nil {
+		t.Fatal("non-owner delete must fail")
+	}
 }
