@@ -364,6 +364,8 @@ func AllModels() []any {
 		&ToolQuotaCounterModel{},
 		&RunCounterModel{},
 		&KnowledgeDocModel{},
+		&UserModel{},
+		&ApiKeyModel{},
 	}
 }
 
@@ -383,3 +385,28 @@ type KnowledgeDocModel struct {
 }
 
 func (KnowledgeDocModel) TableName() string { return "knowledge_docs" }
+
+// UserModel persists a harness account.
+type UserModel struct {
+	ID        int64 `gorm:"primaryKey;autoIncrement"`
+	Name      string
+	Role      string `gorm:"size:16;default:user"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (UserModel) TableName() string { return "users" }
+
+// ApiKeyModel persists a DB-backed API key (hash only).
+type ApiKeyModel struct {
+	ID         string `gorm:"primaryKey;size:64"`
+	UserID     int64  `gorm:"index"`
+	Name       string
+	Prefix     string `gorm:"size:32"`
+	KeyHash    string `gorm:"size:64;index"`
+	LastUsedAt *time.Time
+	Revoked    bool
+	CreatedAt  time.Time
+}
+
+func (ApiKeyModel) TableName() string { return "api_keys" }

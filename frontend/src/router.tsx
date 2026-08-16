@@ -6,6 +6,7 @@ import Memory from '@/pages/Memory';
 import Approvals from '@/pages/Approvals';
 import History from '@/pages/History';
 import Knowledge from '@/pages/Knowledge';
+import Users from '@/pages/Users';
 import Replay from '@/pages/Replay';
 import Evaluation from '@/pages/Evaluation';
 import Templates from '@/pages/Templates';
@@ -31,6 +32,7 @@ export const router = createBrowserRouter([
       { path: 'benchmark', element: <Benchmark /> },
       { path: 'history', element: <History /> },
       { path: 'knowledge', element: <Knowledge /> },
+      { path: 'admin/users', element: <Users /> },
     ],
   },
 ]);

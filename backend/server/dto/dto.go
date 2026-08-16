@@ -667,3 +667,79 @@ func FromKnowledgeDoc(d *entity.KnowledgeDoc) KnowledgeDocDTO {
 	}
 	return out
 }
+
+// UserDTO is the API representation of a harness account.
+type UserDTO struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Role       string `json:"role"`
+	ActiveKeys int    `json:"active_keys"`
+	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// ApiKeyDTO is the API representation of a stored API key (no hash, no secret).
+type ApiKeyDTO struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Prefix     string  `json:"prefix"`
+	Revoked    bool    `json:"revoked"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+	CreatedAt  string  `json:"created_at,omitempty"`
+}
+
+// IssuedKeyDTO carries a freshly issued API key. Plaintext is only returned
+// at issuance.
+type IssuedKeyDTO struct {
+	ID        string `json:"id"`
+	Prefix    string `json:"prefix"`
+	Plaintext string `json:"plaintext"`
+}
+
+type CreateUserRequest struct {
+	Name string `json:"name"`
+	Role string `json:"role,omitempty"`
+}
+
+type CreateUserResponse struct {
+	User   UserDTO       `json:"user"`
+	ApiKey *IssuedKeyDTO `json:"api_key,omitempty"`
+}
+
+type IssueKeyRequest struct {
+	Name string `json:"name,omitempty"`
+}
+
+type MeResponse struct {
+	User UserDTO     `json:"user"`
+	Keys []ApiKeyDTO `json:"keys"`
+}
+
+type UserListResponse struct {
+	Users []UserDTO `json:"users"`
+}
+
+type KeyListResponse struct {
+	Keys []ApiKeyDTO `json:"keys"`
+}
+
+// FromUser maps a user entity (plus key count) to its DTO.
+func FromUser(u *entity.User, activeKeys int) UserDTO {
+	out := UserDTO{ID: u.ID, Name: u.Name, Role: u.Role, ActiveKeys: activeKeys}
+	if !u.CreatedAt.IsZero() {
+		out.CreatedAt = u.CreatedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+// FromApiKey maps an API key entity to its DTO (never exposes the hash).
+func FromApiKey(k *entity.ApiKey) ApiKeyDTO {
+	out := ApiKeyDTO{ID: k.ID, Name: k.Name, Prefix: k.Prefix, Revoked: k.Revoked}
+	if k.LastUsedAt != nil {
+		lu := k.LastUsedAt.Format(time.RFC3339)
+		out.LastUsedAt = &lu
+	}
+	if !k.CreatedAt.IsZero() {
+		out.CreatedAt = k.CreatedAt.Format(time.RFC3339)
+	}
+	return out
+}

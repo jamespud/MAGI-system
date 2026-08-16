@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, BookOpen, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck } from 'lucide-react';
+import { Activity, BookOpen, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck, Users as UsersIcon } from 'lucide-react';
 import { PulseDot, MonoText } from '@/components/shared';
 import { api, type ApiStatus } from '@/api/client';
 import { useAgentStore } from '@/stores';
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/dataset', icon: Database, label: 'Dataset' },
   { to: '/tools', icon: Wrench, label: 'Tools' },
   { to: '/knowledge', icon: BookOpen, label: 'Knowledge' },
+  { to: '/admin/users', icon: UsersIcon, label: 'Users' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

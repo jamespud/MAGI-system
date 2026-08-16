@@ -271,13 +271,18 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | GET/POST/PATCH/DELETE | `/recurring`, `/recurring/:id` (+`/:id/run`) | Recurring templates |
 | POST | `/evaluation`, `/evaluation/:id`, `/benchmark` | Evaluation |
 | GET | `/admin/usage` | Admin usage aggregate |
+| POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
+| GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
+| POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |
+| GET | `/me` (+`POST /me/keys`) | Current principal + self-issued keys |
+| POST/GET/DELETE | `/knowledge`, `/knowledge/:id` | User knowledge base (RAG documents) |
 | GET | `/metrics`, `/health`, `/ready`, `/version`, `/openapi.json` | Ops |
 
 ### Configuration highlights
 
 ```yaml
 model: { api_key: "...", model_name: "..." }   # or model_id for Coze mode
-auth: { enabled: true, api_keys: [...] }        # per-user API keys
+auth: { enabled: true, api_keys: [...] }        # static bootstrap keys (DB keys managed via /admin/users)
 limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }

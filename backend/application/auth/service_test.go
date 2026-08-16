@@ -8,22 +8,24 @@ import (
 )
 
 func TestAuthenticate_ValidAndInvalid(t *testing.T) {
+	ctx := context.Background()
 	svc := auth.NewService(true, []auth.KeySpec{
 		{Name: "alice", Key: "secret-a", UserID: 1, Role: "admin"},
 		{Name: "bob", Key: "secret-b", UserID: 2, Role: "user"},
 	})
-	p, ok := svc.Authenticate("secret-b")
+	p, ok := svc.Authenticate(ctx, "secret-b")
 	if !ok || p == nil || p.UserID != 2 || p.Role != "user" {
 		t.Fatalf("authenticate bob: %+v %v", p, ok)
 	}
-	if _, ok := svc.Authenticate("wrong"); ok {
+	if _, ok := svc.Authenticate(ctx, "wrong"); ok {
 		t.Fatal("wrong key must fail")
 	}
 }
 
 func TestAuthenticate_Disabled(t *testing.T) {
+	ctx := context.Background()
 	svc := auth.NewService(false, []auth.KeySpec{{Key: "k", UserID: 1}})
-	if _, ok := svc.Authenticate("k"); ok {
+	if _, ok := svc.Authenticate(ctx, "k"); ok {
 		t.Fatal("disabled service must reject")
 	}
 	if svc.Enabled() {

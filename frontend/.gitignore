@@ -1,7 +1,6 @@
+node_modules
 node_modules/
 dist/
 .vite/
 *.tsbuildinfo
 
-# worktree-local node_modules symlink
-frontend/node_modules

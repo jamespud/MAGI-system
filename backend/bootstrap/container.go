@@ -41,6 +41,7 @@ import (
 	"github.com/jamespud/magi/backend/application/toolpolicy"
 	"github.com/jamespud/magi/backend/application/toolquota"
 	"github.com/jamespud/magi/backend/application/tracing"
+	"github.com/jamespud/magi/backend/application/users"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -70,6 +71,9 @@ var Module = fx.Options(
 		ProvideToolExecutor,
 		provideMCPAdapter,
 		provideAuthService,
+		provideUserRepository,
+		provideApiKeyRepository,
+		provideUsersService,
 		ProvideKnowledgePort,
 
 		// Database
@@ -130,6 +134,7 @@ var Module = fx.Options(
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
+		usersSvc *users.Service,
 		toolSvc *tool.Service,
 		broker *appserver.EventBroker,
 		repo port.Repository,
@@ -156,6 +161,7 @@ var Module = fx.Options(
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
+			Users:        usersSvc,
 			Tool:         toolSvc,
 			Broker:       broker,
 			EventRepo:    repo.EventRepo(),
@@ -569,12 +575,29 @@ func provideRepository(db *gorm.DB) port.Repository {
 	return magi.NewRepository(db)
 }
 
-func provideAuthService(cfg *Config) *auth.Service {
+func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKeyRepository) *auth.Service {
+	svc := auth.NewService(cfg.Auth.Enabled, staticKeySpecs(cfg))
+	return svc.WithStores(keys, users)
+}
+
+func staticKeySpecs(cfg *Config) []auth.KeySpec {
 	keys := make([]auth.KeySpec, 0, len(cfg.Auth.APIKeys))
 	for _, k := range cfg.Auth.APIKeys {
 		keys = append(keys, auth.KeySpec{Name: k.Name, Key: k.Key, KeyHash: k.KeyHash, UserID: k.UserID, Role: k.Role})
 	}
-	return auth.NewService(cfg.Auth.Enabled, keys)
+	return keys
+}
+
+func provideUserRepository(db *gorm.DB) port.UserRepository {
+	return magi.NewUserRepository(db)
+}
+
+func provideApiKeyRepository(db *gorm.DB) port.ApiKeyRepository {
+	return magi.NewApiKeyRepository(db)
+}
+
+func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyRepository) *users.Service {
+	return users.NewService(userRepo, keyRepo)
 }
 
 func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {

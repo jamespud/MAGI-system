@@ -19,6 +19,7 @@ import (
 	"github.com/jamespud/magi/backend/application/recurring"
 	"github.com/jamespud/magi/backend/application/replay"
 	"github.com/jamespud/magi/backend/application/tool"
+	"github.com/jamespud/magi/backend/application/users"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/server/handler"
 )
@@ -39,6 +40,7 @@ type RouteDeps struct {
 	Judge        *judge.Service
 	Memory       *memory.Service
 	Knowledge    *knowledge.Service
+	Users        *users.Service
 	Tool         *tool.Service
 	Broker       *EventBroker
 	EventRepo    port.EventRepository
@@ -135,6 +137,17 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 
 	adminH := handler.NewAdminHandler(deps.Admin)
 	v1.GET("/admin/usage", RequireRole("admin"), adminH.Usage)
+
+	usersH := handler.NewUsersHandler(deps.Users)
+	v1.GET("/me", usersH.Me)
+	v1.POST("/me/keys", usersH.IssueOwnKey)
+	v1.POST("/admin/users", RequireRole("admin"), usersH.CreateUser)
+	v1.GET("/admin/users", RequireRole("admin"), usersH.ListUsers)
+	v1.DELETE("/admin/users/:id", RequireRole("admin"), usersH.DeleteUser)
+	v1.GET("/admin/users/:id/keys", RequireRole("admin"), usersH.ListKeys)
+	v1.POST("/admin/users/:id/keys", RequireRole("admin"), usersH.IssueKey)
+	v1.POST("/admin/keys/:id/revoke", RequireRole("admin"), usersH.RevokeKey)
+	v1.POST("/admin/keys/:id/rotate", RequireRole("admin"), usersH.RotateKey)
 
 	recH := handler.NewRecurringHandler(deps.Recurring)
 	v1.GET("/recurring", recH.List)

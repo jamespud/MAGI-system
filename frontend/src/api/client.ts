@@ -236,6 +236,46 @@ export const api = {
       throw new Error(err.error || `HTTP ${res.status}`);
     }
   },
+
+  me: () => request<ApiMeResponse>('/me'),
+
+  issueOwnKey: (name?: string) =>
+    request<ApiIssuedKey>('/me/keys', { method: 'POST', body: JSON.stringify({ name }) }),
+
+  listUsers: () => request<{ users: ApiUser[] }>('/admin/users'),
+
+  createUser: (name: string, role: string) =>
+    request<{ user: ApiUser; api_key?: ApiIssuedKey }>('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ name, role }),
+    }),
+
+  deleteUser: async (id: number) => {
+    const res = await fetch(`${BASE_URL}/admin/users/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
+
+  listUserKeys: (userId: number) => request<{ keys: ApiApiKey[] }>(`/admin/users/${userId}/keys`),
+
+  issueUserKey: (userId: number, name?: string) =>
+    request<ApiIssuedKey>(`/admin/users/${userId}/keys`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  revokeKey: async (keyId: string) => {
+    const res = await fetch(`${BASE_URL}/admin/keys/${keyId}/revoke`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+  },
+
+  rotateKey: (keyId: string) =>
+    request<ApiIssuedKey>(`/admin/keys/${keyId}/rotate`, { method: 'POST' }),
 };
 
 interface ApiRecurring {
@@ -363,6 +403,34 @@ interface ApiApproval {
   decided_at?: string;
 }
 
+interface ApiUser {
+  id: number;
+  name: string;
+  role: string;
+  active_keys: number;
+  created_at?: string;
+}
+
+interface ApiApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  revoked: boolean;
+  last_used_at?: string;
+  created_at?: string;
+}
+
+interface ApiIssuedKey {
+  id: string;
+  prefix: string;
+  plaintext: string;
+}
+
+interface ApiMeResponse {
+  user: ApiUser;
+  keys: ApiApiKey[];
+}
+
 interface ApiKnowledgeDoc {
   id: string;
   title: string;
@@ -376,6 +444,10 @@ interface ApiKnowledgeDoc {
 }
 
 export type {
+  ApiUser,
+  ApiApiKey,
+  ApiIssuedKey,
+  ApiMeResponse,
   ApiKnowledgeDoc,
   ApiCaseResponse,
   ApiDataset,

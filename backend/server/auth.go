@@ -29,7 +29,7 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 		if token == "" {
 			token = string(c.GetHeader("X-API-Key"))
 		}
-		p, ok := authSvc.Authenticate(token)
+		p, ok := authSvc.Authenticate(ctx, token)
 		if !ok {
 			c.JSON(consts.StatusUnauthorized, dto.ErrorResponse{Error: "unauthorized"})
 			c.Abort()

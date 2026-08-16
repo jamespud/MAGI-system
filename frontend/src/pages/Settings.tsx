@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/api/client';
+import { api, type ApiMeResponse } from '@/api/client';
 
 export default function Settings() {
   const [version, setVersion] = useState('');
   const [ready, setReady] = useState('');
+  const [me, setMe] = useState<ApiMeResponse | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -19,6 +20,15 @@ export default function Settings() {
         if (!cancelled) setError(e instanceof Error ? e.message : 'failed to load system status');
       }
     })();
+    const loadMe = async () => {
+      try {
+        const m = await api.me();
+        if (!cancelled) setMe(m);
+      } catch {
+        // open mode: no principal, fine
+      }
+    };
+    void loadMe();
     return () => { cancelled = true; };
   }, []);
 
@@ -35,6 +45,15 @@ export default function Settings() {
         <div className="rounded border border-border-dim bg-raised p-4">
           <p className="text-xs text-text-muted">Readiness</p>
           <p className="text-lg font-medium mt-1">{ready || '—'}</p>
+        </div>
+        <div className="rounded border border-border-dim bg-raised p-4">
+          <p className="text-xs text-text-muted">Current user</p>
+          <p className="text-lg font-medium mt-1">{me ? `${me.user.name} (${me.user.role})` : 'open mode'}</p>
+          {me && me.keys.length > 0 && (
+            <p className="text-xs text-text-muted mt-1">
+              {me.keys.filter((k) => !k.revoked).length} active API key(s)
+            </p>
+          )}
         </div>
       </div>
 

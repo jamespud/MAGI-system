@@ -36,6 +36,22 @@ behind a reverse proxy that allows only the Prometheus server (e.g. nginx
 `allow` rules or a separate scrape port). Example alert rules live in
 `deploy/prometheus-alerts.example.yml`.
 
+### Users and API keys
+
+- **Static bootstrap keys** (`auth.api_keys` in config) authenticate at
+  startup and remain valid for the process lifetime. Prefer creating
+  runtime users over the admin API instead of editing config.
+- **DB-backed users** are created with `POST /api/v1/admin/users` (admin
+  only). Each user gets a bootstrap API key whose plaintext is shown exactly
+  once; only its SHA-256 hash is stored (`api_keys.key_hash`).
+- **Key lifecycle** over the admin API: list/issue per user,
+  `POST /admin/keys/:id/revoke` disables a key, `POST /admin/keys/:id/rotate`
+  revokes and issues a replacement. `GET /me` shows the current principal and
+  lets users self-issue keys (`POST /me/keys`).
+- The auth middleware checks static keys first, then DB keys by hash,
+  updating `last_used_at` for observability. Revoked or deleted keys stop
+  authenticating immediately.
+
 ### Multi-tenant boundaries and sandbox egress
 
 - **Per-user limits are cumulative and independent**: run concurrency
@@ -71,7 +87,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 | Section | Purpose |
 | --- | --- |
 | `model` | `api_key` + `base_url` + `model_name` (direct) or `model_id` (Coze mode); `price_per_m_*_usd` for cost accounting |
-| `auth` | `enabled: true` + `api_keys` (name/key/user_id/role). Startup fails fast if enabled without valid keys |
+| `auth` | `enabled: true` + `api_keys` (name/key/user_id/role) act as static bootstrap credentials. Runtime users/keys are managed over the admin API (`/admin/users`) and stored in DB (`users` / `api_keys`, SHA-256-hashed, plaintext shown once at issuance) |
 | `limits` | `max_concurrent_runs_per_user` |
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
 | `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |
