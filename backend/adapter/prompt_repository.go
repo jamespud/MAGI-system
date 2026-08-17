@@ -31,7 +31,7 @@ func NewPromptRepository(db *gorm.DB) port.PromptRepository {
 
 func (r *promptRepo) List(ctx context.Context) ([]*entity.PromptTemplate, error) {
 	var models []PromptTemplateModel
-	if err := r.db.WithContext(ctx).Order("key ASC, version DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("`key` ASC, version DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.PromptTemplate, len(models))
@@ -43,7 +43,7 @@ func (r *promptRepo) List(ctx context.Context) ([]*entity.PromptTemplate, error)
 
 func (r *promptRepo) Get(ctx context.Context, key string) (*entity.PromptTemplate, error) {
 	var m PromptTemplateModel
-	if err := r.db.WithContext(ctx).Where("key = ? AND active = ?", key, true).First(&m).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("`key` = ? AND active = ?", key, true).First(&m).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}
@@ -55,7 +55,7 @@ func (r *promptRepo) Get(ctx context.Context, key string) (*entity.PromptTemplat
 func (r *promptRepo) Save(ctx context.Context, key, content string) (*entity.PromptTemplate, error) {
 	now := time.Now()
 	var cur PromptTemplateModel
-	err := r.db.WithContext(ctx).Where("key = ? AND active = ?", key, true).First(&cur).Error
+	err := r.db.WithContext(ctx).Where("`key` = ? AND active = ?", key, true).First(&cur).Error
 	var nextVersion int
 	if err == nil {
 		nextVersion = cur.Version + 1
@@ -68,7 +68,7 @@ func (r *promptRepo) Save(ctx context.Context, key, content string) (*entity.Pro
 func (r *promptRepo) Restore(ctx context.Context, key, content string) (*entity.PromptTemplate, error) {
 	now := time.Now()
 	var cur PromptTemplateModel
-	err := r.db.WithContext(ctx).Where("key = ? AND active = ?", key, true).First(&cur).Error
+	err := r.db.WithContext(ctx).Where("`key` = ? AND active = ?", key, true).First(&cur).Error
 	nextVersion := 1
 	if err == nil {
 		nextVersion = cur.Version
@@ -83,12 +83,12 @@ func (r *promptRepo) writeActive(ctx context.Context, key string, version int, c
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
-	if err := tx.Model(&PromptTemplateModel{}).Where("key = ?", key).Update("active", false).Error; err != nil {
+	if err := tx.Model(&PromptTemplateModel{}).Where("`key` = ?", key).Update("active", false).Error; err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
 	m := PromptTemplateModel{Key: key, Version: version, Content: content, Active: true, CreatedAt: now, UpdatedAt: now}
-	if err := tx.Where("key = ? AND version = ?", key, version).Delete(&PromptTemplateModel{}).Error; err != nil {
+	if err := tx.Where("`key` = ? AND version = ?", key, version).Delete(&PromptTemplateModel{}).Error; err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
