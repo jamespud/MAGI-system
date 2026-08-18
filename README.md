@@ -260,6 +260,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Fine-grained roles** - admin / operator / user roles with route-level gating (`RequireAnyRole`); operators can run evals, benchmarks, and manage prompts while user/API-key administration stays admin-only.
 - **Deterministic feedback sensors** - the `check_output` tool lints the model's own JSON against a schema and constraint rules, and violations are fed back so the agent self-corrects before human review.
 - **Self-improving harness (human-in-the-loop)** - analyze a failed case into a categorized, rule-based improvement suggestion; an admin confirms before a proposed prompt change is written to the versioned registry.
+- **Automated regression gate** - schedule periodic re-runs of the built-in decision sanity suite (`benchmark.auto_interval_seconds`); regression failures are counted and alerted.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -302,6 +303,7 @@ limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
 feedback_tool: { enabled: true }
+benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
 magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
 # ordered global failover providers + per-role overrides (unset fields inherit primary)

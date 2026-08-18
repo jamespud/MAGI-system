@@ -171,6 +171,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
 | `db_tool` | Built-in `db_query` tool: single read-only SELECT inside a read-only transaction; `driver`/`dsn` default to the `database` block, `max_rows`/`max_query_chars`/`timeout_seconds` bound each call, `blocked_prefixes` adds write-statement rejections |
 | `feedback_tool` | Built-in `check_output` deterministic feedback sensor (default enabled): JSON Schema lint + field constraint rules over the model's own output; violations are fed back for self-correction and counted in `magi_feedback_violations_total` |
+| `benchmark` | `runs_per_item` / `regression_threshold` for manual runs; `auto_interval_seconds` schedules an automated regression of the built-in sanity suite, with `auto_runs_per_item` / `auto_regression_threshold` overrides; failures increment `magi_benchmark_regression_failures_total` |
 | `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |
 | `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
 | `magi` budget | `approval_timeout_seconds` (default 3600), `token_budget` (150000), `compaction_threshold` (0.7) |

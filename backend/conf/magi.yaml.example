@@ -243,6 +243,12 @@ elasticsearch:
 benchmark:
   runs_per_item: 1              # counterfactual repeats per item; agreement rate = stability
   regression_threshold: 0       # fail a run when accuracy drops below this (0 = disabled)
+  # Automated regression: periodically re-run the built-in decision sanity
+  # suite. 0 disables; failures are counted in
+  # magi_benchmark_regression_failures_total.
+  auto_interval_seconds: 0      # e.g. 86400 for a daily regression gate
+  auto_runs_per_item: 1
+  auto_regression_threshold: 0  # 0 = reuse regression_threshold
 
 rag:
   levels: [1800, 900, 300]

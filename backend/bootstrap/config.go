@@ -100,8 +100,11 @@ type ToolQuotaConfig struct {
 }
 
 type BenchmarkConfig struct {
-	RunsPerItem         int     `yaml:"runs_per_item"`
-	RegressionThreshold float64 `yaml:"regression_threshold"`
+	RunsPerItem             int     `yaml:"runs_per_item"`
+	RegressionThreshold     float64 `yaml:"regression_threshold"`
+	AutoIntervalSeconds     int     `yaml:"auto_interval_seconds"`
+	AutoRunsPerItem         int     `yaml:"auto_runs_per_item"`
+	AutoRegressionThreshold float64 `yaml:"auto_regression_threshold"`
 }
 
 type APIKeySpec struct {

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -84,6 +85,7 @@ type Service struct {
 	regressionThreshold float64
 	workerID            string
 	leaseDuration       time.Duration
+	metrics             *metrics.Registry
 }
 
 // Option configures a dataset.Service.
@@ -102,6 +104,11 @@ func WithRunsPerItem(n int) Option {
 // WithRegressionThreshold sets the accuracy gate for benchmark runs (0 disables).
 func WithRegressionThreshold(t float64) Option {
 	return func(s *Service) { s.regressionThreshold = t }
+}
+
+// WithMetrics enables operational counters for automated regression runs.
+func WithMetrics(reg *metrics.Registry) Option {
+	return func(s *Service) { s.metrics = reg }
 }
 
 func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch Orchestrator, maxDebateRounds int, opts ...Option) *Service {
@@ -481,6 +488,25 @@ func (s *Service) StartRunWithOptions(ctx context.Context, ownerID int64, datase
 	return run, nil
 }
 
+// RunAutoRegression ensures the built-in decision sanity suite exists and
+// starts one benchmark run with the given repetition/regression settings. It
+// is used by the periodic automated-regression worker.
+func (s *Service) RunAutoRegression(ctx context.Context, runsPerItem int, threshold float64) (*entity.BenchmarkRun, error) {
+	builtin, _, err := s.SeedBuiltin(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	opts := RunOptions{RunsPerItem: runsPerItem, RegressionThreshold: threshold}
+	run, err := s.StartRunWithOptions(ctx, 0, builtin.ID, opts)
+	if err != nil {
+		return nil, err
+	}
+	if s.metrics != nil {
+		s.metrics.IncBenchmarkAutoRun()
+	}
+	return run, nil
+}
+
 func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerID int64, opts RunOptions) {
 	s.workerSlots <- struct{}{}
 	defer func() { <-s.workerSlots }()
@@ -619,6 +645,9 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 		final.RegressionFailed = true
 		final.FailureReason = fmt.Sprintf("accuracy %.2f below regression threshold %.2f", final.Accuracy, threshold)
 		final.Status = entity.BenchmarkRunFailed
+		if s.metrics != nil {
+			s.metrics.IncBenchmarkRegressionFailure()
+		}
 	}
 	final.CompletedAt = &now
 	_ = s.datasets.UpdateRun(ctx, &final)

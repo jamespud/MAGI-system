@@ -53,7 +53,7 @@
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略、只读 DB 查询工具 | 文件/代码库/浏览器工具；Docker/MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由 | SSO/OAuth/自助注册、更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | 🟡 |
-| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板 | 线上 golden、自动回归运营闭环 | 🟡 |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板、定时自动回归 | 线上 golden | 🟡 |
 
 ### 2.2 明细能力矩阵
 
@@ -87,7 +87,7 @@
 | | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表可版本化/可编辑（D12，`domain/prompt/`）是雏形；FSM/投票/RoleGate 仍为硬编码 Go 规则 |
 | | **自我改进 Harness**（分析失败 → 建议并受控应用规则/prompt） | 🟡 | `POST /admin/selfimprove/analyze` 分析失败 case（事件 + agent run 错误 → gate/tool/model/timeout 分类）生成规则化建议；gate 失败时附版本化 prompt 改进建议；`POST .../apply` 由 admin 确认后写入 prompt registry 并标记 applied（`application/selfimprove/`、`server/router.go`）；全自动改规则仍需治理决策 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
-| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend gofmt/test/race/vet、frontend tsc/vitest/build、ops scripts 语法与备份恢复 dry-run 门禁；线上 golden 与自动回归触发仍缺 |
+| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend/frontend/ops CI 门禁；`benchmark.auto_interval_seconds` 定时自动回归内置基准集（`RunAutoRegression` + lifecycle worker，`magi_benchmark_auto_runs_total` / `magi_benchmark_regression_failures_total` + 告警）；线上 golden 仍缺 |
 | | 标准基准集 / 评测指标看板 | ✅ | `POST /admin/benchmarks/seed` 幂等植入内置 "MAGI Decision Sanity Suite"（跨 DB/采购/SRE/安全/战略的 approve/reject/conditional 用例，`application/dataset/service.go`）；`GET /admin/eval/summary` 聚合总运行/成功/失败、平均准确率/稳定性、回归失败数与按数据集/最近运行明细；Benchmark 页评测看板卡片 + seed 按钮 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ✅ | Replay 页 Trace 模式：按 run/agent 分泳道的时间轴可视化（事件按时间定位、按类型着色）、事件计数/运行数/智能体数/错误数统计、点击 marker 查看事件详情（`frontend/src/pages/Replay.tsx`、`api.getTrace`） |

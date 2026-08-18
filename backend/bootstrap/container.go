@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -564,9 +565,11 @@ func provideDatasetRepository(db *gorm.DB) port.DatasetRepository {
 	return magi.NewDatasetRepository(db)
 }
 
-func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.Orchestrator, repo port.Repository, cfg *Config) *dataset.Service {
+func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.Orchestrator, repo port.Repository, cfg *Config, reg *metrics.Registry) *dataset.Service {
 	return dataset.NewService(datasets, repo.CaseRepo(), orch, cfg.Magi.MaxDebateRounds,
-		dataset.WithRunsPerItem(cfg.Benchmark.RunsPerItem), dataset.WithRegressionThreshold(cfg.Benchmark.RegressionThreshold))
+		dataset.WithRunsPerItem(cfg.Benchmark.RunsPerItem),
+		dataset.WithRegressionThreshold(cfg.Benchmark.RegressionThreshold),
+		dataset.WithMetrics(reg))
 }
 
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
@@ -589,13 +592,46 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service) {
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, cfg *Config) {
+	var autoCancel context.CancelFunc
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
 				return err
 			}
-			return dsSvc.RecoverOrphanRuns(ctx)
+			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
+				return err
+			}
+			if cfg.Benchmark.AutoIntervalSeconds > 0 {
+				autoCtx, cancel := context.WithCancel(context.Background())
+				autoCancel = cancel
+				interval := time.Duration(cfg.Benchmark.AutoIntervalSeconds) * time.Second
+				go func() {
+					ticker := time.NewTicker(interval)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-autoCtx.Done():
+							return
+						case <-ticker.C:
+							if _, err := dsSvc.RunAutoRegression(autoCtx,
+								cfg.Benchmark.AutoRunsPerItem, cfg.Benchmark.AutoRegressionThreshold); err != nil {
+								if errors.Is(err, dataset.ErrRunActive) {
+									continue // previous automated run still in flight
+								}
+								log.Printf("auto regression: %v", err)
+							}
+						}
+					}
+				}()
+			}
+			return nil
+		},
+		OnStop: func(context.Context) error {
+			if autoCancel != nil {
+				autoCancel()
+			}
+			return nil
 		},
 	})
 }

@@ -27,6 +27,8 @@ type Registry struct {
 	ModelFailovers          atomic.Int64
 	WebSearchFailovers      atomic.Int64
 	FeedbackViolations      atomic.Int64
+	BenchmarkAutoRuns       atomic.Int64
+	BenchmarkRegressionFail atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -85,6 +87,20 @@ func (r *Registry) IncWebSearchFailover() {
 func (r *Registry) AddFeedbackViolations(n int64) {
 	if r != nil && n > 0 {
 		r.FeedbackViolations.Add(n)
+	}
+}
+
+// IncBenchmarkAutoRun records one automatically triggered benchmark run.
+func (r *Registry) IncBenchmarkAutoRun() {
+	if r != nil {
+		r.BenchmarkAutoRuns.Add(1)
+	}
+}
+
+// IncBenchmarkRegressionFailure records an automated regression gate failure.
+func (r *Registry) IncBenchmarkRegressionFailure() {
+	if r != nil {
+		r.BenchmarkRegressionFail.Add(1)
 	}
 }
 func (r *Registry) RunStart() {
@@ -215,6 +231,8 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_model_failovers_total counter\nmagi_model_failovers_total %d\n", r.ModelFailovers.Load())
 	fmt.Fprintf(w, "# TYPE magi_web_search_failovers_total counter\nmagi_web_search_failovers_total %d\n", r.WebSearchFailovers.Load())
 	fmt.Fprintf(w, "# TYPE magi_feedback_violations_total counter\nmagi_feedback_violations_total %d\n", r.FeedbackViolations.Load())
+	fmt.Fprintf(w, "# TYPE magi_benchmark_auto_runs_total counter\nmagi_benchmark_auto_runs_total %d\n", r.BenchmarkAutoRuns.Load())
+	fmt.Fprintf(w, "# TYPE magi_benchmark_regression_failures_total counter\nmagi_benchmark_regression_failures_total %d\n", r.BenchmarkRegressionFail.Load())
 
 	fmt.Fprintf(w, "# TYPE magi_run_duration_ms histogram\n")
 	fmt.Fprintf(w, "magi_run_duration_ms_sum %d\n", r.RunDurationSumMs.Load())

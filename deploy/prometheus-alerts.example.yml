@@ -39,6 +39,13 @@ groups:
           severity: warning
         annotations:
           summary: "Model outputs are repeatedly failing deterministic checks"
+      - alert: MagiBenchmarkRegressionFailure
+        expr: increase(magi_benchmark_regression_failures_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An automated benchmark run failed the regression gate"
       - alert: MagiModelProviderFailover
         expr: increase(magi_model_failovers_total[15m]) > 0
         for: 10m

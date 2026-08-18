@@ -9,6 +9,7 @@ import (
 
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 )
 
@@ -660,5 +661,32 @@ func TestService_SummaryAggregatesRuns(t *testing.T) {
 	}
 	if len(summary.RecentRuns) != 3 || summary.RecentRuns[0].RunID != "run-3" {
 		t.Fatalf("recent runs = %+v", summary.RecentRuns)
+	}
+}
+
+func TestService_RunAutoRegressionSeedsAndStartsRun(t *testing.T) {
+	repo := newStubDatasetRepo()
+	reg := metrics.New()
+	svc := dataset.NewService(repo, nil, &stubOrch{}, 2,
+		dataset.WithRunsPerItem(1), dataset.WithMetrics(reg))
+	ctx := context.Background()
+
+	run, err := svc.RunAutoRegression(ctx, 1, 0.5)
+	if err != nil {
+		t.Fatalf("auto regression: %v", err)
+	}
+	if run == nil || run.Status != entity.BenchmarkRunQueued {
+		t.Fatalf("run = %+v", run)
+	}
+	if run.RegressionThreshold != 0.5 {
+		t.Fatalf("threshold = %v", run.RegressionThreshold)
+	}
+	if reg.BenchmarkAutoRuns.Load() != 1 {
+		t.Fatalf("auto run metric = %d", reg.BenchmarkAutoRuns.Load())
+	}
+
+	// Second immediate run is skipped because the first is still active.
+	if _, err := svc.RunAutoRegression(ctx, 1, 0.5); !errors.Is(err, dataset.ErrRunActive) {
+		t.Fatalf("expected ErrRunActive, got %v", err)
 	}
 }
