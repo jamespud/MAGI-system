@@ -38,6 +38,7 @@ import (
 	"github.com/jamespud/magi/backend/application/recurring"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/application/replay"
+	"github.com/jamespud/magi/backend/application/rolepolicy"
 	"github.com/jamespud/magi/backend/application/selfimprove"
 	"github.com/jamespud/magi/backend/application/tool"
 	"github.com/jamespud/magi/backend/application/toolpolicy"
@@ -87,6 +88,9 @@ var Module = fx.Options(
 		provideDB,
 		provideRepository,
 		providePromptRepository,
+		provideRolePolicyRepository,
+		provideRolePolicyService,
+		provideRolePolicyHandler,
 		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
@@ -146,6 +150,7 @@ var Module = fx.Options(
 		dsSvc *dataset.Service,
 		repSvc *replay.Service,
 		siH *handler.SelfImproveHandler,
+		rpH *handler.RolePolicyHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -175,6 +180,7 @@ var Module = fx.Options(
 			Assistant:    askSvc,
 			Replay:       repSvc,
 			SelfImprove:  siH,
+			RolePolicy:   rpH,
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
@@ -435,12 +441,21 @@ func provideCommander(
 	)
 }
 
-func provideMagiConfigs(cfg *Config) []*entity.MagiConfig {
-	return []*entity.MagiConfig{
+func provideMagiConfigs(cfg *Config, rolePolicies port.RolePolicyRepository) []*entity.MagiConfig {
+	configs := []*entity.MagiConfig{
 		cfg.Magi.Melchior.ToConfig("melchior", cfg),
 		cfg.Magi.Balthasar.ToConfig("balthasar", cfg),
 		cfg.Magi.Casper.ToConfig("casper", cfg),
 	}
+	for _, config := range configs {
+		if config == nil {
+			continue
+		}
+		if stored, err := rolePolicies.Get(context.Background(), string(config.Code)); err == nil && stored != nil {
+			config.RolePolicy = *stored
+		}
+	}
+	return configs
 }
 
 func provideOrchestrator(
@@ -952,6 +967,18 @@ func providePromptRepository(db *gorm.DB) (port.PromptRepository, error) {
 		return nil, err
 	}
 	return repo, nil
+}
+
+func provideRolePolicyRepository(db *gorm.DB) port.RolePolicyRepository {
+	return magi.NewRolePolicyRepository(db)
+}
+
+func provideRolePolicyService(repo port.RolePolicyRepository) *rolepolicy.Service {
+	return rolepolicy.NewService(repo)
+}
+
+func provideRolePolicyHandler(svc *rolepolicy.Service) *handler.RolePolicyHandler {
+	return handler.NewRolePolicyHandler(svc)
 }
 
 func seedPrompts(ctx context.Context, repo port.PromptRepository) error {

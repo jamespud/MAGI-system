@@ -84,7 +84,7 @@
 | | HTTP 通用限流 | ✅ | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After（D13，`server/ratelimit.go`） |
 | | 敏感数据分级/租户隔离审计 | ✅ | case/memory 列表查询下沉到 DB（`WHERE user_id=?` + LIMIT/OFFSET 分页），e2e 断言跨用户隔离（D2，`adapter/repository.go`） |
 | | **计算型反馈传感器**（Linter / 编译器 / 单测回喂 → AI 自愈） | ✅ | 内置 `check_output` 工具：模型可对自己的 JSON 输出运行 JSON Schema lint 与字段约束规则（eq/ne/gt/gte/lt/lte/contains），违规以 ToolMessage 回喂并自愈（`domain/runtime/feedback.go`、`adapter/feedback_tool.go`、`feedback_tool` 配置默认开启）；代码 linter/编译/单测回喂仍可经 MCP/coderunner 扩展 |
-| | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表可版本化/可编辑（D12，`domain/prompt/`）是雏形；FSM/投票/RoleGate 仍为硬编码 Go 规则 |
+| | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表（D12，`domain/prompt/`）+ 角色契约规范：`role_policy` 表持久化、`GET/PUT /admin/role-policies/:code` 与 reset、运行时装配覆盖 `MagiConfig.RolePolicy`（`application/rolepolicy/`、`adapter/role_policy_repository.go`）；FSM/投票编排仍为硬编码 Go 规则 |
 | | **自我改进 Harness**（分析失败 → 建议并受控应用规则/prompt） | 🟡 | `POST /admin/selfimprove/analyze` 分析失败 case（事件 + agent run 错误 → gate/tool/model/timeout 分类）生成规则化建议；gate 失败时附版本化 prompt 改进建议；`POST .../apply` 由 admin 确认后写入 prompt registry 并标记 applied（`application/selfimprove/`、`server/router.go`）；全自动改规则仍需治理决策 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
 | | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend/frontend/ops CI 门禁；`benchmark.auto_interval_seconds` 定时自动回归内置基准集（`RunAutoRegression` + lifecycle worker，`magi_benchmark_auto_runs_total` / `magi_benchmark_regression_failures_total` + 告警）；线上 golden 仍缺 |

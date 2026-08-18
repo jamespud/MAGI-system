@@ -515,6 +515,39 @@ func FromSelfImprove(s *entity.SelfImproveSuggestion) SelfImproveSuggestionRespo
 	return out
 }
 
+// RolePolicyDTO is the editable role-contract specification.
+type RolePolicyDTO struct {
+	Role                    string  `json:"role"`
+	EnforceAssessment       bool    `json:"enforce_assessment"`
+	RequiredAssessment      string  `json:"required_assessment"`
+	MaxResidualRisk         float64 `json:"max_residual_risk"`
+	MinTechnicalScore       float64 `json:"min_technical_score"`
+	MinOpportunityScore     float64 `json:"min_opportunity_score"`
+	MinWeightedUtilityScore float64 `json:"min_weighted_utility_score"`
+	DebateDirective         string  `json:"debate_directive"`
+}
+
+func FromRolePolicy(p *entity.RolePolicy) RolePolicyDTO {
+	if p == nil {
+		return RolePolicyDTO{}
+	}
+	return RolePolicyDTO{
+		Role: p.Role, EnforceAssessment: p.EnforceAssessment,
+		RequiredAssessment: p.RequiredAssessment, MaxResidualRisk: p.MaxResidualRisk,
+		MinTechnicalScore: p.MinTechnicalScore, MinOpportunityScore: p.MinOpportunityScore,
+		MinWeightedUtilityScore: p.MinWeightedUtilityScore, DebateDirective: p.DebateDirective,
+	}
+}
+
+func (d RolePolicyDTO) ToEntity() entity.RolePolicy {
+	return entity.RolePolicy{
+		Role: d.Role, EnforceAssessment: d.EnforceAssessment,
+		RequiredAssessment: d.RequiredAssessment, MaxResidualRisk: d.MaxResidualRisk,
+		MinTechnicalScore: d.MinTechnicalScore, MinOpportunityScore: d.MinOpportunityScore,
+		MinWeightedUtilityScore: d.MinWeightedUtilityScore, DebateDirective: d.DebateDirective,
+	}
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

@@ -37,6 +37,7 @@ type RouteDeps struct {
 	Recurring    *recurring.Service
 	Replay       *replay.Service
 	SelfImprove  *handler.SelfImproveHandler
+	RolePolicy   *handler.RolePolicyHandler
 	Evaluation   *evaluation.Service
 	Judge        *judge.Service
 	Memory       *memory.Service
@@ -118,6 +119,11 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		v1.POST("/admin/selfimprove/analyze", RequireAnyRole("admin", "operator"), deps.SelfImprove.Analyze)
 		v1.GET("/admin/selfimprove/suggestions", RequireAnyRole("admin", "operator"), deps.SelfImprove.List)
 		v1.POST("/admin/selfimprove/suggestions/:id/apply", RequireRole("admin"), deps.SelfImprove.Apply)
+	}
+	if deps.RolePolicy != nil {
+		v1.GET("/admin/role-policies", RequireAnyRole("admin", "operator"), deps.RolePolicy.List)
+		v1.PUT("/admin/role-policies/:code", RequireAnyRole("admin", "operator"), deps.RolePolicy.Update)
+		v1.POST("/admin/role-policies/:code/reset", RequireAnyRole("admin", "operator"), deps.RolePolicy.Reset)
 	}
 
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)

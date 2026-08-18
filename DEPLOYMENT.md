@@ -51,6 +51,16 @@ propose a prompt change. Suggestions stay `open` until an admin applies them
 prompt to the versioned prompt registry and marks the suggestion `applied`.
 Nothing is applied automatically; the operator is the approval gate.
 
+### Editable role contracts (NLAH control surface)
+
+The per-role evidence-gate policy (required assessment type, residual-risk /
+technical / opportunity score thresholds, weighted-utility gate, debate
+directive) is stored in the `role_policy` table and editable over
+`GET/PUT /admin/role-policies/:code` (reset with
+`POST .../reset`). Stored specs override the built-in defaults when agent
+configs are assembled at startup, so tuning a role's decision boundary is a
+versioned, auditable config change rather than a code change.
+
 ### Default observability stack
 
 With the web stack running, start the bundled Prometheus + Alertmanager +

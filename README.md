@@ -267,6 +267,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Restricted URL fetch** - `web_fetch` fetches allow-listed domains and returns readable text with size/timeout bounds and SSRF protection (`web_tool` config).
 - **Dynamic sub-investigation** - the `delegate` tool spawns an independent subagent to investigate a sub-question and returns its evidence for citation (`delegate_tool` config).
 - **OIDC SSO + self-registration** - authorization-code login against any OIDC issuer with signed session cookies; first login can auto-provision an account, and public self-registration issues a one-time key.
+- **Editable role contracts** - the per-role evidence-gate policy is stored and editable via admin API (`role_policy` table + `GET/PUT /admin/role-policies/:code`), overriding the built-in defaults at runtime.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -294,6 +295,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
 | POST/GET | `/admin/benchmarks/seed`, `/admin/eval/summary` | Seed built-in benchmark suite / aggregate evaluation dashboard (admin) |
 | POST/GET/POST | `/admin/selfimprove/analyze`, `/admin/selfimprove/suggestions`, `/admin/selfimprove/suggestions/:id/apply` | Analyze failed cases into improvement suggestions and apply them under admin approval |
+| GET/PUT/POST | `/admin/role-policies`, `/admin/role-policies/:code`, `/admin/role-policies/:code/reset` | Editable role-contract specifications (NLAH control surface) |
 | GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
 | POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |
 | GET | `/me` (+`POST /me/keys`) | Current principal + self-issued keys |

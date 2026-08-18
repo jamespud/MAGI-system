@@ -393,6 +393,7 @@ func AllModels() []any {
 		&UserModel{},
 		&ApiKeyModel{},
 		&PromptTemplateModel{},
+		&RolePolicyModel{},
 		&ConversationModel{},
 		&SelfImproveModel{},
 		&ConversationMessageModel{},
