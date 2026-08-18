@@ -901,6 +901,7 @@ func codeRunnerAdapter(cfg *Config) port.CodeRunnerPort {
 			Image:            cfg.CodeRunner.Docker.Image,
 			MemoryMB:         cfg.CodeRunner.Docker.MemoryMB,
 			CPUs:             cfg.CodeRunner.Docker.CPUs,
+			Runtime:          cfg.CodeRunner.Docker.Runtime,
 			DockerTimeout:    cfg.CodeRunner.Docker.TimeoutSeconds,
 			DefaultTimeout:   p.TimeoutSeconds,
 		}, nil)

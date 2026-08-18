@@ -16,6 +16,7 @@ type DockerCodeRunnerPolicy struct {
 	Image          string
 	MemoryMB       int64
 	CPUs           string
+	Runtime        string // optional container runtime (e.g. "runsc" for gVisor lightweight virtualization)
 	DockerTimeout  int
 	DefaultTimeout int
 }
@@ -33,6 +34,7 @@ type DockerCodeRunnerAdapter struct {
 	image    string
 	memoryMB int64
 	cpus     string
+	runtime  string
 	timeout  time.Duration
 	runCmd   dockerRunFunc
 }
@@ -62,7 +64,7 @@ func NewDockerCodeRunnerAdapter(p DockerCodeRunnerPolicy, runCmd dockerRunFunc) 
 	}
 	return &DockerCodeRunnerAdapter{
 		policy: p.CodeRunnerPolicy, image: p.Image, memoryMB: p.MemoryMB,
-		cpus: p.CPUs, timeout: timeout, runCmd: executor,
+		cpus: p.CPUs, runtime: strings.TrimSpace(p.Runtime), timeout: timeout, runCmd: executor,
 	}, nil
 }
 
@@ -76,6 +78,9 @@ func (a *DockerCodeRunnerAdapter) Run(ctx context.Context, lang, code string) (s
 		return "", fmt.Errorf("docker coderunner: no interpreter for language %q", lang)
 	}
 	args := []string{"run", "--rm", "--network", "none", "--pids-limit", "64"}
+	if a.runtime != "" {
+		args = append(args, "--runtime", a.runtime)
+	}
 	if a.memoryMB > 0 {
 		args = append(args, "--memory", fmt.Sprintf("%dm", a.memoryMB))
 	}

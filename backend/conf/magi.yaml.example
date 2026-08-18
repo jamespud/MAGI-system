@@ -193,6 +193,9 @@ code_runner:
     image: "python:3.12-slim"
     memory_mb: 512
     cpus: "1.0"
+    # Optional container runtime for lightweight virtualization isolation,
+    # e.g. "runsc" (gVisor) installed as a Docker runtime.
+    runtime: ""
     timeout_seconds: 30
 
 # Built-in read-only database query tool (db_query). Executes a single

@@ -272,6 +272,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Self-improving automation (guarded)** - after each automated regression, recurring failure suggestions can be auto-applied to the versioned prompt registry once a category reaches a configured threshold (`selfimprove.auto_apply_enabled`).
 - **Task state tree** - each agent/round execution is recorded as a node (`GET /cases/:id/task-tree`) and shown in the Replay trace view.
 - **External deterministic sensors** - register linter/compiler/unit-test commands (`sensor_tool`); the `run_check` tool executes only registered checks and feeds output back for self-correction.
+- **Lightweight VM sandboxing** - the Docker sandbox accepts a container `runtime` (e.g. gVisor `runsc`) for lightweight-virtualization isolation on top of network/memory/CPU/PID/time limits.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -315,7 +316,7 @@ model: { api_key: "...", model_name: "..." }   # or model_id for Coze mode
 auth: { enabled: true, api_keys: [...] }        # static bootstrap keys (DB keys managed via /admin/users)
 limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
-code_runner.docker: { enabled: true, image: "python:3.12-slim", memory_mb: 512, cpus: "1.0" }
+code_runner.docker: { enabled: true, image: "python:3.12-slim", memory_mb: 512, cpus: "1.0", runtime: "runsc" }
 db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
 file_tool: { enabled: true, roots: ["/var/lib/magi"] }
 repo_tool: { enabled: true, roots: ["/srv/app"] }

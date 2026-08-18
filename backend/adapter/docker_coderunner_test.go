@@ -69,6 +69,28 @@ func TestDockerCodeRunner_RunsIsolatedContainer(t *testing.T) {
 	}
 }
 
+func TestDockerCodeRunner_AppliesConfiguredRuntime(t *testing.T) {
+	var gotArgs []string
+	exec := func(ctx context.Context, args ...string) ([]byte, error) {
+		gotArgs = append([]string(nil), args...)
+		return []byte("ok"), nil
+	}
+	adapter, err := magi.NewDockerCodeRunnerAdapter(magi.DockerCodeRunnerPolicy{
+		CodeRunnerPolicy: magi.DefaultCodeRunnerPolicy(),
+		Image:            "python:3.12-slim", Runtime: "runsc",
+	}, exec)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := adapter.Run(context.Background(), "Python", "print(1)"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	joined := strings.Join(gotArgs, " ")
+	if !strings.Contains(joined, "--runtime runsc") {
+		t.Fatalf("runtime arg missing: %s", joined)
+	}
+}
+
 func TestDockerCodeRunner_ReportsTimeout(t *testing.T) {
 	exec := func(ctx context.Context, args ...string) ([]byte, error) {
 		<-ctx.Done()

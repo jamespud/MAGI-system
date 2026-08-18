@@ -110,6 +110,7 @@ type DockerCodeRunnerConfig struct {
 	Image          string `yaml:"image"`
 	MemoryMB       int64  `yaml:"memory_mb"`
 	CPUs           string `yaml:"cpus"`
+	Runtime        string `yaml:"runtime"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 

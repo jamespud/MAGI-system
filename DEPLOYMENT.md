@@ -208,7 +208,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 | `auth` | `enabled: true` + `api_keys` (name/key/user_id/role) act as static bootstrap credentials. Runtime users/keys are managed over the admin API (`/admin/users`) and stored in DB (`users` / `api_keys`, SHA-256-hashed, plaintext shown once at issuance) |
 | `limits` | `max_concurrent_runs_per_user` |
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
-| `code_runner.docker` | Optional Docker sandbox runtime: `docker run --rm --network none --pids-limit 64` with `memory_mb`/`cpus`/`timeout_seconds` limits; reuses the shared language/length/blocked-pattern policy; requires a local docker CLI |
+| `code_runner.docker` | Optional Docker sandbox runtime: `docker run --rm --network none --pids-limit 64` with `memory_mb`/`cpus`/`timeout_seconds` limits and optional `runtime` (e.g. gVisor `runsc`); reuses the shared language/length/blocked-pattern policy; requires a local docker CLI |
 | `db_tool` | Built-in `db_query` tool: single read-only SELECT inside a read-only transaction; `driver`/`dsn` default to the `database` block, `max_rows`/`max_query_chars`/`timeout_seconds` bound each call, `blocked_prefixes` adds write-statement rejections |
 | `file_tool` | Built-in read-only `file_query` tool: allow-listed absolute `roots`, traversal rejection, `max_file_bytes` / `max_list_items` bounds |
 | `repo_tool` | Built-in read-only `repo_query` tool: grep substring / list files inside allow-listed roots, `includes` extension filter, `max_results` / `max_file_bytes` bounds, symlink-escape rejection |
