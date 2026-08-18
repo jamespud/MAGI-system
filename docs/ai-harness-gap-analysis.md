@@ -53,7 +53,7 @@
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱；多搜索提供商抽象 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job | 前端 trace 可视化、默认告警/看板栈、任务级 pause->hibernate->wake | 🟡 |
-| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions 双栈 CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
 
 ### 2.2 明细能力矩阵
 
@@ -87,7 +87,7 @@
 | | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表可版本化/可编辑（D12，`domain/prompt/`）是雏形；FSM/投票/RoleGate 仍为硬编码 Go 规则 |
 | | **自我改进 Harness**（分析失败 → 自动改 AGENTS.md / 规则） | ❌ | 无 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
-| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend gofmt/test/race/vet 与 frontend tsc/vitest/build 门禁；线上 golden 与自动回归触发仍缺 |
+| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend gofmt/test/race/vet、frontend tsc/vitest/build、ops scripts 语法与备份恢复 dry-run 门禁；线上 golden 与自动回归触发仍缺 |
 | | 标准基准集 / 评测指标看板 | ❌ | 仅自定义数据集评测，无可复用行业基准与聚合看板 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ❌ | OTel 默认 log sink，无 trace UI |
@@ -99,7 +99,7 @@
 | **部署运营** | Docker compose / readiness / config fail-fast / 多实例 worker | ✅ | `docker/`、`bootstrap/config.go` |
 | | K8s/Helm 清单、横向扩容文档 | ✅ | `deploy/magi/` Helm chart（Deployment/Service/ConfigMap/Secret/Ingress/HPA/PDB、SSE-aware nginx、readiness/liveness probes）；`deploy/k8s/magi.yaml` 渲染清单；`deploy/magi/README.md` 与 `DEPLOYMENT.md` 提供镜像、外部密钥、外部依赖与多副本扩容说明 |
 | | 跨实例 SSE 实时推送 | ✅ | SSE + DB 轮询兜底（`EventRepository.ListAfter`，按时间戳增量拉取 + ID 去重）（D4，`server/sse.go`） |
-| | 数据导出 / 备份方案 | 🟡 | case/memory/eval 全量导出已实现（D15，`server/handler/export.go`）；备份/迁移快照策略仍缺 |
+| | 数据导出 / 备份方案 | ✅ | case/memory/eval 全量导出（D15，`server/handler/export.go`）；`scripts/backup.sh` 输出 MySQL 单事务 dump + Milvus/ES/etcd/MinIO 卷快照 + SHA256 清单并支持保留策略；`scripts/restore.sh` 提供安全校验、dry-run、数据库重建与 RAG 卷恢复 |
 
 ---
 ## 三、现有功能实现缺陷清单
@@ -158,7 +158,7 @@
 
 **D14. 无 i18n**：UI 全英文；中文用户（设计文档本身是中文）使用成本高。
 
-**D15. 数据导出/备份弱**：只有数据集 item export；无 case/memory/评测结果全量导出、无迁移快照策略（DEPLOYMENT.md 提到 atlas SQL 仅文档用途）。
+**D15. 数据导出/备份弱** - ✅ 已修复：case/memory/eval 全量导出已实现；`scripts/backup.sh` / `scripts/restore.sh` 提供校验、保留策略、MySQL 逻辑备份、RAG 数据卷快照与 destructive-restore 防护（DEPLOYMENT.md 提供灾备流程）。
 
 **D16. 缺 CRUD 完整性**：无 `DELETE /cases/:id`、无 `DELETE /datasets/:id`、无 `DELETE /evaluation` 等；数据集删除只能删 item。
 
@@ -177,7 +177,7 @@
 5. **多模型编排**：per-agent/commander/judge 独立模型配置，多供应商路由与降级，模型参数管理。
 6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
 7. **可观测性**：默认 trace 落库 + 前端 trace 视图、通用 HTTP 限流、告警默认部署。
-8. **运营与交付**：K8s/Helm 已完成；剩余备份/恢复策略与 i18n 覆盖度。
+8. **运营与交付**：K8s/Helm 与备份/恢复已完成；剩余 i18n 覆盖度与灾备演练自动化。
 
 ---
 
@@ -200,7 +200,7 @@
 - 身份体系（SSO/OAuth/用户自助/密钥轮换）。
 - 通用任务执行层（基于现有 agent loop 扩展 code/file/shell 工具 + 审批门）。
 - 评估运营化（线上 golden + 看板 + prompt 运营；CI 门禁已完成）。
-- 可观测性栈 + i18n（K8s/Helm 已完成）。
+- 可观测性栈 + 灾备演练自动化（K8s/Helm 与备份/恢复已完成）。
 
 ---
 
@@ -243,7 +243,7 @@ P2 级缺陷（D9–D17）已全部实现，通过 `go build` / `go vet` / `go t
 | D12 提示词硬编码 | 版本化提示词注册表：`prompt_template` 表 + `PromptRepository/Provider`，启动从内置默认种子，`GET/PUT /admin/prompts/:key`、`POST /admin/prompts/:key/restore`；Commander（normalize/report）与 agent workflow 模板运行时经 provider 加载、内置兜底 | `domain/prompt/`、`adapter/prompt_repository.go`、`domain/service/commander.go`、`domain/runtime/prompt.go` |
 | D13 无 HTTP 限流 | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After，含单测 | `server/ratelimit.go`、`bootstrap/config.go`、`server/ratelimit_test.go` |
 | D14 无 i18n | 内置轻量 i18n（无新依赖）：`frontend/src/i18n/`，en/zh 字典 + `t()/useT()/useLang()`，TopNav 语言切换器（localStorage 持久化），导航/侧栏/工作台/记忆/工具/审批/历史/模板/基准/评测/数据集/设置等主要页面完成字符串抽取 | `frontend/src/i18n/`、`frontend/src/components/layout/TopNav.tsx`、各 pages |
-| D15 数据导出弱 | `GET /cases/:id/export`（case+resolution+report+agents+evidence+claims+votes+tool_calls+events+memory 全量 JSON）、`GET /memory/export`（本人全部记忆）、`GET /evaluation/:id/export`（评测+judge）；前端 CaseHeader/记忆/评测页导出按钮 | `server/handler/export.go`、`server/dto/dto.go`、`frontend/src/api/client.ts` |
+| D15 数据导出/备份弱 | `GET /cases/:id/export`（case+resolution+report+agents+evidence+claims+votes+tool_calls+events+memory 全量 JSON）、`GET /memory/export`（本人全部记忆）、`GET /evaluation/:id/export`（评测+judge）；`scripts/backup.sh` / `scripts/restore.sh` 覆盖 MySQL + Milvus/ES/etcd/MinIO、SHA256 校验、保留策略、dry-run 与恢复防护；前端 CaseHeader/记忆/评测页导出按钮 | `server/handler/export.go`、`server/dto/dto.go`、`frontend/src/api/client.ts`、`scripts/backup.sh`、`scripts/restore.sh` |
 | D16 CRUD 不完整 | `DELETE /cases/:id`（级联清理全部 case_id 产物 + tool_call/reflection 经 agent_run 子查询）、`DELETE /datasets/:id`（级联 items/runs/results，先中止进行中 run） | `adapter/repository.go`、`adapter/dataset_repository.go`、`application/decision/service.go`、`application/dataset/service.go` |
 | D17 可观测性默认弱 | `/metrics` 增加 `metrics.auth_required`（开启后要求 admin 角色，open 模式放行），限流/评测/导出等均接入日志；文档补充 alert 与授权说明 | `server/router.go`、`bootstrap/config.go`、`backend/conf/magi.yaml.example` |
 

@@ -239,6 +239,58 @@ release blocker.
    to server logs when `tracing.enabled: true`. Events are persisted in the
    event store and available via `/api/v1/cases/<id>/events`.
 
+## Backup and disaster recovery
+
+### Create a full-stack backup
+
+```bash
+make backup
+# or with explicit retention/output settings:
+MAGI_BACKUP_RETAIN=30 MAGI_BACKUP_DIR=/secure/magi-backups scripts/backup.sh
+```
+
+`scripts/backup.sh` pauses only the application server, then creates:
+
+- a single-transaction MySQL logical dump of all MAGI tables;
+- archives of `magi-milvus-data`, `magi-es-data`, `magi-etcd-data`, and
+  `magi-minio-data`;
+- `SHA256SUMS`, a manifest, and one portable `magi-backup-<timestamp>.tar.gz`.
+
+Retention removes only old `magi-backup-*.tar.gz` files in the output
+directory. Store bundles off-host and encrypt them: they contain case content,
+knowledge, memories, checkpoint state, and credential hashes. A production RPO
+is determined by how often this command is scheduled (for example, nightly with
+cron, systemd timers, or your platform scheduler).
+
+### Verify and restore
+
+Inspect a bundle without touching running services:
+
+```bash
+scripts/restore.sh --bundle backups/magi-backup-<timestamp>.tar.gz --dry-run
+```
+
+Restore is destructive. It stops the application, drops and recreates the
+configured MySQL database, restores the SQL dump, replaces RAG volume contents,
+and restarts the stack:
+
+```bash
+scripts/restore.sh \
+  --bundle backups/magi-backup-<timestamp>.tar.gz \
+  --confirm
+curl http://localhost/ready
+```
+
+Use `--skip-rag` only for a deliberate database-only recovery. Test a restore
+into an isolated environment after every backup-process or Docker-volume layout
+change; an untested backup is not a recovery plan.
+
+For Kubernetes, use the persistent-volume backup strategy supported by the
+platform (for example Velero with restic/Kopia), plus managed MySQL PITR or
+scheduled `mysqldump`. The Helm chart intentionally leaves durable storage and
+backup policy to MySQL/RAG providers. Preserve the same namespace/secret and
+database naming conventions in recovery runbooks.
+
 ## Troubleshooting
 
 - **Startup fails fast**: read the error — model must be configured, auth keys

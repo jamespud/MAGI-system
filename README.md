@@ -259,6 +259,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Conversational entry** — `POST /api/v1/assistant` turns a natural-language question into a full decision run with report.
 - **Admin operations** — role-gated usage aggregates (cases/runs/tokens/cost per user) at `GET /api/v1/admin/usage`.
 - **Kubernetes delivery** - Helm chart with backend/frontend deployments, SSE-aware ingress, probes, HPA, PDB, and externally managed secrets (`deploy/magi/`).
+- **Backup and recovery** - verified MySQL + RAG volume backup bundles with checksums, retention, safe inspection, and destructive restore guardrails (`scripts/backup.sh`, `scripts/restore.sh`).
 
 ### API map (v1)
 

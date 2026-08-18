@@ -11,7 +11,7 @@ SCRIPTS_DIR := scripts
         stop \
         fmt vet tidy lint \
         build clean \
-        test \
+        test backup \
         web-up web-down web-logs web-ps
 
 # =============================================================================
@@ -42,6 +42,7 @@ help:
 	@echo ""
 	@echo "Quality"
 	@echo "  make test             Run all tests (Go + frontend)"
+	@echo "  make backup           Create a verified full-stack backup bundle"
 	@echo ""
 	@echo "Web (containerized stack)"
 	@echo "  make web-up           Build + start full stack (mysql + server + nginx)"
@@ -100,6 +101,9 @@ clean:
 test:
 	go -C backend test ./...
 	npm -C frontend test
+
+backup:
+	bash $(SCRIPTS_DIR)/backup.sh
 
 fmt:
 	go -C backend fmt ./...

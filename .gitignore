@@ -42,3 +42,6 @@ docs/superpowers/
 
 # build artifacts
 backend/magi-server
+
+# local backup bundles
+backups/

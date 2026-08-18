@@ -48,6 +48,42 @@ jobs:
       - name: Run vet
         run: go vet ./...
 
+  scripts:
+    name: Operational scripts gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/backup.sh
+          bash -n scripts/restore.sh
+
+      - name: Smoke-test backup planning
+        run: scripts/backup.sh --output "$RUNNER_TEMP/magi-backups" --dry-run
+
+      - name: Smoke-test restore bundle verification
+        run: |
+          root="$RUNNER_TEMP/magi-restore-fixture"
+          mkdir -p "$root/mysql" "$root/rag"
+          printf '%s\n' '-- synthetic MySQL dump --' | gzip -c > "$root/mysql/mysql.sql.gz"
+          for name in milvus es etcd minio; do
+            printf '%s synthetic volume\n' "$name" | gzip -c > "$root/rag/$name.tar.gz"
+          done
+          cat > "$root/manifest.txt" <<'EOF'
+          MAGI_BACKUP_FORMAT=1
+          CREATED_AT_UTC=20260818T000000Z
+          DB_NAME=magi
+          MYSQL_DUMP=mysql/mysql.sql.gz
+          EOF
+          (
+            cd "$root"
+            find mysql rag -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          tar -czf "$RUNNER_TEMP/magi-backup.tar.gz" -C "$root" manifest.txt SHA256SUMS mysql rag
+          scripts/restore.sh --bundle "$RUNNER_TEMP/magi-backup.tar.gz" --dry-run
+
   frontend:
     name: Frontend quality gate
     runs-on: ubuntu-latest
