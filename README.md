@@ -256,6 +256,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Pluggable web search** - ordered Tavily/Brave providers normalize results into the evidence pipeline and fail over with `magi_web_search_failovers_total` observability.
 - **Read-only database tool** - `db_query` runs a single SELECT inside a read-only transaction with row/length/timeout guards and write-statement rejection (`db_tool` config).
 - **Hibernate and wake** - pause a running case (`POST /cases/:id/pause`), park its durable job, then wake it (`/resume`) to continue from its checkpoint with the FSM state restored.
+- **Built-in benchmark suite + dashboard** - one-click seed of a reusable decision sanity suite and an aggregate evaluation summary (accuracy/stability/regression per dataset and recent runs).
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -281,6 +282,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | GET | `/admin/usage`, `/me/usage` | Admin usage aggregate / own usage + budget |
 | GET/PUT/POST | `/admin/prompts`, `/admin/prompts/:key` (+`/restore`) | Versioned prompt registry (P2) |
 | POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
+| POST/GET | `/admin/benchmarks/seed`, `/admin/eval/summary` | Seed built-in benchmark suite / aggregate evaluation dashboard (admin) |
 | GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
 | POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |
 | GET | `/me` (+`POST /me/keys`) | Current principal + self-issued keys |

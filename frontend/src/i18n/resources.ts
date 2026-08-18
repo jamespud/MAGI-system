@@ -122,6 +122,18 @@ export const en: Record<string, string> = {
   // Benchmark
   'benchmark.title': 'Benchmark',
   'benchmark.empty': 'No benchmark runs yet.',
+  'benchmark.dashboard': 'Evaluation dashboard',
+  'benchmark.seed': 'Seed built-in suite',
+  'benchmark.seeded': 'Seeded:',
+  'benchmark.seedFailed': 'Seed failed',
+  'benchmark.totalRuns': 'Total runs',
+  'benchmark.avgAccuracy': 'Avg accuracy',
+  'benchmark.avgStability': 'Avg stability',
+  'benchmark.regressionFailures': 'Regression fails',
+  'benchmark.dataset': 'Dataset',
+  'benchmark.runs': 'Runs',
+  'benchmark.recentRuns': 'Recent runs',
+  'benchmark.noSummary': 'No evaluation data yet.',
 
   // Evaluation
   'evaluation.title': 'Evaluation',
@@ -282,6 +294,18 @@ export const zh: Record<string, string> = {
 
   'benchmark.title': '基准测试',
   'benchmark.empty': '暂无基准测试记录。',
+  'benchmark.dashboard': '评测看板',
+  'benchmark.seed': '植入内置基准集',
+  'benchmark.seeded': '已植入：',
+  'benchmark.seedFailed': '植入失败',
+  'benchmark.totalRuns': '总运行数',
+  'benchmark.avgAccuracy': '平均准确率',
+  'benchmark.avgStability': '平均稳定性',
+  'benchmark.regressionFailures': '回归失败',
+  'benchmark.dataset': '数据集',
+  'benchmark.runs': '运行数',
+  'benchmark.recentRuns': '最近运行',
+  'benchmark.noSummary': '暂无评测数据。',
 
   'evaluation.title': '评测',
   'evaluation.placeholder': '决策 ID（如 case-…）',

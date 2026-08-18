@@ -153,6 +153,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/datasets/:id/runs", dsH.ListRuns)
 	v1.GET("/benchmarks/:runID", dsH.RunDetail)
 	v1.PATCH("/benchmarks/:runID/results/:resultID", dsH.AddFeedback)
+	v1.POST("/admin/benchmarks/seed", RequireRole("admin"), dsH.SeedBuiltin)
+	v1.GET("/admin/eval/summary", RequireRole("admin"), dsH.EvalSummary)
 
 	plugH := handler.NewPluginsHandler(deps.Plugins)
 	v1.GET("/plugins", plugH.List)

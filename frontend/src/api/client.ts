@@ -265,6 +265,10 @@ export const api = {
 
   getDatasetRuns: (id: string) => request<ApiBenchmarkRun[]>(`/datasets/${id}/runs`),
 
+  seedBuiltinBenchmark: () => request<ApiDataset>('/admin/benchmarks/seed', { method: 'POST' }),
+
+  getEvalSummary: () => request<ApiEvalSummary>('/admin/eval/summary'),
+
   searchMemory: (query: string, limit = 20) =>
     request<{ results: ApiMemoryProjection[] }>(`/memory?q=${encodeURIComponent(query)}&limit=${limit}`),
 
@@ -582,6 +586,32 @@ interface ApiJudgeResult {
   created_at: string;
 }
 
+interface ApiEvalSummary {
+  total_runs: number;
+  succeeded_runs: number;
+  failed_runs: number;
+  avg_accuracy: number;
+  avg_stability: number;
+  regression_failed_runs: number;
+  datasets: {
+    dataset_id: string;
+    name: string;
+    runs: number;
+    avg_accuracy: number;
+    avg_stability: number;
+  }[];
+  recent_runs: {
+    run_id: string;
+    dataset_id: string;
+    dataset_name: string;
+    status: string;
+    accuracy: number;
+    stability: number;
+    regression_failed: boolean;
+    completed_at?: string;
+  }[];
+}
+
 interface ApiApproval {
   id: string;
   case_id: string;
@@ -644,6 +674,7 @@ export type {
   ApiKnowledgeDoc,
   ApiCaseResponse,
   ApiDataset,
+  ApiEvalSummary,
   ApiBenchmarkRun,
   ApiBenchmarkDetail,
   ApiEvaluation,

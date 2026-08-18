@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jamespud/magi/backend/application/admin"
+	"github.com/jamespud/magi/backend/application/dataset"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -413,6 +414,70 @@ type DatasetResponse struct {
 
 type DatasetListResponse struct {
 	Datasets []DatasetResponse `json:"datasets"`
+}
+
+// EvalDatasetRow is one dataset's aggregate row in the eval summary.
+type EvalDatasetRow struct {
+	DatasetID    string  `json:"dataset_id"`
+	Name         string  `json:"name"`
+	Runs         int     `json:"runs"`
+	AvgAccuracy  float64 `json:"avg_accuracy"`
+	AvgStability float64 `json:"avg_stability"`
+}
+
+// EvalRunRow is one finished benchmark run in the summary.
+type EvalRunRow struct {
+	RunID            string  `json:"run_id"`
+	DatasetID        string  `json:"dataset_id"`
+	DatasetName      string  `json:"dataset_name"`
+	Status           string  `json:"status"`
+	Accuracy         float64 `json:"accuracy"`
+	Stability        float64 `json:"stability"`
+	RegressionFailed bool    `json:"regression_failed"`
+	CompletedAt      string  `json:"completed_at,omitempty"`
+}
+
+// EvalSummaryResponse is the aggregate evaluation dashboard payload.
+type EvalSummaryResponse struct {
+	TotalRuns            int              `json:"total_runs"`
+	SucceededRuns        int              `json:"succeeded_runs"`
+	FailedRuns           int              `json:"failed_runs"`
+	AvgAccuracy          float64          `json:"avg_accuracy"`
+	AvgStability         float64          `json:"avg_stability"`
+	RegressionFailedRuns int              `json:"regression_failed_runs"`
+	Datasets             []EvalDatasetRow `json:"datasets"`
+	RecentRuns           []EvalRunRow     `json:"recent_runs"`
+}
+
+func FromEvalSummary(s *dataset.EvalSummary) EvalSummaryResponse {
+	if s == nil {
+		return EvalSummaryResponse{}
+	}
+	out := EvalSummaryResponse{
+		TotalRuns: s.TotalRuns, SucceededRuns: s.SucceededRuns, FailedRuns: s.FailedRuns,
+		AvgAccuracy: s.AvgAccuracy, AvgStability: s.AvgStability, RegressionFailedRuns: s.RegressionFailedRuns,
+	}
+	for _, d := range s.Datasets {
+		if d == nil {
+			continue
+		}
+		out.Datasets = append(out.Datasets, EvalDatasetRow{
+			DatasetID: d.DatasetID, Name: d.Name, Runs: d.Runs,
+			AvgAccuracy: d.AvgAccuracy, AvgStability: d.AvgStability,
+		})
+	}
+	for _, r := range s.RecentRuns {
+		row := EvalRunRow{
+			RunID: r.RunID, DatasetID: r.DatasetID, DatasetName: r.DatasetName,
+			Status: string(r.Status), Accuracy: r.Accuracy, Stability: r.Stability,
+			RegressionFailed: r.RegressionFailed,
+		}
+		if r.CompletedAt != nil {
+			row.CompletedAt = r.CompletedAt.Format(time.RFC3339)
+		}
+		out.RecentRuns = append(out.RecentRuns, row)
+	}
+	return out
 }
 
 type AddDatasetItemsRequest struct {

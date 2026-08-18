@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,52 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
+
+// BuiltinBenchmarkName is the idempotent seed dataset for the reusable
+// decision sanity suite.
+const BuiltinBenchmarkName = "MAGI Decision Sanity Suite"
+
+// builtinBenchmarkItems is a small, grounded industry-style decision suite
+// covering approve/reject/conditional outcomes across risk, finance, and
+// operations contexts. It is a reusable baseline, not a model-specific eval.
+var builtinBenchmarkItems = []NewItem{
+	{
+		Question:         "Approve the migration of our user database from MySQL 5.7 to MySQL 8.4?",
+		Background:       "The team completed a dry-run migration with no data loss, ran the compatibility report with zero warnings, and scheduled a maintenance window outside peak hours.",
+		ExpectedDecision: entity.VoteDecisionApprove,
+		Weight:           2, Tags: []string{"database", "migration"},
+	},
+	{
+		Question:         "Deploy the unvalidated schema change directly to the production replica?",
+		Background:       "No staging test, no rollback plan, and the change is untested against the current dataset.",
+		ExpectedDecision: entity.VoteDecisionReject,
+		Weight:           2, Tags: []string{"database", "safety"},
+	},
+	{
+		Question:         "Sign the vendor contract with the single bidder?",
+		Background:       "Sole source justified, budget approved, but the contract has no service-level agreement and no penalty clause.",
+		ExpectedDecision: entity.VoteDecisionConditionalApprove,
+		Weight:           1, Tags: []string{"procurement", "risk"},
+	},
+	{
+		Question:         "Roll back the release after a verified 4x error-rate increase?",
+		Background:       "Monitoring shows the new version raised p95 latency and error rate for 30 minutes with no other change in the window.",
+		ExpectedDecision: entity.VoteDecisionApprove,
+		Weight:           2, Tags: []string{"release", "sre"},
+	},
+	{
+		Question:         "Grant admin access to the new intern on day one?",
+		Background:       "No security review, no least-privilege role defined, and the intern does not yet have a named incident-responder role.",
+		ExpectedDecision: entity.VoteDecisionReject,
+		Weight:           1, Tags: []string{"security", "rbac"},
+	},
+	{
+		Question:         "Increase the risk budget for the new market expansion?",
+		Background:       "Projected upside exceeds the residual-risk threshold only under an optimistic adoption scenario; downside case violates the existing policy.",
+		ExpectedDecision: entity.VoteDecisionConditionalApprove,
+		Weight:           1, Tags: []string{"strategy", "risk"},
+	},
+}
 
 // ErrRunActive is returned when a dataset already has a queued/running run.
 var ErrRunActive = errors.New("benchmark run already active")
@@ -248,6 +295,144 @@ func (s *Service) ExportItems(ctx context.Context, ownerID int64, datasetID stri
 		return nil, err
 	}
 	return s.datasets.ListItems(ctx, datasetID)
+}
+
+// SeedBuiltin creates the reusable decision sanity suite when it is not
+// already present. The dataset is owned by the caller (owner 0 = system) and
+// the operation is idempotent by name.
+func (s *Service) SeedBuiltin(ctx context.Context, ownerID int64) (*entity.BenchmarkDataset, bool, error) {
+	all, err := s.datasets.ListDatasets(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("dataset: list for seed: %w", err)
+	}
+	for _, d := range all {
+		if d != nil && d.Name == BuiltinBenchmarkName {
+			return d, false, nil
+		}
+	}
+	created, err := s.Create(ctx, ownerID, BuiltinBenchmarkName,
+		"Reusable decision sanity suite: grounded approve/reject/conditional cases across database, procurement, SRE, security, and strategy.")
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := s.AddItems(ctx, ownerID, created.ID, builtinBenchmarkItems); err != nil {
+		return nil, false, err
+	}
+	created, err = s.Get(ctx, ownerID, created.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	return created, true, nil
+}
+
+// DatasetEvalRow is one dataset's aggregate evaluation row.
+type DatasetEvalRow struct {
+	DatasetID    string
+	Name         string
+	Runs         int
+	AvgAccuracy  float64
+	AvgStability float64
+}
+
+// RunEvalRow is one finished benchmark run in the summary.
+type RunEvalRow struct {
+	RunID            string
+	DatasetID        string
+	DatasetName      string
+	Status           entity.BenchmarkRunStatus
+	Accuracy         float64
+	Stability        float64
+	RegressionFailed bool
+	CompletedAt      *time.Time
+}
+
+// EvalSummary aggregates benchmark runs across datasets for the evaluation
+// dashboard. It is admin-scoped (all datasets are readable).
+func (s *Service) Summary(ctx context.Context) (*EvalSummary, error) {
+	all, err := s.datasets.ListDatasets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("dataset: list for summary: %w", err)
+	}
+	nameByID := make(map[string]string, len(all))
+	for _, d := range all {
+		if d != nil {
+			nameByID[d.ID] = d.Name
+		}
+	}
+	runs, err := s.datasets.ListAllRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("dataset: list runs for summary: %w", err)
+	}
+	summary := &EvalSummary{}
+	perDataset := map[string]*DatasetEvalRow{}
+	var accSum, stabSum float64
+	var succeeded int
+	for _, r := range runs {
+		if r == nil {
+			continue
+		}
+		summary.TotalRuns++
+		switch r.Status {
+		case entity.BenchmarkRunSucceeded:
+			succeeded++
+			summary.SucceededRuns++
+			accSum += r.Accuracy
+			stabSum += r.Stability
+			if r.RegressionFailed {
+				summary.RegressionFailedRuns++
+			}
+		case entity.BenchmarkRunFailed:
+			summary.FailedRuns++
+		}
+		row := perDataset[r.DatasetID]
+		if row == nil {
+			row = &DatasetEvalRow{DatasetID: r.DatasetID, Name: nameByID[r.DatasetID]}
+			perDataset[r.DatasetID] = row
+		}
+		row.Runs++
+		if r.Status == entity.BenchmarkRunSucceeded {
+			row.AvgAccuracy += r.Accuracy
+			row.AvgStability += r.Stability
+		}
+	}
+	if succeeded > 0 {
+		summary.AvgAccuracy = accSum / float64(succeeded)
+		summary.AvgStability = stabSum / float64(succeeded)
+	}
+	for _, row := range perDataset {
+		if row.Runs > 0 {
+			row.AvgAccuracy /= float64(row.Runs)
+			row.AvgStability /= float64(row.Runs)
+		}
+		summary.Datasets = append(summary.Datasets, row)
+	}
+	sort.Slice(summary.Datasets, func(i, j int) bool {
+		return summary.Datasets[i].Runs > summary.Datasets[j].Runs
+	})
+	sort.Slice(runs, func(i, j int) bool { return runs[i].CreatedAt.After(runs[j].CreatedAt) })
+	for _, r := range runs {
+		if len(summary.RecentRuns) >= 5 {
+			break
+		}
+		summary.RecentRuns = append(summary.RecentRuns, RunEvalRow{
+			RunID: r.ID, DatasetID: r.DatasetID, DatasetName: nameByID[r.DatasetID],
+			Status: r.Status, Accuracy: r.Accuracy, Stability: r.Stability,
+			RegressionFailed: r.RegressionFailed, CompletedAt: r.CompletedAt,
+		})
+	}
+	return summary, nil
+}
+
+// EvalSummary is the aggregate evaluation dashboard payload.
+type EvalSummary struct {
+	TotalRuns            int
+	SucceededRuns        int
+	FailedRuns           int
+	AvgAccuracy          float64
+	AvgStability         float64
+	RegressionFailedRuns int
+	Datasets             []*DatasetEvalRow
+	RecentRuns           []RunEvalRow
 }
 
 // StartRun enqueues an asynchronous benchmark run and returns immediately.

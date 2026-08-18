@@ -217,3 +217,27 @@ func (h *DatasetHandler) RunDetail(ctx context.Context, c *app.RequestContext) {
 	}
 	c.JSON(consts.StatusOK, dto.BenchmarkDetailResponse{Run: dto.FromBenchmarkRun(run), Results: out})
 }
+
+// SeedBuiltin creates the idempotent built-in decision sanity suite (admin).
+func (h *DatasetHandler) SeedBuiltin(ctx context.Context, c *app.RequestContext) {
+	d, created, err := h.svc.SeedBuiltin(ctx, CurrentUserID(ctx))
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	status := consts.StatusOK
+	if created {
+		status = consts.StatusCreated
+	}
+	c.JSON(status, dto.FromDataset(d))
+}
+
+// EvalSummary returns the aggregate evaluation dashboard (admin).
+func (h *DatasetHandler) EvalSummary(ctx context.Context, c *app.RequestContext) {
+	summary, err := h.svc.Summary(ctx)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, dto.FromEvalSummary(summary))
+}

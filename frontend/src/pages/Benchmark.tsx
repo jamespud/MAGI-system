@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { api, type ApiBenchmarkDetail, type ApiEvaluation } from '@/api/client';
+import { useEffect, useState } from 'react';
+import { api, type ApiBenchmarkDetail, type ApiEvalSummary, type ApiEvaluation } from '@/api/client';
 import { useT } from '@/i18n';
 
 export default function Benchmark() {
@@ -11,6 +11,26 @@ export default function Benchmark() {
   const [runA, setRunA] = useState('');
   const [runB, setRunB] = useState('');
   const [compare, setCompare] = useState<[ApiBenchmarkDetail, ApiBenchmarkDetail] | null>(null);
+  const [summary, setSummary] = useState<ApiEvalSummary | null>(null);
+  const [seedMsg, setSeedMsg] = useState('');
+
+  useEffect(() => {
+    api.getEvalSummary()
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, []);
+
+  const handleSeed = async () => {
+    setSeedMsg('');
+    try {
+      const d = await api.seedBuiltinBenchmark();
+      setSeedMsg(`${t('benchmark.seeded')} ${d.name} (${d.item_count} items)`);
+      const s = await api.getEvalSummary();
+      setSummary(s);
+    } catch (e) {
+      setSeedMsg(e instanceof Error ? e.message : t('benchmark.seedFailed'));
+    }
+  };
 
   const run = async () => {
     const ids = input.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
@@ -40,6 +60,74 @@ export default function Benchmark() {
   return (
     <div className="p-6 space-y-6">
       <h1 className="text-xl font-semibold">{t('benchmark.title')}</h1>
+
+      <section className="rounded border border-border-dim bg-raised p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">{t('benchmark.dashboard')}</h2>
+          <button
+            className="rounded bg-accent px-3 py-1 text-sm disabled:opacity-50"
+            onClick={() => void handleSeed()}
+          >
+            {t('benchmark.seed')}
+          </button>
+        </div>
+        {seedMsg && <p className="text-xs text-text-secondary">{seedMsg}</p>}
+        {summary ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: t('benchmark.totalRuns'), value: summary.total_runs },
+                { label: t('benchmark.avgAccuracy'), value: `${(summary.avg_accuracy * 100).toFixed(0)}%` },
+                { label: t('benchmark.avgStability'), value: `${(summary.avg_stability * 100).toFixed(0)}%` },
+                { label: t('benchmark.regressionFailures'), value: summary.regression_failed_runs },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded border border-border-dim bg-background p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-text-muted">{label}</p>
+                  <p className="mt-1 text-lg">{value}</p>
+                </div>
+              ))}
+            </div>
+            {summary.datasets.length > 0 && (
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-text-muted">
+                    <th className="py-1 pr-2">{t('benchmark.dataset')}</th>
+                    <th className="py-1 pr-2">{t('benchmark.runs')}</th>
+                    <th className="py-1 pr-2">{t('benchmark.avgAccuracy')}</th>
+                    <th className="py-1">{t('benchmark.avgStability')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.datasets.map((d) => (
+                    <tr key={d.dataset_id} className="border-t border-border-dim">
+                      <td className="py-1 pr-2">{d.name}</td>
+                      <td className="py-1 pr-2">{d.runs}</td>
+                      <td className="py-1 pr-2">{(d.avg_accuracy * 100).toFixed(0)}%</td>
+                      <td className="py-1">{(d.avg_stability * 100).toFixed(0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {summary.recent_runs.length > 0 && (
+              <div>
+                <p className="text-xs text-text-muted mb-1">{t('benchmark.recentRuns')}</p>
+                <ul className="space-y-1">
+                  {summary.recent_runs.map((r) => (
+                    <li key={r.run_id} className="text-xs font-mono text-text-secondary">
+                      {r.dataset_name || r.dataset_id} · {r.status} · {(r.accuracy * 100).toFixed(0)}%
+                      {r.regression_failed ? ' · REGRESSION FAILED' : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">{t('benchmark.noSummary')}</p>
+        )}
+      </section>
+
       <div className="space-y-2">
         <textarea
           className="w-full h-28 rounded border border-border-dim bg-background px-3 py-2 text-sm font-mono"

@@ -591,3 +591,74 @@ func TestService_DeleteCancelsRunsAndRemovesDataset(t *testing.T) {
 		t.Fatal("non-owner delete must fail")
 	}
 }
+
+func TestService_SeedBuiltinIsIdempotent(t *testing.T) {
+	repo := newStubDatasetRepo()
+	svc := dataset.NewService(repo, nil, nil, 2)
+	ctx := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 1, Role: "admin"})
+
+	d1, created, err := svc.SeedBuiltin(ctx, 1)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if !created || d1.Name != dataset.BuiltinBenchmarkName {
+		t.Fatalf("first seed: created=%v dataset=%+v", created, d1)
+	}
+	items, err := svc.ListItems(ctx, 1, d1.ID)
+	if err != nil {
+		t.Fatalf("list items: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("built-in suite must contain items")
+	}
+
+	d2, created, err := svc.SeedBuiltin(ctx, 1)
+	if err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	if created || d2.ID != d1.ID {
+		t.Fatalf("re-seed must be a no-op: created=%v id=%s want=%s", created, d2.ID, d1.ID)
+	}
+}
+
+func TestService_SummaryAggregatesRuns(t *testing.T) {
+	repo := newStubDatasetRepo()
+	svc := dataset.NewService(repo, nil, nil, 2)
+	ctx := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 1, Role: "admin"})
+
+	d, _, err := svc.SeedBuiltin(ctx, 1)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	now := time.Now()
+	runs := []*entity.BenchmarkRun{
+		{ID: "run-1", DatasetID: d.ID, Status: entity.BenchmarkRunSucceeded, Accuracy: 0.8, Stability: 0.9, CompletedAt: &now, CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: "run-2", DatasetID: d.ID, Status: entity.BenchmarkRunSucceeded, Accuracy: 0.6, Stability: 0.7, RegressionFailed: true, CompletedAt: &now, CreatedAt: now.Add(-time.Minute)},
+		{ID: "run-3", DatasetID: d.ID, Status: entity.BenchmarkRunFailed, CreatedAt: now},
+	}
+	for _, r := range runs {
+		if err := repo.CreateRun(ctx, r); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+	}
+
+	summary, err := svc.Summary(ctx)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.TotalRuns != 3 || summary.SucceededRuns != 2 || summary.FailedRuns != 1 {
+		t.Fatalf("counts = %+v", summary)
+	}
+	if summary.AvgAccuracy != 0.7 || summary.AvgStability != 0.8 {
+		t.Fatalf("averages = %+v", summary)
+	}
+	if summary.RegressionFailedRuns != 1 {
+		t.Fatalf("regression failures = %d", summary.RegressionFailedRuns)
+	}
+	if len(summary.Datasets) != 1 || summary.Datasets[0].Name != dataset.BuiltinBenchmarkName {
+		t.Fatalf("dataset rows = %+v", summary.Datasets)
+	}
+	if len(summary.RecentRuns) != 3 || summary.RecentRuns[0].RunID != "run-3" {
+		t.Fatalf("recent runs = %+v", summary.RecentRuns)
+	}
+}

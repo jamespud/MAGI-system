@@ -82,6 +82,8 @@ const openAPISpec = `{
     },
     "/api/v1/recurring/{id}/run": {"post": {"summary": "Trigger a recurring run now", "responses": {"202": {"description": "started"}}}},
     "/api/v1/admin/usage": {"get": {"summary": "Admin usage aggregate (admin only)", "responses": {"200": {"description": "usage"}}}},
+    "/api/v1/admin/benchmarks/seed": {"post": {"summary": "Seed built-in benchmark suite (admin only)", "responses": {"200": {"description": "seeded"}}}},
+    "/api/v1/admin/eval/summary": {"get": {"summary": "Aggregate evaluation summary (admin only)", "responses": {"200": {"description": "summary"}}}},
     "/api/v1/tools": {"get": {"summary": "List tools", "responses": {"200": {"description": "tools"}}}},
     "/api/v1/tools/{name}": {"get": {"summary": "Get tool details", "responses": {"200": {"description": "tool"}}}},
     "/api/v1/approvals": {"get": {"summary": "List tool approval requests", "responses": {"200": {"description": "approvals"}}}},

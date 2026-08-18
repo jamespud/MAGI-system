@@ -3,13 +3,24 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import Benchmark from '../Benchmark';
 
 const mockBenchmark = vi.fn();
+const mockGetEvalSummary = vi.fn();
+const mockSeedBuiltin = vi.fn();
 
 vi.mock('@/api/client', () => ({
-  api: { benchmarkCases: (...a: unknown[]) => mockBenchmark(...a) },
+  api: {
+    benchmarkCases: (...a: unknown[]) => mockBenchmark(...a),
+    getEvalSummary: (...a: unknown[]) => mockGetEvalSummary(...a),
+    seedBuiltinBenchmark: (...a: unknown[]) => mockSeedBuiltin(...a),
+  },
 }));
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  mockGetEvalSummary.mockResolvedValue({
+    total_runs: 0, succeeded_runs: 0, failed_runs: 0,
+    avg_accuracy: 0, avg_stability: 0, regression_failed_runs: 0,
+    datasets: [], recent_runs: [],
+  });
 });
 
 describe('Benchmark page', () => {
@@ -28,5 +39,24 @@ describe('Benchmark page', () => {
     const body = document.body.textContent ?? '';
     expect(body).toContain('500');
     expect(body).toContain('900');
+  });
+
+  it('renders the evaluation dashboard and seeds the built-in suite', async () => {
+    mockGetEvalSummary.mockResolvedValue({
+      total_runs: 3, succeeded_runs: 2, failed_runs: 1,
+      avg_accuracy: 0.7, avg_stability: 0.8, regression_failed_runs: 1,
+      datasets: [{ dataset_id: 'd1', name: 'MAGI Decision Sanity Suite', runs: 3, avg_accuracy: 0.7, avg_stability: 0.8 }],
+      recent_runs: [{ run_id: 'r1', dataset_id: 'd1', dataset_name: 'MAGI Decision Sanity Suite', status: 'succeeded', accuracy: 0.8, stability: 0.9, regression_failed: false }],
+    });
+    mockSeedBuiltin.mockResolvedValue({ id: 'd1', name: 'MAGI Decision Sanity Suite', description: '', item_count: 6, created_at: 't' });
+
+    const { getByText, findByText } = render(<Benchmark />);
+    await findByText('MAGI Decision Sanity Suite');
+    expect(document.body.textContent ?? '').toContain('70%');
+    expect(document.body.textContent ?? '').toContain('MAGI Decision Sanity Suite');
+
+    fireEvent.click(getByText('Seed built-in suite'));
+    await waitFor(() => expect(mockSeedBuiltin).toHaveBeenCalled());
+    expect(document.body.textContent ?? '').toContain('6 items');
   });
 });

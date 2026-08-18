@@ -222,6 +222,37 @@ describe('api.pauseCase and resumeCase', () => {
   });
 });
 
+describe('api.seedBuiltinBenchmark and getEvalSummary', () => {
+  it('seeds the built-in suite and fetches the aggregate summary', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'd1', name: 'MAGI Decision Sanity Suite', item_count: 6, description: '', created_at: 't' }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          total_runs: 2, succeeded_runs: 2, failed_runs: 0,
+          avg_accuracy: 0.8, avg_stability: 0.9, regression_failed_runs: 0,
+          datasets: [], recent_runs: [],
+        }),
+      } as Response);
+
+    const dataset = await api.seedBuiltinBenchmark();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/benchmarks/seed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(dataset.name).toBe('MAGI Decision Sanity Suite');
+
+    const summary = await api.getEvalSummary();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/eval/summary', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(summary.avg_accuracy).toBe(0.8);
+  });
+});
+
 describe('api.getCases wrapper', () => {
   it('unwraps {cases: [...]} envelope', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({

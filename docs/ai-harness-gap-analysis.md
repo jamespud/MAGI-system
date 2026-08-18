@@ -53,7 +53,7 @@
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略、只读 DB 查询工具 | 文件/代码库/浏览器工具；Docker/MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | 🟡 |
-| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板 | 线上 golden、自动回归运营闭环 | 🟡 |
 
 ### 2.2 明细能力矩阵
 
@@ -88,7 +88,7 @@
 | | **自我改进 Harness**（分析失败 → 自动改 AGENTS.md / 规则） | ❌ | 无 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
 | | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend gofmt/test/race/vet、frontend tsc/vitest/build、ops scripts 语法与备份恢复 dry-run 门禁；线上 golden 与自动回归触发仍缺 |
-| | 标准基准集 / 评测指标看板 | ❌ | 仅自定义数据集评测，无可复用行业基准与聚合看板 |
+| | 标准基准集 / 评测指标看板 | ✅ | `POST /admin/benchmarks/seed` 幂等植入内置 "MAGI Decision Sanity Suite"（跨 DB/采购/SRE/安全/战略的 approve/reject/conditional 用例，`application/dataset/service.go`）；`GET /admin/eval/summary` 聚合总运行/成功/失败、平均准确率/稳定性、回归失败数与按数据集/最近运行明细；Benchmark 页评测看板卡片 + seed 按钮 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ✅ | Replay 页 Trace 模式：按 run/agent 分泳道的时间轴可视化（事件按时间定位、按类型着色）、事件计数/运行数/智能体数/错误数统计、点击 marker 查看事件详情（`frontend/src/pages/Replay.tsx`、`api.getTrace`） |
 | | 告警默认部署 / 看板栈 | ✅ | `docker/docker-compose-monitoring.yml` 一键启动 Prometheus（抓取 `magi-server:8080/metrics`）+ Alertmanager + Grafana（自动 provisioning 数据源与 MAGI Overview 看板）；告警规则单一来源 `deploy/prometheus-alerts.example.yml`；`make monitoring-up` |
@@ -175,7 +175,7 @@
 3. **身份与访问管理**：登录/SSO、用户自助、密钥管理、角色粒度（当前只有 admin/非 admin）、审计 UI。
 4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
 5. **多模型编排**：per-agent/commander/judge 独立模型配置与多供应商自动降级已完成；剩余集中式模型参数管理。
-6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
+6. **评估运营化**：CI 门禁、内置基准集与聚合看板已完成；剩余线上 golden、自动回归与 prompt 版本运营。
 7. **可观测性**：前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 看板栈已完成；剩余默认 trace 落库与告警通道（邮件/IM）接入。
 8. **运营与交付**：K8s/Helm 与备份/恢复已完成；剩余 i18n 覆盖度与灾备演练自动化。
 
