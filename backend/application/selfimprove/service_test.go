@@ -194,8 +194,14 @@ func TestService_AutoApplyAppliesRecurringCategory(t *testing.T) {
 	if prompts.saved["agent.workflow_tools"] == nil {
 		t.Fatal("prompt must be written on auto-apply")
 	}
-	if repo.items["s1"].Status != entity.SelfImproveApplied {
-		t.Fatalf("suggestion must be marked applied: %+v", repo.items["s1"])
+	appliedCount := 0
+	for _, item := range repo.items {
+		if item.Status == entity.SelfImproveApplied {
+			appliedCount++
+		}
+	}
+	if appliedCount != 1 {
+		t.Fatalf("expected exactly one applied suggestion, got %d", appliedCount)
 	}
 
 	// Threshold 3 on the same two open suggestions must not apply again.

@@ -26,34 +26,35 @@ import (
 
 // RouteDeps holds all application services needed by the router.
 type RouteDeps struct {
-	Decision     *decision.Service
-	Approval     *approval.Service
-	Assistant    *assistant.Service
-	Auth         *auth.Service
-	Admin        *admin.Service
-	Metrics      *metrics.Registry
-	Dataset      *dataset.Service
-	Plugins      *plugins.Service
-	Recurring    *recurring.Service
-	Replay       *replay.Service
-	SelfImprove  *handler.SelfImproveHandler
-	RolePolicy   *handler.RolePolicyHandler
-	Golden       *handler.GoldenHandler
-	TaskTree     *handler.TaskTreeHandler
-	Evaluation   *evaluation.Service
-	Judge        *judge.Service
-	Memory       *memory.Service
-	Knowledge    *knowledge.Service
-	Users        *users.Service
-	OIDC         *handler.OIDCHandler
-	Tool         *tool.Service
-	Broker       *EventBroker
-	EventRepo    port.EventRepository
-	Export       *handler.ExportHandler
-	HealthPinger handler.Pinger
-	ModelName    string
-	MaxSteps     int
-	Tracing      *trace.TracerProvider
+	Decision        *decision.Service
+	Approval        *approval.Service
+	Assistant       *assistant.Service
+	Auth            *auth.Service
+	Admin           *admin.Service
+	Metrics         *metrics.Registry
+	Dataset         *dataset.Service
+	Plugins         *plugins.Service
+	Recurring       *recurring.Service
+	Replay          *replay.Service
+	SelfImprove     *handler.SelfImproveHandler
+	RolePolicy      *handler.RolePolicyHandler
+	Golden          *handler.GoldenHandler
+	ConsensusPolicy *handler.ConsensusPolicyHandler
+	TaskTree        *handler.TaskTreeHandler
+	Evaluation      *evaluation.Service
+	Judge           *judge.Service
+	Memory          *memory.Service
+	Knowledge       *knowledge.Service
+	Users           *users.Service
+	OIDC            *handler.OIDCHandler
+	Tool            *tool.Service
+	Broker          *EventBroker
+	EventRepo       port.EventRepository
+	Export          *handler.ExportHandler
+	HealthPinger    handler.Pinger
+	ModelName       string
+	MaxSteps        int
+	Tracing         *trace.TracerProvider
 	// RateLimit configures per-minute HTTP rate limiting on /api/v1 (P2 D13).
 	RateLimit RateLimitConfig
 	// MetricsAuth requires the admin role for /metrics when true (P2 D17).
@@ -135,6 +136,11 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		v1.GET("/admin/golden", RequireAnyRole("admin", "operator"), deps.Golden.List)
 		v1.DELETE("/admin/golden/:id", RequireAnyRole("admin", "operator"), deps.Golden.Delete)
 		v1.POST("/admin/golden/sync", RequireAnyRole("admin", "operator"), deps.Golden.Sync)
+	}
+	if deps.ConsensusPolicy != nil {
+		v1.GET("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Get)
+		v1.PUT("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Update)
+		v1.POST("/admin/consensus-policy/reset", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Reset)
 	}
 
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)

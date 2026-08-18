@@ -394,6 +394,7 @@ func AllModels() []any {
 		&ApiKeyModel{},
 		&PromptTemplateModel{},
 		&RolePolicyModel{},
+		&ConsensusPolicyModel{},
 		&GoldenCaseModel{},
 		&TaskNodeModel{},
 		&ConversationModel{},

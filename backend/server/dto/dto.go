@@ -7,6 +7,7 @@ import (
 	"github.com/jamespud/magi/backend/application/admin"
 	"github.com/jamespud/magi/backend/application/dataset"
 
+	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -594,6 +595,28 @@ func FromTaskNode(n *entity.TaskNode) TaskNodeDTO {
 		out.CompletedAt = n.CompletedAt.Format(time.RFC3339)
 	}
 	return out
+}
+
+// ConsensusPolicyDTO is the editable consensus/voting rule set.
+type ConsensusPolicyDTO struct {
+	Quorum                      int  `json:"quorum"`
+	FirstSplitGoesToDebate      bool `json:"first_split_goes_to_debate"`
+	ResolveOnReconsiderMajority bool `json:"resolve_on_reconsider_majority"`
+	ConditionalAsApprove        bool `json:"conditional_as_approve"`
+}
+
+func FromConsensusPolicy(p consensus.ConsensusPolicy) ConsensusPolicyDTO {
+	return ConsensusPolicyDTO{
+		Quorum: p.Quorum, FirstSplitGoesToDebate: p.FirstSplitGoesToDebate,
+		ResolveOnReconsiderMajority: p.ResolveOnReconsiderMajority, ConditionalAsApprove: p.ConditionalAsApprove,
+	}
+}
+
+func (d ConsensusPolicyDTO) ToEntity() consensus.ConsensusPolicy {
+	return consensus.ConsensusPolicy{
+		Quorum: d.Quorum, FirstSplitGoesToDebate: d.FirstSplitGoesToDebate,
+		ResolveOnReconsiderMajority: d.ResolveOnReconsiderMajority, ConditionalAsApprove: d.ConditionalAsApprove,
+	}
 }
 
 type AddDatasetItemsRequest struct {

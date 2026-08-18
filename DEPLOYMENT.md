@@ -61,6 +61,12 @@ directive) is stored in the `role_policy` table and editable over
 configs are assembled at startup, so tuning a role's decision boundary is a
 versioned, auditable config change rather than a code change.
 
+The deterministic consensus/voting rules (quorum, first-round split to
+debate, reconsider majority resolution, conditional-as-approve) are likewise
+editable over `GET/PUT /admin/consensus-policy` (`POST .../reset` restores
+defaults). The orchestrator loads the stored policy at startup, so tuning
+voting thresholds is a config change, not a code change.
+
 ### Online golden regression
 
 Completed production cases can be promoted to the online-golden set

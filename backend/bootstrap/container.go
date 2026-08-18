@@ -27,6 +27,7 @@ import (
 	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
 	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/application/consensuspolicy"
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
@@ -95,6 +96,9 @@ var Module = fx.Options(
 		provideGoldenRepository,
 		provideGoldenService,
 		provideGoldenHandler,
+		provideConsensusPolicyRepository,
+		provideConsensusPolicyService,
+		provideConsensusPolicyHandler,
 		provideTaskTreeRepository,
 		provideTaskTreeHandler,
 		providePromptProvider,
@@ -158,6 +162,7 @@ var Module = fx.Options(
 		siH *handler.SelfImproveHandler,
 		rpH *handler.RolePolicyHandler,
 		goldenH *handler.GoldenHandler,
+		cpH *handler.ConsensusPolicyHandler,
 		ttH *handler.TaskTreeHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
@@ -176,34 +181,35 @@ var Module = fx.Options(
 		tp *trace.TracerProvider,
 	) {
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
-			Decision:     decSvc,
-			Approval:     apprSvc,
-			Judge:        judgeSvc,
-			Auth:         authSvc,
-			Metrics:      reg,
-			Dataset:      dsSvc,
-			Plugins:      plugs,
-			Admin:        admSvc,
-			Recurring:    recSvc,
-			Assistant:    askSvc,
-			Replay:       repSvc,
-			SelfImprove:  siH,
-			RolePolicy:   rpH,
-			Golden:       goldenH,
-			TaskTree:     ttH,
-			Evaluation:   evalSvc,
-			Memory:       memSvc,
-			Knowledge:    knowSvc,
-			Users:        usersSvc,
-			OIDC:         oidcH,
-			Tool:         toolSvc,
-			Broker:       broker,
-			EventRepo:    repo.EventRepo(),
-			HealthPinger: dbPing,
-			Tracing:      tp,
-			ModelName:    cfg.Model.ModelName,
-			MaxSteps:     cfg.Magi.MaxSteps,
-			Export:       handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
+			Decision:        decSvc,
+			Approval:        apprSvc,
+			Judge:           judgeSvc,
+			Auth:            authSvc,
+			Metrics:         reg,
+			Dataset:         dsSvc,
+			Plugins:         plugs,
+			Admin:           admSvc,
+			Recurring:       recSvc,
+			Assistant:       askSvc,
+			Replay:          repSvc,
+			SelfImprove:     siH,
+			RolePolicy:      rpH,
+			Golden:          goldenH,
+			ConsensusPolicy: cpH,
+			TaskTree:        ttH,
+			Evaluation:      evalSvc,
+			Memory:          memSvc,
+			Knowledge:       knowSvc,
+			Users:           usersSvc,
+			OIDC:            oidcH,
+			Tool:            toolSvc,
+			Broker:          broker,
+			EventRepo:       repo.EventRepo(),
+			HealthPinger:    dbPing,
+			Tracing:         tp,
+			ModelName:       cfg.Model.ModelName,
+			MaxSteps:        cfg.Magi.MaxSteps,
+			Export:          handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
 			RateLimit: appserver.RateLimitConfig{
 				Enabled:          cfg.HTTPRateLimit.Enabled,
 				PerUserPerMinute: cfg.HTTPRateLimit.PerUserPerMinute,
@@ -499,7 +505,12 @@ func provideOrchestrator(
 	contextBuilder *domainmemory.ContextBuilder,
 	knowledge port.KnowledgePort,
 	plugs *plugins.Service,
+	policyRepo port.ConsensusPolicyRepository,
 ) *orchestration.Orchestrator {
+	policy := consensus.DefaultConsensusPolicy()
+	if stored, err := policyRepo.Get(context.Background()); err == nil && stored != nil {
+		policy = *stored
+	}
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop:            agentLoop,
 		Consensus:            consensus.NewConsensusEngine(),
@@ -512,9 +523,21 @@ func provideOrchestrator(
 		Knowledge:            knowledge,
 		MemoryRepo:           repo.MemoryRepo(),
 		Configs:              configs,
-		Policy:               consensus.DefaultConsensusPolicy(),
+		Policy:               policy,
 		ToolBindingsProvider: plugs,
 	})
+}
+
+func provideConsensusPolicyRepository(db *gorm.DB) port.ConsensusPolicyRepository {
+	return magi.NewConsensusPolicyRepository(db)
+}
+
+func provideConsensusPolicyService(repo port.ConsensusPolicyRepository) *consensuspolicy.Service {
+	return consensuspolicy.NewService(repo)
+}
+
+func provideConsensusPolicyHandler(svc *consensuspolicy.Service) *handler.ConsensusPolicyHandler {
+	return handler.NewConsensusPolicyHandler(svc)
 }
 
 func provideApprovalRepository(db *gorm.DB) port.ApprovalRepository {
