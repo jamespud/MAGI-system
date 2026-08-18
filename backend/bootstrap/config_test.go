@@ -419,6 +419,41 @@ func TestConfigValidate_RepoTool(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_WebTool(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.WebTool.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "web_tool: at least one allowed domain") {
+		t.Fatalf("expected web_tool domains validation error, got %v", err)
+	}
+	cfg.WebTool.AllowedDomains = []string{"example.com"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid web_tool rejected: %v", err)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsWebToolWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.WebTool.Enabled = true
+	cfg.WebTool.AllowedDomains = []string{"example.com"}
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "web_fetch" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("web_fetch not bound when web_tool enabled: %+v", c.Tools)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsRepoToolWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.RepoTool.Enabled = true

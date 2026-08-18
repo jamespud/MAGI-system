@@ -67,6 +67,7 @@ type Config struct {
 	FeedbackTool FeedbackToolConfig `yaml:"feedback_tool"`
 	FileTool     FileToolConfig     `yaml:"file_tool"`
 	RepoTool     RepoToolConfig     `yaml:"repo_tool"`
+	WebTool      WebToolConfig      `yaml:"web_tool"`
 	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -184,6 +185,14 @@ type RepoToolConfig struct {
 	Includes     []string `yaml:"includes"`
 	MaxResults   int      `yaml:"max_results"`
 	MaxFileBytes int64    `yaml:"max_file_bytes"`
+}
+
+// WebToolConfig configures the built-in restricted URL fetch tool.
+type WebToolConfig struct {
+	Enabled        bool     `yaml:"enabled"`
+	AllowedDomains []string `yaml:"allowed_domains"`
+	MaxBytes       int64    `yaml:"max_bytes"`
+	TimeoutSeconds int      `yaml:"timeout_seconds"`
 }
 
 type EmbeddingConfig struct {
@@ -623,6 +632,9 @@ func enabledLocalTools(cfg *Config) []string {
 	if cfg.RepoTool.Enabled {
 		tools = append(tools, magi.RepoToolName)
 	}
+	if cfg.WebTool.Enabled {
+		tools = append(tools, magi.WebFetchToolName)
+	}
 	return tools
 }
 
@@ -807,6 +819,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 	if cfg.RepoTool.Enabled {
 		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.RepoToolName})
 	}
+	if cfg.WebTool.Enabled {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.WebFetchToolName})
+	}
 	return tools
 }
 
@@ -857,6 +872,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RepoTool.Enabled && len(c.RepoTool.Roots) == 0 {
 		return fmt.Errorf("repo_tool: at least one root is required when enabled")
+	}
+	if c.WebTool.Enabled && len(c.WebTool.AllowedDomains) == 0 {
+		return fmt.Errorf("web_tool: at least one allowed domain is required when enabled")
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")

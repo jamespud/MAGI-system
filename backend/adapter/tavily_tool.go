@@ -91,6 +91,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == WebFetchToolName && r.isEnabled(WebFetchToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       WebFetchToolName,
+				Desc:       "Fetch a URL from an allow-listed domain and return readable text. Responses are size-bounded and HTML is reduced to text.",
+				ArgsSchema: []byte(webFetchArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil

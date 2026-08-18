@@ -129,6 +129,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 		{Source: entity.ToolSourceLocal, ToolName: magi.FeedbackToolName},
 		{Source: entity.ToolSourceLocal, ToolName: magi.FileToolName},
 		{Source: entity.ToolSourceLocal, ToolName: magi.RepoToolName},
+		{Source: entity.ToolSourceLocal, ToolName: magi.WebFetchToolName},
 	}
 
 	all := magi.NewLocalToolRegistry()
@@ -136,7 +137,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
-	if len(defs) != 5 {
+	if len(defs) != 6 {
 		t.Fatalf("all-local registry should resolve every local tool, got %+v", defs)
 	}
 
@@ -183,6 +184,15 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	}
 	if len(defs) != 1 || defs[0].Name != magi.RepoToolName {
 		t.Fatalf("repo-only registry resolved %+v", defs)
+	}
+
+	webOnly := magi.NewLocalToolRegistry(magi.WebFetchToolName)
+	defs, err = webOnly.List(context.Background(), bindings)
+	if err != nil {
+		t.Fatalf("list web only: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != magi.WebFetchToolName {
+		t.Fatalf("web-only registry resolved %+v", defs)
 	}
 }
 

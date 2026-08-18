@@ -309,6 +309,16 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		}
 		executors[magi.RepoToolName] = repoTool
 	}
+	if cfg.WebTool.Enabled {
+		webTool, err := magi.NewWebFetchToolExecutor(magi.WebFetchToolConfig{
+			Enabled: cfg.WebTool.Enabled, AllowedDomains: cfg.WebTool.AllowedDomains,
+			MaxBytes: cfg.WebTool.MaxBytes, TimeoutSeconds: cfg.WebTool.TimeoutSeconds,
+		})
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.WebFetchToolName] = webTool
+	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)
 	if err != nil {

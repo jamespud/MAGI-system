@@ -218,6 +218,16 @@ repo_tool:
   # max_results: 50
   # max_file_bytes: 4194304
 
+# Built-in restricted URL fetch tool (web_fetch): fetch a URL from an
+# allow-listed domain and return readable text. Responses are size-bounded,
+# HTML is reduced to text, non-text content is rejected, and domain-name
+# lookups are checked against private-address SSRF. Disabled by default.
+web_tool:
+  enabled: false
+  allowed_domains: []      # e.g. ["docs.example.com", "api.example.com"]
+  # max_bytes: 524288
+  # timeout_seconds: 10
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:
