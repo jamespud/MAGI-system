@@ -244,6 +244,8 @@ export const api = {
 
   getEvents: (id: string) => request<ApiEvent[]>(`/cases/${id}/events`),
 
+  getTrace: (id: string) => request<ApiEvent[]>(`/cases/${id}/trace`),
+
   listDatasets: () => request<{ datasets: ApiDataset[] }>('/datasets'),
 
   createDataset: (name: string, description?: string) =>

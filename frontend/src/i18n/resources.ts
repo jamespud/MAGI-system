@@ -24,6 +24,18 @@ export const en: Record<string, string> = {
   'nav.history': 'History',
   'nav.users': 'Users',
 
+  // Replay / trace
+  'replay.timeline': 'Timeline',
+  'replay.trace': 'Trace',
+  'replay.load': 'Replay',
+  'replay.loading': 'Loading…',
+  'replay.casePlaceholder': 'Case ID (e.g. case-…) or select from History',
+  'replay.empty': 'No events for this case.',
+  'replay.events': 'Events',
+  'replay.runs': 'Runs',
+  'replay.agents': 'Agents',
+  'replay.errors': 'Errors',
+
   // Decision workspace
   'ws.newDecision': 'New Decision',
   'ws.questionPlaceholder': 'What decision should MAGI analyze?',
@@ -194,6 +206,17 @@ export const zh: Record<string, string> = {
   'nav.benchmark': '基准测试',
   'nav.history': '历史',
   'nav.users': '用户',
+
+  'replay.timeline': '时间线',
+  'replay.trace': 'Trace',
+  'replay.load': '回放',
+  'replay.loading': '加载中…',
+  'replay.casePlaceholder': 'Case ID（如 case-…）或从历史中选择',
+  'replay.empty': '该 case 暂无事件。',
+  'replay.events': '事件',
+  'replay.runs': '运行',
+  'replay.agents': '智能体',
+  'replay.errors': '错误',
 
   'ws.newDecision': '新建决策',
   'ws.questionPlaceholder': 'MAGI 应该分析什么决策？',

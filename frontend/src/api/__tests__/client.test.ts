@@ -175,6 +175,25 @@ describe('api.getEvents', () => {
   });
 });
 
+describe('api.getTrace', () => {
+  it('fetches the execution trace for a case', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 't1', type: 'AGENT_STEP', agent_code: 'melchior', run_id: 'run-1', message: 'step 1', timestamp: 't' },
+      ]),
+    } as Response);
+
+    const result = await api.getTrace('case-001');
+
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/trace', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result[0].id).toBe('t1');
+    expect(result[0].type).toBe('AGENT_STEP');
+  });
+});
+
 describe('api.getCases wrapper', () => {
   it('unwraps {cases: [...]} envelope', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
