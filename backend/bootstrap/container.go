@@ -30,6 +30,7 @@ import (
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
+	"github.com/jamespud/magi/backend/application/golden"
 	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/knowledge"
 	"github.com/jamespud/magi/backend/application/memory"
@@ -91,6 +92,9 @@ var Module = fx.Options(
 		provideRolePolicyRepository,
 		provideRolePolicyService,
 		provideRolePolicyHandler,
+		provideGoldenRepository,
+		provideGoldenService,
+		provideGoldenHandler,
 		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
@@ -151,6 +155,7 @@ var Module = fx.Options(
 		repSvc *replay.Service,
 		siH *handler.SelfImproveHandler,
 		rpH *handler.RolePolicyHandler,
+		goldenH *handler.GoldenHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -181,6 +186,7 @@ var Module = fx.Options(
 			Replay:       repSvc,
 			SelfImprove:  siH,
 			RolePolicy:   rpH,
+			Golden:       goldenH,
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
@@ -979,6 +985,18 @@ func provideRolePolicyService(repo port.RolePolicyRepository) *rolepolicy.Servic
 
 func provideRolePolicyHandler(svc *rolepolicy.Service) *handler.RolePolicyHandler {
 	return handler.NewRolePolicyHandler(svc)
+}
+
+func provideGoldenRepository(db *gorm.DB) port.GoldenRepository {
+	return magi.NewGoldenRepository(db)
+}
+
+func provideGoldenService(repo port.Repository, goldenRepo port.GoldenRepository, datasets port.DatasetRepository) *golden.Service {
+	return golden.NewService(goldenRepo, repo.CaseRepo(), repo.ResolutionRepo(), datasets)
+}
+
+func provideGoldenHandler(svc *golden.Service) *handler.GoldenHandler {
+	return handler.NewGoldenHandler(svc)
 }
 
 func seedPrompts(ctx context.Context, repo port.PromptRepository) error {

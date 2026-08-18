@@ -548,6 +548,28 @@ func (d RolePolicyDTO) ToEntity() entity.RolePolicy {
 	}
 }
 
+// AddGoldenRequest promotes a completed production case to the golden set.
+type AddGoldenRequest struct {
+	CaseID string `json:"case_id"`
+}
+
+// GoldenCaseResponse is one online-golden decision case.
+type GoldenCaseResponse struct {
+	ID               string `json:"id"`
+	CaseID           string `json:"case_id"`
+	Question         string `json:"question"`
+	Context          string `json:"context"`
+	ExpectedDecision string `json:"expected_decision"`
+	CreatedAt        string `json:"created_at"`
+}
+
+func FromGoldenCase(g *entity.GoldenCase) GoldenCaseResponse {
+	return GoldenCaseResponse{
+		ID: g.ID, CaseID: g.CaseID, Question: g.Question, Context: g.Context,
+		ExpectedDecision: string(g.ExpectedDecision), CreatedAt: g.CreatedAt.Format(time.RFC3339),
+	}
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

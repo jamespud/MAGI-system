@@ -61,6 +61,15 @@ directive) is stored in the `role_policy` table and editable over
 configs are assembled at startup, so tuning a role's decision boundary is a
 versioned, auditable config change rather than a code change.
 
+### Online golden regression
+
+Completed production cases can be promoted to the online-golden set
+(`POST /admin/golden` with `{case_id}`; list/delete via `GET/DELETE
+/admin/golden...`). `POST /admin/golden/sync` appends all golden cases to the
+built-in decision sanity suite, so the periodic automated regression gate
+(`benchmark.auto_interval_seconds`) continuously validates real production
+decisions against the current harness.
+
 ### Default observability stack
 
 With the web stack running, start the bundled Prometheus + Alertmanager +
