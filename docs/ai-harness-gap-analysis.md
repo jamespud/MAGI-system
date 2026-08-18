@@ -31,44 +31,53 @@
 ## 二、"全面 AI Harness" 能力矩阵对照
 
 > 参考能力域来自主流 AI harness（LangGraph、AutoGen、CrewAI、Claude Code、OpenHands 等）的功能空间。✅=已实现且较完整，🟡=部分实现/有缺陷，❌=缺失。
+> 更新记录：2026-08-18 按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
 
 | 能力域 | 子能力 | 状态 | 说明 / 证据 |
 | --- | --- | --- | --- |
 | **决策编排** | 确定性 FSM / 硬投票 / 辩论 / 反思 / 复议 / 死锁 | ✅ | `domain/orchestration/orchestrator.go`，~20 状态 |
 | | 角色契约（技术/风险/机会）门控 | ✅ | `evidence/role_gate.go`、`entity/role.go` |
-| **Agent 执行** | 手写 agent loop、工具循环、终止策略、压缩 | ✅ | `domain/runtime/agent_loop.go` |
-| | **多模型多样性**（不同 agent 用不同模型） | ❌ | 三 agent+commander+judge 全部共用 `cfg.Model`（`bootstrap/container.go`），设计文档列为"可选"但未实现 |
-| | 多供应商路由/降级 | ❌ | 仅单个 OpenAI 兼容端点 |
+| **Agent 执行** | 手写 agent loop、工具循环、终止策略、上下文压缩 | ✅ | `domain/runtime/agent_loop.go`、`domain/runtime/compaction.go` |
+| | **多模型多样性**（per-role 独立模型） | ✅ | `magi.<role>.model` / `commander.model` / `judge.model` 逐字段覆盖全局、未设字段继承（D5，`bootstrap/config.go`），含 fail-fast 校验 |
+| | 多供应商路由/降级（failover） | ❌ | 仅单 OpenAI 兼容端点（`adapter/model_adapter.go`）；per-role 可配独立 BaseURL/APIKey，但无自动降级路由 |
+| | **长任务规划 / 动态 subagent 派生** | ❌ | 三 agent 固定（`entity/role.go`），无 subagent 派生框架、无任务规划层 |
 | **工具生态** | Tavily web_search / MCP(stdio+http) / CodeRunner(WASM) | ✅ | `adapter/tavily_tool.go`、`adapter/mcp/mcp.go`、`coderunner_adapter.go` |
-| | 原生文件/代码库/浏览器/DB 工具 | ❌ | 只能靠外部 MCP 引入，无内置代码库工具集 |
+| | 原生文件/代码库/浏览器/DB 工具 | ❌ | 只能靠外部 MCP 引入，无内置代码库/文件/浏览器工具集 |
+| | Docker / MicroVM 沙箱 | ❌ | 仅 WASM 沙箱（CodeRunner），无容器 / MicroVM 隔离 |
 | | 多搜索引擎插件化 | 🟡 | 只绑 Tavily，无搜索提供商抽象 |
 | **记忆/知识** | case 记忆投影 + RAG（Milvus+ES+MySQL 混合 RRF） | ✅ | `adapter/rag/` |
-| | **语义检索接入 UI** | ❌ | `/api/v1/memory` 走 SQL LIKE（`adapter/repository.go memoryRepo.Search`），RAG 只用于 agent 上下文 |
-| | **文档/URL 知识导入管理** | ❌ | KnowledgePort.Store 仅由 case 投影调用，无上传/导入/管理 API |
-| | 长期记忆编辑/删除/标注 | ❌ | memory 只读查询 |
+| | 语义检索接入 UI | ✅ | `/api/v1/memory` 先 Milvus+ES 语义检索（限定 `case_memory` 源）再 LIKE 兜底、去重、Owner 过滤（D6，`application/memory/service.go`） |
+| | 文档/URL 知识导入管理 | ✅ | `POST/GET/DELETE /api/v1/knowledge`，文档经 `StoreDocument` 索引进 RAG（独立 `knowledge_doc` 命名空间）（D7，`application/knowledge/`、`server/router.go`） |
+| | 长期记忆编辑/删除/标注 | ❌ | memory 只读查询（`GET /memory` 系列），无 PATCH / DELETE |
 | **会话** | 单次 question→decision（`/assistant`） | ✅ | `application/assistant/service.go` |
 | | **持久对话线程/多轮追问/对话内上下文** | ❌ | 无 conversation/thread 模型，无追问链路 |
 | **身份与多租户** | API-Key 认证（常量时间比较）+ 按用户所有权 | ✅ | `application/auth`、`server/auth.go` |
-| | **Web UI 认证通道 / 登录页** | ❌ | 前端 `api/client.ts` 不携带任何认证头，`auth.enabled=true` 时 UI 全 401 |
-| | 用户管理 / 注册 / SSO / OAuth / 密钥轮换 | ❌ | key 静态写在 yaml |
+| | Web UI 认证通道 / 登录页 | ✅ | `X-API-Key` header 注入 + 401 `magi:unauthorized` 事件 + `/login` 页（D1，`frontend/src/api/client.ts`、`pages/Login.tsx`、`api/stream.ts` fetch-streaming） |
+| | 用户管理 / 密钥轮换（DB 用户 + SHA-256 存储） | ✅ | `/admin/users`、`/admin/keys/:id/revoke` + `rotate`、`/me`；明文仅展示一次（D8，`application/users/`、`pages/Users.tsx`） |
+| | SSO / OAuth / 自助注册 / 细粒度 RBAC | ❌ | 仅 admin / 非 admin 两级角色（`RequireRole("admin")`） |
 | | 按用户配额/预算/限额 | ✅ | `application/admin`、`run_manager.go` |
 | **安全** | 沙箱/审批门/注入防护/脱敏/审计事件 | ✅ | `toolpolicy`、`approval`、`redact` |
-| | HTTP 通用限流 | ❌ | 只有 tool quota 与 run 并发，无 API 层限流 |
-| | 敏感数据分级/租户隔离审计 | 🟡 | 有 ownership 检查，但列表接口先全表拉取再过滤（见缺陷#2） |
+| | HTTP 通用限流 | ✅ | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After（D13，`server/ratelimit.go`） |
+| | 敏感数据分级/租户隔离审计 | ✅ | case/memory 列表查询下沉到 DB（`WHERE user_id=?` + LIMIT/OFFSET 分页），e2e 断言跨用户隔离（D2，`adapter/repository.go`） |
+| | **计算型反馈传感器**（Linter / 编译器 / 单测回喂 → AI 自愈） | ❌ | 有反思/复议/重试的推理型自纠，无代码执行反馈闭环（`agent_loop.go`） |
+| | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表可版本化/可编辑（D12，`domain/prompt/`）是雏形；FSM/投票/RoleGate 仍为硬编码 Go 规则 |
+| | **自我改进 Harness**（分析失败 → 自动改 AGENTS.md / 规则） | ❌ | 无 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
-| | 持续评估 / CI 集成 / 线上 golden / 指标看板 | ❌ | 全部离线手动触发 |
+| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | ❌ | 全部离线手动触发，无 CI workflows |
+| | 标准基准集 / 评测指标看板 | ❌ | 仅自定义数据集评测，无可复用行业基准与聚合看板 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
-| | 内置 trace 可视化 / 告警默认部署 | 🟡 | OTel 默认 log sink；alert 仅 example 文件 |
-| **UI** | 决策工作台/证据图/时间线/审批/评测/数据集/模板/benchmark/history/memory/tools/settings | ✅ | `frontend/src/pages/` 11 页 |
-| | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ❌ | `admin/usage` 仅 API；Settings 页为静态信息 |
-| | 国际化 | ❌ | 全英文，无 i18n |
+| | 前端 trace 可视化 | ❌ | OTel 默认 log sink，无 trace UI |
+| | 告警默认部署 / 看板栈 | 🟡 | `metrics.auth_required`（D17）+ `deploy/prometheus-alerts.example.yml` 示例；无内置 Grafana/Jaeger |
+| | **Hibernate-and-Wake** 长任务休眠/唤醒 | 🟡 | 有断点续跑 + durable job + 租约（per case/agent/round），无任务级"暂停→休眠→唤醒" |
+| **UI** | 决策工作台/证据图/时间线/审批/评测/数据集/模板/benchmark/history/memory/tools/settings | ✅ | `frontend/src/router.tsx`，14 个功能页 |
+| | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ✅ | `/me/usage` + `/admin/usage` 用量卡片（D9）、Users 页（D8）、Knowledge 页（D7）、prompt 管理（D12） |
+| | 国际化 | ✅ | `frontend/src/i18n/` en/zh + 语言切换器（D14），主要页面字符串抽取 |
 | **部署运营** | Docker compose / readiness / config fail-fast / 多实例 worker | ✅ | `docker/`、`bootstrap/config.go` |
 | | K8s/Helm 清单、横向扩容文档 | ❌ | 无 |
-| | 跨实例 SSE 实时推送 | ❌ | broker 进程内（见缺陷#4） |
-| | 数据导出/备份方案 | 🟡 | 仅数据集 item export；无 case/memory 全量导出 |
+| | 跨实例 SSE 实时推送 | ✅ | SSE + DB 轮询兜底（`EventRepository.ListAfter`，按时间戳增量拉取 + ID 去重）（D4，`server/sse.go`） |
+| | 数据导出 / 备份方案 | 🟡 | case/memory/eval 全量导出已实现（D15，`server/handler/export.go`）；备份/迁移快照策略仍缺 |
 
 ---
-
 ## 三、现有功能实现缺陷清单
 
 ### P0（正确性 / 安全 / 多租户）
