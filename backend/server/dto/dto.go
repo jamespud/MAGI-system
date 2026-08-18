@@ -627,12 +627,15 @@ type FSMBlueprintDTO struct {
 type StateTransitionDTO struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+	// Action is the NLAH binding: the orchestrator action executed when
+	// entering To (filled from defaults when absent).
+	Action string `json:"action,omitempty"`
 }
 
 func FromFSMBlueprint(b entity.FSMBlueprint) FSMBlueprintDTO {
 	out := FSMBlueprintDTO{Transitions: make([]StateTransitionDTO, 0, len(b.Transitions))}
 	for _, t := range b.Transitions {
-		out.Transitions = append(out.Transitions, StateTransitionDTO{From: t.From, To: t.To})
+		out.Transitions = append(out.Transitions, StateTransitionDTO{From: t.From, To: t.To, Action: t.Action})
 	}
 	return out
 }
@@ -640,7 +643,7 @@ func FromFSMBlueprint(b entity.FSMBlueprint) FSMBlueprintDTO {
 func (d FSMBlueprintDTO) ToEntity() entity.FSMBlueprint {
 	out := entity.FSMBlueprint{Transitions: make([]entity.StateTransition, 0, len(d.Transitions))}
 	for _, t := range d.Transitions {
-		out.Transitions = append(out.Transitions, entity.StateTransition{From: t.From, To: t.To})
+		out.Transitions = append(out.Transitions, entity.StateTransition{From: t.From, To: t.To, Action: t.Action})
 	}
 	return out
 }

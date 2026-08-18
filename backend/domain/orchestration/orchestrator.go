@@ -117,6 +117,17 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			if violations := o.blueprint.ValidatePath([]string{string(prevStatus), string(status)}); len(violations) > 0 {
 				return o.fail(ctx, case_, fmt.Sprintf("fsm blueprint violation: %s", violations[0]))
 			}
+			// NLAH action binding: the blueprint declares which action runs on
+			// each transition; the runtime fails fast if the declaration does
+			// not match the deterministic handler bound to the target status.
+			if expected := o.blueprint.ActionFor(string(prevStatus), string(status)); expected != "" {
+				actual := entity.ActionForStatus(string(status))
+				if expected != actual {
+					return o.fail(ctx, case_, fmt.Sprintf(
+						"fsm blueprint action mismatch for %s -> %s: declared %q, actual %q",
+						prevStatus, status, expected, actual))
+				}
+			}
 		}
 		prevStatus = status
 		switch status {

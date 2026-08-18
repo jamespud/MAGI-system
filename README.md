@@ -276,7 +276,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Lightweight VM sandboxing** - the Docker sandbox accepts a container `runtime` (e.g. gVisor `runsc`) for lightweight-virtualization isolation on top of network/memory/CPU/PID/time limits.
 - **Parallel sub-investigation** - the `delegate` tool accepts a `questions` array to spawn up to 4 sub-agents concurrently and merge their evidence.
 - **Editable consensus rules** - the deterministic voting/consensus policy (quorum, split-to-debate, reconsider-majority, conditional-as-approve) is editable via `GET/PUT /admin/consensus-policy`.
-- **FSM orchestration blueprint** - the legal case-status transition set is editable and validated (`/admin/fsm-blueprint` + `/validate`), the governance surface for the deterministic decision FSM.
+- **FSM orchestration blueprint** - the legal case-status transition set is editable and validated (`/admin/fsm-blueprint` + `/validate`); each transition also declares the orchestrator action (NLAH binding), checked at save time and enforced at runtime with fail-fast.
 - **Blueprint-enforced FSM** - the orchestrator validates every status transition against the blueprint at runtime; illegal transitions fail fast.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.

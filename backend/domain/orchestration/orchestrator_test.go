@@ -215,6 +215,30 @@ func TestOrchestrate_RejectsBlueprintViolation(t *testing.T) {
 	}
 }
 
+func TestOrchestrate_RejectsBlueprintActionMismatch(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	blueprint := entity.DefaultFSMBlueprint()
+	for i := range blueprint.Transitions {
+		if blueprint.Transitions[i].From == string(entity.CaseStatusDraft) &&
+			blueprint.Transitions[i].To == string(entity.CaseStatusNormalizing) {
+			blueprint.Transitions[i].Action = "wrong_action"
+		}
+	}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Blueprint: &blueprint,
+	})
+	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
+	if err == nil || !strings.Contains(err.Error(), "fsm blueprint action mismatch") {
+		t.Fatalf("expected fsm blueprint action mismatch, got %v", err)
+	}
+}
+
 func TestOrchestrate_ConflictThenReconsider(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}

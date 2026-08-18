@@ -46,8 +46,16 @@ func TestService_SaveAndValidate(t *testing.T) {
 	if len(saved.Transitions) != 1 {
 		t.Fatalf("saved = %+v", saved)
 	}
+	if saved.Transitions[0].Action != "normalize" {
+		t.Fatalf("missing action must be filled from defaults, got %q", saved.Transitions[0].Action)
+	}
 	if _, err := svc.Save(ctx, entity.FSMBlueprint{}); err == nil {
 		t.Fatal("empty blueprint must be rejected")
+	}
+	if _, err := svc.Save(ctx, entity.FSMBlueprint{Transitions: []entity.StateTransition{
+		{From: "DRAFT", To: "NORMALIZING", Action: "not_a_real_action"},
+	}}); err == nil {
+		t.Fatal("unknown action must be rejected")
 	}
 	violations, err := svc.ValidatePath(ctx, []string{"DRAFT", "NORMALIZING", "RESOLVED"})
 	if err != nil {

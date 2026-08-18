@@ -3,6 +3,7 @@ package fsmblueprint
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -34,6 +35,17 @@ func (s *Service) Get(ctx context.Context) (entity.FSMBlueprint, error) {
 func (s *Service) Save(ctx context.Context, b entity.FSMBlueprint) (entity.FSMBlueprint, error) {
 	if len(b.Transitions) == 0 {
 		return entity.FSMBlueprint{}, fmt.Errorf("fsm blueprint: at least one transition is required")
+	}
+	// NLAH binding: fill missing actions from the default blueprint so legacy
+	// clients keep working, then reject unknown actions.
+	def := entity.DefaultFSMBlueprint()
+	for i := range b.Transitions {
+		if strings.TrimSpace(b.Transitions[i].Action) == "" {
+			b.Transitions[i].Action = def.ActionFor(b.Transitions[i].From, b.Transitions[i].To)
+		}
+	}
+	if unknown := b.UnknownActions(); len(unknown) > 0 {
+		return entity.FSMBlueprint{}, fmt.Errorf("fsm blueprint: %s", unknown[0])
 	}
 	if err := s.repo.Save(ctx, b); err != nil {
 		return entity.FSMBlueprint{}, err
