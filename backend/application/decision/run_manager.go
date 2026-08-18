@@ -104,9 +104,9 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
-		runCounter: d.RunCounter,
+		runCounter:    d.RunCounter,
 		budgetChecker: d.BudgetChecker,
-		userRuns:   make(map[int64]int), runs: make(map[string]*runHandle),
+		userRuns:      make(map[int64]int), runs: make(map[string]*runHandle),
 	}
 }
 

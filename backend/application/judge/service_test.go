@@ -49,15 +49,21 @@ func (r *fakeResRepo) Get(ctx context.Context, caseID string) (*entity.Resolutio
 	return r.res, nil
 }
 func (r *fakeVoteRepo) Create(ctx context.Context, v *entity.Vote) error { return nil }
-func (r *fakeVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) { return r.vs, nil }
-func (r *fakeEvRepo) Get(ctx context.Context, id string) (*entity.EvidenceRecord, error) { return nil, nil }
+func (r *fakeVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) {
+	return r.vs, nil
+}
+func (r *fakeEvRepo) Get(ctx context.Context, id string) (*entity.EvidenceRecord, error) {
+	return nil, nil
+}
 func (r *fakeEvRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error { return nil }
 func (r *fakeEvRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) {
 	return r.evs, nil
 }
 func (r *fakeClaimRepo) Get(ctx context.Context, id string) (*entity.Claim, error) { return nil, nil }
-func (r *fakeClaimRepo) Create(ctx context.Context, c *entity.Claim) error { return nil }
-func (r *fakeClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) { return r.cls, nil }
+func (r *fakeClaimRepo) Create(ctx context.Context, c *entity.Claim) error         { return nil }
+func (r *fakeClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) {
+	return r.cls, nil
+}
 func (r *fakeRefRepo) Create(ctx context.Context, rf *entity.Reflection) error { return nil }
 func (r *fakeRefRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) {
 	return r.rfs, nil

@@ -271,6 +271,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 	return s.caseRepo.Delete(ctx, id)
 }
+
 // Get retrieves a DecisionCase by ID.
 func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	if s.caseRepo != nil {

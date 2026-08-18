@@ -42,7 +42,9 @@ func (r *ownedCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.C
 func (r *ownedCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return nil
 }
-func (r *ownedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (r *ownedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (r *ownedCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 func TestDecisionHandler_EnforcesCaseOwnership(t *testing.T) {
@@ -80,7 +82,9 @@ func (stubAdminAgentRuns) ListByCase(ctx context.Context, caseID string) ([]*ent
 func (stubAdminAgentRuns) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
-func (stubAdminAgentRuns) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
+func (stubAdminAgentRuns) CountByUser(ctx context.Context, userID int64) (int64, error) {
+	return 0, nil
+}
 
 func TestRequireRole_AdminGate(t *testing.T) {
 	adminSvc := admin.NewService(&ownedCaseRepo{}, stubAdminAgentRuns{})

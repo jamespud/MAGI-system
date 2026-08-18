@@ -14,8 +14,8 @@ type DecisionCase struct {
 	CurrentPhase CasePhase
 	// Pinned/Archived are user-level list management flags (P2 D11): pin keeps a
 	// case at the top of the sidebar, archive hides it from active lists.
-	Pinned    bool
-	Archived  bool
+	Pinned   bool
+	Archived bool
 	// ExecutionAttempt is set by the durable worker for the current attempt.
 	// It is intentionally runtime-only: the durable job owns the source of truth.
 	ExecutionAttempt int

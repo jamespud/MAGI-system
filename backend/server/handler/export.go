@@ -11,9 +11,9 @@ import (
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/memory"
-	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 

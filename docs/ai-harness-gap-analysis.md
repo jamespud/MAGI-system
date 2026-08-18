@@ -53,7 +53,7 @@
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱；多搜索提供商抽象 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job | 前端 trace 可视化、默认告警/看板栈、任务级 pause->hibernate->wake | 🟡 |
-| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge | CI 集成与线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions 双栈 CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
 
 ### 2.2 明细能力矩阵
 
@@ -87,7 +87,7 @@
 | | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表可版本化/可编辑（D12，`domain/prompt/`）是雏形；FSM/投票/RoleGate 仍为硬编码 Go 规则 |
 | | **自我改进 Harness**（分析失败 → 自动改 AGENTS.md / 规则） | ❌ | 无 |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
-| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | ❌ | 全部离线手动触发，无 CI workflows |
+| | 持续评估 / CI 集成 / 线上 golden / 自动回归 | 🟡 | `.github/workflows/ci.yml` 提供 backend gofmt/test/race/vet 与 frontend tsc/vitest/build 门禁；线上 golden 与自动回归触发仍缺 |
 | | 标准基准集 / 评测指标看板 | ❌ | 仅自定义数据集评测，无可复用行业基准与聚合看板 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ❌ | OTel 默认 log sink，无 trace UI |
@@ -175,7 +175,7 @@
 3. **身份与访问管理**：登录/SSO、用户自助、密钥管理、角色粒度（当前只有 admin/非 admin）、审计 UI。
 4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
 5. **多模型编排**：per-agent/commander/judge 独立模型配置，多供应商路由与降级，模型参数管理。
-6. **评估运营化**：CI 集成、线上 golden、自动回归、评测指标看板、prompt 版本管理。
+6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
 7. **可观测性**：默认 trace 落库 + 前端 trace 视图、通用 HTTP 限流、告警默认部署。
 8. **运营与交付**：K8s/Helm、跨实例 SSE（或改为轮询/WS）、数据导出/备份、i18n。
 
@@ -199,7 +199,7 @@
 ### Phase 3（平台化，约 8-12 周）
 - 身份体系（SSO/OAuth/用户自助/密钥轮换）。
 - 通用任务执行层（基于现有 agent loop 扩展 code/file/shell 工具 + 审批门）。
-- 评估运营化（CI 集成 + 看板 + prompt 管理）。
+- 评估运营化（线上 golden + 看板 + prompt 运营；CI 门禁已完成）。
 - K8s/Helm + 可观测性栈 + i18n。
 
 ---

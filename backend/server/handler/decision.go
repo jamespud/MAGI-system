@@ -9,9 +9,9 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/decision"
-	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
+	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 

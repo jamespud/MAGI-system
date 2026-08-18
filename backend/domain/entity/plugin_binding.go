@@ -6,12 +6,12 @@ import "time"
 // Agent runs for that user resolve their tool set from these bindings plus
 // the built-in local tools (web_search).
 type PluginBinding struct {
-	ID       string
-	UserID   int64
-	PluginID int64
-	ToolID   int64
-	IsDraft  bool
-	Enabled  bool
+	ID        string
+	UserID    int64
+	PluginID  int64
+	ToolID    int64
+	IsDraft   bool
+	Enabled   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

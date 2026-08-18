@@ -64,7 +64,6 @@ func TestParseResponse_StripsCodeFencesAroundVote(t *testing.T) {
 	}
 }
 
-
 func TestParseResponse_NormalizesVoteConfidenceToPercentage(t *testing.T) {
 	cases := []struct {
 		name string

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -72,12 +73,21 @@ func TestHybridKnowledgeAdapterRetrieve(t *testing.T) {
 
 // recordingPublisher captures published events for assertions.
 type recordingPublisher struct {
+	mu     sync.Mutex
 	events []entity.MagiEvent
 }
 
 func (p *recordingPublisher) Publish(_ context.Context, e entity.MagiEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.events = append(p.events, e)
 	return nil
+}
+
+func (p *recordingPublisher) snapshot() []entity.MagiEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]entity.MagiEvent(nil), p.events...)
 }
 
 // failingVectorIndex simulates a Milvus outage (best-effort write must not
@@ -119,11 +129,12 @@ func TestHybridKnowledgeAdapterStoreStatsAndEvent(t *testing.T) {
 	if stats.Chunks300 == 0 || stats.Chunks900 == 0 || stats.Chunks1800 == 0 {
 		t.Errorf("expected chunks at all three levels, got %+v", stats)
 	}
-	if len(pub.events) != 1 || pub.events[0].Type != entity.EventMemoryIndexed {
-		t.Fatalf("expected one MEMORY_INDEXED event, got %d events: %+v", len(pub.events), pub.events)
+	events := pub.snapshot()
+	if len(events) != 1 || events[0].Type != entity.EventMemoryIndexed {
+		t.Fatalf("expected one MEMORY_INDEXED event, got %d events: %+v", len(events), events)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(pub.events[0].Payload, &payload); err != nil {
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 	if payload["chunks_300"] != float64(stats.Chunks300) ||

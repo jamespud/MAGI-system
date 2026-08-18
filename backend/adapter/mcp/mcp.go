@@ -44,12 +44,12 @@ type Adapter struct {
 }
 
 type server struct {
-	mu       sync.Mutex
-	cfg      ServerConfig
-	dial     func(ServerConfig) (*mcpclient.Client, error)
-	client   *mcpclient.Client
-	tools    []port.ToolDefinition
-	lastErr  error
+	mu      sync.Mutex
+	cfg     ServerConfig
+	dial    func(ServerConfig) (*mcpclient.Client, error)
+	client  *mcpclient.Client
+	tools   []port.ToolDefinition
+	lastErr error
 }
 
 var _ port.ToolRegistryPort = (*Adapter)(nil)

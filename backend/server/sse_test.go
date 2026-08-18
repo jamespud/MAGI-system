@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,20 +35,39 @@ func TestSSEReplay_DedupsAndTracksWatermark(t *testing.T) {
 }
 
 type fakeEventRepo struct {
+	mu      sync.Mutex
 	events  []*entity.MagiEvent
 	listErr error
 }
 
+func (f *fakeEventRepo) setEvents(events []*entity.MagiEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append([]*entity.MagiEvent(nil), events...)
+}
+
+func (f *fakeEventRepo) addEvent(event *entity.MagiEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+func (f *fakeEventRepo) snapshot() []*entity.MagiEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*entity.MagiEvent(nil), f.events...)
+}
+
 func (f *fakeEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error { return nil }
 func (f *fakeEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
-	return f.events, nil
+	return f.snapshot(), nil
 }
 func (f *fakeEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
 	var out []*entity.MagiEvent
-	for _, e := range f.events {
+	for _, e := range f.snapshot() {
 		if !e.Timestamp.Before(after) {
 			out = append(out, e)
 		}
@@ -60,11 +80,11 @@ func TestPollOnce_ForwardsCrossInstanceEvents(t *testing.T) {
 	base := time.Now()
 	// Events that existed before the connection: history is replayed on
 	// connect, so the poller must not re-emit them.
-	repo.events = []*entity.MagiEvent{
+	repo.setEvents([]*entity.MagiEvent{
 		{ID: "old1", CaseID: "c1", Timestamp: base},
 		{ID: "old2", CaseID: "c1", Timestamp: base.Add(time.Second)},
-	}
-	replay := newSSEReplay(repo.events)
+	})
+	replay := newSSEReplay(repo.snapshot())
 
 	var emitted []string
 	emit := func(ev *entity.MagiEvent) error {
@@ -73,10 +93,8 @@ func TestPollOnce_ForwardsCrossInstanceEvents(t *testing.T) {
 	}
 
 	// A remote instance persists new events after the subscriber connected.
-	repo.events = append(repo.events,
-		&entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)},
-		&entity.MagiEvent{ID: "remote2", CaseID: "c1", Timestamp: base.Add(3 * time.Second)},
-	)
+	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)})
+	repo.addEvent(&entity.MagiEvent{ID: "remote2", CaseID: "c1", Timestamp: base.Add(3 * time.Second)})
 
 	if err := pollOnce(context.Background(), repo, "c1", replay, emit); err != nil {
 		t.Fatalf("poll: %v", err)
@@ -143,9 +161,9 @@ func TestSSE_CrossInstancePollerDeliversRemoteEvents(t *testing.T) {
 	broker := NewEventBroker()
 	repo := &fakeEventRepo{}
 	base := time.Now()
-	repo.events = []*entity.MagiEvent{
+	repo.setEvents([]*entity.MagiEvent{
 		{ID: "hist1", CaseID: "c1", Timestamp: base},
-	}
+	})
 
 	baseURL := sseHTTPHarness(t, broker, repo)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -203,7 +221,7 @@ func TestSSE_CrossInstancePollerDeliversRemoteEvents(t *testing.T) {
 	// Now simulate another instance: publish a local event through the broker
 	// AND persist a remote event only visible via the DB poller.
 	broker.Publish(context.Background(), entity.MagiEvent{ID: "local1", CaseID: "c1", Timestamp: base.Add(time.Second)})
-	repo.events = append(repo.events, &entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)})
+	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)})
 
 	if !waitID("local1") {
 		t.Fatalf("local event not delivered; got %v", got)

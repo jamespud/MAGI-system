@@ -13,12 +13,12 @@ import (
 )
 
 type stubDatasetRepo struct {
-	mu      sync.Mutex
-	ds      map[string]*entity.BenchmarkDataset
-	items   map[string][]*entity.BenchmarkItem
-	runs    map[string]*entity.BenchmarkRun
-	results map[string][]*entity.BenchmarkItemResult
-	byItem  map[string]string // runID -> itemID prefix for GetRun
+	mu              sync.Mutex
+	ds              map[string]*entity.BenchmarkDataset
+	items           map[string][]*entity.BenchmarkItem
+	runs            map[string]*entity.BenchmarkRun
+	results         map[string][]*entity.BenchmarkItemResult
+	byItem          map[string]string // runID -> itemID prefix for GetRun
 	deletedDatasets []string
 }
 
@@ -241,7 +241,9 @@ func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.D
 func (s *stubCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *stubCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 type stubOrch struct {

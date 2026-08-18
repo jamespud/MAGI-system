@@ -9,9 +9,9 @@ import (
 
 // Keys for the versioned prompt registry.
 const (
-	KeyCommanderNormalize  = "commander.normalize"
-	KeyCommanderReport     = "commander.report"
-	KeyAgentWorkflowTools  = "agent.workflow_tools"
+	KeyCommanderNormalize   = "commander.normalize"
+	KeyCommanderReport      = "commander.report"
+	KeyAgentWorkflowTools   = "agent.workflow_tools"
 	KeyAgentWorkflowNoTools = "agent.workflow_notools"
 )
 

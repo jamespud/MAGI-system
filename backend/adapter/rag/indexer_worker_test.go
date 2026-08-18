@@ -51,15 +51,16 @@ func TestAsyncIndexerPublishesIndexedEventWithStats(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(pub.events) >= 1 {
+		if len(pub.snapshot()) >= 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(pub.events) != 1 {
-		t.Fatalf("expected one published event, got %d", len(pub.events))
+	events := pub.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected one published event, got %d", len(events))
 	}
-	ev := pub.events[0]
+	ev := events[0]
 	if ev.Type != entity.EventMemoryIndexed {
 		t.Fatalf("event type = %s, want MEMORY_INDEXED", ev.Type)
 	}

@@ -12,10 +12,10 @@ import (
 // ABSTAIN reasoning carry the real cause instead of "agent completed".
 func TestCheckTermination_SetsErr(t *testing.T) {
 	policy := entity.LoopPolicy{
-		MaxGateFailures:                   3,
-		MaxConsecutiveToolFailures:        5,
-		MaxConsecutiveValidationFailures:  5,
-		TokenBudget:                       1000,
+		MaxGateFailures:                  3,
+		MaxConsecutiveToolFailures:       5,
+		MaxConsecutiveValidationFailures: 5,
+		TokenBudget:                      1000,
 	}
 	cases := []struct {
 		name string

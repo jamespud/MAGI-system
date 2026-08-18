@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eino-contrib/jsonschema"
 	"github.com/cloudwego/eino/schema"
+	"github.com/eino-contrib/jsonschema"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/jamespud/magi/backend/application/metrics"
@@ -491,7 +491,7 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				}
 				messages = append(messages, schema.UserMessage(fixHint))
 				trace.Steps = append(trace.Steps, st)
-			if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
+				if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 					finalizeTrace(trace, result.Status)
 					return result, result.Err
 				}

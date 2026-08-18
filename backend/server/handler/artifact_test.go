@@ -92,7 +92,10 @@ func indexOf(s, sub string) int {
 
 type memClaimRepo struct{ items []*entity.Claim }
 
-func (r *memClaimRepo) Create(ctx context.Context, c *entity.Claim) error { r.items = append(r.items, c); return nil }
+func (r *memClaimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	r.items = append(r.items, c)
+	return nil
+}
 func (r *memClaimRepo) Get(ctx context.Context, id string) (*entity.Claim, error) { return nil, nil }
 func (r *memClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) {
 	var out []*entity.Claim
@@ -106,8 +109,13 @@ func (r *memClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 
 type memAgentRunRepo struct{ items []*entity.AgentRun }
 
-func (r *memAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error { r.items = append(r.items, a); return nil }
-func (r *memAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, error) { return nil, nil }
+func (r *memAgentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	r.items = append(r.items, a)
+	return nil
+}
+func (r *memAgentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, error) {
+	return nil, nil
+}
 func (r *memAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	var out []*entity.AgentRun
 	for _, a := range r.items {
@@ -120,11 +128,16 @@ func (r *memAgentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*ent
 func (r *memAgentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64, float64, error) {
 	return 0, 0, nil
 }
-func (r *memAgentRunRepo) CountByUser(ctx context.Context, userID int64) (int64, error) { return 0, nil }
+func (r *memAgentRunRepo) CountByUser(ctx context.Context, userID int64) (int64, error) {
+	return 0, nil
+}
 
 type memToolCallRepo struct{ items []*entity.ToolCall }
 
-func (r *memToolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error { r.items = append(r.items, t); return nil }
+func (r *memToolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	r.items = append(r.items, t)
+	return nil
+}
 func (r *memToolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error) {
 	var out []*entity.ToolCall
 	for _, t := range r.items {

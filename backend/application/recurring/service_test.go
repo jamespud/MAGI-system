@@ -107,7 +107,9 @@ func (s *stubCases) UpdateTask(ctx context.Context, id string, task *entity.Deci
 func (s *stubCases) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *stubCases) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubCases) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *stubCases) Delete(ctx context.Context, id string) error { return nil }
 
 type stubRecOrch struct{}

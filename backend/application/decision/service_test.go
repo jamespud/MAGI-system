@@ -47,9 +47,10 @@ func (s *stubCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.D
 func (s *stubCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *stubCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *stubCaseRepo) Delete(ctx context.Context, id string) error { return nil }
-
 
 func TestService_Create(t *testing.T) {
 	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{MaxDebateRounds: 2})
@@ -123,7 +124,6 @@ func TestService_Get(t *testing.T) {
 	}
 }
 
-
 func TestService_ForkAndRun(t *testing.T) {
 	repo := &stubCaseRepo{case_: &entity.DecisionCase{
 		ID: "src", Question: "Should I adopt a dog?", Context: "one dog", MaxDebateRounds: 3,
@@ -196,7 +196,9 @@ func (s *multiCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.
 func (s *multiCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *multiCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *multiCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *multiCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 // scopedCaseRepo implements port.CaseListFilter; ListScoped must delegate to it.
@@ -211,7 +213,9 @@ func (s *scopedCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) err
 func (s *scopedCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	return nil, nil
 }
-func (s *scopedCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return s.cases, nil }
+func (s *scopedCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
+	return s.cases, nil
+}
 func (s *scopedCaseRepo) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
 	return nil
 }
@@ -221,7 +225,9 @@ func (s *scopedCaseRepo) UpdateTask(ctx context.Context, id string, task *entity
 func (s *scopedCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *scopedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *scopedCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *scopedCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 func (s *scopedCaseRepo) ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error) {
 	s.lastUserID, s.lastLimit, s.lastOffset = userID, limit, offset

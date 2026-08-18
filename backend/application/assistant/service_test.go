@@ -29,7 +29,9 @@ func (s *askCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.De
 func (s *askCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *askCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *askCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *askCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 type askOrch struct{}

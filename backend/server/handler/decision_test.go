@@ -52,7 +52,9 @@ func (s stubCaseLookup) Get(ctx context.Context, id string) (*entity.DecisionCas
 func (s stubCaseLookup) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s stubCaseLookup) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s stubCaseLookup) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s stubCaseLookup) Delete(ctx context.Context, id string) error { return nil }
 
 func (s stubCaseLookup) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
