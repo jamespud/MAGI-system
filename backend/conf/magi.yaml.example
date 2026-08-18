@@ -285,6 +285,15 @@ mcp:
     #   transport: "http"
     #   url: "https://mcp.example.com/mcp"
     #   timeout_seconds: 60
+    # Full browser automation is available through an external browser MCP
+    # server over the stdio/http connectors below (e.g. Playwright MCP or a
+    # Chrome DevTools MCP). Tools then appear as mcp_<server>_<tool> and can be
+    # gated by tool_policy like any other tool.
+    # - name: "browser"
+    #   transport: "stdio"
+    #   command: "npx"
+    #   args: ["-y", "@playwright/mcp@latest"]
+    #   timeout_seconds: 120
 
 # Tool approval gate: tools listed here cannot execute in autonomous runs
 # unless also listed under auto_approved. Default: code_runner requires approval.
