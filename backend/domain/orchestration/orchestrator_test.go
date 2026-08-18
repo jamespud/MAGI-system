@@ -191,6 +191,30 @@ func TestOrchestrate_UnanimousApprove(t *testing.T) {
 	}
 }
 
+func TestOrchestrate_RejectsBlueprintViolation(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+
+	restricted := entity.FSMBlueprint{Transitions: []entity.StateTransition{
+		{From: string(entity.CaseStatusDraft), To: string(entity.CaseStatusDraft)},
+	}}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Blueprint: &restricted,
+	})
+	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
+	if err == nil || !strings.Contains(err.Error(), "fsm blueprint violation") {
+		t.Fatalf("expected blueprint violation, got %v", err)
+	}
+}
+
 func TestOrchestrate_ConflictThenReconsider(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}

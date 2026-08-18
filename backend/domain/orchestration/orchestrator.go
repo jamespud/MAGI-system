@@ -31,6 +31,7 @@ type Orchestrator struct {
 	failPolicy   FailurePolicy
 	lastAgentErr error
 	configs      []*entity.MagiConfig
+	blueprint    *entity.FSMBlueprint
 }
 
 type OrchestratorDeps struct {
@@ -48,6 +49,7 @@ type OrchestratorDeps struct {
 	Configs              []*entity.MagiConfig
 	Policy               consensus.ConsensusPolicy
 	FailPolicy           FailurePolicy
+	Blueprint            *entity.FSMBlueprint
 }
 
 func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
@@ -69,6 +71,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		failPolicy:   fp,
 		lastAgentErr: nil,
 		configs:      d.Configs,
+		blueprint:    d.Blueprint,
 	}
 }
 
@@ -107,8 +110,15 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
 		}
 	}
+	var prevStatus entity.CaseStatus
 
 	for {
+		if o.blueprint != nil && prevStatus != "" && prevStatus != status {
+			if violations := o.blueprint.ValidatePath([]string{string(prevStatus), string(status)}); len(violations) > 0 {
+				return o.fail(ctx, case_, fmt.Sprintf("fsm blueprint violation: %s", violations[0]))
+			}
+		}
+		prevStatus = status
 		switch status {
 
 		case entity.CaseStatusDraft:

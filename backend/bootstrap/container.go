@@ -512,10 +512,15 @@ func provideOrchestrator(
 	knowledge port.KnowledgePort,
 	plugs *plugins.Service,
 	policyRepo port.ConsensusPolicyRepository,
+	blueprintRepo port.FSMBlueprintRepository,
 ) *orchestration.Orchestrator {
 	policy := consensus.DefaultConsensusPolicy()
 	if stored, err := policyRepo.Get(context.Background()); err == nil && stored != nil {
 		policy = *stored
+	}
+	blueprint := entity.DefaultFSMBlueprint()
+	if stored, err := blueprintRepo.Get(context.Background()); err == nil && stored != nil {
+		blueprint = *stored
 	}
 	return orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop:            agentLoop,
@@ -530,6 +535,7 @@ func provideOrchestrator(
 		MemoryRepo:           repo.MemoryRepo(),
 		Configs:              configs,
 		Policy:               policy,
+		Blueprint:            &blueprint,
 		ToolBindingsProvider: plugs,
 	})
 }

@@ -70,8 +70,10 @@ voting thresholds is a config change, not a code change.
 The FSM orchestration blueprint (the legal case-status transition set) is
 editable over `GET/PUT /admin/fsm-blueprint` and auditable with
 `POST /admin/fsm-blueprint/validate {path:[...]}`. Execution still follows the
-Go orchestrator; the blueprint is the governance/audit surface for a
-progressive table-driven migration.
+Go orchestrator, but the orchestrator now validates every runtime status
+transition against the loaded blueprint and fails fast on violations. The
+blueprint is both a governance/audit surface and an execution-time constraint,
+supporting a progressive table-driven migration.
 
 ### Online golden regression
 
