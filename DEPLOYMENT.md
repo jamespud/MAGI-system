@@ -70,6 +70,14 @@ built-in decision sanity suite, so the periodic automated regression gate
 (`benchmark.auto_interval_seconds`) continuously validates real production
 decisions against the current harness.
 
+### Self-improving automation
+
+`selfimprove.auto_apply_enabled` turns the analysis loop fully automatic
+behind a threshold: after each automated regression, the oldest open
+suggestion of any category that has reached `auto_apply_threshold` is applied
+to the versioned prompt registry (the harness evolves its own rules). Keep it
+disabled unless you have audited the prompt-registry change path.
+
 ### Default observability stack
 
 With the web stack running, start the bundled Prometheus + Alertmanager +

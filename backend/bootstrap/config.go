@@ -71,6 +71,7 @@ type Config struct {
 	RepoTool     RepoToolConfig     `yaml:"repo_tool"`
 	WebTool      WebToolConfig      `yaml:"web_tool"`
 	DelegateTool DelegateToolConfig `yaml:"delegate_tool"`
+	SelfImprove  SelfImproveConfig  `yaml:"selfimprove"`
 	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -214,6 +215,12 @@ type WebToolConfig struct {
 // DelegateToolConfig enables the dynamic sub-investigation delegation tool.
 type DelegateToolConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// SelfImproveConfig gates the automatic rule-evolution loop.
+type SelfImproveConfig struct {
+	AutoApplyEnabled   bool `yaml:"auto_apply_enabled"`
+	AutoApplyThreshold int  `yaml:"auto_apply_threshold"`
 }
 
 type EmbeddingConfig struct {
@@ -911,6 +918,9 @@ func (c *Config) Validate() error {
 	}
 	if c.WebTool.Enabled && len(c.WebTool.AllowedDomains) == 0 {
 		return fmt.Errorf("web_tool: at least one allowed domain is required when enabled")
+	}
+	if c.SelfImprove.AutoApplyEnabled && c.SelfImprove.AutoApplyThreshold < 1 {
+		return fmt.Errorf("selfimprove: auto_apply_threshold must be at least 1 when auto_apply_enabled")
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")

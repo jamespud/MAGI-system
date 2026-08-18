@@ -248,6 +248,14 @@ web_tool:
 delegate_tool:
   enabled: false
 
+# Self-improving harness automation. When enabled, after each automated
+# regression the analyzer applies the oldest open suggestion of a category
+# that has reached the threshold (writes the proposed prompt to the versioned
+# registry). Keep disabled unless you want the harness to change rules itself.
+selfimprove:
+  auto_apply_enabled: false
+  auto_apply_threshold: 3
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

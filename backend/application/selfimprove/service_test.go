@@ -168,6 +168,60 @@ func TestService_AnalyzeClassifiesToolError(t *testing.T) {
 	}
 }
 
+func TestService_AutoApplyAppliesRecurringCategory(t *testing.T) {
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	prompts := &stubSIPromptRepo{
+		current: map[string]*entity.PromptTemplate{"agent.workflow_tools": {Key: "agent.workflow_tools", Content: "Use tools."}},
+		saved:   map[string]*entity.PromptTemplate{},
+	}
+	svc := selfimprove.NewService(repo, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{},
+		selfimprove.WithPrompts(prompts), selfimprove.WithAutoApply(true, 2))
+	ctx := context.Background()
+	for _, id := range []string{"s1", "s2"} {
+		_ = repo.Create(ctx, &entity.SelfImproveSuggestion{
+			ID: id, Category: entity.SelfImproveGateFailure,
+			PromptKey: "agent.workflow_tools", PromptContent: "Use tools. " + id,
+			Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+		})
+	}
+	applied, err := svc.AutoApply(ctx)
+	if err != nil {
+		t.Fatalf("auto apply: %v", err)
+	}
+	if applied != 1 {
+		t.Fatalf("applied = %d, want 1", applied)
+	}
+	if prompts.saved["agent.workflow_tools"] == nil {
+		t.Fatal("prompt must be written on auto-apply")
+	}
+	if repo.items["s1"].Status != entity.SelfImproveApplied {
+		t.Fatalf("suggestion must be marked applied: %+v", repo.items["s1"])
+	}
+
+	// Threshold 3 on the same two open suggestions must not apply again.
+	repo2 := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	svc2 := selfimprove.NewService(repo2, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{},
+		selfimprove.WithAutoApply(true, 3))
+	for _, id := range []string{"a", "b"} {
+		_ = repo2.Create(ctx, &entity.SelfImproveSuggestion{
+			ID: id, Category: entity.SelfImproveGateFailure,
+			PromptKey: "agent.workflow_tools", PromptContent: "x",
+			Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+		})
+	}
+	applied, err = svc2.AutoApply(ctx)
+	if err != nil || applied != 0 {
+		t.Fatalf("below threshold must not apply: applied=%d err=%v", applied, err)
+	}
+}
+
+func TestService_AutoApplyDisabledIsNoOp(t *testing.T) {
+	svc := selfimprove.NewService(&stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{})
+	if applied, err := svc.AutoApply(context.Background()); err != nil || applied != 0 {
+		t.Fatalf("disabled auto-apply: applied=%d err=%v", applied, err)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

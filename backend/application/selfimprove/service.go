@@ -22,6 +22,8 @@ type Service struct {
 	agentRuns  port.AgentRunRepository
 	prompts    port.PromptRepository
 	eventLimit int
+	autoApply  bool
+	threshold  int
 }
 
 type Option func(*Service)
@@ -30,6 +32,18 @@ type Option func(*Service)
 // prompt registry.
 func WithPrompts(p port.PromptRepository) Option {
 	return func(s *Service) { s.prompts = p }
+}
+
+// WithAutoApply enables applying recurring suggestions automatically once a
+// category reaches the given threshold. Guarded by configuration.
+func WithAutoApply(enabled bool, threshold int) Option {
+	return func(s *Service) {
+		s.autoApply = enabled
+		if threshold < 1 {
+			threshold = 1
+		}
+		s.threshold = threshold
+	}
 }
 
 func NewService(repo port.SelfImproveRepository, cases port.CaseRepository, events port.EventRepository, agentRuns port.AgentRunRepository, opts ...Option) *Service {
@@ -117,6 +131,46 @@ func (s *Service) Apply(ctx context.Context, id string) (*entity.SelfImproveSugg
 	}
 	suggestion.Status = entity.SelfImproveApplied
 	return suggestion, nil
+}
+
+// AutoApply applies the oldest open suggestion of the most frequent category
+// once that category has reached the configured threshold. It is a guarded
+// automation: suggestions carry prompt content that is written to the
+// versioned prompt registry, and repeated failures are required before
+// anything changes.
+func (s *Service) AutoApply(ctx context.Context) (int, error) {
+	if s.repo == nil || !s.autoApply {
+		return 0, nil
+	}
+	all, err := s.repo.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	openByCategory := map[string][]*entity.SelfImproveSuggestion{}
+	for _, suggestion := range all {
+		if suggestion == nil || suggestion.Status != entity.SelfImproveOpen {
+			continue
+		}
+		openByCategory[suggestion.Category] = append(openByCategory[suggestion.Category], suggestion)
+	}
+	applied := 0
+	for _, suggestions := range openByCategory {
+		if len(suggestions) < s.threshold {
+			continue
+		}
+		// Oldest first: pick the earliest suggestion with prompt content.
+		for _, suggestion := range suggestions {
+			if suggestion.PromptKey == "" || suggestion.PromptContent == "" {
+				continue
+			}
+			if _, err := s.Apply(ctx, suggestion.ID); err != nil {
+				continue
+			}
+			applied++
+			break
+		}
+	}
+	return applied, nil
 }
 
 func (s *Service) classify(c *entity.DecisionCase, events []*entity.MagiEvent) string {

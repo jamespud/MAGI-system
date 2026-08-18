@@ -269,6 +269,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **OIDC SSO + self-registration** - authorization-code login against any OIDC issuer with signed session cookies; first login can auto-provision an account, and public self-registration issues a one-time key.
 - **Editable role contracts** - the per-role evidence-gate policy is stored and editable via admin API (`role_policy` table + `GET/PUT /admin/role-policies/:code`), overriding the built-in defaults at runtime.
 - **Online golden regression** - promote completed production cases to a golden set (`/admin/golden`) and sync them into the built-in suite so the automated regression gate covers real decisions.
+- **Self-improving automation (guarded)** - after each automated regression, recurring failure suggestions can be auto-applied to the versioned prompt registry once a category reaches a configured threshold (`selfimprove.auto_apply_enabled`).
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -317,6 +318,7 @@ file_tool: { enabled: true, roots: ["/var/lib/magi"] }
 repo_tool: { enabled: true, roots: ["/srv/app"] }
 web_tool: { enabled: true, allowed_domains: ["docs.example.com"] }
 delegate_tool: { enabled: true }
+selfimprove: { auto_apply_enabled: false, auto_apply_threshold: 3 }
 feedback_tool: { enabled: true }
 benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }

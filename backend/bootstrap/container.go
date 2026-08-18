@@ -602,9 +602,10 @@ func provideSelfImproveRepository(db *gorm.DB) port.SelfImproveRepository {
 	return magi.NewSelfImproveRepository(db)
 }
 
-func provideSelfImproveService(repo port.Repository, sir port.SelfImproveRepository, prompts port.PromptRepository) *selfimprove.Service {
+func provideSelfImproveService(repo port.Repository, sir port.SelfImproveRepository, prompts port.PromptRepository, cfg *Config) *selfimprove.Service {
 	return selfimprove.NewService(sir, repo.CaseRepo(), repo.EventRepo(), repo.AgentRunRepo(),
-		selfimprove.WithPrompts(prompts))
+		selfimprove.WithPrompts(prompts),
+		selfimprove.WithAutoApply(cfg.SelfImprove.AutoApplyEnabled, cfg.SelfImprove.AutoApplyThreshold))
 }
 
 func provideSelfImproveHandler(svc *selfimprove.Service) *handler.SelfImproveHandler {
@@ -665,7 +666,7 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, cfg *Config) {
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, cfg *Config) {
 	var autoCancel context.CancelFunc
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -693,6 +694,13 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 									continue // previous automated run still in flight
 								}
 								log.Printf("auto regression: %v", err)
+							}
+							if siSvc != nil && cfg.SelfImprove.AutoApplyEnabled {
+								if applied, aerr := siSvc.AutoApply(autoCtx); aerr != nil {
+									log.Printf("selfimprove auto-apply: %v", aerr)
+								} else if applied > 0 {
+									log.Printf("selfimprove auto-applied %d suggestion(s) after regression", applied)
+								}
 							}
 						}
 					}
