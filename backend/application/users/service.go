@@ -52,8 +52,8 @@ func (s *Service) CreateUser(ctx context.Context, actorRole, name, role string) 
 	if role == "" {
 		role = entity.RoleUser
 	}
-	if role != entity.RoleAdmin && role != entity.RoleUser {
-		return nil, nil, fmt.Errorf("users: role must be %q or %q", entity.RoleAdmin, entity.RoleUser)
+	if !entity.IsValidRole(role) {
+		return nil, nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
 	}
 	u := &entity.User{Name: name, Role: role}
 	if err := s.users.Create(ctx, u); err != nil {

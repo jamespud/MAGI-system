@@ -61,3 +61,30 @@ func TestAuthMiddleware_DisabledAllowsOpen(t *testing.T) {
 		t.Fatalf("disabled auth: expected 200, got %d", w.Code)
 	}
 }
+
+func TestRequireAnyRole_GrantsListedRolesAndRejectsOthers(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{
+		{Name: "admin", Key: "tok-admin", UserID: 1, Role: "admin"},
+		{Name: "ops", Key: "tok-ops", UserID: 2, Role: "operator"},
+		{Name: "user", Key: "tok-user", UserID: 3, Role: "user"},
+	})
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.Auth(svc))
+	h.GET("/ops", server.RequireAnyRole("admin", "operator"), func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+
+	for _, tc := range []struct {
+		token string
+		want  int
+	}{
+		{token: "tok-admin", want: 200},
+		{token: "tok-ops", want: 200},
+		{token: "tok-user", want: 403},
+	} {
+		w := ut.PerformRequest(h.Engine, "GET", "/ops", nil, ut.Header{Key: "Authorization", Value: "Bearer " + tc.token})
+		if w.Code != tc.want {
+			t.Fatalf("token %s: expected %d, got %d", tc.token, tc.want, w.Code)
+		}
+	}
+}

@@ -153,8 +153,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/datasets/:id/runs", dsH.ListRuns)
 	v1.GET("/benchmarks/:runID", dsH.RunDetail)
 	v1.PATCH("/benchmarks/:runID/results/:resultID", dsH.AddFeedback)
-	v1.POST("/admin/benchmarks/seed", RequireRole("admin"), dsH.SeedBuiltin)
-	v1.GET("/admin/eval/summary", RequireRole("admin"), dsH.EvalSummary)
+	v1.POST("/admin/benchmarks/seed", RequireAnyRole("admin", "operator"), dsH.SeedBuiltin)
+	v1.GET("/admin/eval/summary", RequireAnyRole("admin", "operator"), dsH.EvalSummary)
 
 	plugH := handler.NewPluginsHandler(deps.Plugins)
 	v1.GET("/plugins", plugH.List)
@@ -165,15 +165,15 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	adminH := handler.NewAdminHandler(deps.Admin, admin.UsageLimits{
 		MaxTokens: deps.MaxTokensPerUser, MaxCostUSD: deps.MaxCostUSDPerUser,
 	})
-	v1.GET("/admin/usage", RequireRole("admin"), adminH.Usage)
+	v1.GET("/admin/usage", RequireAnyRole("admin", "operator"), adminH.Usage)
 	v1.GET("/me/usage", adminH.MeUsage)
 
 	if deps.PromptRepo != nil {
 		promptH := handler.NewPromptHandler(deps.PromptRepo)
-		v1.GET("/admin/prompts", RequireRole("admin"), promptH.List)
-		v1.GET("/admin/prompts/:key", RequireRole("admin"), promptH.Get)
-		v1.PUT("/admin/prompts/:key", RequireRole("admin"), promptH.Update)
-		v1.POST("/admin/prompts/:key/restore", RequireRole("admin"), promptH.Restore)
+		v1.GET("/admin/prompts", RequireAnyRole("admin", "operator"), promptH.List)
+		v1.GET("/admin/prompts/:key", RequireAnyRole("admin", "operator"), promptH.Get)
+		v1.PUT("/admin/prompts/:key", RequireAnyRole("admin", "operator"), promptH.Update)
+		v1.POST("/admin/prompts/:key/restore", RequireAnyRole("admin", "operator"), promptH.Restore)
 	}
 
 	usersH := handler.NewUsersHandler(deps.Users)

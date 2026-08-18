@@ -257,6 +257,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Read-only database tool** - `db_query` runs a single SELECT inside a read-only transaction with row/length/timeout guards and write-statement rejection (`db_tool` config).
 - **Hibernate and wake** - pause a running case (`POST /cases/:id/pause`), park its durable job, then wake it (`/resume`) to continue from its checkpoint with the FSM state restored.
 - **Built-in benchmark suite + dashboard** - one-click seed of a reusable decision sanity suite and an aggregate evaluation summary (accuracy/stability/regression per dataset and recent runs).
+- **Fine-grained roles** - admin / operator / user roles with route-level gating (`RequireAnyRole`); operators can run evals, benchmarks, and manage prompts while user/API-key administration stays admin-only.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.

@@ -8,15 +8,21 @@ import "time"
 type User struct {
 	ID        int64
 	Name      string
-	Role      string // "admin" | "user"
+	Role      string // "admin" | "operator" | "user"
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
 const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
+	RoleAdmin    = "admin"
+	RoleOperator = "operator"
+	RoleUser     = "user"
 )
+
+// IsValidRole reports whether role is a recognized principal role.
+func IsValidRole(role string) bool {
+	return role == RoleAdmin || role == RoleOperator || role == RoleUser
+}
 
 // ApiKey is a DB-backed credential issued to a user. Only the SHA-256 hash
 // is stored; the plaintext is shown exactly once at issuance.

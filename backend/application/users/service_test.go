@@ -107,6 +107,18 @@ func TestUsersService_CreateUserAndAuthenticate(t *testing.T) {
 		t.Fatalf("user=%+v key=%+v", u, key)
 	}
 
+	// Admin may create an operator; operator cannot create users.
+	op, _, err := svc.CreateUser(context.Background(), entity.RoleAdmin, "ops", entity.RoleOperator)
+	if err != nil {
+		t.Fatalf("create operator: %v", err)
+	}
+	if op.Role != entity.RoleOperator {
+		t.Fatalf("operator role = %s", op.Role)
+	}
+	if _, _, err := svc.CreateUser(context.Background(), entity.RoleOperator, "nested", entity.RoleUser); err != users.ErrForbidden {
+		t.Fatalf("operator must not create users, got %v", err)
+	}
+
 	// The issued key authenticates via the auth service backed by these repos.
 	authSvc := auth.NewService(true, nil).WithStores(krepo, urepo)
 	p, ok := authSvc.Authenticate(context.Background(), key.Plaintext)

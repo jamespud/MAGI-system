@@ -52,3 +52,23 @@ func RequireRole(role string) app.HandlerFunc {
 		c.Abort()
 	}
 }
+
+// RequireAnyRole gates a route to any of the listed roles. Open mode (nil
+// principal, auth disabled) passes through for local development.
+func RequireAnyRole(roles ...string) app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		p := auth.PrincipalFrom(ctx)
+		if p == nil {
+			c.Next(ctx)
+			return
+		}
+		for _, role := range roles {
+			if p.Role == role {
+				c.Next(ctx)
+				return
+			}
+		}
+		c.JSON(consts.StatusForbidden, dto.ErrorResponse{Error: "forbidden"})
+		c.Abort()
+	}
+}

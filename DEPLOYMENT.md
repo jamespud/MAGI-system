@@ -74,6 +74,10 @@ runs, tool/model/search failures and failovers, model cost) from
 - The auth middleware checks static keys first, then DB keys by hash,
   updating `last_used_at` for observability. Revoked or deleted keys stop
   authenticating immediately.
+- **Roles**: `admin` (users, API keys, all routes), `operator` (usage,
+  prompts, benchmark seed and eval summary), and `user` (own workspace).
+  Routes are gated with `RequireAnyRole(...)`; user and API-key management
+  stays admin-only.
 
 ### Multi-tenant boundaries and sandbox egress
 
