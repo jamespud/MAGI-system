@@ -35,6 +35,7 @@ export const en: Record<string, string> = {
   'replay.runs': 'Runs',
   'replay.agents': 'Agents',
   'replay.errors': 'Errors',
+  'replay.taskTree': 'Task tree',
 
   // Decision workspace
   'ws.newDecision': 'New Decision',
@@ -230,6 +231,7 @@ export const zh: Record<string, string> = {
   'replay.runs': '运行',
   'replay.agents': '智能体',
   'replay.errors': '错误',
+  'replay.taskTree': '任务树',
 
   'ws.newDecision': '新建决策',
   'ws.questionPlaceholder': 'MAGI 应该分析什么决策？',

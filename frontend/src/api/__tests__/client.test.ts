@@ -222,6 +222,22 @@ describe('api.pauseCase and resumeCase', () => {
   });
 });
 
+describe('api.getTaskTree', () => {
+  it('fetches the task state tree for a case', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        nodes: [{ id: 'n1', case_id: 'case-001', kind: 'agent', title: 'melchior', status: 'completed', created_at: 't' }],
+      }),
+    } as Response);
+    const result = await api.getTaskTree('case-001');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/task-tree', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result.nodes[0].kind).toBe('agent');
+  });
+});
+
 describe('api.seedBuiltinBenchmark and getEvalSummary', () => {
   it('seeds the built-in suite and fetches the aggregate summary', async () => {
     vi.spyOn(globalThis, 'fetch')

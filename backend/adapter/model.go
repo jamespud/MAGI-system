@@ -395,6 +395,7 @@ func AllModels() []any {
 		&PromptTemplateModel{},
 		&RolePolicyModel{},
 		&GoldenCaseModel{},
+		&TaskNodeModel{},
 		&ConversationModel{},
 		&SelfImproveModel{},
 		&ConversationMessageModel{},

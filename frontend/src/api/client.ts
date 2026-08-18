@@ -250,6 +250,8 @@ export const api = {
 
   getTrace: (id: string) => request<ApiEvent[]>(`/cases/${id}/trace`),
 
+  getTaskTree: (id: string) => request<{ nodes: ApiTaskNode[] }>(`/cases/${id}/task-tree`),
+
   listDatasets: () => request<{ datasets: ApiDataset[] }>('/datasets'),
 
   createDataset: (name: string, description?: string) =>
@@ -612,6 +614,19 @@ interface ApiEvalSummary {
   }[];
 }
 
+interface ApiTaskNode {
+  id: string;
+  case_id: string;
+  parent_id?: string;
+  run_id?: string;
+  kind: string;
+  title: string;
+  status: string;
+  detail?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
 interface ApiApproval {
   id: string;
   case_id: string;
@@ -675,6 +690,7 @@ export type {
   ApiCaseResponse,
   ApiDataset,
   ApiEvalSummary,
+  ApiTaskNode,
   ApiBenchmarkRun,
   ApiBenchmarkDetail,
   ApiEvaluation,

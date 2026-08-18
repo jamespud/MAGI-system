@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { api, type ApiEvent } from '@/api/client';
+import { api, type ApiEvent, type ApiTaskNode } from '@/api/client';
 import { useT } from '@/i18n';
 
 type ViewMode = 'timeline' | 'trace';
@@ -55,6 +55,7 @@ export default function Replay() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<ViewMode>('timeline');
   const [selectedEvent, setSelectedEvent] = useState<ApiEvent | null>(null);
+  const [taskTree, setTaskTree] = useState<ApiTaskNode[] | null>(null);
 
   const load = async (nextMode: ViewMode = mode) => {
     if (!caseId.trim()) return;
@@ -67,6 +68,13 @@ export default function Replay() {
         : await api.getEvents(caseId.trim());
       setEvents(list);
       setMode(nextMode);
+      if (nextMode === 'trace') {
+        api.getTaskTree(caseId.trim())
+          .then((r) => setTaskTree(r.nodes))
+          .catch(() => setTaskTree(null));
+      } else {
+        setTaskTree(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'load failed');
       setEvents([]);
@@ -171,6 +179,22 @@ export default function Replay() {
             ))}
             {lanes.length === 0 && <p className="text-sm text-text-muted">{t('replay.empty')}</p>}
           </div>
+
+          {taskTree && taskTree.length > 0 && (
+            <div className="rounded border border-border-dim bg-raised p-4">
+              <p className="font-mono text-xs text-text-muted mb-2">{t('replay.taskTree')}</p>
+              <ul className="space-y-1">
+                {taskTree.map((node) => (
+                  <li key={node.id} className="flex items-center gap-2 text-xs font-mono text-text-secondary">
+                    <span className="rounded bg-background border border-border-dim px-1.5 py-0.5 text-[10px] text-text-muted">{node.kind}</span>
+                    <span>{node.title}</span>
+                    <span className="text-text-muted">· {node.status}</span>
+                    {node.completed_at && <span className="text-text-muted">{new Date(node.completed_at).toLocaleTimeString()}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {selectedEvent && (
             <div className="rounded border border-border-dim bg-raised p-4">

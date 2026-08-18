@@ -54,6 +54,7 @@ type AgentLoop struct {
 	approvalRepo   port.ApprovalRepository
 	quota          port.ToolQuotaPort
 	prompts        port.PromptProvider
+	taskTree       port.TaskTreeRecorder
 }
 
 type AgentLoopDeps struct {
@@ -72,6 +73,7 @@ type AgentLoopDeps struct {
 	ApprovalRepo   port.ApprovalRepository
 	Quota          port.ToolQuotaPort
 	Prompts        port.PromptProvider
+	TaskTree       port.TaskTreeRecorder
 }
 
 func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
@@ -112,6 +114,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 		reflectionVal:  rv,
 		eventPub:       d.EventPub,
 		checkpointRepo: d.CheckpointRepo,
+		taskTree:       d.TaskTree,
 	}, nil
 }
 
@@ -143,6 +146,18 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 }
 
 func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *AgentContext) (*LoopResult, error) {
+	result, err := l.run(ctx, cfg, actx)
+	if l.taskTree != nil && actx != nil && actx.CaseID != "" && cfg != nil {
+		status := ""
+		if result != nil {
+			status = string(result.Status)
+		}
+		_ = l.taskTree.RecordAgent(ctx, actx.CaseID, actx.RunID, string(cfg.Code), status)
+	}
+	return result, err
+}
+
+func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *AgentContext) (*LoopResult, error) {
 	if cfg == nil {
 		return nil, errors.New("agent loop: nil config")
 	}

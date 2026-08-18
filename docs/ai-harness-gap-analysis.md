@@ -48,7 +48,7 @@
 
 | Harness 核心组件 | 定义拆解 | MAGI 已覆盖 | 仍未覆盖 / 待补齐 | 组件状态 |
 | --- | --- | --- | --- | --- |
-| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步 | 更通用的任务级文件/状态树 | 🟡 |
+| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步、任务级状态树 | 无 | 🟡 |
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈、内置 `check_output` 计算型反馈传感器、失败分析→建议→受控应用闭环（含可配置全自动规则演化） | 更完整外部传感器（代码 linter/编译/单测，依赖 MCP/coderunner） | 🟡 |
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、Docker 沙箱、工具策略、只读 DB/文件/代码库查询与受限 URL 抓取 | MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由、OIDC SSO + 自助注册 | 更完整的敏感数据分级与审计 UI | 🟡 |
@@ -71,6 +71,7 @@
 | | 多搜索引擎插件化 | ✅ | `search.providers` 支持 Tavily/Brave 有序配置；本地 `web_search` 统一 provider 中立结果结构，失败自动切换并暴露 `magi_web_search_failovers_total`；`tavily.api_key` 兼容并作为 primary |
 | **记忆/知识** | case 记忆投影 + RAG（Milvus+ES+MySQL 混合 RRF） | ✅ | `adapter/rag/` |
 | | 语义检索接入 UI | ✅ | `/api/v1/memory` 先 Milvus+ES 语义检索（限定 `case_memory` 源）再 LIKE 兜底、去重、Owner 过滤（D6，`application/memory/service.go`） |
+| | 任务级状态树 | ✅ | `task_node` 表持久化 agent/round 执行节点（AgentLoop.Run 出口自动记录），`GET /cases/:id/task-tree` 返回，Replay Trace 页展示（`adapter/task_tree_repository.go`、`domain/runtime/agent_loop.go`、`server/handler/tasktree.go`） |
 | | 文档/URL 知识导入管理 | ✅ | `POST/GET/DELETE /api/v1/knowledge`，文档经 `StoreDocument` 索引进 RAG（独立 `knowledge_doc` 命名空间）（D7，`application/knowledge/`、`server/router.go`） |
 | | 长期记忆编辑/删除/标注 | ✅ | `PATCH/DELETE /api/v1/memory/:id` 支持摘要/结论/经验/标注/标签编辑、校验与 Owner 隔离；更新/删除同步 RAG case-memory chunks，失败回滚 SQL 投影；前端 Memory 页支持标注、标签与删除 |
 | **会话** | 单次 question→decision（`/assistant`） | ✅ | `application/assistant/service.go` |

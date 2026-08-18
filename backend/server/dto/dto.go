@@ -570,6 +570,32 @@ func FromGoldenCase(g *entity.GoldenCase) GoldenCaseResponse {
 	}
 }
 
+// TaskNodeDTO is one node of the case task state tree.
+type TaskNodeDTO struct {
+	ID          string `json:"id"`
+	CaseID      string `json:"case_id"`
+	ParentID    string `json:"parent_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
+	Kind        string `json:"kind"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Detail      string `json:"detail,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	CompletedAt string `json:"completed_at,omitempty"`
+}
+
+func FromTaskNode(n *entity.TaskNode) TaskNodeDTO {
+	out := TaskNodeDTO{
+		ID: n.ID, CaseID: n.CaseID, ParentID: n.ParentID, RunID: n.RunID,
+		Kind: n.Kind, Title: n.Title, Status: n.Status, Detail: n.Detail,
+		CreatedAt: n.CreatedAt.Format(time.RFC3339),
+	}
+	if n.CompletedAt != nil {
+		out.CompletedAt = n.CompletedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

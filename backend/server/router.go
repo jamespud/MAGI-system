@@ -39,6 +39,7 @@ type RouteDeps struct {
 	SelfImprove  *handler.SelfImproveHandler
 	RolePolicy   *handler.RolePolicyHandler
 	Golden       *handler.GoldenHandler
+	TaskTree     *handler.TaskTreeHandler
 	Evaluation   *evaluation.Service
 	Judge        *judge.Service
 	Memory       *memory.Service
@@ -114,6 +115,9 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/cases/:id/events", repH.Events)
 	v1.GET("/cases/:id/timeline", repH.Timeline)
 	v1.GET("/cases/:id/trace", repH.Trace)
+	if deps.TaskTree != nil {
+		v1.GET("/cases/:id/task-tree", deps.TaskTree.List)
+	}
 	v1.GET("/cases/:id/stream", SSEHandlerWithHistory(deps.Broker, deps.EventRepo, deps.Decision))
 
 	if deps.SelfImprove != nil {

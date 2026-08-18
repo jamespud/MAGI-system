@@ -95,6 +95,8 @@ var Module = fx.Options(
 		provideGoldenRepository,
 		provideGoldenService,
 		provideGoldenHandler,
+		provideTaskTreeRepository,
+		provideTaskTreeHandler,
 		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
@@ -156,6 +158,7 @@ var Module = fx.Options(
 		siH *handler.SelfImproveHandler,
 		rpH *handler.RolePolicyHandler,
 		goldenH *handler.GoldenHandler,
+		ttH *handler.TaskTreeHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -187,6 +190,7 @@ var Module = fx.Options(
 			SelfImprove:  siH,
 			RolePolicy:   rpH,
 			Golden:       goldenH,
+			TaskTree:     ttH,
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
@@ -233,6 +237,7 @@ func provideAgentLoop(
 	approvalRepo port.ApprovalRepository,
 	quota *toolquota.Service,
 	prompts port.PromptProvider,
+	taskTree port.TaskTreeRecorder,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -242,8 +247,16 @@ func provideAgentLoop(
 	)
 	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts, TaskTree: taskTree,
 	})
+}
+
+func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
+	return magi.NewTaskTreeRepository(db)
+}
+
+func provideTaskTreeHandler(repo port.TaskTreeRepository, caseSvc port.CaseRepository) *handler.TaskTreeHandler {
+	return handler.NewTaskTreeHandler(repo, caseSvc)
 }
 
 // ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.

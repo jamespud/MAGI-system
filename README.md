@@ -270,6 +270,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Editable role contracts** - the per-role evidence-gate policy is stored and editable via admin API (`role_policy` table + `GET/PUT /admin/role-policies/:code`), overriding the built-in defaults at runtime.
 - **Online golden regression** - promote completed production cases to a golden set (`/admin/golden`) and sync them into the built-in suite so the automated regression gate covers real decisions.
 - **Self-improving automation (guarded)** - after each automated regression, recurring failure suggestions can be auto-applied to the versioned prompt registry once a category reaches a configured threshold (`selfimprove.auto_apply_enabled`).
+- **Task state tree** - each agent/round execution is recorded as a node (`GET /cases/:id/task-tree`) and shown in the Replay trace view.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -287,6 +288,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | POST/GET/PATCH/DELETE | `/cases`, `/cases/:id` (`?page=&page_size=`; `PATCH` pin/archive; `DELETE` cascade; +`/run`, `/cancel`, `/pause`, `/resume`, `/fork`, `/report`, `/export`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
 | GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` (+`DELETE /datasets/:id`) | Ground-truth evaluation |
 | GET | `/memory`, `/memory/:id`, `/memory/export` | Case-memory search (semantic + LIKE) and full export |
+| GET | `/cases/:id/task-tree` | Task state tree (agent/round execution nodes) |
 | GET | `/evaluation/:id/export` | Export evaluation + judge verdict |
 | GET/POST | `/approvals`, `/approvals/:id`, `/approvals/:id/approve`, `/approvals/:id/reject` | Human-in-the-loop tool approvals |
 | GET/POST/PATCH/DELETE | `/plugins`, `/plugins/:id` | User plugin bindings |
