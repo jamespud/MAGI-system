@@ -18,20 +18,52 @@ const defaultTavilyURL = "https://api.tavily.com/search"
 // webSearchArgsSchema is the JSON Schema for web_search arguments.
 const webSearchArgsSchema = `{"type":"object","properties":{"query":{"type":"string","description":"the search query"}},"required":["query"],"additionalProperties":false}`
 
-// LocalToolRegistry resolves the web_search tool definition for any binding
-// that requests it. Other bindings are ignored (return no def).
-type LocalToolRegistry struct{}
+// dbQueryArgsSchema is the JSON Schema for db_query arguments.
+const dbQueryArgsSchema = `{"type":"object","properties":{"query":{"type":"string","description":"single read-only SELECT statement"}},"required":["query"],"additionalProperties":false}`
 
-func NewLocalToolRegistry() *LocalToolRegistry { return &LocalToolRegistry{} }
+// LocalToolRegistry resolves built-in local tool definitions (web_search,
+// db_query) for any binding that requests them. Other bindings are ignored.
+// An empty enabled set preserves the historical "all local tools" behavior.
+type LocalToolRegistry struct {
+	enabled map[string]bool
+}
+
+// NewLocalToolRegistry returns a registry restricted to the named local
+// tools. With no arguments every local tool is enabled.
+func NewLocalToolRegistry(enabled ...string) *LocalToolRegistry {
+	set := make(map[string]bool, len(enabled))
+	for _, name := range enabled {
+		if name != "" {
+			set[name] = true
+		}
+	}
+	return &LocalToolRegistry{enabled: set}
+}
+
+func (r *LocalToolRegistry) isEnabled(name string) bool {
+	if len(r.enabled) == 0 {
+		return true
+	}
+	return r.enabled[name]
+}
 
 func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
 	out := make([]port.ToolDefinition, 0, len(bindings))
 	for _, b := range bindings {
-		if b.ToolName == "web_search" {
+		switch {
+		case b.ToolName == "web_search" && r.isEnabled("web_search"):
 			out = append(out, port.ToolDefinition{
 				Name:       "web_search",
 				Desc:       "Search the web for up-to-date information. Returns content snippets and URLs.",
 				ArgsSchema: []byte(webSearchArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
+		case b.ToolName == DBQueryToolName && r.isEnabled(DBQueryToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       DBQueryToolName,
+				Desc:       "Run a single read-only SELECT query against the configured database. Returns rows as JSON.",
+				ArgsSchema: []byte(dbQueryArgsSchema),
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})

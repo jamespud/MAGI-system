@@ -254,6 +254,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Counterfactual stability & regression gate** — benchmark items repeat N times (`runs_per_item`), report stability, and fail the run when accuracy drops below `regression_threshold`.
 - **Model failover** - ordered global/per-role providers move build/generation failures to the next model, expose `magi_model_failovers_total`, and preserve provider-specific cost accounting.
 - **Pluggable web search** - ordered Tavily/Brave providers normalize results into the evidence pipeline and fail over with `magi_web_search_failovers_total` observability.
+- **Read-only database tool** - `db_query` runs a single SELECT inside a read-only transaction with row/length/timeout guards and write-statement rejection (`db_tool` config).
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -292,6 +293,7 @@ model: { api_key: "...", model_name: "..." }   # or model_id for Coze mode
 auth: { enabled: true, api_keys: [...] }        # static bootstrap keys (DB keys managed via /admin/users)
 limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
+db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
 magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
 # ordered global failover providers + per-role overrides (unset fields inherit primary)

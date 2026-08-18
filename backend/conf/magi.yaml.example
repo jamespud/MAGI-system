@@ -172,6 +172,18 @@ code_runner:
   node_modules_dir: ""
   memory_limit_mb: 100
 
+# Built-in read-only database query tool (db_query). Executes a single
+# SELECT inside a read-only transaction; write statements and multi-statement
+# input are rejected. Disabled by default.
+db_tool:
+  enabled: false
+  # driver: "mysql"            # defaults to database.driver
+  # dsn: ""                    # defaults to database.dsn
+  # max_rows: 50
+  # max_query_chars: 2000
+  # timeout_seconds: 10
+  # blocked_prefixes: []       # extra statement prefixes to reject
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

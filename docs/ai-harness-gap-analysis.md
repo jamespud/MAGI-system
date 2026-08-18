@@ -50,7 +50,7 @@
 | --- | --- | --- | --- | --- |
 | **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步 | 更通用的任务级文件/状态树 | 🟡 |
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈 | 计算型反馈传感器（Linter/编译/单测输出回喂）、更完整外部传感器与自我改进 Harness | 🟡 |
-| **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱 | 🟡 |
+| **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略、只读 DB 查询工具 | 文件/代码库/浏览器工具；Docker/MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈 | 任务级 pause->hibernate->wake | 🟡 |
 | **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
@@ -66,7 +66,7 @@
 | | 多供应商路由/降级（failover） | ✅ | `model.providers` / per-role `model.providers` 有序 provider 链；Build / Generate / 工具绑定失败自动尝试下一家，Stream 可在首块前 failover；取消的请求不重试；`magi_model_failovers_total` 观测；fallback 按实际 provider 单价核算 usage 成本（`adapter/model_failover.go`） |
 | | **长任务规划 / 动态 subagent 派生** | ❌ | 三 agent 固定（`entity/role.go`），无 subagent 派生框架、无任务规划层 |
 | **工具生态** | Tavily/Brave web_search / MCP(stdio+http) / CodeRunner(WASM) | ✅ | `adapter/web_search_executor.go`、`adapter/tavily_tool.go`、`adapter/mcp/mcp.go`、`coderunner_adapter.go` |
-| | 原生文件/代码库/浏览器/DB 工具 | ❌ | 只能靠外部 MCP 引入，无内置代码库/文件/浏览器工具集 |
+| | 原生文件/代码库/浏览器/DB 工具 | 🟡 | `db_tool` 内置只读 `db_query`：单条 SELECT + 只读事务 + 行数/长度/超时限制 + 写语句拒绝（`adapter/db_query_tool.go`）；文件/代码库/浏览器工具仍只能靠外部 MCP |
 | | Docker / MicroVM 沙箱 | ❌ | 仅 WASM 沙箱（CodeRunner），无容器 / MicroVM 隔离 |
 | | 多搜索引擎插件化 | ✅ | `search.providers` 支持 Tavily/Brave 有序配置；本地 `web_search` 统一 provider 中立结果结构，失败自动切换并暴露 `magi_web_search_failovers_total`；`tavily.api_key` 兼容并作为 primary |
 | **记忆/知识** | case 记忆投影 + RAG（Milvus+ES+MySQL 混合 RRF） | ✅ | `adapter/rag/` |

@@ -225,8 +225,8 @@ func provideAgentLoop(
 // ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.
 func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolRegistryPort {
 	var local port.ToolRegistryPort
-	if cfg.Tavily.APIKey != "" {
-		local = magi.NewLocalToolRegistry()
+	if enabledLocal := enabledLocalTools(cfg); len(enabledLocal) > 0 {
+		local = magi.NewLocalToolRegistry(enabledLocal...)
 	}
 	var mcpReg port.ToolRegistryPort
 	if len(cfg.MCP.Servers) > 0 {
@@ -239,6 +239,7 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
 func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry) (port.ToolExecutorPort, error) {
 	var local port.ToolExecutorPort
+	executors := map[string]port.ToolExecutorPort{}
 	if providers := webSearchProviderSpecs(cfg); len(providers) > 0 {
 		specs := make([]magi.WebSearchProviderSpec, 0, len(providers))
 		for _, provider := range providers {
@@ -246,11 +247,35 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 				Provider: provider.Provider, APIKey: provider.APIKey, BaseURL: provider.BaseURL,
 			})
 		}
-		var err error
-		local, err = magi.NewWebSearchToolExecutor(specs, reg)
+		webSearch, err := magi.NewWebSearchToolExecutor(specs, reg)
 		if err != nil {
 			return nil, err
 		}
+		executors["web_search"] = webSearch
+	}
+	if cfg.DBTool.Enabled {
+		dbDriver := cfg.DBTool.Driver
+		if dbDriver == "" {
+			dbDriver = cfg.Database.Driver
+		}
+		dbDSN := cfg.DBTool.DSN
+		if dbDSN == "" {
+			dbDSN = cfg.Database.DSN
+		}
+		dbTool, err := magi.NewDBQueryToolExecutor(magi.DBQueryToolConfig{
+			Enabled: cfg.DBTool.Enabled, Driver: dbDriver, DSN: dbDSN,
+			MaxRows: cfg.DBTool.MaxRows, MaxQueryChars: cfg.DBTool.MaxQueryChars,
+			TimeoutSeconds: cfg.DBTool.TimeoutSeconds, BlockedPrefixes: cfg.DBTool.BlockedPrefixes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.DBQueryToolName] = dbTool
+	}
+	var err error
+	local, err = magi.NewLocalToolMux(executors)
+	if err != nil {
+		return nil, err
 	}
 	var mcpExec port.ToolExecutorPort
 	if len(cfg.MCP.Servers) > 0 {

@@ -62,6 +62,7 @@ type Config struct {
 		NodeModulesDir   string   `yaml:"node_modules_dir"`
 		MemoryLimitMB    int64    `yaml:"memory_limit_mb"`
 	} `yaml:"code_runner"`
+	DBTool     DBToolConfig `yaml:"db_tool"`
 	ToolPolicy struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -133,6 +134,17 @@ type SearchProviderConfig struct {
 	Provider string `yaml:"provider"`
 	APIKey   string `yaml:"api_key"`
 	BaseURL  string `yaml:"base_url"`
+}
+
+// DBToolConfig configures the built-in read-only database query tool.
+type DBToolConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	Driver          string   `yaml:"driver"`
+	DSN             string   `yaml:"dsn"`
+	MaxRows         int      `yaml:"max_rows"`
+	MaxQueryChars   int      `yaml:"max_query_chars"`
+	TimeoutSeconds  int      `yaml:"timeout_seconds"`
+	BlockedPrefixes []string `yaml:"blocked_prefixes"`
 }
 
 type EmbeddingConfig struct {
@@ -549,6 +561,19 @@ func webSearchProviderSpecs(cfg *Config) []SearchProviderConfig {
 	return providers
 }
 
+// enabledLocalTools returns the built-in local tools that should be exposed
+// to agents based on configuration.
+func enabledLocalTools(cfg *Config) []string {
+	tools := make([]string, 0, 2)
+	if len(webSearchProviderSpecs(cfg)) > 0 {
+		tools = append(tools, "web_search")
+	}
+	if cfg.DBTool.Enabled {
+		tools = append(tools, magi.DBQueryToolName)
+	}
+	return tools
+}
+
 func validateSearchProviders(providers []SearchProviderConfig) error {
 	seen := make(map[string]bool, len(providers))
 	for i := range providers {
@@ -571,6 +596,30 @@ func validateSearchProviders(providers []SearchProviderConfig) error {
 			return fmt.Errorf("search.providers[%d]: duplicate provider %q", i, provider)
 		}
 		seen[provider] = true
+	}
+	return nil
+}
+
+func validateDBTool(tool *DBToolConfig, defaultDriver, defaultDSN string) error {
+	if tool == nil {
+		return nil
+	}
+	driver := strings.TrimSpace(tool.Driver)
+	if driver == "" {
+		driver = strings.TrimSpace(defaultDriver)
+	}
+	if driver != "mysql" && driver != "sqlite3" {
+		return fmt.Errorf("db_tool: driver must be \"mysql\" or \"sqlite3\" when enabled")
+	}
+	dsn := strings.TrimSpace(tool.DSN)
+	if dsn == "" {
+		dsn = strings.TrimSpace(defaultDSN)
+	}
+	if dsn == "" {
+		return fmt.Errorf("db_tool: dsn is required when enabled (set db_tool.dsn or database.dsn)")
+	}
+	if tool.MaxRows < 0 || tool.MaxQueryChars < 0 || tool.TimeoutSeconds < 0 {
+		return fmt.Errorf("db_tool: max_rows, max_query_chars and timeout_seconds cannot be negative")
 	}
 	return nil
 }
@@ -672,9 +721,7 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			RequireJustification: s.ReflectionPolicy.RequireJustification,
 			RequireNewEvidence:   s.ReflectionPolicy.RequireNewEvidence,
 		},
-		Tools: []entity.ToolBinding{
-			{Source: entity.ToolSourceLocal, ToolName: "web_search"},
-		},
+		Tools: s.bindTools(cfg),
 		LoopPolicy: entity.LoopPolicy{
 			MaxSteps:                         cfg.Magi.MaxSteps,
 			Timeout:                          time.Duration(cfg.Magi.TimeoutSeconds) * time.Second,
@@ -688,6 +735,14 @@ func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 			TokenCompactionThreshold:         cfg.Magi.CompactionThreshold,
 		},
 	}
+}
+
+func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
+	tools := []entity.ToolBinding{{Source: entity.ToolSourceLocal, ToolName: "web_search"}}
+	if cfg.DBTool.Enabled {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.DBQueryToolName})
+	}
+	return tools
 }
 
 // Validate returns a descriptive error for invalid or incomplete
@@ -704,6 +759,11 @@ func (c *Config) Validate() error {
 	}
 	if err := validateSearchProviders(c.Search.Providers); err != nil {
 		return err
+	}
+	if c.DBTool.Enabled {
+		if err := validateDBTool(&c.DBTool, c.Database.Driver, c.Database.DSN); err != nil {
+			return err
+		}
 	}
 	if c.Auth.Enabled {
 		if len(c.Auth.APIKeys) == 0 {

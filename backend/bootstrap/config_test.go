@@ -260,6 +260,75 @@ func TestConfigValidate_SearchProviders(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_DBTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "db-tool.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+  model_name: "m"
+db_tool:
+  enabled: true
+  driver: "sqlite3"
+  dsn: "/tmp/magi.db"
+  max_rows: 25
+  max_query_chars: 500
+  timeout_seconds: 3
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !cfg.DBTool.Enabled || cfg.DBTool.Driver != "sqlite3" || cfg.DBTool.MaxRows != 25 {
+		t.Fatalf("db_tool config = %+v", cfg.DBTool)
+	}
+}
+
+func TestConfigValidate_DBTool(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.DBTool.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "db_tool") {
+		t.Fatalf("expected db_tool validation error, got %v", err)
+	}
+
+	cfg.DBTool.Driver = "oracle"
+	cfg.DBTool.DSN = "x"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `driver must be "mysql" or "sqlite3"`) {
+		t.Fatalf("expected driver validation error, got %v", err)
+	}
+
+	cfg.DBTool.Driver = "sqlite3"
+	cfg.DBTool.DSN = "/tmp/magi.db"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid db_tool rejected: %v", err)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsDBQueryWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.DBTool.Enabled = true
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "db_query" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("db_query not bound when db_tool enabled: %+v", c.Tools)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsWebSearch(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)

@@ -154,6 +154,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 | `auth` | `enabled: true` + `api_keys` (name/key/user_id/role) act as static bootstrap credentials. Runtime users/keys are managed over the admin API (`/admin/users`) and stored in DB (`users` / `api_keys`, SHA-256-hashed, plaintext shown once at issuance) |
 | `limits` | `max_concurrent_runs_per_user` |
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |
+| `db_tool` | Built-in `db_query` tool: single read-only SELECT inside a read-only transaction; `driver`/`dsn` default to the `database` block, `max_rows`/`max_query_chars`/`timeout_seconds` bound each call, `blocked_prefixes` adds write-statement rejections |
 | `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |
 | `tool_policy` | `require_approval` (default `code_runner`) and `auto_approved` |
 | `magi` budget | `approval_timeout_seconds` (default 3600), `token_budget` (150000), `compaction_threshold` (0.7) |
