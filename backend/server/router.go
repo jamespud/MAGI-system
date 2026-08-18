@@ -40,6 +40,7 @@ type RouteDeps struct {
 	RolePolicy      *handler.RolePolicyHandler
 	Golden          *handler.GoldenHandler
 	ConsensusPolicy *handler.ConsensusPolicyHandler
+	FSMBlueprint    *handler.FSMBlueprintHandler
 	TaskTree        *handler.TaskTreeHandler
 	Evaluation      *evaluation.Service
 	Judge           *judge.Service
@@ -141,6 +142,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		v1.GET("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Get)
 		v1.PUT("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Update)
 		v1.POST("/admin/consensus-policy/reset", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Reset)
+	}
+	if deps.FSMBlueprint != nil {
+		v1.GET("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Get)
+		v1.PUT("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Update)
+		v1.POST("/admin/fsm-blueprint/reset", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Reset)
+		v1.POST("/admin/fsm-blueprint/validate", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Validate)
 	}
 
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)

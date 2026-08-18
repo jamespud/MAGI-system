@@ -70,8 +70,7 @@ func TestDelegateToolExecutor_RequiresQuestionAndInvestigator(t *testing.T) {
 }
 
 func TestDelegateToolExecutor_RunsParallelSubInvestigations(t *testing.T) {
-	var active, maxActive int32
-	investigator := &trackingInvestigator{active: &active, maxActive: &maxActive}
+	investigator := &trackingInvestigator{expected: 3, done: make(chan struct{})}
 	exec, err := magi.NewDelegateToolExecutor(investigator)
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -93,25 +92,32 @@ func TestDelegateToolExecutor_RunsParallelSubInvestigations(t *testing.T) {
 	if len(out.Results) != 3 || out.EvidenceCount != 3 {
 		t.Fatalf("results=%d evidence=%d", len(out.Results), out.EvidenceCount)
 	}
-	if maxActive < 2 {
-		t.Fatalf("expected concurrency >= 2, got %d", maxActive)
+	if investigator.maxActive < 2 {
+		t.Fatalf("expected concurrency >= 2, got %d", investigator.maxActive)
 	}
 }
 
 type trackingInvestigator struct {
-	active    *int32
-	maxActive *int32
+	active    int32
+	maxActive int32
+	entered   int32
+	expected  int32
+	done      chan struct{}
 }
 
 func (s *trackingInvestigator) Investigate(ctx context.Context, question, background string) (*magi.DelegateResult, error) {
-	cur := atomic.AddInt32(s.active, 1)
+	cur := atomic.AddInt32(&s.active, 1)
 	for {
-		observed := atomic.LoadInt32(s.maxActive)
-		if cur <= observed || atomic.CompareAndSwapInt32(s.maxActive, observed, cur) {
+		observed := atomic.LoadInt32(&s.maxActive)
+		if cur <= observed || atomic.CompareAndSwapInt32(&s.maxActive, observed, cur) {
 			break
 		}
 	}
-	defer atomic.AddInt32(s.active, -1)
+	if atomic.AddInt32(&s.entered, 1) == s.expected {
+		close(s.done)
+	}
+	<-s.done
+	defer atomic.AddInt32(&s.active, -1)
 	return &magi.DelegateResult{Question: question, Status: "completed", Evidence: []map[string]any{
 		{"id": "EV-" + question, "tool": "web_search", "observation": "found"},
 	}}, nil

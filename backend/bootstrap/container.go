@@ -31,6 +31,7 @@ import (
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/evaluation"
+	"github.com/jamespud/magi/backend/application/fsmblueprint"
 	"github.com/jamespud/magi/backend/application/golden"
 	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/knowledge"
@@ -99,6 +100,9 @@ var Module = fx.Options(
 		provideConsensusPolicyRepository,
 		provideConsensusPolicyService,
 		provideConsensusPolicyHandler,
+		provideFSMBlueprintRepository,
+		provideFSMBlueprintService,
+		provideFSMBlueprintHandler,
 		provideTaskTreeRepository,
 		provideTaskTreeHandler,
 		providePromptProvider,
@@ -163,6 +167,7 @@ var Module = fx.Options(
 		rpH *handler.RolePolicyHandler,
 		goldenH *handler.GoldenHandler,
 		cpH *handler.ConsensusPolicyHandler,
+		fbH *handler.FSMBlueprintHandler,
 		ttH *handler.TaskTreeHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
@@ -196,6 +201,7 @@ var Module = fx.Options(
 			RolePolicy:      rpH,
 			Golden:          goldenH,
 			ConsensusPolicy: cpH,
+			FSMBlueprint:    fbH,
 			TaskTree:        ttH,
 			Evaluation:      evalSvc,
 			Memory:          memSvc,
@@ -538,6 +544,18 @@ func provideConsensusPolicyService(repo port.ConsensusPolicyRepository) *consens
 
 func provideConsensusPolicyHandler(svc *consensuspolicy.Service) *handler.ConsensusPolicyHandler {
 	return handler.NewConsensusPolicyHandler(svc)
+}
+
+func provideFSMBlueprintRepository(db *gorm.DB) port.FSMBlueprintRepository {
+	return magi.NewFSMBlueprintRepository(db)
+}
+
+func provideFSMBlueprintService(repo port.FSMBlueprintRepository) *fsmblueprint.Service {
+	return fsmblueprint.NewService(repo)
+}
+
+func provideFSMBlueprintHandler(svc *fsmblueprint.Service) *handler.FSMBlueprintHandler {
+	return handler.NewFSMBlueprintHandler(svc)
 }
 
 func provideApprovalRepository(db *gorm.DB) port.ApprovalRepository {

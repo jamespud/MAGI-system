@@ -67,6 +67,12 @@ editable over `GET/PUT /admin/consensus-policy` (`POST .../reset` restores
 defaults). The orchestrator loads the stored policy at startup, so tuning
 voting thresholds is a config change, not a code change.
 
+The FSM orchestration blueprint (the legal case-status transition set) is
+editable over `GET/PUT /admin/fsm-blueprint` and auditable with
+`POST /admin/fsm-blueprint/validate {path:[...]}`. Execution still follows the
+Go orchestrator; the blueprint is the governance/audit surface for a
+progressive table-driven migration.
+
 ### Online golden regression
 
 Completed production cases can be promoted to the online-golden set

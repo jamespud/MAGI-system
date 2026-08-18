@@ -275,6 +275,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Lightweight VM sandboxing** - the Docker sandbox accepts a container `runtime` (e.g. gVisor `runsc`) for lightweight-virtualization isolation on top of network/memory/CPU/PID/time limits.
 - **Parallel sub-investigation** - the `delegate` tool accepts a `questions` array to spawn up to 4 sub-agents concurrently and merge their evidence.
 - **Editable consensus rules** - the deterministic voting/consensus policy (quorum, split-to-debate, reconsider-majority, conditional-as-approve) is editable via `GET/PUT /admin/consensus-policy`.
+- **FSM orchestration blueprint** - the legal case-status transition set is editable and validated (`/admin/fsm-blueprint` + `/validate`), the governance surface for the deterministic decision FSM.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -305,6 +306,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | POST/GET/POST | `/admin/selfimprove/analyze`, `/admin/selfimprove/suggestions`, `/admin/selfimprove/suggestions/:id/apply` | Analyze failed cases into improvement suggestions and apply them under admin approval |
 | GET/PUT/POST | `/admin/role-policies`, `/admin/role-policies/:code`, `/admin/role-policies/:code/reset` | Editable role-contract specifications (NLAH control surface) |
 | GET/PUT/POST | `/admin/consensus-policy`, `/admin/consensus-policy/reset` | Editable consensus/voting rules |
+| GET/PUT/POST/POST | `/admin/fsm-blueprint`, `/admin/fsm-blueprint/reset`, `/admin/fsm-blueprint/validate` | Editable FSM orchestration blueprint and transition validation |
 | POST/GET/DELETE/POST | `/admin/golden`, `/admin/golden/:id`, `/admin/golden/sync` | Online-golden management and sync into the built-in regression suite |
 | GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
 | POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |

@@ -619,6 +619,32 @@ func (d ConsensusPolicyDTO) ToEntity() consensus.ConsensusPolicy {
 	}
 }
 
+// FSMBlueprintDTO is the editable orchestration blueprint.
+type FSMBlueprintDTO struct {
+	Transitions []StateTransitionDTO `json:"transitions"`
+}
+
+type StateTransitionDTO struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+func FromFSMBlueprint(b entity.FSMBlueprint) FSMBlueprintDTO {
+	out := FSMBlueprintDTO{Transitions: make([]StateTransitionDTO, 0, len(b.Transitions))}
+	for _, t := range b.Transitions {
+		out.Transitions = append(out.Transitions, StateTransitionDTO{From: t.From, To: t.To})
+	}
+	return out
+}
+
+func (d FSMBlueprintDTO) ToEntity() entity.FSMBlueprint {
+	out := entity.FSMBlueprint{Transitions: make([]entity.StateTransition, 0, len(d.Transitions))}
+	for _, t := range d.Transitions {
+		out.Transitions = append(out.Transitions, entity.StateTransition{From: t.From, To: t.To})
+	}
+	return out
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }
