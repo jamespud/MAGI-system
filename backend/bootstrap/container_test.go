@@ -6,6 +6,7 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/bootstrap"
+	"github.com/jamespud/magi/backend/domain/validation"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -54,14 +55,14 @@ func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 func TestProvideToolExecutor_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
-	with, err := bootstrap.ProvideToolExecutor(withCfg, nil, metrics.New())
+	with, err := bootstrap.ProvideToolExecutor(withCfg, nil, metrics.New(), validation.NewJSONSchemaValidator())
 	if err != nil {
 		t.Fatalf("provide with search: %v", err)
 	}
 	if _, ok := with.(*magi.ToolExecutorMux); !ok {
 		t.Fatalf("expected ToolExecutorMux when key set, got %T", with)
 	}
-	without, err := bootstrap.ProvideToolExecutor(&bootstrap.Config{}, nil, metrics.New())
+	without, err := bootstrap.ProvideToolExecutor(&bootstrap.Config{}, nil, metrics.New(), validation.NewJSONSchemaValidator())
 	if err != nil {
 		t.Fatalf("provide without search: %v", err)
 	}

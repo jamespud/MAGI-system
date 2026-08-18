@@ -32,6 +32,13 @@ groups:
           severity: warning
         annotations:
           summary: "A search provider failed and traffic moved to a fallback"
+      - alert: MagiFeedbackViolationSpike
+        expr: increase(magi_feedback_violations_total[15m]) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Model outputs are repeatedly failing deterministic checks"
       - alert: MagiModelProviderFailover
         expr: increase(magi_model_failovers_total[15m]) > 0
         for: 10m

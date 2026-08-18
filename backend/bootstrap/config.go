@@ -62,8 +62,9 @@ type Config struct {
 		NodeModulesDir   string   `yaml:"node_modules_dir"`
 		MemoryLimitMB    int64    `yaml:"memory_limit_mb"`
 	} `yaml:"code_runner"`
-	DBTool     DBToolConfig `yaml:"db_tool"`
-	ToolPolicy struct {
+	DBTool       DBToolConfig       `yaml:"db_tool"`
+	FeedbackTool FeedbackToolConfig `yaml:"feedback_tool"`
+	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
 	} `yaml:"tool_policy"`
@@ -145,6 +146,11 @@ type DBToolConfig struct {
 	MaxQueryChars   int      `yaml:"max_query_chars"`
 	TimeoutSeconds  int      `yaml:"timeout_seconds"`
 	BlockedPrefixes []string `yaml:"blocked_prefixes"`
+}
+
+// FeedbackToolConfig controls the built-in deterministic check_output tool.
+type FeedbackToolConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 type EmbeddingConfig struct {
@@ -283,6 +289,10 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Magi.CallTimeoutSeconds == 0 {
 		cfg.Magi.CallTimeoutSeconds = 180
+	}
+	if cfg.FeedbackTool.Enabled == nil {
+		enabled := true
+		cfg.FeedbackTool.Enabled = &enabled
 	}
 	if cfg.Magi.ApprovalTimeoutSeconds == 0 {
 		cfg.Magi.ApprovalTimeoutSeconds = 3600
@@ -564,14 +574,21 @@ func webSearchProviderSpecs(cfg *Config) []SearchProviderConfig {
 // enabledLocalTools returns the built-in local tools that should be exposed
 // to agents based on configuration.
 func enabledLocalTools(cfg *Config) []string {
-	tools := make([]string, 0, 2)
+	tools := make([]string, 0, 3)
 	if len(webSearchProviderSpecs(cfg)) > 0 {
 		tools = append(tools, "web_search")
 	}
 	if cfg.DBTool.Enabled {
 		tools = append(tools, magi.DBQueryToolName)
 	}
+	if feedbackToolEnabled(cfg) {
+		tools = append(tools, magi.FeedbackToolName)
+	}
 	return tools
+}
+
+func feedbackToolEnabled(cfg *Config) bool {
+	return cfg != nil && cfg.FeedbackTool.Enabled != nil && *cfg.FeedbackTool.Enabled
 }
 
 func validateSearchProviders(providers []SearchProviderConfig) error {
@@ -741,6 +758,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 	tools := []entity.ToolBinding{{Source: entity.ToolSourceLocal, ToolName: "web_search"}}
 	if cfg.DBTool.Enabled {
 		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.DBQueryToolName})
+	}
+	if feedbackToolEnabled(cfg) {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.FeedbackToolName})
 	}
 	return tools
 }

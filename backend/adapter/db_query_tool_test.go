@@ -126,6 +126,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	bindings := []entity.ToolBinding{
 		{Source: entity.ToolSourceLocal, ToolName: "web_search"},
 		{Source: entity.ToolSourceLocal, ToolName: magi.DBQueryToolName},
+		{Source: entity.ToolSourceLocal, ToolName: magi.FeedbackToolName},
 	}
 
 	all := magi.NewLocalToolRegistry()
@@ -133,8 +134,8 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
-	if len(defs) != 2 {
-		t.Fatalf("all-local registry should resolve both tools, got %+v", defs)
+	if len(defs) != 3 {
+		t.Fatalf("all-local registry should resolve every local tool, got %+v", defs)
 	}
 
 	dbOnly := magi.NewLocalToolRegistry(magi.DBQueryToolName)
@@ -153,6 +154,15 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	}
 	if len(defs) != 1 || defs[0].Name != "web_search" {
 		t.Fatalf("search-only registry resolved %+v", defs)
+	}
+
+	feedbackOnly := magi.NewLocalToolRegistry(magi.FeedbackToolName)
+	defs, err = feedbackOnly.List(context.Background(), bindings)
+	if err != nil {
+		t.Fatalf("list feedback only: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != magi.FeedbackToolName {
+		t.Fatalf("feedback-only registry resolved %+v", defs)
 	}
 }
 

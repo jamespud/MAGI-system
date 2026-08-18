@@ -156,8 +156,56 @@ magi:
 	if cfg.Magi.CallTimeoutSeconds != 180 {
 		t.Fatalf("CallTimeoutSeconds default: got %d want 180", cfg.Magi.CallTimeoutSeconds)
 	}
+	if cfg.FeedbackTool.Enabled == nil || !*cfg.FeedbackTool.Enabled {
+		t.Fatal("feedback_tool should default to enabled")
+	}
 	if cfg.Model.APIKey != "test-key" {
 		t.Fatalf("APIKey: got %s", cfg.Model.APIKey)
+	}
+}
+
+func TestLoadConfig_FeedbackToolExplicitDisable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feedback.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+  model_name: "m"
+feedback_tool:
+  enabled: false
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.FeedbackTool.Enabled == nil || *cfg.FeedbackTool.Enabled {
+		t.Fatal("feedback_tool.enabled=false must be respected")
+	}
+}
+
+func TestMagiSpec_ToConfigBindsFeedbackToolWhenEnabled(t *testing.T) {
+	enabled := true
+	cfg := &bootstrap.Config{FeedbackTool: bootstrap.FeedbackToolConfig{Enabled: &enabled}}
+	cfg.DBTool.Enabled = true
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := map[string]bool{}
+	for _, tool := range c.Tools {
+		found[tool.ToolName] = true
+	}
+	if !found["check_output"] {
+		t.Fatalf("check_output not bound when feedback_tool enabled: %+v", c.Tools)
+	}
+	if !found["db_query"] || !found["web_search"] {
+		t.Fatalf("existing local tools must remain bound: %+v", c.Tools)
+	}
+
+	disabled := false
+	cfg2 := &bootstrap.Config{FeedbackTool: bootstrap.FeedbackToolConfig{Enabled: &disabled}}
+	c2 := cfg2.Magi.Melchior.ToConfig("melchior", cfg2)
+	for _, tool := range c2.Tools {
+		if tool.ToolName == "check_output" {
+			t.Fatal("check_output must not be bound when disabled")
+		}
 	}
 }
 

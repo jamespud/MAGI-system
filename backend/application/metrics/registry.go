@@ -26,6 +26,7 @@ type Registry struct {
 	MemoryRetrievalFailures atomic.Int64
 	ModelFailovers          atomic.Int64
 	WebSearchFailovers      atomic.Int64
+	FeedbackViolations      atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -76,6 +77,14 @@ func (r *Registry) IncModelFailover() {
 func (r *Registry) IncWebSearchFailover() {
 	if r != nil {
 		r.WebSearchFailovers.Add(1)
+	}
+}
+
+// AddFeedbackViolations records deterministic check violations returned by
+// the check_output feedback sensor.
+func (r *Registry) AddFeedbackViolations(n int64) {
+	if r != nil && n > 0 {
+		r.FeedbackViolations.Add(n)
 	}
 }
 func (r *Registry) RunStart() {
@@ -205,6 +214,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_memory_retrieval_failures_total counter\nmagi_memory_retrieval_failures_total %d\n", r.MemoryRetrievalFailures.Load())
 	fmt.Fprintf(w, "# TYPE magi_model_failovers_total counter\nmagi_model_failovers_total %d\n", r.ModelFailovers.Load())
 	fmt.Fprintf(w, "# TYPE magi_web_search_failovers_total counter\nmagi_web_search_failovers_total %d\n", r.WebSearchFailovers.Load())
+	fmt.Fprintf(w, "# TYPE magi_feedback_violations_total counter\nmagi_feedback_violations_total %d\n", r.FeedbackViolations.Load())
 
 	fmt.Fprintf(w, "# TYPE magi_run_duration_ms histogram\n")
 	fmt.Fprintf(w, "magi_run_duration_ms_sum %d\n", r.RunDurationSumMs.Load())

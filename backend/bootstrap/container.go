@@ -237,7 +237,7 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 }
 
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
-func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry) (port.ToolExecutorPort, error) {
+func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry, val validation.Validator) (port.ToolExecutorPort, error) {
 	var local port.ToolExecutorPort
 	executors := map[string]port.ToolExecutorPort{}
 	if providers := webSearchProviderSpecs(cfg); len(providers) > 0 {
@@ -271,6 +271,15 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 			return nil, err
 		}
 		executors[magi.DBQueryToolName] = dbTool
+	}
+	if feedbackToolEnabled(cfg) {
+		executors[magi.FeedbackToolName] = magi.NewFeedbackToolExecutor(
+			runtime.NewCompositeFeedbackSensor(
+				runtime.NewSchemaFeedbackSensor(val),
+				runtime.NewConstraintFeedbackSensor(),
+			),
+			reg,
+		)
 	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)

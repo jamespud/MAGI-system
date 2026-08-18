@@ -184,6 +184,12 @@ db_tool:
   # timeout_seconds: 10
   # blocked_prefixes: []       # extra statement prefixes to reject
 
+# Deterministic feedback sensor (check_output): the model can lint its own
+# JSON output against a JSON Schema and field constraint rules before
+# submitting; violations are fed back so it self-corrects before human review.
+feedback_tool:
+  enabled: true
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

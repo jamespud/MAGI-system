@@ -67,6 +67,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == FeedbackToolName && r.isEnabled(FeedbackToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       FeedbackToolName,
+				Desc:       "Run deterministic checks on your own output: JSON Schema lint and field constraint rules. Returns ok plus a list of violations.",
+				ArgsSchema: []byte(feedbackArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil
