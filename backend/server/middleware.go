@@ -7,6 +7,10 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+
+	"github.com/jamespud/magi/backend/application/audit"
+	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -48,5 +52,32 @@ func Logger() app.HandlerFunc {
 			time.Since(start),
 			rid,
 		)
+	}
+}
+
+// AuditMiddleware records one audit event per request after the handler runs.
+// It is attached to administrative and sensitive routes so the audit trail
+// captures who (principal) performed which action and with what result.
+func AuditMiddleware(svc *audit.Service) app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		c.Next(ctx)
+		if svc == nil {
+			return
+		}
+		method := string(c.Method())
+		path := string(c.Request.URI().Path())
+		event := &entity.AuditEvent{
+			Action:   method,
+			Resource: path,
+			Status:   c.Response.StatusCode(),
+		}
+		if p := auth.PrincipalFrom(ctx); p != nil {
+			event.UserID = p.UserID
+			event.Username = p.Name
+			event.Role = p.Role
+		}
+		// Use a fresh context: the request context may be canceled by the time
+		// the response is flushed, and audit writes must not fail requests.
+		_ = svc.Record(context.Background(), event)
 	}
 }

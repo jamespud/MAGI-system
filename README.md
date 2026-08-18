@@ -284,6 +284,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Proactive scheduling** — recurring decision templates fire automatically at intervals through the async run manager.
 - **Conversational entry** — `POST /api/v1/assistant` turns a natural-language question into a full decision run with report.
 - **Admin operations** — role-gated usage aggregates (cases/runs/tokens/cost per user) at `GET /api/v1/admin/usage`.
+- **Audit trail** — every admin/security action (admin APIs, OIDC login/register, case delete/export, plan updates) is recorded in `audit_log` and browsable via `GET /api/v1/admin/audit` (Admin → Audit page).
 - **Kubernetes delivery** - Helm chart with backend/frontend deployments, SSE-aware ingress, probes, HPA, PDB, and externally managed secrets (`deploy/magi/`).
 - **Backup and recovery** - verified MySQL + RAG volume backup bundles with checksums, retention, safe inspection, and destructive restore guardrails (`scripts/backup.sh`, `scripts/restore.sh`).
 
@@ -303,6 +304,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | GET/POST/PATCH/DELETE | `/recurring`, `/recurring/:id` (+`/:id/run`) | Recurring templates |
 | POST | `/evaluation`, `/evaluation/:id`, `/benchmark` | Evaluation |
 | GET | `/admin/usage`, `/me/usage` | Admin usage aggregate / own usage + budget |
+| GET | `/admin/audit` | Administrative/security audit trail (paginated) |
 | GET/PUT/POST | `/admin/prompts`, `/admin/prompts/:key` (+`/restore`) | Versioned prompt registry (P2) |
 | POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
 | POST/GET | `/admin/benchmarks/seed`, `/admin/eval/summary` | Seed built-in benchmark suite / aggregate evaluation dashboard (admin) |

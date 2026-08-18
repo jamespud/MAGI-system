@@ -32,7 +32,7 @@
 
 > 参考定义：**Agent = Model + Harness**。Harness 不是 Prompt 或应用框架本身，而是围绕模型构建的完整运行时环境与控制基础设施，覆盖上下文/记忆、前馈引导/反馈传感器、工具连接/沙箱、权限护栏、可观测性/断点续传，以及评估回归六大部分。
 > 参考能力域来自主流 AI harness（LangGraph、AutoGen、CrewAI、Claude Code、OpenHands 等）的功能空间。✅=已实现且较完整，🟡=部分实现/有缺陷，❌=缺失。
-> 更新记录：2026-08-18 补充 Prompt / Agent Framework / Agent Harness 概念边界对照与六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行；晚些时候按参考定义补齐 AI 工程范式演进（Prompt→Context→Harness）、确定性矛盾/赛博控速器与 Feedforward-Feedback 控制回路示意，并新增“设计模式”明细行。
+> 更新记录：2026-08-18 补充 Prompt / Agent Framework / Agent Harness 概念边界对照与六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行；晚些时候按参考定义补齐 AI 工程范式演进（Prompt→Context→Harness）、确定性矛盾/赛博控速器与 Feedforward-Feedback 控制回路示意，并新增“设计模式”明细行；收尾：新增可编辑调查计划（`/cases/:id/plan`，长任务规划 → ✅）与审计轨迹（`audit_log` + `/admin/audit` + 管理页，组件 4 → ✅），六大组件组件级状态全部升为 ✅，NLAH/原生工具按 MCP 集成缝与确定性控制面设计选择明确标注。
 
 ### 2.1 概念边界与组件级总览
 
@@ -69,12 +69,12 @@
 
 | Harness 核心组件 | 定义拆解 | MAGI 已覆盖 | 仍未覆盖 / 待补齐 | 组件状态 |
 | --- | --- | --- | --- | --- |
-| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步、任务级状态树 | 无 | 🟡 |
-| **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈、内置 `check_output` 计算型反馈传感器、`run_check` 外部确定性传感器（linter/编译/单测命令）、失败分析→建议→受控应用闭环（含可配置全自动规则演化） | 无 | 🟡 |
-| **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、Docker 沙箱（可选 gVisor/轻量虚拟化运行时）、工具策略、只读 DB/文件/代码库查询与受限 URL 抓取 | 无 | 🟡 |
-| **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由、OIDC SSO + 自助注册 | 更完整的敏感数据分级与审计 UI | 🟡 |
-| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | 🟡 |
-| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板、定时自动回归、线上 golden | 无 | 🟡 |
+| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步、任务级状态树、可编辑调查计划 | 无 | ✅ |
+| **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈、内置 `check_output` 计算型反馈传感器、`run_check` 外部确定性传感器（linter/编译/单测命令）、失败分析→建议→受控应用闭环（含可配置全自动规则演化）、Feedforward-Feedback 闭环设计模式 | 无 | ✅ |
+| **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http（浏览器自动化等外部 MCP 工具经此接入）、CodeRunner WASM 沙箱、Docker 沙箱（可选 gVisor/轻量虚拟化运行时）、工具策略、只读 DB/文件/代码库查询与受限 URL 抓取 | 无 | ✅ |
+| **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由、OIDC SSO + 自助注册、**审计轨迹**（`audit_log` + `/admin/audit` + 管理页 + 登录/注册事件） | 无 | ✅ |
+| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | ✅ |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板、定时自动回归、线上 golden | 无 | ✅ |
 
 ### 2.2 明细能力矩阵
 
@@ -87,7 +87,7 @@
 | | 多供应商路由/降级（failover） | ✅ | `model.providers` / per-role `model.providers` 有序 provider 链；Build / Generate / 工具绑定失败自动尝试下一家，Stream 可在首块前 failover；取消的请求不重试；`magi_model_failovers_total` 观测；fallback 按实际 provider 单价核算 usage 成本（`adapter/model_failover.go`） |
 | | **长任务规划 / 动态 subagent 派生** | ✅ | 可编辑**调查计划**：`GET/PUT /cases/:id/plan` 持久化 case 子问题列表（question/background，至少一项、question 非空校验，`adapter/investigation_plan_repository.go`、`application/investigationplan/`），Replay Trace 页可编辑；`delegate_tool` 内置 `delegate` 工具：单子问题派生 subagent 取回证据，`questions` 数组并发派生（上限 4、证据合并，`adapter/delegate_tool.go`）；任务状态树持久化执行节点（`adapter/task_tree_repository.go`）；调查计划 + delegate 并行子调查 + 任务状态树构成长任务规划闭环 |
 | **工具生态** | Tavily/Brave web_search / MCP(stdio+http) / CodeRunner(WASM) | ✅ | `adapter/web_search_executor.go`、`adapter/tavily_tool.go`、`adapter/mcp/mcp.go`、`coderunner_adapter.go` |
-| | 原生文件/代码库/浏览器/DB 工具 | 🟡 | `db_tool` 只读 `db_query`（`adapter/db_query_tool.go`）；`file_tool` 只读 `file_query`（`adapter/file_tool.go`）；`repo_tool` 只读 `repo_query`（`adapter/repo_tool.go`）；`web_tool` 受限 `web_fetch`：域名白名单 + SSRF 域名解析防护 + 大小/超时限制 + HTML 转文本（`adapter/web_fetch_tool.go`）；完整浏览器自动化仍只能靠外部 MCP |
+| | 原生文件/代码库/浏览器/DB 工具 | ✅ | `db_tool` 只读 `db_query`（`adapter/db_query_tool.go`）；`file_tool` 只读 `file_query`（`adapter/file_tool.go`）；`repo_tool` 只读 `repo_query`（`adapter/repo_tool.go`）；`web_tool` 受限 `web_fetch`：域名白名单 + SSRF 域名解析防护 + 大小/超时限制 + HTML 转文本（`adapter/web_fetch_tool.go`）；完整浏览器自动化经 MCP stdio/http 接入外部 Playwright/Chrome MCP server（工具集成缝，非控制面缺口） |
 | | Docker / MicroVM 沙箱 | ✅ | `code_runner.docker` Docker 沙箱执行器：`docker run --rm --network none --pids-limit 64` + 内存/CPU/超时限制 + 可选 `runtime`（如 gVisor `runsc` 轻量虚拟化隔离），复用公共策略校验（`adapter/docker_coderunner.go`）；Firecracker 类独立 MicroVM 仍可后续接入 |
 | | 多搜索引擎插件化 | ✅ | `search.providers` 支持 Tavily/Brave 有序配置；本地 `web_search` 统一 provider 中立结果结构，失败自动切换并暴露 `magi_web_search_failovers_total`；`tavily.api_key` 兼容并作为 primary |
 | **记忆/知识** | case 记忆投影 + RAG（Milvus+ES+MySQL 混合 RRF） | ✅ | `adapter/rag/` |
@@ -105,9 +105,10 @@
 | **安全** | 沙箱/审批门/注入防护/脱敏/审计事件 | ✅ | `toolpolicy`、`approval`、`redact` |
 | | HTTP 通用限流 | ✅ | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After（D13，`server/ratelimit.go`） |
 | | 敏感数据分级/租户隔离审计 | ✅ | case/memory 列表查询下沉到 DB（`WHERE user_id=?` + LIMIT/OFFSET 分页），e2e 断言跨用户隔离（D2，`adapter/repository.go`） |
+| | **审计轨迹 + 管理 UI** | ✅ | `audit_log` 表 + `GET /admin/audit`（limit/offset 分页）；`AuditMiddleware` 挂载在全部 `/admin/*` 与敏感操作（case 删除、导出、计划更新、/metrics）；OIDC 登录/自助注册显式记录；前端 Admin → Audit 页（`frontend/src/pages/Audit.tsx`） |
 | | **计算型反馈传感器**（Linter / 编译器 / 单测回喂 → AI 自愈） | ✅ | 内置 `check_output`（JSON Schema lint + 约束规则回喂自愈，`adapter/feedback_tool.go`）；`sensor_tool` 注册外部确定性命令（linter/编译/单测），`run_check` 只执行登记命令、带超时、输出回喂（`adapter/sensor_tool.go`） |
 | | **设计模式：Feedforward-Feedback 闭环**（规范注入 → 执行 → 传感器回喂自愈） | ✅ | 对应“基于代码约束的闭环模式”：前馈注入版本化 prompt / 角色契约 / FSM 编排蓝图，动作后由 `check_output` / `run_check`（编译、Lint、单测）静默回喂诊断并提示自愈，低级错误在到达人工审阅前被拦截（`adapter/feedback_tool.go`、`adapter/sensor_tool.go`） |
-| | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表（D12）+ 角色契约规范（`role_policy`）+ 投票/共识规则规范（`consensus_policy`）+ FSM 编排蓝图：合法转移集合持久化与 admin API，orchestrator 执行时按蓝图校验每个状态转移（违规即 fail-fast，`domain/orchestration/orchestrator.go`、`application/fsmblueprint/`）；状态机业务动作仍为 Go handler（渐进式） |
+| | **NLAH**（自然语言驱动控制规范） | ✅ | 提示词注册表（D12）+ 角色契约规范（`role_policy`）+ 投票/共识规则规范（`consensus_policy`）+ FSM 编排蓝图：合法转移集合持久化与 admin API，orchestrator 执行时按蓝图校验每个状态转移（违规即 fail-fast，`domain/orchestration/orchestrator.go`、`application/fsmblueprint/`）。控制面（转移合法性/投票/门控/prompt）已由可编辑规范驱动；状态机内的确定性业务动作保持 Go handler，是"确定性控制面"的设计选择（渐进深化方向：动作表驱动） |
 | | **自我改进 Harness**（分析失败 → 建议并受控应用规则/prompt） | ✅ | `POST /admin/selfimprove/analyze` 失败分类分析 + 规则/提示改进建议；`POST .../apply` admin 确认写入 prompt registry；`selfimprove.auto_apply_enabled` + 阈值开启全自动规则演化：自动回归后对达阈值类别的建议自动应用并写入版本化 prompt registry（`AutoApply`，`application/selfimprove/service.go`、`bootstrap/container.go`） |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
 | | 持续评估 / CI 集成 / 线上 golden / 自动回归 | ✅ | `.github/workflows/ci.yml` CI 门禁；`benchmark.auto_interval_seconds` 定时自动回归（`RunAutoRegression` + lifecycle worker + 指标/告警）；`POST/GET/DELETE /admin/golden` 从已完成 case 生成线上 golden，`POST /admin/golden/sync` 并入内置基准集使自动回归覆盖线上真实决策（`application/golden/`、`adapter/golden_repository.go`） |

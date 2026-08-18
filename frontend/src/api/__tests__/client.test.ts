@@ -274,6 +274,24 @@ describe('api.investigationPlan', () => {
   });
 });
 
+describe('api.listAuditEvents', () => {
+  it('fetches the admin audit trail with pagination', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        events: [{ id: 1, user_id: 1, username: 'admin', role: 'admin', action: 'PUT', resource: '/admin/prompts/x', detail: '', status: 200, created_at: '2026-08-18T10:00:00Z' }],
+        total: 1,
+      }),
+    } as Response);
+    const result = await api.listAuditEvents(50, 0);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/admin/audit?limit=50&offset=0', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result.total).toBe(1);
+    expect(result.events[0].action).toBe('PUT');
+  });
+});
+
 describe('api.seedBuiltinBenchmark and getEvalSummary', () => {
   it('seeds the built-in suite and fetches the aggregate summary', async () => {
     vi.spyOn(globalThis, 'fetch')

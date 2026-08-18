@@ -11,8 +11,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
+	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/users"
+	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -56,13 +58,14 @@ type OIDCHandler struct {
 	client  *auth.OIDCClient
 	session *auth.SessionCodec
 	users   *users.Service
+	audit   *audit.Service
 	states  *oidcStateStore
 }
 
 // NewOIDCHandler builds the SSO handler. client may be nil when OIDC is
 // disabled (routes are not registered).
-func NewOIDCHandler(client *auth.OIDCClient, session *auth.SessionCodec, usersSvc *users.Service) *OIDCHandler {
-	return &OIDCHandler{client: client, session: session, users: usersSvc, states: &oidcStateStore{}}
+func NewOIDCHandler(client *auth.OIDCClient, session *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service) *OIDCHandler {
+	return &OIDCHandler{client: client, session: session, users: usersSvc, audit: auditSvc, states: &oidcStateStore{}}
 }
 
 func (h *OIDCHandler) Login(ctx context.Context, c *app.RequestContext) {
@@ -114,6 +117,9 @@ func (h *OIDCHandler) Callback(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.SetCookie(sessionCookieName, token, int(h.sessionTTL().Seconds()), "/", "", protocol.CookieSameSiteLaxMode, true, true)
+	if h.audit != nil {
+		_ = h.audit.Record(ctx, &entity.AuditEvent{Action: "login", Resource: "oidc", Username: user.Name, UserID: user.ID, Role: user.Role, Status: consts.StatusFound})
+	}
 	c.Redirect(consts.StatusFound, []byte("/"))
 }
 
@@ -150,6 +156,9 @@ func (h *OIDCHandler) Register(ctx context.Context, c *app.RequestContext) {
 	var issued *dto.IssuedKeyDTO
 	if key != nil {
 		issued = &dto.IssuedKeyDTO{ID: key.ID, Prefix: key.Prefix, Plaintext: key.Plaintext}
+	}
+	if h.audit != nil {
+		_ = h.audit.Record(ctx, &entity.AuditEvent{Action: "register", Resource: "self", Username: u.Name, UserID: u.ID, Role: u.Role, Status: consts.StatusCreated})
 	}
 	c.JSON(consts.StatusCreated, dto.CreateUserResponse{User: dto.FromUser(u, 0), ApiKey: issued})
 }

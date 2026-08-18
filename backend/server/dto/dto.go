@@ -663,6 +663,27 @@ func FromInvestigationPlan(p *entity.InvestigationPlan) InvestigationPlanDTO {
 	return out
 }
 
+// AuditEventDTO is one audit-trail row.
+type AuditEventDTO struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	Action    string `json:"action"`
+	Resource  string `json:"resource"`
+	Detail    string `json:"detail"`
+	Status    int    `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+func FromAuditEvent(e *entity.AuditEvent) AuditEventDTO {
+	return AuditEventDTO{
+		ID: e.ID, UserID: e.UserID, Username: e.Username, Role: e.Role,
+		Action: e.Action, Resource: e.Resource, Detail: e.Detail,
+		Status: e.Status, CreatedAt: e.CreatedAt.Format(time.RFC3339),
+	}
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

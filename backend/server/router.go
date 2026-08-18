@@ -7,6 +7,7 @@ import (
 	"github.com/jamespud/magi/backend/application/admin"
 	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
+	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/dataset"
 	"github.com/jamespud/magi/backend/application/decision"
@@ -43,6 +44,8 @@ type RouteDeps struct {
 	FSMBlueprint      *handler.FSMBlueprintHandler
 	TaskTree          *handler.TaskTreeHandler
 	InvestigationPlan *handler.InvestigationPlanHandler
+	Audit             *audit.Service
+	AuditH            *handler.AuditHandler
 	Evaluation        *evaluation.Service
 	Judge             *judge.Service
 	Memory            *memory.Service
@@ -75,7 +78,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		// /metrics normally sits in publicPaths; drop it so Auth runs first,
 		// then gate the handler on the admin role (open mode still passes).
 		delete(publicPaths, "/metrics")
-		h.GET("/metrics", RequireRole("admin"), MetricsHandler(deps.Metrics))
+		h.GET("/metrics", RequireRole("admin"), AuditMiddleware(deps.Audit), MetricsHandler(deps.Metrics))
 	} else {
 		h.GET("/metrics", MetricsHandler(deps.Metrics))
 	}
@@ -94,6 +97,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 
 	v1 := h.Group("/api/v1")
 	v1.Use(RateLimit(deps.RateLimit))
+	amw := AuditMiddleware(deps.Audit)
 
 	decH := handler.NewDecisionHandler(deps.Decision, deps.Metrics)
 	v1.POST("/cases", decH.Create)
@@ -104,7 +108,7 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/cases/:id/resume", decH.Resume)
 	v1.GET("/cases/:id", decH.Get)
 	v1.PATCH("/cases/:id", decH.Patch)
-	v1.DELETE("/cases/:id", decH.Delete)
+	v1.DELETE("/cases/:id", amw, decH.Delete)
 	v1.GET("/cases/:id/report", decH.Report)
 	v1.GET("/cases", decH.List)
 
@@ -123,36 +127,36 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	}
 	if deps.InvestigationPlan != nil {
 		v1.GET("/cases/:id/plan", deps.InvestigationPlan.Get)
-		v1.PUT("/cases/:id/plan", deps.InvestigationPlan.Update)
+		v1.PUT("/cases/:id/plan", amw, deps.InvestigationPlan.Update)
 	}
 	v1.GET("/cases/:id/stream", SSEHandlerWithHistory(deps.Broker, deps.EventRepo, deps.Decision))
 
 	if deps.SelfImprove != nil {
-		v1.POST("/admin/selfimprove/analyze", RequireAnyRole("admin", "operator"), deps.SelfImprove.Analyze)
-		v1.GET("/admin/selfimprove/suggestions", RequireAnyRole("admin", "operator"), deps.SelfImprove.List)
-		v1.POST("/admin/selfimprove/suggestions/:id/apply", RequireRole("admin"), deps.SelfImprove.Apply)
+		v1.POST("/admin/selfimprove/analyze", RequireAnyRole("admin", "operator"), amw, deps.SelfImprove.Analyze)
+		v1.GET("/admin/selfimprove/suggestions", RequireAnyRole("admin", "operator"), amw, deps.SelfImprove.List)
+		v1.POST("/admin/selfimprove/suggestions/:id/apply", RequireRole("admin"), amw, deps.SelfImprove.Apply)
 	}
 	if deps.RolePolicy != nil {
-		v1.GET("/admin/role-policies", RequireAnyRole("admin", "operator"), deps.RolePolicy.List)
-		v1.PUT("/admin/role-policies/:code", RequireAnyRole("admin", "operator"), deps.RolePolicy.Update)
-		v1.POST("/admin/role-policies/:code/reset", RequireAnyRole("admin", "operator"), deps.RolePolicy.Reset)
+		v1.GET("/admin/role-policies", RequireAnyRole("admin", "operator"), amw, deps.RolePolicy.List)
+		v1.PUT("/admin/role-policies/:code", RequireAnyRole("admin", "operator"), amw, deps.RolePolicy.Update)
+		v1.POST("/admin/role-policies/:code/reset", RequireAnyRole("admin", "operator"), amw, deps.RolePolicy.Reset)
 	}
 	if deps.Golden != nil {
-		v1.POST("/admin/golden", RequireAnyRole("admin", "operator"), deps.Golden.Add)
-		v1.GET("/admin/golden", RequireAnyRole("admin", "operator"), deps.Golden.List)
-		v1.DELETE("/admin/golden/:id", RequireAnyRole("admin", "operator"), deps.Golden.Delete)
-		v1.POST("/admin/golden/sync", RequireAnyRole("admin", "operator"), deps.Golden.Sync)
+		v1.POST("/admin/golden", RequireAnyRole("admin", "operator"), amw, deps.Golden.Add)
+		v1.GET("/admin/golden", RequireAnyRole("admin", "operator"), amw, deps.Golden.List)
+		v1.DELETE("/admin/golden/:id", RequireAnyRole("admin", "operator"), amw, deps.Golden.Delete)
+		v1.POST("/admin/golden/sync", RequireAnyRole("admin", "operator"), amw, deps.Golden.Sync)
 	}
 	if deps.ConsensusPolicy != nil {
-		v1.GET("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Get)
-		v1.PUT("/admin/consensus-policy", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Update)
-		v1.POST("/admin/consensus-policy/reset", RequireAnyRole("admin", "operator"), deps.ConsensusPolicy.Reset)
+		v1.GET("/admin/consensus-policy", RequireAnyRole("admin", "operator"), amw, deps.ConsensusPolicy.Get)
+		v1.PUT("/admin/consensus-policy", RequireAnyRole("admin", "operator"), amw, deps.ConsensusPolicy.Update)
+		v1.POST("/admin/consensus-policy/reset", RequireAnyRole("admin", "operator"), amw, deps.ConsensusPolicy.Reset)
 	}
 	if deps.FSMBlueprint != nil {
-		v1.GET("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Get)
-		v1.PUT("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Update)
-		v1.POST("/admin/fsm-blueprint/reset", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Reset)
-		v1.POST("/admin/fsm-blueprint/validate", RequireAnyRole("admin", "operator"), deps.FSMBlueprint.Validate)
+		v1.GET("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), amw, deps.FSMBlueprint.Get)
+		v1.PUT("/admin/fsm-blueprint", RequireAnyRole("admin", "operator"), amw, deps.FSMBlueprint.Update)
+		v1.POST("/admin/fsm-blueprint/reset", RequireAnyRole("admin", "operator"), amw, deps.FSMBlueprint.Reset)
+		v1.POST("/admin/fsm-blueprint/validate", RequireAnyRole("admin", "operator"), amw, deps.FSMBlueprint.Validate)
 	}
 
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)
@@ -202,8 +206,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/datasets/:id/runs", dsH.ListRuns)
 	v1.GET("/benchmarks/:runID", dsH.RunDetail)
 	v1.PATCH("/benchmarks/:runID/results/:resultID", dsH.AddFeedback)
-	v1.POST("/admin/benchmarks/seed", RequireAnyRole("admin", "operator"), dsH.SeedBuiltin)
-	v1.GET("/admin/eval/summary", RequireAnyRole("admin", "operator"), dsH.EvalSummary)
+	v1.POST("/admin/benchmarks/seed", RequireAnyRole("admin", "operator"), amw, dsH.SeedBuiltin)
+	v1.GET("/admin/eval/summary", RequireAnyRole("admin", "operator"), amw, dsH.EvalSummary)
 
 	plugH := handler.NewPluginsHandler(deps.Plugins)
 	v1.GET("/plugins", plugH.List)
@@ -214,27 +218,30 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	adminH := handler.NewAdminHandler(deps.Admin, admin.UsageLimits{
 		MaxTokens: deps.MaxTokensPerUser, MaxCostUSD: deps.MaxCostUSDPerUser,
 	})
-	v1.GET("/admin/usage", RequireAnyRole("admin", "operator"), adminH.Usage)
+	v1.GET("/admin/usage", RequireAnyRole("admin", "operator"), amw, adminH.Usage)
 	v1.GET("/me/usage", adminH.MeUsage)
 
 	if deps.PromptRepo != nil {
 		promptH := handler.NewPromptHandler(deps.PromptRepo)
-		v1.GET("/admin/prompts", RequireAnyRole("admin", "operator"), promptH.List)
-		v1.GET("/admin/prompts/:key", RequireAnyRole("admin", "operator"), promptH.Get)
-		v1.PUT("/admin/prompts/:key", RequireAnyRole("admin", "operator"), promptH.Update)
-		v1.POST("/admin/prompts/:key/restore", RequireAnyRole("admin", "operator"), promptH.Restore)
+		v1.GET("/admin/prompts", RequireAnyRole("admin", "operator"), amw, promptH.List)
+		v1.GET("/admin/prompts/:key", RequireAnyRole("admin", "operator"), amw, promptH.Get)
+		v1.PUT("/admin/prompts/:key", RequireAnyRole("admin", "operator"), amw, promptH.Update)
+		v1.POST("/admin/prompts/:key/restore", RequireAnyRole("admin", "operator"), amw, promptH.Restore)
 	}
 
 	usersH := handler.NewUsersHandler(deps.Users)
 	v1.GET("/me", usersH.Me)
 	v1.POST("/me/keys", usersH.IssueOwnKey)
-	v1.POST("/admin/users", RequireRole("admin"), usersH.CreateUser)
-	v1.GET("/admin/users", RequireRole("admin"), usersH.ListUsers)
-	v1.DELETE("/admin/users/:id", RequireRole("admin"), usersH.DeleteUser)
-	v1.GET("/admin/users/:id/keys", RequireRole("admin"), usersH.ListKeys)
-	v1.POST("/admin/users/:id/keys", RequireRole("admin"), usersH.IssueKey)
-	v1.POST("/admin/keys/:id/revoke", RequireRole("admin"), usersH.RevokeKey)
-	v1.POST("/admin/keys/:id/rotate", RequireRole("admin"), usersH.RotateKey)
+	v1.POST("/admin/users", RequireRole("admin"), amw, usersH.CreateUser)
+	v1.GET("/admin/users", RequireRole("admin"), amw, usersH.ListUsers)
+	v1.DELETE("/admin/users/:id", RequireRole("admin"), amw, usersH.DeleteUser)
+	v1.GET("/admin/users/:id/keys", RequireRole("admin"), amw, usersH.ListKeys)
+	v1.POST("/admin/users/:id/keys", RequireRole("admin"), amw, usersH.IssueKey)
+	v1.POST("/admin/keys/:id/revoke", RequireRole("admin"), amw, usersH.RevokeKey)
+	v1.POST("/admin/keys/:id/rotate", RequireRole("admin"), amw, usersH.RotateKey)
+	if deps.AuditH != nil {
+		v1.GET("/admin/audit", RequireAnyRole("admin", "operator"), amw, deps.AuditH.List)
+	}
 
 	recH := handler.NewRecurringHandler(deps.Recurring)
 	v1.GET("/recurring", recH.List)
@@ -252,8 +259,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.DELETE("/conversations/:id", convH.Delete)
 
 	if deps.Export != nil {
-		v1.GET("/cases/:id/export", deps.Export.Case)
-		v1.GET("/memory/export", deps.Export.Memory)
+		v1.GET("/cases/:id/export", amw, deps.Export.Case)
+		v1.GET("/memory/export", amw, deps.Export.Memory)
 		v1.GET("/evaluation/:id/export", deps.Export.Evaluation)
 	}
 }

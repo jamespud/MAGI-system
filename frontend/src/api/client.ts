@@ -257,6 +257,11 @@ export const api = {
   updateInvestigationPlan: (id: string, items: ApiInvestigationPlanItem[]) =>
     request<ApiInvestigationPlan>(`/cases/${id}/plan`, { method: 'PUT', body: JSON.stringify({ items }) }),
 
+  listAuditEvents: (limit?: number, offset?: number) =>
+    request<{ events: ApiAuditEvent[]; total: number }>(
+      `/admin/audit${limit != null ? `?limit=${limit}${offset != null ? `&offset=${offset}` : ''}` : ''}`,
+    ),
+
   listDatasets: () => request<{ datasets: ApiDataset[] }>('/datasets'),
 
   createDataset: (name: string, description?: string) =>
@@ -643,6 +648,18 @@ interface ApiInvestigationPlan {
   updated_at: string;
 }
 
+interface ApiAuditEvent {
+  id: number;
+  user_id: number;
+  username: string;
+  role: string;
+  action: string;
+  resource: string;
+  detail: string;
+  status: number;
+  created_at: string;
+}
+
 interface ApiApproval {
   id: string;
   case_id: string;
@@ -709,6 +726,7 @@ export type {
   ApiTaskNode,
   ApiInvestigationPlan,
   ApiInvestigationPlanItem,
+  ApiAuditEvent,
   ApiBenchmarkRun,
   ApiBenchmarkDetail,
   ApiEvaluation,

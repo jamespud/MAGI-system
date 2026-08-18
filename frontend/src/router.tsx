@@ -9,6 +9,7 @@ import Approvals from '@/pages/Approvals';
 import History from '@/pages/History';
 import Knowledge from '@/pages/Knowledge';
 import Users from '@/pages/Users';
+import Audit from '@/pages/Audit';
 import Replay from '@/pages/Replay';
 import Evaluation from '@/pages/Evaluation';
 import Templates from '@/pages/Templates';
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: 'history', element: <History /> },
       { path: 'knowledge', element: <Knowledge /> },
       { path: 'admin/users', element: <Users /> },
+      { path: 'admin/audit', element: <Audit /> },
     ],
   },
   { path: 'login', element: <Login /> },

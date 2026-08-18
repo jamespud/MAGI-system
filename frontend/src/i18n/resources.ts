@@ -23,6 +23,21 @@ export const en: Record<string, string> = {
   'nav.benchmark': 'Benchmark',
   'nav.history': 'History',
   'nav.users': 'Users',
+  'nav.audit': 'Audit',
+
+  // Audit trail
+  'audit.title': 'Audit trail',
+  'audit.subtitle': 'Administrative and security actions recorded by the harness.',
+  'audit.refresh': 'Refresh',
+  'audit.time': 'Time',
+  'audit.user': 'User',
+  'audit.action': 'Action',
+  'audit.resource': 'Resource',
+  'audit.status': 'Status',
+  'audit.total': 'Total',
+  'audit.prev': '← Prev',
+  'audit.next': 'Next →',
+  'audit.empty': 'No audit events yet.',
 
   // Replay / trace
   'replay.timeline': 'Timeline',
@@ -228,6 +243,21 @@ export const zh: Record<string, string> = {
   'nav.benchmark': '基准测试',
   'nav.history': '历史',
   'nav.users': '用户',
+  'nav.audit': '审计',
+
+  // Audit trail
+  'audit.title': '审计轨迹',
+  'audit.subtitle': 'Harness 记录的运维与安全操作。',
+  'audit.refresh': '刷新',
+  'audit.time': '时间',
+  'audit.user': '用户',
+  'audit.action': '动作',
+  'audit.resource': '资源',
+  'audit.status': '状态',
+  'audit.total': '总数',
+  'audit.prev': '← 上一页',
+  'audit.next': '下一页 →',
+  'audit.empty': '暂无审计事件。',
 
   'replay.timeline': '时间线',
   'replay.trace': 'Trace',

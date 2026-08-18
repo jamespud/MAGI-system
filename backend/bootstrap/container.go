@@ -26,6 +26,7 @@ import (
 	"github.com/jamespud/magi/backend/application/admin"
 	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
+	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/consensuspolicy"
 	"github.com/jamespud/magi/backend/application/dataset"
@@ -109,6 +110,9 @@ var Module = fx.Options(
 		provideInvestigationPlanRepository,
 		provideInvestigationPlanService,
 		provideInvestigationPlanHandler,
+		provideAuditRepository,
+		provideAuditService,
+		provideAuditHandler,
 		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
@@ -174,6 +178,8 @@ var Module = fx.Options(
 		fbH *handler.FSMBlueprintHandler,
 		ttH *handler.TaskTreeHandler,
 		ipH *handler.InvestigationPlanHandler,
+		auditSvc *audit.Service,
+		auditH *handler.AuditHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -209,6 +215,8 @@ var Module = fx.Options(
 			FSMBlueprint:      fbH,
 			TaskTree:          ttH,
 			InvestigationPlan: ipH,
+			Audit:             auditSvc,
+			AuditH:            auditH,
 			Evaluation:        evalSvc,
 			Memory:            memSvc,
 			Knowledge:         knowSvc,
@@ -287,6 +295,18 @@ func provideInvestigationPlanService(repo port.InvestigationPlanRepository) *inv
 
 func provideInvestigationPlanHandler(svc *investigationplan.Service, caseSvc port.CaseRepository) *handler.InvestigationPlanHandler {
 	return handler.NewInvestigationPlanHandler(svc, caseSvc)
+}
+
+func provideAuditRepository(db *gorm.DB) port.AuditRepository {
+	return magi.NewAuditRepository(db)
+}
+
+func provideAuditService(repo port.AuditRepository) *audit.Service {
+	return audit.NewService(repo)
+}
+
+func provideAuditHandler(svc *audit.Service) *handler.AuditHandler {
+	return handler.NewAuditHandler(svc)
 }
 
 // ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.
@@ -927,8 +947,8 @@ func provideOIDCClient(cfg *Config, users port.UserRepository) (*auth.OIDCClient
 	}, users)
 }
 
-func provideOIDCHandler(client *auth.OIDCClient, codec *auth.SessionCodec, usersSvc *users.Service) *handler.OIDCHandler {
-	return handler.NewOIDCHandler(client, codec, usersSvc)
+func provideOIDCHandler(client *auth.OIDCClient, codec *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service) *handler.OIDCHandler {
+	return handler.NewOIDCHandler(client, codec, usersSvc, auditSvc)
 }
 
 func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {
