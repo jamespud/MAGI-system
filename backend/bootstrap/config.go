@@ -39,8 +39,10 @@ type Config struct {
 	} `yaml:"tavily"`
 	Search SearchConfig `yaml:"search"`
 	Auth   struct {
-		Enabled bool         `yaml:"enabled"`
-		APIKeys []APIKeySpec `yaml:"api_keys"`
+		Enabled          bool         `yaml:"enabled"`
+		APIKeys          []APIKeySpec `yaml:"api_keys"`
+		SelfRegistration bool         `yaml:"self_registration"`
+		OIDC             OIDCConfig   `yaml:"oidc"`
 	} `yaml:"auth"`
 	Limits struct {
 		MaxConcurrentRunsPerUser int     `yaml:"max_concurrent_runs_per_user"`
@@ -128,6 +130,19 @@ type APIKeySpec struct {
 	KeyHash string `yaml:"key_hash"`
 	UserID  int64  `yaml:"user_id"`
 	Role    string `yaml:"role"`
+}
+
+// OIDCConfig configures OpenID Connect authorization-code login.
+type OIDCConfig struct {
+	Enabled           bool     `yaml:"enabled"`
+	Issuer            string   `yaml:"issuer"`
+	ClientID          string   `yaml:"client_id"`
+	ClientSecret      string   `yaml:"client_secret"`
+	RedirectURL       string   `yaml:"redirect_url"`
+	Scopes            []string `yaml:"scopes"`
+	SelfRegistration  bool     `yaml:"self_registration"`
+	SessionSecret     string   `yaml:"session_secret"`
+	SessionTTLSeconds int      `yaml:"session_ttl_seconds"`
 }
 
 // MCPServerConfig describes one external MCP server. stdio servers are child
@@ -865,6 +880,15 @@ func (c *Config) Validate() error {
 			if (k.Key == "" && k.KeyHash == "") || k.UserID <= 0 || k.Role == "" {
 				return fmt.Errorf("auth: each api_key needs non-empty key, user_id > 0 and role")
 			}
+		}
+	}
+	if c.Auth.OIDC.Enabled {
+		if strings.TrimSpace(c.Auth.OIDC.Issuer) == "" || strings.TrimSpace(c.Auth.OIDC.ClientID) == "" ||
+			strings.TrimSpace(c.Auth.OIDC.RedirectURL) == "" {
+			return fmt.Errorf("auth.oidc: issuer, client_id and redirect_url are required when enabled")
+		}
+		if strings.TrimSpace(c.Auth.OIDC.SessionSecret) == "" {
+			return fmt.Errorf("auth.oidc: session_secret is required when enabled")
 		}
 	}
 	if c.Limits.MaxConcurrentRunsPerUser < 0 {

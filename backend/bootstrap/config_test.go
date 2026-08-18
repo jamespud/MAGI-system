@@ -438,6 +438,31 @@ func TestConfigValidate_WebTool(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_OIDC(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.Auth.OIDC.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "auth.oidc: issuer, client_id and redirect_url") {
+		t.Fatalf("expected oidc validation error, got %v", err)
+	}
+	cfg.Auth.OIDC.Issuer = "https://issuer.example"
+	cfg.Auth.OIDC.ClientID = "cid"
+	cfg.Auth.OIDC.RedirectURL = "http://localhost/auth/oidc/callback"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "session_secret is required") {
+		t.Fatalf("expected session_secret error, got %v", err)
+	}
+	cfg.Auth.OIDC.SessionSecret = "s3cret"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid oidc rejected: %v", err)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsDelegateToolWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.DelegateTool.Enabled = true

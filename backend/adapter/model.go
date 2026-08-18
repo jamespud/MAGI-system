@@ -420,6 +420,7 @@ func (KnowledgeDocModel) TableName() string { return "knowledge_docs" }
 type UserModel struct {
 	ID        int64 `gorm:"primaryKey;autoIncrement"`
 	Name      string
+	Email     string `gorm:"index;size:255"`
 	Role      string `gorm:"size:16;default:user"`
 	CreatedAt time.Time
 	UpdatedAt time.Time

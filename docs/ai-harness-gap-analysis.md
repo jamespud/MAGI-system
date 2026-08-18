@@ -51,7 +51,7 @@
 | **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步 | 更通用的任务级文件/状态树 | 🟡 |
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈、内置 `check_output` 计算型反馈传感器、失败分析→建议→人工应用闭环 | 更完整外部传感器（代码 linter/编译/单测，依赖 MCP/coderunner）与全自动规则演化 | 🟡 |
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、Docker 沙箱、工具策略、只读 DB/文件/代码库查询与受限 URL 抓取 | MicroVM 沙箱 | 🟡 |
-| **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由 | SSO/OAuth/自助注册、更完整的敏感数据分级与审计 UI | 🟡 |
+| **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏、admin/operator/user 细粒度角色路由、OIDC SSO + 自助注册 | 更完整的敏感数据分级与审计 UI | 🟡 |
 | **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | 🟡 |
 | **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁、内置行业基准集与聚合看板、定时自动回归 | 线上 golden | 🟡 |
 
@@ -78,7 +78,7 @@
 | **身份与多租户** | API-Key 认证（常量时间比较）+ 按用户所有权 | ✅ | `application/auth`、`server/auth.go` |
 | | Web UI 认证通道 / 登录页 | ✅ | `X-API-Key` header 注入 + 401 `magi:unauthorized` 事件 + `/login` 页（D1，`frontend/src/api/client.ts`、`pages/Login.tsx`、`api/stream.ts` fetch-streaming） |
 | | 用户管理 / 密钥轮换（DB 用户 + SHA-256 存储） | ✅ | `/admin/users`、`/admin/keys/:id/revoke` + `rotate`、`/me`；明文仅展示一次（D8，`application/users/`、`pages/Users.tsx`） |
-| | SSO / OAuth / 自助注册 / 细粒度 RBAC | 🟡 | 角色体系扩展为 admin/operator/user（`entity.Role*`、`IsValidRole`）；`RequireAnyRole` 中间件把运营端点（usage/prompts/benchmark seed/eval summary）开放给 operator，用户/密钥管理保持 admin-only（`server/auth.go`、`server/router.go`）；SSO/OAuth/自助注册仍缺 |
+| | SSO / OAuth / 自助注册 / 细粒度 RBAC | ✅ | OIDC 授权码流（发现/授权/换 token/userinfo）+ 签名会话 cookie（HMAC）+ 自动开户/自助注册（`application/auth/oidc.go`、`session.go`、`server/handler/oidc.go`）；admin/operator/user 角色 + `RequireAnyRole`（`server/auth.go`、`server/router.go`）；前端登录页 SSO 入口 |
 | | 按用户配额/预算/限额 | ✅ | `application/admin`、`run_manager.go` |
 | **安全** | 沙箱/审批门/注入防护/脱敏/审计事件 | ✅ | `toolpolicy`、`approval`、`redact` |
 | | HTTP 通用限流 | ✅ | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After（D13，`server/ratelimit.go`） |

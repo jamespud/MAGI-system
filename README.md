@@ -266,6 +266,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Read-only repo tool** - `repo_query` greps and lists files inside allow-listed repository roots with extension filtering and result bounds (`repo_tool` config).
 - **Restricted URL fetch** - `web_fetch` fetches allow-listed domains and returns readable text with size/timeout bounds and SSRF protection (`web_tool` config).
 - **Dynamic sub-investigation** - the `delegate` tool spawns an independent subagent to investigate a sub-question and returns its evidence for citation (`delegate_tool` config).
+- **OIDC SSO + self-registration** - authorization-code login against any OIDC issuer with signed session cookies; first login can auto-provision an account, and public self-registration issues a one-time key.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.

@@ -90,6 +90,18 @@ runs, tool/model/search failures and failovers, model cost) from
   Routes are gated with `RequireAnyRole(...)`; user and API-key management
   stays admin-only.
 
+### OIDC single sign-on
+
+`auth.oidc.enabled: true` enables authorization-code login against any OIDC
+issuer. `GET /auth/oidc/login` redirects to the provider; the callback
+exchanges the code, fetches userinfo, matches the identity by email (or
+auto-provisions a user-role account when `self_registration` is true), and
+sets an HMAC-signed `magi_session` cookie that the auth middleware accepts
+alongside API keys. `auth.self_registration` exposes `POST /auth/register`
+for public one-time-key account creation. The one-time state store is
+in-memory, so multi-replica deployments should terminate OIDC at a gateway or
+share state.
+
 ### Multi-tenant boundaries and sandbox egress
 
 - **Per-user limits are cumulative and independent**: run concurrency

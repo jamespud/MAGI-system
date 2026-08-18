@@ -8,6 +8,7 @@ import "time"
 type User struct {
 	ID        int64
 	Name      string
+	Email     string
 	Role      string // "admin" | "operator" | "user"
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -30,8 +30,9 @@ type IssuedKey struct {
 
 // Service is the application-layer service for users and API keys.
 type Service struct {
-	users port.UserRepository
-	keys  port.ApiKeyRepository
+	users            port.UserRepository
+	keys             port.ApiKeyRepository
+	selfRegistration bool
 }
 
 // NewService creates a UsersService.
@@ -39,9 +40,29 @@ func NewService(users port.UserRepository, keys port.ApiKeyRepository) *Service 
 	return &Service{users: users, keys: keys}
 }
 
+// WithSelfRegistration enables public self-registration (used by the
+// auth.self_registration flag).
+func WithSelfRegistration(enabled bool) func(*Service) {
+	return func(s *Service) { s.selfRegistration = enabled }
+}
+
+func NewServiceWithOptions(users port.UserRepository, keys port.ApiKeyRepository, opts ...func(*Service)) *Service {
+	s := NewService(users, keys)
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
 // CreateUser creates an account and issues its bootstrap key. The returned
 // key plaintext must be shown to the caller exactly once.
 func (s *Service) CreateUser(ctx context.Context, actorRole, name, role string) (*entity.User, *IssuedKey, error) {
+	return s.CreateUserWithEmail(ctx, actorRole, name, "", role)
+}
+
+// CreateUserWithEmail creates an account (optionally with an identity email
+// used by OIDC matching) and issues its bootstrap key.
+func (s *Service) CreateUserWithEmail(ctx context.Context, actorRole, name, email, role string) (*entity.User, *IssuedKey, error) {
 	if !isAdmin(actorRole) {
 		return nil, nil, ErrForbidden
 	}
@@ -55,13 +76,40 @@ func (s *Service) CreateUser(ctx context.Context, actorRole, name, role string) 
 	if !entity.IsValidRole(role) {
 		return nil, nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
 	}
-	u := &entity.User{Name: name, Role: role}
+	u := &entity.User{Name: name, Email: strings.TrimSpace(email), Role: role}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, nil, fmt.Errorf("users: create user: %w", err)
 	}
 	key, err := s.issueKey(ctx, u.ID, "bootstrap")
 	if err != nil {
 		// The user row exists even if key issuance fails; surface the key error.
+		return u, nil, fmt.Errorf("users: issue bootstrap key: %w", err)
+	}
+	return u, key, nil
+}
+
+// SelfRegister creates a user with the user role and issues a bootstrap key.
+// It is only allowed when self-registration is enabled.
+func (s *Service) SelfRegister(ctx context.Context, name, email string) (*entity.User, *IssuedKey, error) {
+	if !s.selfRegistration {
+		return nil, nil, ErrForbidden
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil, fmt.Errorf("users: name is required")
+	}
+	email = strings.TrimSpace(email)
+	if email != "" {
+		if existing, err := s.users.FindByEmail(ctx, email); err == nil && existing != nil {
+			return nil, nil, fmt.Errorf("users: email already registered")
+		}
+	}
+	u := &entity.User{Name: name, Email: email, Role: entity.RoleUser}
+	if err := s.users.Create(ctx, u); err != nil {
+		return nil, nil, fmt.Errorf("users: create user: %w", err)
+	}
+	key, err := s.issueKey(ctx, u.ID, "bootstrap")
+	if err != nil {
 		return u, nil, fmt.Errorf("users: issue bootstrap key: %w", err)
 	}
 	return u, key, nil

@@ -2,6 +2,7 @@ package magi
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,7 +23,7 @@ func (r *userRepo) Create(ctx context.Context, u *entity.User) error {
 		u.CreatedAt = time.Now()
 	}
 	u.UpdatedAt = u.CreatedAt
-	m := UserModel{Name: u.Name, Role: u.Role, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
+	m := UserModel{Name: u.Name, Email: u.Email, Role: u.Role, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
 		return err
 	}
@@ -35,7 +36,15 @@ func (r *userRepo) GetByID(ctx context.Context, id int64) (*entity.User, error) 
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&m).Error; err != nil {
 		return nil, err
 	}
-	return &entity.User{ID: m.ID, Name: m.Name, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
+	return &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
+}
+
+func (r *userRepo) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
+	var m UserModel
+	if err := r.db.WithContext(ctx).Where("email = ?", strings.TrimSpace(email)).First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
 }
 
 func (r *userRepo) List(ctx context.Context) ([]*entity.User, error) {
@@ -46,7 +55,7 @@ func (r *userRepo) List(ctx context.Context) ([]*entity.User, error) {
 	out := make([]*entity.User, len(models))
 	for i := range models {
 		m := &models[i]
-		out[i] = &entity.User{ID: m.ID, Name: m.Name, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
+		out[i] = &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
 	}
 	return out, nil
 }
@@ -54,7 +63,7 @@ func (r *userRepo) List(ctx context.Context) ([]*entity.User, error) {
 func (r *userRepo) Update(ctx context.Context, u *entity.User) error {
 	u.UpdatedAt = time.Now()
 	return r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", u.ID).Updates(map[string]any{
-		"name": u.Name, "role": u.Role, "updated_at": u.UpdatedAt,
+		"name": u.Name, "email": u.Email, "role": u.Role, "updated_at": u.UpdatedAt,
 	}).Error
 }
 

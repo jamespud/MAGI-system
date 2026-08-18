@@ -75,6 +75,9 @@ var Module = fx.Options(
 		ProvideToolExecutor,
 		provideMCPAdapter,
 		provideAuthService,
+		provideSessionCodec,
+		provideOIDCClient,
+		provideOIDCHandler,
 		provideUserRepository,
 		provideApiKeyRepository,
 		provideUsersService,
@@ -147,6 +150,7 @@ var Module = fx.Options(
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
 		usersSvc *users.Service,
+		oidcH *handler.OIDCHandler,
 		toolSvc *tool.Service,
 		broker *appserver.EventBroker,
 		repo port.Repository,
@@ -175,6 +179,7 @@ var Module = fx.Options(
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
 			Users:        usersSvc,
+			OIDC:         oidcH,
 			Tool:         toolSvc,
 			Broker:       broker,
 			EventRepo:    repo.EventRepo(),
@@ -750,9 +755,12 @@ func provideRepository(db *gorm.DB) port.Repository {
 	return magi.NewRepository(db)
 }
 
-func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKeyRepository) *auth.Service {
-	svc := auth.NewService(cfg.Auth.Enabled, staticKeySpecs(cfg))
-	return svc.WithStores(keys, users)
+func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKeyRepository, codec *auth.SessionCodec) *auth.Service {
+	svc := auth.NewService(cfg.Auth.Enabled, staticKeySpecs(cfg)).WithStores(keys, users)
+	if codec != nil {
+		svc = svc.WithSession(codec)
+	}
+	return svc
 }
 
 func staticKeySpecs(cfg *Config) []auth.KeySpec {
@@ -771,8 +779,36 @@ func provideApiKeyRepository(db *gorm.DB) port.ApiKeyRepository {
 	return magi.NewApiKeyRepository(db)
 }
 
-func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyRepository) *users.Service {
-	return users.NewService(userRepo, keyRepo)
+func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyRepository, cfg *Config) *users.Service {
+	selfRegistration := cfg.Auth.SelfRegistration || cfg.Auth.OIDC.SelfRegistration
+	return users.NewServiceWithOptions(userRepo, keyRepo, users.WithSelfRegistration(selfRegistration))
+}
+
+func provideSessionCodec(cfg *Config) *auth.SessionCodec {
+	if !cfg.Auth.OIDC.Enabled || strings.TrimSpace(cfg.Auth.OIDC.SessionSecret) == "" {
+		return nil
+	}
+	ttl := time.Duration(cfg.Auth.OIDC.SessionTTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 12 * time.Hour
+	}
+	return auth.NewSessionCodec(cfg.Auth.OIDC.SessionSecret, ttl)
+}
+
+func provideOIDCClient(cfg *Config, users port.UserRepository) (*auth.OIDCClient, error) {
+	if !cfg.Auth.OIDC.Enabled {
+		return nil, nil
+	}
+	return auth.NewOIDCClient(auth.OIDCConfig{
+		Enabled: cfg.Auth.OIDC.Enabled, Issuer: cfg.Auth.OIDC.Issuer,
+		ClientID: cfg.Auth.OIDC.ClientID, ClientSecret: cfg.Auth.OIDC.ClientSecret,
+		RedirectURL: cfg.Auth.OIDC.RedirectURL, Scopes: cfg.Auth.OIDC.Scopes,
+		SelfRegistration: cfg.Auth.OIDC.SelfRegistration,
+	}, users)
+}
+
+func provideOIDCHandler(client *auth.OIDCClient, codec *auth.SessionCodec, usersSvc *users.Service) *handler.OIDCHandler {
+	return handler.NewOIDCHandler(client, codec, usersSvc)
 }
 
 func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {

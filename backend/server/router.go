@@ -42,6 +42,7 @@ type RouteDeps struct {
 	Memory       *memory.Service
 	Knowledge    *knowledge.Service
 	Users        *users.Service
+	OIDC         *handler.OIDCHandler
 	Tool         *tool.Service
 	Broker       *EventBroker
 	EventRepo    port.EventRepository
@@ -77,6 +78,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	h.GET("/health", healthH.Health)
 	h.GET("/ready", healthH.Ready)
 	h.GET("/version", healthH.Version)
+
+	if deps.OIDC != nil {
+		h.GET("/auth/oidc/login", deps.OIDC.Login)
+		h.GET("/auth/oidc/callback", deps.OIDC.Callback)
+		h.POST("/auth/register", deps.OIDC.Register)
+	}
 	h.GET("/openapi.json", OpenAPIHandler)
 
 	v1 := h.Group("/api/v1")

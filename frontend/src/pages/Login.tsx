@@ -73,6 +73,13 @@ export default function Login() {
           <span className="flex-1 border-t border-border-dim" />
         </div>
 
+        <a
+          href="/auth/oidc/login"
+          className="block w-full rounded border border-border-dim px-4 py-2 text-center text-sm text-text-secondary hover:bg-overlay hover:text-text-primary"
+        >
+          Sign in with SSO
+        </a>
+
         <button
           type="button"
           onClick={skipOpen}

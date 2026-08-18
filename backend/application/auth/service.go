@@ -51,6 +51,7 @@ type Service struct {
 	hashes    map[string]Principal
 	keyStore  KeyStore
 	userStore UserStore
+	session   *SessionCodec
 }
 
 // WithStores wires the DB-backed key/user stores so runtime-issued keys
@@ -59,6 +60,24 @@ func (s *Service) WithStores(keys KeyStore, users UserStore) *Service {
 	s.keyStore = keys
 	s.userStore = users
 	return s
+}
+
+// WithSession enables signed-cookie session authentication.
+func (s *Service) WithSession(codec *SessionCodec) *Service {
+	s.session = codec
+	return s
+}
+
+// AuthenticateSession validates a signed session cookie token.
+func (s *Service) AuthenticateSession(token string) (*Principal, bool) {
+	if !s.enabled || s.session == nil || token == "" {
+		return nil, false
+	}
+	p, err := s.session.Decode(token)
+	if err != nil {
+		return nil, false
+	}
+	return p, true
 }
 
 func NewService(enabled bool, keys []KeySpec) *Service {

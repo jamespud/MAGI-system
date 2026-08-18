@@ -28,6 +28,14 @@ func (r *memUserRepo) GetByID(ctx context.Context, id int64) (*entity.User, erro
 	}
 	return nil, errNotFound
 }
+func (r *memUserRepo) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
+	for _, u := range r.byID {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return nil, errNotFound
+}
 func (r *memUserRepo) List(ctx context.Context) ([]*entity.User, error) {
 	var out []*entity.User
 	for _, u := range r.byID {
@@ -201,5 +209,26 @@ func TestUsersService_MeAndList(t *testing.T) {
 	}
 	if _, err := svc.ListUsers(context.Background(), entity.RoleUser); err != users.ErrForbidden {
 		t.Fatalf("expected forbidden list, got %v", err)
+	}
+}
+
+func TestUsersService_SelfRegister(t *testing.T) {
+	urepo := newMemUserRepo()
+	krepo := newMemKeyRepo()
+	disabled := users.NewServiceWithOptions(urepo, krepo, users.WithSelfRegistration(false))
+	if _, _, err := disabled.SelfRegister(context.Background(), "x", ""); err != users.ErrForbidden {
+		t.Fatalf("expected forbidden when disabled, got %v", err)
+	}
+
+	enabled := users.NewServiceWithOptions(urepo, krepo, users.WithSelfRegistration(true))
+	u, key, err := enabled.SelfRegister(context.Background(), "self", "self@example.com")
+	if err != nil {
+		t.Fatalf("self register: %v", err)
+	}
+	if u.Role != entity.RoleUser || u.Email != "self@example.com" || key == nil || key.Plaintext == "" {
+		t.Fatalf("user=%+v key=%+v", u, key)
+	}
+	if _, _, err := enabled.SelfRegister(context.Background(), "self2", "self@example.com"); err == nil {
+		t.Fatal("duplicate email must be rejected")
 	}
 }

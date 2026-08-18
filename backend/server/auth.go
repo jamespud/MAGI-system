@@ -17,6 +17,7 @@ import (
 var publicPaths = map[string]bool{
 	"/health": true, "/ready": true, "/version": true,
 	"/openapi.json": true, "/metrics": true,
+	"/auth/oidc/login": true, "/auth/oidc/callback": true, "/auth/register": true,
 }
 
 func Auth(authSvc *auth.Service) app.HandlerFunc {
@@ -30,6 +31,12 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 			token = string(c.GetHeader("X-API-Key"))
 		}
 		p, ok := authSvc.Authenticate(ctx, token)
+		if !ok {
+			// OIDC signed session cookie fallback.
+			if cookie := c.Cookie("magi_session"); len(cookie) > 0 {
+				p, ok = authSvc.AuthenticateSession(string(cookie))
+			}
+		}
 		if !ok {
 			c.JSON(consts.StatusUnauthorized, dto.ErrorResponse{Error: "unauthorized"})
 			c.Abort()

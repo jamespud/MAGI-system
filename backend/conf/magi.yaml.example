@@ -145,6 +145,20 @@ auth:
     - { name: "admin", key: "change-me", user_id: 1, role: "admin" }
     # Prefer key_hash (sha256 hex of the API key) over plaintext key:
     # - { name: "ops", key_hash: "<sha256-hex>", user_id: 2, role: "admin" }
+  # Public self-registration (creates a user-role account + one-time key).
+  self_registration: false
+  # OpenID Connect authorization-code login (SSO). When enabled, sign in with
+  # the identity provider and continue with a signed session cookie.
+  oidc:
+    enabled: false
+    issuer: ""                 # e.g. "https://auth.example.com/realms/magi"
+    client_id: ""
+    client_secret: ""
+    redirect_url: ""           # e.g. "http://localhost/auth/oidc/callback"
+    scopes: []                 # default: openid email profile
+    self_registration: true    # provision a user-role account on first login
+    session_secret: ""         # HMAC secret for signed session cookies
+    session_ttl_seconds: 43200
 
 # Per-user governance.
 limits:
