@@ -32,11 +32,32 @@
 
 > 参考定义：**Agent = Model + Harness**。Harness 不是 Prompt 或应用框架本身，而是围绕模型构建的完整运行时环境与控制基础设施，覆盖上下文/记忆、前馈引导/反馈传感器、工具连接/沙箱、权限护栏、可观测性/断点续传，以及评估回归六大部分。
 > 参考能力域来自主流 AI harness（LangGraph、AutoGen、CrewAI、Claude Code、OpenHands 等）的功能空间。✅=已实现且较完整，🟡=部分实现/有缺陷，❌=缺失。
-> 更新记录：2026-08-18 补充 Prompt / Agent Framework / Agent Harness 概念边界对照与六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
+> 更新记录：2026-08-18 补充 Prompt / Agent Framework / Agent Harness 概念边界对照与六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行；晚些时候按参考定义补齐 AI 工程范式演进（Prompt→Context→Harness）、确定性矛盾/赛博控速器与 Feedforward-Feedback 控制回路示意，并新增“设计模式”明细行。
 
 ### 2.1 概念边界与组件级总览
 
-按 `Agent = Model + Harness` 校准：Model 是概率性推理大脑；Harness 是智能体的运行时躯干、感官、手脚与规则边界，在概率性模型推理和确定性外部系统之间充当控制与反馈闭环。概念边界对照如下：
+按 `Agent = Model + Harness` 校准：Model 是概率性推理大脑；Harness 是智能体的运行时躯干、感官、手脚与规则边界，在概率性模型推理和确定性外部系统之间充当控制与反馈闭环。
+
+**范式演进**：Harness 是 AI 工程范式三次演进（1.0 Prompt → 2.0 Context → 3.0 Harness）的最新阶段：
+
+| 阶段 | 核心技术范式 | 核心关注点 | 局限性与瓶颈 |
+| --- | --- | --- | --- |
+| **1.0** | Prompt Engineering（提示词工程） | 撰写更精准的 System/User Prompt 以“套出”模型最佳回答 | 模型只能“说”不能“做”，无法跨系统联动与复杂计算 |
+| **2.0** | Context Engineering（上下文工程） | 通过 RAG、滑动窗口、向量数据库为模型注入准确上下文 | 模型仍处于“被动问答”状态，长流程任务易丢失目标（熵增） |
+| **3.0** | Harness Engineering（驾驭工程） | 构建让 AI 自主感知、执行工具、自我纠错、跨会话记忆与安全运行的闭环环境 | 工程师工作从“写代码/写 Prompt”转为“为 AI 构建并维护运行环境” |
+
+**确定性矛盾（Cybernetic Governor）**：大模型是概率性生成引擎（Stochastic Engine），真实软件系统与业务流程要求绝对确定性（Deterministic System）。Harness 作为“赛博控速器”，在概率性模型推理与确定性外部系统之间建立防撞墙与自动化反馈闭环；MAGI 的确定性 FSM 控制面（Go 规则）+ 证据门 + RoleGate 即是对该矛盾的结构化回应。
+
+**Harness 控制回路**：前馈（Feedforward Guides，事前引导提高第一次做对的概率）与反馈（Feedback Sensors，事后感知错误并指导自愈）两大机制：
+
+```
+[ Feedforward Guides ]                  [ Feedback Sensors ]
+- 系统规范 (AGENTS.md / Prompt)          - 编译器与静态检查 (Linters)
+- 项目模板与代码库架构                   - 自动化单元测试 (Unit Tests)
+- 架构约束规则                           - 语义评测 (LLM-as-a-Judge)
+```
+
+概念边界对照如下：
 
 | 对照对象 | 定位 | 工作方式 | 类比 | 与 MAGI 的关系 |
 | --- | --- | --- | --- | --- |
@@ -85,6 +106,7 @@
 | | HTTP 通用限流 | ✅ | `http_rate_limit` 配置 + 中间件（按用户 ID，open 模式按 IP），429 + Retry-After（D13，`server/ratelimit.go`） |
 | | 敏感数据分级/租户隔离审计 | ✅ | case/memory 列表查询下沉到 DB（`WHERE user_id=?` + LIMIT/OFFSET 分页），e2e 断言跨用户隔离（D2，`adapter/repository.go`） |
 | | **计算型反馈传感器**（Linter / 编译器 / 单测回喂 → AI 自愈） | ✅ | 内置 `check_output`（JSON Schema lint + 约束规则回喂自愈，`adapter/feedback_tool.go`）；`sensor_tool` 注册外部确定性命令（linter/编译/单测），`run_check` 只执行登记命令、带超时、输出回喂（`adapter/sensor_tool.go`） |
+| | **设计模式：Feedforward-Feedback 闭环**（规范注入 → 执行 → 传感器回喂自愈） | ✅ | 对应“基于代码约束的闭环模式”：前馈注入版本化 prompt / 角色契约 / FSM 编排蓝图，动作后由 `check_output` / `run_check`（编译、Lint、单测）静默回喂诊断并提示自愈，低级错误在到达人工审阅前被拦截（`adapter/feedback_tool.go`、`adapter/sensor_tool.go`） |
 | | **NLAH**（自然语言驱动控制规范） | 🟡 | 提示词注册表（D12）+ 角色契约规范（`role_policy`）+ 投票/共识规则规范（`consensus_policy`）+ FSM 编排蓝图：合法转移集合持久化与 admin API，orchestrator 执行时按蓝图校验每个状态转移（违规即 fail-fast，`domain/orchestration/orchestrator.go`、`application/fsmblueprint/`）；状态机业务动作仍为 Go handler（渐进式） |
 | | **自我改进 Harness**（分析失败 → 建议并受控应用规则/prompt） | ✅ | `POST /admin/selfimprove/analyze` 失败分类分析 + 规则/提示改进建议；`POST .../apply` admin 确认写入 prompt registry；`selfimprove.auto_apply_enabled` + 阈值开启全自动规则演化：自动回归后对达阈值类别的建议自动应用并写入版本化 prompt registry（`AutoApply`，`application/selfimprove/service.go`、`bootstrap/container.go`） |
 | **评估闭环** | 数据集评测 / benchmark / stability / regression gate / LLM judge | ✅ | `application/dataset`、`evaluation`、`judge` |
