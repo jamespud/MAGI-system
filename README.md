@@ -273,6 +273,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Task state tree** - each agent/round execution is recorded as a node (`GET /cases/:id/task-tree`) and shown in the Replay trace view.
 - **External deterministic sensors** - register linter/compiler/unit-test commands (`sensor_tool`); the `run_check` tool executes only registered checks and feeds output back for self-correction.
 - **Lightweight VM sandboxing** - the Docker sandbox accepts a container `runtime` (e.g. gVisor `runsc`) for lightweight-virtualization isolation on top of network/memory/CPU/PID/time limits.
+- **Parallel sub-investigation** - the `delegate` tool accepts a `questions` array to spawn up to 4 sub-agents concurrently and merge their evidence.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.

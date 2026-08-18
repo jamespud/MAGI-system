@@ -64,7 +64,7 @@
 | **Agent 执行** | 手写 agent loop、工具循环、终止策略、上下文压缩 | ✅ | `domain/runtime/agent_loop.go`、`domain/runtime/compaction.go` |
 | | **多模型多样性**（per-role 独立模型） | ✅ | `magi.<role>.model` / `commander.model` / `judge.model` 逐字段覆盖全局、未设字段继承（D5，`bootstrap/config.go`），含 fail-fast 校验 |
 | | 多供应商路由/降级（failover） | ✅ | `model.providers` / per-role `model.providers` 有序 provider 链；Build / Generate / 工具绑定失败自动尝试下一家，Stream 可在首块前 failover；取消的请求不重试；`magi_model_failovers_total` 观测；fallback 按实际 provider 单价核算 usage 成本（`adapter/model_failover.go`） |
-| | **长任务规划 / 动态 subagent 派生** | 🟡 | `delegate_tool` 内置 `delegate` 工具：agent 可动态派生 subagent 独立调查子问题并取回证据（复用主 AgentLoop，`adapter/delegate_tool.go`、`LoopSubInvestigator`）；完整任务规划/并行编排层仍缺 |
+| | **长任务规划 / 动态 subagent 派生** | 🟡 | `delegate_tool` 内置 `delegate` 工具：单子问题派生 subagent 取回证据，`questions` 数组并发派生（上限 4、证据合并，`adapter/delegate_tool.go`）；任务状态树持久化执行节点（`adapter/task_tree_repository.go`）；完整任务规划/编排层仍缺 |
 | **工具生态** | Tavily/Brave web_search / MCP(stdio+http) / CodeRunner(WASM) | ✅ | `adapter/web_search_executor.go`、`adapter/tavily_tool.go`、`adapter/mcp/mcp.go`、`coderunner_adapter.go` |
 | | 原生文件/代码库/浏览器/DB 工具 | 🟡 | `db_tool` 只读 `db_query`（`adapter/db_query_tool.go`）；`file_tool` 只读 `file_query`（`adapter/file_tool.go`）；`repo_tool` 只读 `repo_query`（`adapter/repo_tool.go`）；`web_tool` 受限 `web_fetch`：域名白名单 + SSRF 域名解析防护 + 大小/超时限制 + HTML 转文本（`adapter/web_fetch_tool.go`）；完整浏览器自动化仍只能靠外部 MCP |
 | | Docker / MicroVM 沙箱 | ✅ | `code_runner.docker` Docker 沙箱执行器：`docker run --rm --network none --pids-limit 64` + 内存/CPU/超时限制 + 可选 `runtime`（如 gVisor `runsc` 轻量虚拟化隔离），复用公共策略校验（`adapter/docker_coderunner.go`）；Firecracker 类独立 MicroVM 仍可后续接入 |

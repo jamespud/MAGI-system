@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -14,7 +15,7 @@ import (
 const DelegateToolName = "delegate"
 
 // delegateArgsSchema is the JSON Schema for delegate arguments.
-const delegateArgsSchema = `{"type":"object","properties":{"question":{"type":"string","description":"sub-question to investigate independently"},"background":{"type":"string"}},"required":["question"],"additionalProperties":false}`
+const delegateArgsSchema = `{"type":"object","properties":{"question":{"type":"string","description":"sub-question to investigate independently"},"background":{"type":"string"},"questions":{"type":"array","items":{"type":"object","properties":{"question":{"type":"string"},"background":{"type":"string"}},"required":["question"],"additionalProperties":false},"description":"multiple sub-questions to investigate in parallel"}},"anyOf":[{"required":["question"]},{"required":["questions"]}],"additionalProperties":false}`
 
 // DelegateResult is the evidence bundle returned by a sub-investigation.
 type DelegateResult struct {
@@ -94,9 +95,16 @@ func (e *DelegateToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 	var args struct {
 		Question   string `json:"question"`
 		Background string `json:"background,omitempty"`
+		Questions  []struct {
+			Question   string `json:"question"`
+			Background string `json:"background,omitempty"`
+		} `json:"questions,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(req.ArgumentsJSON), &args); err != nil {
 		return nil, fmt.Errorf("delegate: parse args: %w", err)
+	}
+	if len(args.Questions) > 0 {
+		return e.executeParallel(ctx, args.Questions)
 	}
 	if args.Question == "" {
 		return nil, fmt.Errorf("delegate: question is required")
@@ -111,6 +119,60 @@ func (e *DelegateToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 	}
 	raw, _ := json.Marshal(out)
 	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
+const delegateParallelLimit = 4
+
+// executeParallel runs multiple sub-investigations concurrently (bounded)
+// and merges their evidence into one structured result.
+func (e *DelegateToolExecutor) executeParallel(ctx context.Context, questions []struct {
+	Question   string `json:"question"`
+	Background string `json:"background,omitempty"`
+}) (*port.ToolExecutionResult, error) {
+	if len(questions) == 0 {
+		return nil, fmt.Errorf("delegate: at least one question is required")
+	}
+	results := make([]*DelegateResult, len(questions))
+	errs := make([]error, len(questions))
+	limit := delegateParallelLimit
+	if len(questions) < limit {
+		limit = len(questions)
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i, item := range questions {
+		if item.Question == "" {
+			return nil, fmt.Errorf("delegate: question %d is empty", i)
+		}
+		wg.Add(1)
+		go func(idx int, question, background string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[idx], errs[idx] = e.investigator.Investigate(ctx, question, background)
+		}(i, item.Question, item.Background)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, fmt.Errorf("delegate parallel: %w", err)
+		}
+	}
+	out := map[string]any{
+		"results": results, "evidence_count": totalEvidence(results),
+	}
+	raw, _ := json.Marshal(out)
+	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
+func totalEvidence(results []*DelegateResult) int {
+	total := 0
+	for _, r := range results {
+		if r != nil {
+			total += len(r.Evidence)
+		}
+	}
+	return total
 }
 
 var _ port.ToolExecutorPort = (*DelegateToolExecutor)(nil)

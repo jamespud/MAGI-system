@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -66,6 +67,54 @@ func TestDelegateToolExecutor_RequiresQuestionAndInvestigator(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "question is required") {
 		t.Fatalf("expected question error, got %v", err)
 	}
+}
+
+func TestDelegateToolExecutor_RunsParallelSubInvestigations(t *testing.T) {
+	var active, maxActive int32
+	investigator := &trackingInvestigator{active: &active, maxActive: &maxActive}
+	exec, err := magi.NewDelegateToolExecutor(investigator)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName:      magi.DelegateToolName,
+		ArgumentsJSON: `{"questions":[{"question":"q1"},{"question":"q2"},{"question":"q3"}]}`,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var out struct {
+		Results       []magi.DelegateResult `json:"results"`
+		EvidenceCount int                   `json:"evidence_count"`
+	}
+	if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Results) != 3 || out.EvidenceCount != 3 {
+		t.Fatalf("results=%d evidence=%d", len(out.Results), out.EvidenceCount)
+	}
+	if maxActive < 2 {
+		t.Fatalf("expected concurrency >= 2, got %d", maxActive)
+	}
+}
+
+type trackingInvestigator struct {
+	active    *int32
+	maxActive *int32
+}
+
+func (s *trackingInvestigator) Investigate(ctx context.Context, question, background string) (*magi.DelegateResult, error) {
+	cur := atomic.AddInt32(s.active, 1)
+	for {
+		observed := atomic.LoadInt32(s.maxActive)
+		if cur <= observed || atomic.CompareAndSwapInt32(s.maxActive, observed, cur) {
+			break
+		}
+	}
+	defer atomic.AddInt32(s.active, -1)
+	return &magi.DelegateResult{Question: question, Status: "completed", Evidence: []map[string]any{
+		{"id": "EV-" + question, "tool": "web_search", "observation": "found"},
+	}}, nil
 }
 
 type stubMagiRuntime struct {
