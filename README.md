@@ -258,6 +258,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Proactive scheduling** — recurring decision templates fire automatically at intervals through the async run manager.
 - **Conversational entry** — `POST /api/v1/assistant` turns a natural-language question into a full decision run with report.
 - **Admin operations** — role-gated usage aggregates (cases/runs/tokens/cost per user) at `GET /api/v1/admin/usage`.
+- **Kubernetes delivery** - Helm chart with backend/frontend deployments, SSE-aware ingress, probes, HPA, PDB, and externally managed secrets (`deploy/magi/`).
 
 ### API map (v1)
 

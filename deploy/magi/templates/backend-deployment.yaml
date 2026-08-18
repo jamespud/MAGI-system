@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "magi.fullname" . }}-backend
+  labels:
+    {{- include "magi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "magi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        {{- include "magi.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/backend-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/backend-secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.common.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "magi.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.common.serviceAccount.automountServiceAccountToken }}
+      containers:
+        - name: magi-server
+          image: {{ include "magi.backendImage" . }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MAGI_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magi.secretName" . }}
+                  key: {{ .Values.secret.keys.dbDSN }}
+            - name: MAGI_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magi.secretName" . }}
+                  key: {{ .Values.secret.keys.modelApiKey }}
+            - name: MAGI_TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magi.secretName" . }}
+                  key: {{ .Values.secret.keys.tavilyApiKey }}
+            - name: MAGI_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magi.secretName" . }}
+                  key: {{ .Values.secret.keys.embeddingApiKey }}
+            - name: MAGI_AUTH_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "magi.secretName" . }}
+                  key: {{ .Values.secret.keys.authAPIKeys }}
+            - name: MAGI_DB_DRIVER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_DB_DRIVER
+            - name: MAGI_MODEL_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_MODEL_BASE_URL
+            - name: MAGI_MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_MODEL_NAME
+            - name: MAGI_EMBEDDING_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_EMBEDDING_BASE_URL
+            - name: MAGI_EMBEDDING_MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_EMBEDDING_MODEL_NAME
+            - name: MAGI_MILVUS_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_MILVUS_ADDRESS
+            - name: MAGI_ES_ADDRESSES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_ES_ADDRESSES
+            - name: MAGI_AUTH_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_AUTH_ENABLED
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}

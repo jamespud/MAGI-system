@@ -71,6 +71,46 @@ behind a reverse proxy that allows only the Prometheus server (e.g. nginx
   services. In standalone deployments those tools degrade gracefully; embed
   MAGI in the Coze process when plugin/workflow capability is required.
 
+## Kubernetes deployment (Helm)
+
+The Helm chart deploys two stateless workloads: `magi-backend` and
+`magi-frontend`. MySQL, Milvus, and Elasticsearch are intentionally external
+dependencies so storage durability, backup policy, and scaling remain under
+platform control.
+
+```bash
+# Build and publish both images first (see deploy/magi/README.md).
+helm lint deploy/magi --strict \
+  --set-string secret.values.dbDSN='magi:magi123@tcp(mysql:3306)/magi?charset=utf8mb4&parseTime=True' \
+  --set-string secret.values.modelApiKey=render-only
+
+helm upgrade --install magi deploy/magi \
+  --namespace magi --create-namespace \
+  --values magi-values.yaml
+```
+
+The chart provides:
+
+- Backend/frontend Deployments, Services, readiness/liveness probes and resources
+- A least-privilege ServiceAccount with token automount disabled
+- Runtime Secret integration (chart-created or externally managed)
+- A non-secret configuration ConfigMap
+- SSE-aware nginx configuration (`proxy_buffering off`, long read timeout)
+- Ingress with SSE-friendly annotations, optional TLS
+- Optional HPA and PodDisruptionBudget for horizontal scaling
+- A rendered example manifest at `deploy/k8s/magi.yaml`
+
+Keep `backend.replicaCount=1` for the first install while AutoMigrate initializes
+the schema. After a successful rollout, increase replicas or enable the backend
+HPA. Shared DB scheduler locks, durable jobs, run counters, and SSE DB polling
+support multiple backend replicas. A production values file should use
+`secret.create=false` plus `secret.existingSecret`; see
+[`deploy/magi/README.md`](deploy/magi/README.md).
+
+The raw manifest contains deliberately invalid placeholders (`CHANGE_ME` and
+`example.com` images). Render a fresh manifest from your own values instead of
+applying it unchanged.
+
 ## Configuration
 
 ### Schema management
@@ -223,8 +263,11 @@ release blocker.
 
 ```bash
 make test                            # backend go tests + frontend vitest
-cd backend && go test -race ./...
+cd backend && go test -race ./... && go vet ./...
 docker compose -f docker/docker-compose-dev.yml config   # compose validity
+helm lint deploy/magi --strict       # add render-only secret values
+docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary \
+  < deploy/k8s/magi.yaml
 ```
 
 `backend/server/e2e_test.go` exercises the full harness flow (auth, cases,

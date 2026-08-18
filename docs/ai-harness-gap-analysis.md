@@ -97,7 +97,7 @@
 | | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ✅ | `/me/usage` + `/admin/usage` 用量卡片（D9）、Users 页（D8）、Knowledge 页（D7）、prompt 管理（D12） |
 | | 国际化 | ✅ | `frontend/src/i18n/` en/zh + 语言切换器（D14），主要页面字符串抽取 |
 | **部署运营** | Docker compose / readiness / config fail-fast / 多实例 worker | ✅ | `docker/`、`bootstrap/config.go` |
-| | K8s/Helm 清单、横向扩容文档 | ❌ | 无 |
+| | K8s/Helm 清单、横向扩容文档 | ✅ | `deploy/magi/` Helm chart（Deployment/Service/ConfigMap/Secret/Ingress/HPA/PDB、SSE-aware nginx、readiness/liveness probes）；`deploy/k8s/magi.yaml` 渲染清单；`deploy/magi/README.md` 与 `DEPLOYMENT.md` 提供镜像、外部密钥、外部依赖与多副本扩容说明 |
 | | 跨实例 SSE 实时推送 | ✅ | SSE + DB 轮询兜底（`EventRepository.ListAfter`，按时间戳增量拉取 + ID 去重）（D4，`server/sse.go`） |
 | | 数据导出 / 备份方案 | 🟡 | case/memory/eval 全量导出已实现（D15，`server/handler/export.go`）；备份/迁移快照策略仍缺 |
 
@@ -177,7 +177,7 @@
 5. **多模型编排**：per-agent/commander/judge 独立模型配置，多供应商路由与降级，模型参数管理。
 6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
 7. **可观测性**：默认 trace 落库 + 前端 trace 视图、通用 HTTP 限流、告警默认部署。
-8. **运营与交付**：K8s/Helm、跨实例 SSE（或改为轮询/WS）、数据导出/备份、i18n。
+8. **运营与交付**：K8s/Helm 已完成；剩余备份/恢复策略与 i18n 覆盖度。
 
 ---
 
@@ -200,7 +200,7 @@
 - 身份体系（SSO/OAuth/用户自助/密钥轮换）。
 - 通用任务执行层（基于现有 agent loop 扩展 code/file/shell 工具 + 审批门）。
 - 评估运营化（线上 golden + 看板 + prompt 运营；CI 门禁已完成）。
-- K8s/Helm + 可观测性栈 + i18n。
+- 可观测性栈 + i18n（K8s/Helm 已完成）。
 
 ---
 
