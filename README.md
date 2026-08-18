@@ -255,6 +255,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Model failover** - ordered global/per-role providers move build/generation failures to the next model, expose `magi_model_failovers_total`, and preserve provider-specific cost accounting.
 - **Pluggable web search** - ordered Tavily/Brave providers normalize results into the evidence pipeline and fail over with `magi_web_search_failovers_total` observability.
 - **Read-only database tool** - `db_query` runs a single SELECT inside a read-only transaction with row/length/timeout guards and write-statement rejection (`db_tool` config).
+- **Hibernate and wake** - pause a running case (`POST /cases/:id/pause`), park its durable job, then wake it (`/resume`) to continue from its checkpoint with the FSM state restored.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -269,7 +270,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/assistant` | Run a decision from a message |
-| POST/GET/PATCH/DELETE | `/cases`, `/cases/:id` (`?page=&page_size=`; `PATCH` pin/archive; `DELETE` cascade; +`/run`, `/cancel`, `/fork`, `/report`, `/export`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
+| POST/GET/PATCH/DELETE | `/cases`, `/cases/:id` (`?page=&page_size=`; `PATCH` pin/archive; `DELETE` cascade; +`/run`, `/cancel`, `/pause`, `/resume`, `/fork`, `/report`, `/export`, `/agents`, `/evidence`, `/claims`, `/votes`, `/events`, `/timeline`, `/trace`, `/stream`) | Decision lifecycle and artifacts |
 | GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` (+`DELETE /datasets/:id`) | Ground-truth evaluation |
 | GET | `/memory`, `/memory/:id`, `/memory/export` | Case-memory search (semantic + LIKE) and full export |
 | GET | `/evaluation/:id/export` | Export evaluation + judge verdict |

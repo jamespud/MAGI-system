@@ -9,6 +9,42 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
+func TestCaseRepository_UpdatePausedRoundtrip(t *testing.T) {
+	db := openDatasetDB(t)
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	cr := repo.CaseRepo()
+	if err := cr.Create(ctx, &entity.DecisionCase{
+		ID: "c-pause", Question: "q", Status: entity.CaseStatusInvestigating,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	writer, ok := cr.(port.PauseStatusWriter)
+	if !ok {
+		t.Fatal("case repo must implement PauseStatusWriter")
+	}
+	if err := writer.UpdatePaused(ctx, "c-pause", entity.CaseStatusPaused, entity.CaseStatusInvestigating); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	c, err := cr.Get(ctx, "c-pause")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if c.Status != entity.CaseStatusPaused || c.PausedFromStatus != entity.CaseStatusInvestigating {
+		t.Fatalf("paused case = %+v", c)
+	}
+	if err := writer.UpdatePaused(ctx, "c-pause", entity.CaseStatusInvestigating, ""); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	c, err = cr.Get(ctx, "c-pause")
+	if err != nil {
+		t.Fatalf("get after resume: %v", err)
+	}
+	if c.Status != entity.CaseStatusInvestigating || c.PausedFromStatus != "" {
+		t.Fatalf("resumed case = %+v", c)
+	}
+}
+
 // TestCaseRepository_ListForUser verifies the multi-tenant, paginated listing
 // is scoped in SQL: a user sees only their own cases plus unowned (owner 0)
 // cases, and never rows owned by another user (P0: D2).

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 type stubOrchestrator struct {
@@ -21,6 +22,64 @@ type stubCaseRepo struct {
 	case_       *entity.DecisionCase
 	cancelledID string
 	created     []*entity.DecisionCase
+}
+
+type pauseCaseRepo struct {
+	case_ *entity.DecisionCase
+}
+
+func (s *pauseCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
+func (s *pauseCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return s.case_, nil
+}
+func (s *pauseCaseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
+func (s *pauseCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
+	return nil, 0, nil
+}
+func (s *pauseCaseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
+	s.case_.Status = status
+	return nil
+}
+func (s *pauseCaseRepo) UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error {
+	s.case_.Status = status
+	s.case_.PausedFromStatus = pausedFrom
+	return nil
+}
+func (s *pauseCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
+	return nil
+}
+func (s *pauseCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
+func (s *pauseCaseRepo) Delete(ctx context.Context, id string) error { return nil }
+
+var _ port.CaseRepository = (*pauseCaseRepo)(nil)
+var _ port.PauseStatusWriter = (*pauseCaseRepo)(nil)
+
+func TestService_PauseAndResume(t *testing.T) {
+	repo := &pauseCaseRepo{case_: &entity.DecisionCase{ID: "c1", Status: entity.CaseStatusInvestigating}}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo))
+	ctx := context.Background()
+
+	if err := svc.Pause(ctx, "c1"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if repo.case_.Status != entity.CaseStatusPaused || repo.case_.PausedFromStatus != entity.CaseStatusInvestigating {
+		t.Fatalf("after pause = %+v", repo.case_)
+	}
+	if err := svc.Pause(ctx, "c1"); err == nil {
+		t.Fatal("pausing an already paused case must fail")
+	}
+
+	if err := svc.Resume(ctx, "c1"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if repo.case_.Status != entity.CaseStatusInvestigating || repo.case_.PausedFromStatus != "" {
+		t.Fatalf("after resume = %+v", repo.case_)
+	}
+	if err := svc.Resume(ctx, "c1"); err == nil {
+		t.Fatal("resuming a non-paused case must fail")
+	}
 }
 
 func (s *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {

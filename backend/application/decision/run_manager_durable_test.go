@@ -94,6 +94,55 @@ func TestRunManager_RecoverQueuedJob(t *testing.T) {
 	}
 }
 
+func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
+	db := openJobDB(t)
+	jobs := magi.NewDecisionJobRepository(db)
+	orch := &blockingUserOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: &stubCaseRepo{case_: &entity.DecisionCase{ID: "case-pause"}},
+		WorkerID: "worker-pause", MaxAttempts: 2, RetryBase: time.Millisecond,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-pause"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-orch.started
+
+	if !rm.Pause("case-pause") {
+		t.Fatal("pause should stop the running case")
+	}
+	job := waitJobStatus(t, jobs, "case-pause", entity.DecisionJobPaused)
+	if job.Status != entity.DecisionJobPaused {
+		t.Fatalf("job status = %s", job.Status)
+	}
+	close(orch.release)
+
+	if !rm.Resume("case-pause") {
+		t.Fatal("resume should re-queue the paused job")
+	}
+	job = waitJobStatus(t, jobs, "case-pause", entity.DecisionJobSucceeded)
+	if job.Status != entity.DecisionJobSucceeded {
+		t.Fatalf("resumed job status = %s", job.Status)
+	}
+}
+
+func TestRunManager_ResumeIgnoresNonPausedJobs(t *testing.T) {
+	db := openJobDB(t)
+	jobs := magi.NewDecisionJobRepository(db)
+	rm := decision.NewRunManager(&durableRetryOrchestrator{}, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "worker-resume", MaxAttempts: 2, RetryBase: time.Millisecond,
+	})
+	if _, err := jobs.Enqueue(context.Background(), "case-active", 2); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if rm.Resume("case-active") {
+		t.Fatal("resume must not re-queue an active (non-paused) job")
+	}
+	job, err := jobs.GetByCase(context.Background(), "case-active")
+	if err != nil || job.Status != entity.DecisionJobQueued {
+		t.Fatalf("job should stay queued: %+v err=%v", job, err)
+	}
+}
+
 type blockingUserOrchestrator struct {
 	once    sync.Once
 	started chan struct{}

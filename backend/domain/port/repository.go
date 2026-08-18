@@ -34,6 +34,10 @@ type DecisionJobRepository interface {
 	MarkSucceeded(ctx context.Context, jobID, workerID string) error
 	MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error
 	Cancel(ctx context.Context, jobID string) error
+	// MarkPaused parks a durable job so it is neither runnable nor counted as
+	// active; a later ResumeQueued returns it to the runnable set.
+	MarkPaused(ctx context.Context, jobID string) error
+	ResumeQueued(ctx context.Context, jobID string) error
 	RequeueExpired(ctx context.Context, now time.Time) error
 	ListRunnable(ctx context.Context, now time.Time) ([]*entity.DecisionJob, error)
 	GetByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error)
@@ -54,6 +58,14 @@ type CaseRepository interface {
 	UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error
 	// Delete removes a case and its artifacts (P2 D16).
 	Delete(ctx context.Context, id string) error
+}
+
+// PauseStatusWriter is an optional CaseRepository capability that persists
+// the pre-pause status together with the PAUSED status in one update, so a
+// later wake can restore the FSM position. Repositories that do not implement
+// it degrade to a plain status update (wake restarts from DRAFT).
+type PauseStatusWriter interface {
+	UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error
 }
 
 // CaseListFilter is an optional capability for multi-tenant, paginated case

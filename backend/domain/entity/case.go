@@ -19,6 +19,9 @@ type DecisionCase struct {
 	// ExecutionAttempt is set by the durable worker for the current attempt.
 	// It is intentionally runtime-only: the durable job owns the source of truth.
 	ExecutionAttempt int
+	// PausedFromStatus records the case status before a task-level pause, so
+	// wake can continue the FSM from where it stopped.
+	PausedFromStatus CaseStatus
 	MaxDebateRounds  int
 	Deadline         *time.Time
 	CreatedAt        time.Time
@@ -50,6 +53,7 @@ const (
 	CaseStatusTimedOut         CaseStatus = "TIMED_OUT"
 	CaseStatusInsufficientEv   CaseStatus = "INSUFFICIENT_EVIDENCE"
 	CaseStatusDeadlocked       CaseStatus = "DEADLOCKED"
+	CaseStatusPaused           CaseStatus = "PAUSED"
 )
 
 type CasePhase string

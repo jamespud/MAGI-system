@@ -167,6 +167,37 @@ func (r *decisionJobRepo) Cancel(ctx context.Context, jobID string) error {
 	return nil
 }
 
+// MarkPaused parks a queued/running durable job. The execution context is
+// cancelled by the run manager; the job stays out of the runnable set until
+// ResumeQueued.
+func (r *decisionJobRepo) MarkPaused(ctx context.Context, jobID string) error {
+	result := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
+		Where("id = ? AND status IN ?", jobID,
+			[]string{string(entity.DecisionJobQueued), string(entity.DecisionJobRunning)}).
+		Updates(map[string]any{"status": string(entity.DecisionJobPaused), "worker_id": "", "lease_until": nil, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("decision job: cannot pause")
+	}
+	return nil
+}
+
+// ResumeQueued returns a paused job to the runnable set.
+func (r *decisionJobRepo) ResumeQueued(ctx context.Context, jobID string) error {
+	result := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
+		Where("id = ? AND status = ?", jobID, string(entity.DecisionJobPaused)).
+		Updates(map[string]any{"status": string(entity.DecisionJobQueued), "available_at": time.Now(), "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("decision job: cannot resume")
+	}
+	return nil
+}
+
 func (r *decisionJobRepo) RequeueExpired(ctx context.Context, now time.Time) error {
 	return r.db.WithContext(ctx).Model(&DecisionJobModel{}).
 		Where("status = ? AND lease_until IS NOT NULL AND lease_until < ?", string(entity.DecisionJobRunning), now).

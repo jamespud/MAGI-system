@@ -86,6 +86,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/cases/:id/run", decH.Run)
 	v1.POST("/cases/:id/fork", decH.Fork)
 	v1.POST("/cases/:id/cancel", decH.Cancel)
+	v1.POST("/cases/:id/pause", decH.Pause)
+	v1.POST("/cases/:id/resume", decH.Resume)
 	v1.GET("/cases/:id", decH.Get)
 	v1.PATCH("/cases/:id", decH.Patch)
 	v1.DELETE("/cases/:id", decH.Delete)

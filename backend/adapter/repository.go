@@ -104,6 +104,12 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("status", string(status)).Error
 }
+func (r *caseRepo) UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error {
+	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).
+		Updates(map[string]any{
+			"status": string(status), "paused_from_status": string(pausedFrom), "updated_at": time.Now(),
+		}).Error
+}
 func (r *caseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("task_json", toJSON(task)).Error
 }
@@ -241,7 +247,7 @@ func caseToModel(c *entity.DecisionCase) CaseModel {
 	return CaseModel{
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
 		ConstraintsJSON: toJSON(c.Constraints), ParentCaseID: c.ParentCaseID, Status: string(c.Status),
-		CurrentPhase:    string(c.CurrentPhase),
+		CurrentPhase: string(c.CurrentPhase), PausedFromStatus: string(c.PausedFromStatus),
 		MaxDebateRounds: c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		Pinned: c.Pinned, Archived: c.Archived,
 	}
@@ -251,7 +257,8 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 		ID: m.ID, UserID: m.UserID, Question: m.Question, Context: m.Context,
 		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ParentCaseID: m.ParentCaseID,
 		Status:       entity.CaseStatus(m.Status),
-		CurrentPhase: entity.CasePhase(m.CurrentPhase), MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
+		CurrentPhase: entity.CasePhase(m.CurrentPhase), PausedFromStatus: entity.CaseStatus(m.PausedFromStatus),
+		MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
 		Pinned: m.Pinned, Archived: m.Archived,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}

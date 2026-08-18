@@ -194,6 +194,34 @@ describe('api.getTrace', () => {
   });
 });
 
+describe('api.pauseCase and resumeCase', () => {
+  it('posts pause and resume for a case', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'case-001', status: 'PAUSED' }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 'case-001', status: 'DRAFT' }),
+      } as Response);
+
+    const paused = await api.pauseCase('case-001');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(paused.status).toBe('PAUSED');
+
+    const resumed = await api.resumeCase('case-001');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(resumed.status).toBe('DRAFT');
+  });
+});
+
 describe('api.getCases wrapper', () => {
   it('unwraps {cases: [...]} envelope', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({

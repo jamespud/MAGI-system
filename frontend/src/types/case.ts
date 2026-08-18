@@ -20,7 +20,8 @@ export type CaseStatus =
   | 'CANCELLED'
   | 'TIMED_OUT'
   | 'INSUFFICIENT_EVIDENCE'
-  | 'MEMORY_INDEXED';
+  | 'MEMORY_INDEXED'
+  | 'PAUSED';
 
 export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   DRAFT: 'Draft',
@@ -45,6 +46,7 @@ export const CASE_STATUS_LABELS: Record<CaseStatus, string> = {
   TIMED_OUT: 'Timed Out',
   INSUFFICIENT_EVIDENCE: 'Insufficient Evidence',
   MEMORY_INDEXED: 'Memory Indexed',
+  PAUSED: 'Paused',
 };
 
 export const TERMINAL_CASE_STATUSES: readonly CaseStatus[] = [

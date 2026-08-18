@@ -37,6 +37,8 @@ func (f *fakeRunManager) Cancel(caseID string) bool {
 	}
 	return false
 }
+func (f *fakeRunManager) Pause(caseID string) bool     { return f.started[caseID] }
+func (f *fakeRunManager) Resume(caseID string) bool    { return false }
 func (f *fakeRunManager) IsRunning(caseID string) bool { return f.started[caseID] }
 
 // stubCaseLookup implements port.CaseRepository enough for the handler.
@@ -59,6 +61,9 @@ func (s stubCaseLookup) Delete(ctx context.Context, id string) error { return ni
 
 func (s stubCaseLookup) List(ctx context.Context) ([]*entity.DecisionCase, error) { return nil, nil }
 func (s stubCaseLookup) UpdateStatus(ctx context.Context, id string, st entity.CaseStatus) error {
+	if s.c != nil {
+		s.c.Status = st
+	}
 	return nil
 }
 func (s stubCaseLookup) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
@@ -120,5 +125,44 @@ func TestDecisionHandler_Run_Returns404WhenCaseMissing(t *testing.T) {
 	w := ut.PerformRequest(r.Engine, "POST", "/cases/missing/run", nil)
 	if w.Result().StatusCode() != 404 {
 		t.Fatalf("expected 404, got %d", w.Result().StatusCode())
+	}
+}
+
+func TestDecisionHandler_PauseAndResume(t *testing.T) {
+	rm := newFakeRunManager()
+	c := &entity.DecisionCase{ID: "c1", Question: "q", Status: entity.CaseStatusInvestigating}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithRunManager(rm),
+		decision.WithCaseRepo(stubCaseLookup{c: c}))
+	h := handler.NewDecisionHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.POST("/cases/:id/pause", h.Pause)
+	r.POST("/cases/:id/resume", h.Resume)
+
+	w := ut.PerformRequest(r.Engine, "POST", "/cases/c1/pause", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("pause: expected 200, got %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+	w = ut.PerformRequest(r.Engine, "POST", "/cases/c1/resume", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("resume: expected 200, got %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+}
+
+func TestDecisionHandler_PauseRejectsResolvedCase(t *testing.T) {
+	rm := newFakeRunManager()
+	c := &entity.DecisionCase{ID: "c1", Question: "q", Status: entity.CaseStatusResolved}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithRunManager(rm),
+		decision.WithCaseRepo(stubCaseLookup{c: c}))
+	h := handler.NewDecisionHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.POST("/cases/:id/pause", h.Pause)
+
+	w := ut.PerformRequest(r.Engine, "POST", "/cases/c1/pause", nil)
+	if w.Result().StatusCode() != 400 {
+		t.Fatalf("expected 400 for resolved case, got %d", w.Result().StatusCode())
 	}
 }

@@ -234,6 +234,10 @@ export const api = {
 
   cancelCase: (id: string) => request<ApiRunResponse>(`/cases/${id}/cancel`, { method: 'POST' }),
 
+  pauseCase: (id: string) => request<ApiRunResponse>(`/cases/${id}/pause`, { method: 'POST' }),
+
+  resumeCase: (id: string) => request<ApiRunResponse>(`/cases/${id}/resume`, { method: 'POST' }),
+
   getAgents: (id: string) => request<Record<string, ApiAgentSnapshot>>(`/cases/${id}/agents`),
 
   getEvidence: (id: string) => request<ApiEvidence[]>(`/cases/${id}/evidence`),

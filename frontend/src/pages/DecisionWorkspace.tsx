@@ -4,6 +4,7 @@ import { useCaseStore, useAgentStore, useEventStore } from '@/stores';
 import { api } from '@/api/client';
 import { subscribeCaseStream } from '@/api/stream';
 import { mapBackendEvent } from '@/api/eventMapper';
+import { useT } from '@/i18n';
 import { ACTIVE_CASE_STATUSES, TERMINAL_CASE_STATUSES, type CaseStatus } from '@/types/case';
 import CaseHeader from '@/components/workspace/CaseHeader';
 import AgentTrio from '@/components/workspace/AgentTrio';
@@ -15,6 +16,7 @@ import { Button } from '@/components/ui';
 export default function DecisionWorkspace() {
   const { caseId } = useParams<{ caseId: string }>();
   const navigate = useNavigate();
+  const t = useT();
   const currentCase = useCaseStore((s) => s.case);
   const loading = useCaseStore((s) => s.loading);
   const error = useCaseStore((s) => s.error);
@@ -130,6 +132,23 @@ export default function DecisionWorkspace() {
         <Button onClick={handleRun} disabled={btn.disabled}>
           {btn.label}
         </Button>
+        {currentCase.status === 'PAUSED' ? (
+          <Button
+            variant="ghost"
+            className="ml-2"
+            onClick={() => void useCaseStore.getState().resumeCase(caseId!)}
+          >
+            {t('ws.resume')}
+          </Button>
+        ) : ACTIVE_CASE_STATUSES.includes(currentCase.status as CaseStatus) ? (
+          <Button
+            variant="ghost"
+            className="ml-2"
+            onClick={() => void useCaseStore.getState().pauseCase(caseId!)}
+          >
+            {t('ws.pause')}
+          </Button>
+        ) : null}
         {error && <span className="ml-3 text-red-400 text-xs font-mono">{error}</span>}
       </div>
       <CaseHeader />

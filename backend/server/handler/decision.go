@@ -124,6 +124,34 @@ func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "no active run for case"})
 }
 
+func (h *DecisionHandler) Pause(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	case_, err := h.svc.Get(ctx, id)
+	if err == nil && case_ != nil && !AuthorizeCase(ctx, case_.UserID) {
+		Forbidden(c)
+		return
+	}
+	if err := h.svc.Pause(ctx, id); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, dto.CaseResponse{ID: id, Status: string(entity.CaseStatusPaused)})
+}
+
+func (h *DecisionHandler) Resume(ctx context.Context, c *app.RequestContext) {
+	id := c.Param("id")
+	case_, err := h.svc.Get(ctx, id)
+	if err == nil && case_ != nil && !AuthorizeCase(ctx, case_.UserID) {
+		Forbidden(c)
+		return
+	}
+	if err := h.svc.Resume(ctx, id); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(consts.StatusOK, dto.CaseResponse{ID: id, Status: string(entity.CaseStatusDraft)})
+}
+
 func (h *DecisionHandler) Get(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	case_, err := h.svc.Get(ctx, id)

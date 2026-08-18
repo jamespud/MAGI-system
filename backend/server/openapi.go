@@ -30,6 +30,8 @@ const openAPISpec = `{
     "/api/v1/cases/{id}": {"get": {"summary": "Get case details", "responses": {"200": {"description": "case"}}}},
     "/api/v1/cases/{id}/run": {"post": {"summary": "Run a decision case", "responses": {"200": {"description": "resolution"}}}},
     "/api/v1/cases/{id}/cancel": {"post": {"summary": "Cancel a case", "responses": {"200": {"description": "cancelled"}}}},
+    "/api/v1/cases/{id}/pause": {"post": {"summary": "Pause (hibernate) a running case", "responses": {"200": {"description": "paused"}}}},
+    "/api/v1/cases/{id}/resume": {"post": {"summary": "Resume (wake) a paused case", "responses": {"200": {"description": "resumed"}}}},
     "/api/v1/cases/{id}/report": {"get": {"summary": "Get final report", "responses": {"200": {"description": "report"}}}},
     "/api/v1/cases/{id}/events": {"get": {"summary": "Replay events", "responses": {"200": {"description": "events"}}}},
     "/api/v1/cases/{id}/timeline": {"get": {"summary": "Event timeline", "responses": {"200": {"description": "timeline"}}}},

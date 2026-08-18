@@ -58,6 +58,8 @@ func WithAgentRunRepo(repo port.AgentRunRepository) Option {
 type RunController interface {
 	Start(ctx context.Context, c *entity.DecisionCase) error
 	Cancel(caseID string) bool
+	Pause(caseID string) bool
+	Resume(caseID string) bool
 }
 
 // WithRunManager injects an async run controller. When set, StartRun delegates
@@ -338,6 +340,61 @@ func (s *Service) Cancel(ctx context.Context, id string) error {
 		return s.caseRepo.UpdateStatus(ctx, id, entity.CaseStatusCancelled)
 	}
 	return fmt.Errorf("case repository not configured")
+}
+
+// Pause parks a running case: the worker context is cancelled, the case
+// status is set to PAUSED with the pre-pause status remembered, and the
+// durable job is marked paused so it is not retried automatically.
+func (s *Service) Pause(ctx context.Context, id string) error {
+	if s.caseRepo == nil {
+		return fmt.Errorf("case repository not configured")
+	}
+	c, err := s.caseRepo.Get(ctx, id)
+	if err != nil || c == nil {
+		return fmt.Errorf("case not found")
+	}
+	if c.Status == entity.CaseStatusResolved || c.Status == entity.CaseStatusFailed ||
+		c.Status == entity.CaseStatusCancelled || c.Status == entity.CaseStatusPaused {
+		return fmt.Errorf("case is not pauseable in status %s", c.Status)
+	}
+	if s.runs != nil && !s.runs.Pause(id) {
+		// Nothing was actively running or parked; still mark the case paused
+		// so the user-facing state is explicit.
+	}
+	if writer, ok := s.caseRepo.(port.PauseStatusWriter); ok {
+		return writer.UpdatePaused(ctx, id, entity.CaseStatusPaused, c.Status)
+	}
+	return s.caseRepo.UpdateStatus(ctx, id, entity.CaseStatusPaused)
+}
+
+// Resume wakes a paused case back to the FSM status it had before pausing and
+// re-queues its durable job so the worker continues from its checkpoint.
+func (s *Service) Resume(ctx context.Context, id string) error {
+	if s.caseRepo == nil {
+		return fmt.Errorf("case repository not configured")
+	}
+	c, err := s.caseRepo.Get(ctx, id)
+	if err != nil || c == nil {
+		return fmt.Errorf("case not found")
+	}
+	if c.Status != entity.CaseStatusPaused {
+		return fmt.Errorf("case is not paused")
+	}
+	restore := c.PausedFromStatus
+	if restore == "" {
+		restore = entity.CaseStatusDraft
+	}
+	if writer, ok := s.caseRepo.(port.PauseStatusWriter); ok {
+		if err := writer.UpdatePaused(ctx, id, restore, ""); err != nil {
+			return err
+		}
+	} else if err := s.caseRepo.UpdateStatus(ctx, id, restore); err != nil {
+		return err
+	}
+	if s.runs != nil {
+		s.runs.Resume(id)
+	}
+	return nil
 }
 
 // Report returns the final report for a resolved case, loading the resolution

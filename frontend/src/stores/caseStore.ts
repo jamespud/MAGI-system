@@ -83,6 +83,8 @@ interface CaseState {
   forkCase: (id: string) => Promise<ApiCaseResponse>;
   runCase: (id: string) => Promise<void>;
   cancelCase: (id: string) => Promise<void>;
+  pauseCase: (id: string) => Promise<void>;
+  resumeCase: (id: string) => Promise<void>;
 }
 
 const PAGE_SIZE = 20;
@@ -236,6 +238,32 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     set({ error: null });
     try {
       await api.cancelCase(id);
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  pauseCase: async (id: string) => {
+    set({ error: null });
+    try {
+      await api.pauseCase(id);
+      set((s) => ({
+        case: s.case ? { ...s.case, status: 'PAUSED' as Case['status'] } : null,
+        cases: patchSummary(s.cases, id, { status: 'PAUSED' as Case['status'] }),
+      }));
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  resumeCase: async (id: string) => {
+    set({ error: null });
+    try {
+      await api.resumeCase(id);
+      set((s) => ({
+        case: s.case ? { ...s.case, status: 'DRAFT' as Case['status'] } : null,
+        cases: patchSummary(s.cases, id, { status: 'DRAFT' as Case['status'] }),
+      }));
     } catch (e) {
       set({ error: (e as Error).message });
     }

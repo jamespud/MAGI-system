@@ -27,4 +27,5 @@ const (
 	DecisionJobSucceeded DecisionJobStatus = "succeeded"
 	DecisionJobFailed    DecisionJobStatus = "failed"
 	DecisionJobCancelled DecisionJobStatus = "cancelled"
+	DecisionJobPaused    DecisionJobStatus = "paused"
 )

@@ -52,7 +52,7 @@
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈 | 计算型反馈传感器（Linter/编译/单测输出回喂）、更完整外部传感器与自我改进 Harness | 🟡 |
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略、只读 DB 查询工具 | 文件/代码库/浏览器工具；Docker/MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
-| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈 | 任务级 pause->hibernate->wake | 🟡 |
+| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈、任务级 pause->hibernate->wake | 无 | 🟡 |
 | **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
 
 ### 2.2 明细能力矩阵
@@ -92,7 +92,7 @@
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ✅ | Replay 页 Trace 模式：按 run/agent 分泳道的时间轴可视化（事件按时间定位、按类型着色）、事件计数/运行数/智能体数/错误数统计、点击 marker 查看事件详情（`frontend/src/pages/Replay.tsx`、`api.getTrace`） |
 | | 告警默认部署 / 看板栈 | ✅ | `docker/docker-compose-monitoring.yml` 一键启动 Prometheus（抓取 `magi-server:8080/metrics`）+ Alertmanager + Grafana（自动 provisioning 数据源与 MAGI Overview 看板）；告警规则单一来源 `deploy/prometheus-alerts.example.yml`；`make monitoring-up` |
-| | **Hibernate-and-Wake** 长任务休眠/唤醒 | 🟡 | 有断点续跑 + durable job + 租约（per case/agent/round），无任务级"暂停→休眠→唤醒" |
+| | **Hibernate-and-Wake** 长任务休眠/唤醒 | ✅ | `POST /cases/:id/pause|resume`：暂停取消 worker 并持久化 PAUSED + PausedFromStatus，durable job 置为 paused（不重试不计活跃）；唤醒恢复暂停前状态、重新入队并重启 worker（`RunManager.Pause/Resume`、`caseRepo.UpdatePaused`、`decision_job.MarkPaused/ResumeQueued`）；前端工作台暂停/唤醒按钮 |
 | **UI** | 决策工作台/证据图/时间线/审批/评测/数据集/模板/benchmark/history/memory/tools/settings | ✅ | `frontend/src/router.tsx`，14 个功能页 |
 | | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ✅ | `/me/usage` + `/admin/usage` 用量卡片（D9）、Users 页（D8）、Knowledge 页（D7）、prompt 管理（D12） |
 | | 国际化 | ✅ | `frontend/src/i18n/` en/zh + 语言切换器（D14），主要页面字符串抽取 |

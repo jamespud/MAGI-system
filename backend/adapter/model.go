@@ -4,21 +4,22 @@ import "time"
 
 // CaseModel is the GORM model for decision_case (ADR-007: lives in adapter layer).
 type CaseModel struct {
-	ID              string `gorm:"primaryKey"`
-	UserID          int64
-	Question        string `gorm:"type:text"`
-	Context         string `gorm:"type:text"`
-	ConstraintsJSON string `gorm:"type:text"`
-	ParentCaseID    string `gorm:"index"`
-	Status          string
-	CurrentPhase    string
-	MaxDebateRounds int
-	Deadline        *time.Time
-	TaskJSON        string `gorm:"type:text"`
-	Pinned          bool
-	Archived        bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID               string `gorm:"primaryKey"`
+	UserID           int64
+	Question         string `gorm:"type:text"`
+	Context          string `gorm:"type:text"`
+	ConstraintsJSON  string `gorm:"type:text"`
+	ParentCaseID     string `gorm:"index"`
+	Status           string
+	CurrentPhase     string
+	PausedFromStatus string
+	MaxDebateRounds  int
+	Deadline         *time.Time
+	TaskJSON         string `gorm:"type:text"`
+	Pinned           bool
+	Archived         bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (CaseModel) TableName() string { return "decision_case" }

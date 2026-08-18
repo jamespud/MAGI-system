@@ -81,6 +81,7 @@ type RunManager struct {
 	userRuns             map[int64]int
 	mu                   sync.Mutex
 	runs                 map[string]*runHandle
+	paused               map[string]bool
 }
 
 func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
@@ -107,6 +108,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		runCounter:    d.RunCounter,
 		budgetChecker: d.BudgetChecker,
 		userRuns:      make(map[int64]int), runs: make(map[string]*runHandle),
+		paused: make(map[string]bool),
 	}
 }
 
@@ -274,7 +276,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 	for {
 		if ctx.Err() != nil {
 			if job != nil {
-				_ = m.jobRepo.Cancel(context.Background(), job.ID)
+				m.cancelWorkerJob(c.ID, job.ID)
 			}
 			return
 		}
@@ -308,7 +310,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		if ctx.Err() != nil {
-			_ = m.jobRepo.Cancel(context.Background(), claimed.ID)
+			m.cancelWorkerJob(c.ID, claimed.ID)
 			return
 		}
 		if claimed.Attempt < claimed.MaxAttempts {
@@ -320,7 +322,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				if !timer.Stop() {
 					<-timer.C
 				}
-				_ = m.jobRepo.Cancel(context.Background(), claimed.ID)
+				m.cancelWorkerJob(c.ID, claimed.ID)
 				return
 			case <-timer.C:
 			}
@@ -418,6 +420,85 @@ func (m *RunManager) Cancel(caseID string) bool {
 		}
 	}
 	return local
+}
+
+// Pause stops a running case but keeps its durable job parked instead of
+// cancelled, so a later Resume can wake it from its checkpoint. Returns true
+// when a local worker or durable job was stopped.
+func (m *RunManager) Pause(caseID string) bool {
+	m.mu.Lock()
+	h, local := m.runs[caseID]
+	m.paused[caseID] = true
+	m.mu.Unlock()
+	parked := false
+	if m.jobRepo != nil {
+		job, err := m.jobRepo.GetByCase(context.Background(), caseID)
+		if err == nil && job != nil &&
+			(job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
+			if m.jobRepo.MarkPaused(context.Background(), job.ID) == nil {
+				parked = true
+			}
+		}
+	}
+	if local {
+		h.cancel()
+	}
+	return parked || local
+}
+
+// Resume wakes a paused durable job back into the runnable set and relaunches
+// the worker when the previous one has fully exited. Local-only runs (no
+// durable job) cannot be resumed and return false.
+func (m *RunManager) Resume(caseID string) bool {
+	if m.jobRepo == nil {
+		return false
+	}
+	job, err := m.jobRepo.GetByCase(context.Background(), caseID)
+	if err != nil || job == nil || job.Status != entity.DecisionJobPaused {
+		return false
+	}
+	if err := m.jobRepo.ResumeQueued(context.Background(), job.ID); err != nil {
+		return false
+	}
+	m.mu.Lock()
+	m.paused[caseID] = false
+	h, active := m.runs[caseID]
+	m.mu.Unlock()
+	if active {
+		select {
+		case <-h.done:
+		case <-time.After(time.Second):
+		}
+		m.mu.Lock()
+		_, stillActive := m.runs[caseID]
+		m.mu.Unlock()
+		if stillActive {
+			return true
+		}
+	}
+	if m.caseRepo == nil {
+		return true
+	}
+	c, err := m.caseRepo.Get(context.Background(), caseID)
+	if err != nil || c == nil {
+		return true
+	}
+	m.launch(c, job, false)
+	return true
+}
+
+// cancelWorkerJob records the durable job state when a worker stops because
+// its context was cancelled: a deliberate pause parks the job, any other
+// cancellation (API cancel, shutdown) marks it cancelled.
+func (m *RunManager) cancelWorkerJob(caseID, jobID string) {
+	m.mu.Lock()
+	wasPaused := m.paused[caseID]
+	m.mu.Unlock()
+	if wasPaused {
+		_ = m.jobRepo.MarkPaused(context.Background(), jobID)
+		return
+	}
+	_ = m.jobRepo.Cancel(context.Background(), jobID)
 }
 
 func (m *RunManager) IsRunning(caseID string) bool {
