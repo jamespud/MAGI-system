@@ -174,6 +174,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 | `file_tool` | Built-in read-only `file_query` tool: allow-listed absolute `roots`, traversal rejection, `max_file_bytes` / `max_list_items` bounds |
 | `repo_tool` | Built-in read-only `repo_query` tool: grep substring / list files inside allow-listed roots, `includes` extension filter, `max_results` / `max_file_bytes` bounds, symlink-escape rejection |
 | `web_tool` | Built-in restricted `web_fetch` tool: allow-listed domains only, SSRF DNS guard for domain names, `max_bytes` / `timeout_seconds` bounds, HTML-to-text extraction, non-text content rejection |
+| `delegate_tool` | Built-in `delegate` tool (default disabled): spawn an independent sub-investigation subagent on the shared agent loop and return its collected evidence |
 | `feedback_tool` | Built-in `check_output` deterministic feedback sensor (default enabled): JSON Schema lint + field constraint rules over the model's own output; violations are fed back for self-correction and counted in `magi_feedback_violations_total` |
 | `benchmark` | `runs_per_item` / `regression_threshold` for manual runs; `auto_interval_seconds` schedules an automated regression of the built-in sanity suite, with `auto_runs_per_item` / `auto_regression_threshold` overrides; failures increment `magi_benchmark_regression_failures_total` |
 | `mcp` | `servers[]` with `name`/`transport` (`stdio` or `http`)/`command`+`args` or `url`/`env`/`timeout_seconds` (default 60); tools appear as `mcp_<server>_<tool>` |

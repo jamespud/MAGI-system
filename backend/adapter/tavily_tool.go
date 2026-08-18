@@ -99,6 +99,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == DelegateToolName && r.isEnabled(DelegateToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       DelegateToolName,
+				Desc:       "Delegate a sub-question to an independently derived subagent and return its collected evidence as JSON.",
+				ArgsSchema: []byte(delegateArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil

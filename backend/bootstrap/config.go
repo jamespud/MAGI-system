@@ -68,6 +68,7 @@ type Config struct {
 	FileTool     FileToolConfig     `yaml:"file_tool"`
 	RepoTool     RepoToolConfig     `yaml:"repo_tool"`
 	WebTool      WebToolConfig      `yaml:"web_tool"`
+	DelegateTool DelegateToolConfig `yaml:"delegate_tool"`
 	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -193,6 +194,11 @@ type WebToolConfig struct {
 	AllowedDomains []string `yaml:"allowed_domains"`
 	MaxBytes       int64    `yaml:"max_bytes"`
 	TimeoutSeconds int      `yaml:"timeout_seconds"`
+}
+
+// DelegateToolConfig enables the dynamic sub-investigation delegation tool.
+type DelegateToolConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type EmbeddingConfig struct {
@@ -635,6 +641,9 @@ func enabledLocalTools(cfg *Config) []string {
 	if cfg.WebTool.Enabled {
 		tools = append(tools, magi.WebFetchToolName)
 	}
+	if cfg.DelegateTool.Enabled {
+		tools = append(tools, magi.DelegateToolName)
+	}
 	return tools
 }
 
@@ -821,6 +830,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 	}
 	if cfg.WebTool.Enabled {
 		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.WebFetchToolName})
+	}
+	if cfg.DelegateTool.Enabled {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.DelegateToolName})
 	}
 	return tools
 }

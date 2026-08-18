@@ -55,14 +55,14 @@ func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 func TestProvideToolExecutor_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
-	with, err := bootstrap.ProvideToolExecutor(withCfg, nil, metrics.New(), validation.NewJSONSchemaValidator())
+	with, err := bootstrap.ProvideToolExecutor(withCfg, nil, metrics.New(), validation.NewJSONSchemaValidator(), nil, nil)
 	if err != nil {
 		t.Fatalf("provide with search: %v", err)
 	}
 	if _, ok := with.(*magi.ToolExecutorMux); !ok {
 		t.Fatalf("expected ToolExecutorMux when key set, got %T", with)
 	}
-	without, err := bootstrap.ProvideToolExecutor(&bootstrap.Config{}, nil, metrics.New(), validation.NewJSONSchemaValidator())
+	without, err := bootstrap.ProvideToolExecutor(&bootstrap.Config{}, nil, metrics.New(), validation.NewJSONSchemaValidator(), nil, nil)
 	if err != nil {
 		t.Fatalf("provide without search: %v", err)
 	}

@@ -265,6 +265,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Read-only file tool** - `file_query` reads files and lists directories inside allow-listed roots with traversal rejection and size/item bounds (`file_tool` config).
 - **Read-only repo tool** - `repo_query` greps and lists files inside allow-listed repository roots with extension filtering and result bounds (`repo_tool` config).
 - **Restricted URL fetch** - `web_fetch` fetches allow-listed domains and returns readable text with size/timeout bounds and SSRF protection (`web_tool` config).
+- **Dynamic sub-investigation** - the `delegate` tool spawns an independent subagent to investigate a sub-question and returns its evidence for citation (`delegate_tool` config).
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -310,6 +311,7 @@ db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
 file_tool: { enabled: true, roots: ["/var/lib/magi"] }
 repo_tool: { enabled: true, roots: ["/srv/app"] }
 web_tool: { enabled: true, allowed_domains: ["docs.example.com"] }
+delegate_tool: { enabled: true }
 feedback_tool: { enabled: true }
 benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }

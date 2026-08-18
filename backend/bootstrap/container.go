@@ -244,7 +244,8 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 }
 
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
-func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry, val validation.Validator) (port.ToolExecutorPort, error) {
+func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry, val validation.Validator,
+	loop *runtime.AgentLoop, magiConfigs []*entity.MagiConfig) (port.ToolExecutorPort, error) {
 	var local port.ToolExecutorPort
 	executors := map[string]port.ToolExecutorPort{}
 	if providers := webSearchProviderSpecs(cfg); len(providers) > 0 {
@@ -318,6 +319,21 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 			return nil, err
 		}
 		executors[magi.WebFetchToolName] = webTool
+	}
+	if cfg.DelegateTool.Enabled {
+		roleCfg := (*entity.MagiConfig)(nil)
+		if len(magiConfigs) > 0 {
+			roleCfg = magiConfigs[0]
+		}
+		investigator, err := magi.NewLoopSubInvestigator(loop, roleCfg)
+		if err != nil {
+			return nil, err
+		}
+		delegate, err := magi.NewDelegateToolExecutor(investigator)
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.DelegateToolName] = delegate
 	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)

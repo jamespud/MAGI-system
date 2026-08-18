@@ -438,6 +438,29 @@ func TestConfigValidate_WebTool(t *testing.T) {
 	}
 }
 
+func TestMagiSpec_ToConfigBindsDelegateToolWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.DelegateTool.Enabled = true
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "delegate" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("delegate not bound when delegate_tool enabled: %+v", c.Tools)
+	}
+
+	disabled := &bootstrap.Config{}
+	c2 := disabled.Magi.Melchior.ToConfig("melchior", disabled)
+	for _, tool := range c2.Tools {
+		if tool.ToolName == "delegate" {
+			t.Fatal("delegate must not be bound when disabled")
+		}
+	}
+}
+
 func TestMagiSpec_ToConfigBindsWebToolWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.WebTool.Enabled = true

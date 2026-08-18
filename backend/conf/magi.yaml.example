@@ -228,6 +228,12 @@ web_tool:
   # max_bytes: 524288
   # timeout_seconds: 10
 
+# Dynamic sub-investigation delegation (delegate): the agent can spawn an
+# independent subagent to investigate a sub-question and take back its
+# collected evidence. Disabled by default.
+delegate_tool:
+  enabled: false
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:
