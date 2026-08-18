@@ -48,6 +48,9 @@ func TestTavilyToolExecutor_CallsApiAndParses(t *testing.T) {
 	if res.SourceURI != "https://a.example" {
 		t.Fatalf("SourceURI: %s", res.SourceURI)
 	}
+	if tr.Provider != magi.SearchProviderTavily {
+		t.Fatalf("Provider = %q, want tavily", tr.Provider)
+	}
 }
 
 func TestTavilyToolExecutor_ReturnsErrorOnHTTP500(t *testing.T) {

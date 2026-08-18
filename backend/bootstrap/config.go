@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
 )
 
@@ -36,7 +37,8 @@ type Config struct {
 	Tavily struct {
 		APIKey string `yaml:"api_key"`
 	} `yaml:"tavily"`
-	Auth struct {
+	Search SearchConfig `yaml:"search"`
+	Auth   struct {
 		Enabled bool         `yaml:"enabled"`
 		APIKeys []APIKeySpec `yaml:"api_keys"`
 	} `yaml:"auth"`
@@ -121,6 +123,16 @@ type MCPServerConfig struct {
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
 	Headers        map[string]string `yaml:"headers"`
 	RetryAttempts  int               `yaml:"retry_attempts"`
+}
+
+type SearchConfig struct {
+	Providers []SearchProviderConfig `yaml:"providers"`
+}
+
+type SearchProviderConfig struct {
+	Provider string `yaml:"provider"`
+	APIKey   string `yaml:"api_key"`
+	BaseURL  string `yaml:"base_url"`
 }
 
 type EmbeddingConfig struct {
@@ -508,6 +520,61 @@ func (c *Config) JudgeModelRef() entity.ModelRef {
 	return resolveModelRef(c.modelRef(), c.Judge.Model)
 }
 
+// webSearchProviderSpecs resolves explicit search providers and retains the
+// legacy tavily.api_key setting as the primary provider when both are present.
+func webSearchProviderSpecs(cfg *Config) []SearchProviderConfig {
+	providers := make([]SearchProviderConfig, 0, len(cfg.Search.Providers)+1)
+	for _, provider := range cfg.Search.Providers {
+		if strings.TrimSpace(provider.APIKey) == "" {
+			continue
+		}
+		providers = append(providers, provider)
+	}
+	if cfg.Tavily.APIKey == "" {
+		return providers
+	}
+	hasTavily := false
+	for _, provider := range providers {
+		if strings.EqualFold(provider.Provider, magi.SearchProviderTavily) {
+			hasTavily = true
+			break
+		}
+	}
+	if !hasTavily {
+		providers = append([]SearchProviderConfig{{
+			Provider: magi.SearchProviderTavily,
+			APIKey:   cfg.Tavily.APIKey,
+		}}, providers...)
+	}
+	return providers
+}
+
+func validateSearchProviders(providers []SearchProviderConfig) error {
+	seen := make(map[string]bool, len(providers))
+	for i := range providers {
+		provider := strings.ToLower(strings.TrimSpace(providers[i].Provider))
+		if provider == "" && strings.TrimSpace(providers[i].APIKey) == "" {
+			continue
+		}
+		if provider == "" {
+			return fmt.Errorf("search.providers[%d]: provider is required", i)
+		}
+		if provider != magi.SearchProviderTavily && provider != magi.SearchProviderBrave {
+			return fmt.Errorf("search.providers[%d]: unsupported provider %q (use tavily or brave)", i, provider)
+		}
+		if strings.TrimSpace(providers[i].APIKey) == "" {
+			// Explicit keyless entries are disabled placeholders, matching the
+			// shipped example and legacy tavily.api_key behavior.
+			continue
+		}
+		if seen[provider] {
+			return fmt.Errorf("search.providers[%d]: duplicate provider %q", i, provider)
+		}
+		seen[provider] = true
+	}
+	return nil
+}
+
 // validateModelOverride returns an error for an invalid non-empty model
 // override. Empty overrides fall back to the global model and are valid.
 func validateModelProviders(scope string, providers []ModelSpec) error {
@@ -633,6 +700,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("model: model_name is required when api_key is set")
 	}
 	if err := validateModelProviders("model", c.Model.Providers); err != nil {
+		return err
+	}
+	if err := validateSearchProviders(c.Search.Providers); err != nil {
 		return err
 	}
 	if c.Auth.Enabled {

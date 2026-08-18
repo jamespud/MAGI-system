@@ -116,8 +116,22 @@ magi:
     reflection_policy:
       require_justification: true
 
+# Web search providers are tried in order. The local web_search tool is exposed
+# when at least one provider has an API key; leave the list empty to disable it.
+# The legacy `tavily.api_key` setting remains supported and becomes the primary
+# Tavily provider. Supported providers: tavily, brave.
+search:
+  providers:
+    - provider: "tavily"
+      api_key: ""  # Tavily search API key
+      # base_url: "https://api.tavily.com/search"
+    - provider: "brave"
+      api_key: ""  # Brave Search API key
+      # base_url: "https://api.search.brave.com/res/v1/web/search"
+
+# Legacy single-provider configuration (converted to the primary Tavily provider):
 tavily:
-  api_key: ""  # Tavily search API key; leave empty to disable web_search (agents reason from intrinsic knowledge)
+  api_key: ""
 
 # Coze mode: add these under `model:` (model_id > 0 uses Coze modelbuilder when api_key is empty):
 #   model_id: 0

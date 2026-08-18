@@ -207,6 +207,59 @@ tavily:
 	}
 }
 
+func TestLoadConfig_SearchProviders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "search.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "k"
+  model_name: "m"
+search:
+  providers:
+    - provider: "tavily"
+      api_key: "tavily-key"
+    - provider: "brave"
+      api_key: "brave-key"
+      base_url: "https://search.internal/api"
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(cfg.Search.Providers) != 2 || cfg.Search.Providers[0].Provider != "tavily" ||
+		cfg.Search.Providers[1].Provider != "brave" || cfg.Search.Providers[1].BaseURL != "https://search.internal/api" {
+		t.Fatalf("search providers = %+v", cfg.Search.Providers)
+	}
+}
+
+func TestConfigValidate_SearchProviders(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+	cfg.Search.Providers = []bootstrap.SearchProviderConfig{{Provider: "google"}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Fatalf("expected unsupported provider error, got %v", err)
+	}
+	cfg.Search.Providers = []bootstrap.SearchProviderConfig{
+		{Provider: "brave", APIKey: "one"},
+		{Provider: "brave", APIKey: "two"},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate provider") {
+		t.Fatalf("expected duplicate provider error, got %v", err)
+	}
+	cfg.Search.Providers = []bootstrap.SearchProviderConfig{{Provider: "brave"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("known keyless provider should be a disabled placeholder: %v", err)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsWebSearch(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)

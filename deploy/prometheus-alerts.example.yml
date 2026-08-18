@@ -25,6 +25,13 @@ groups:
           severity: warning
         annotations:
           summary: "Tool failure rate above 40%"
+      - alert: MagiWebSearchProviderFailover
+        expr: increase(magi_web_search_failovers_total[15m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A search provider failed and traffic moved to a fallback"
       - alert: MagiModelProviderFailover
         expr: increase(magi_model_failovers_total[15m]) > 0
         for: 10m

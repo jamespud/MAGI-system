@@ -7,33 +7,46 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
-// TavilyResult is one search result from the Tavily API.
-type TavilyResult struct {
+// WebSearchResult is the provider-neutral result shape used by local web
+// search executors and the evidence adapter.
+type WebSearchResult struct {
 	Title   string  `json:"title"`
 	URL     string  `json:"url"`
 	Content string  `json:"content"`
 	Score   float64 `json:"score"`
 }
 
-// TavilyResponse is the parsed Tavily search response. Shared with the
-// executor (adapter/tavily_tool.go) which produces it.
-type TavilyResponse struct {
-	Answer  string         `json:"answer"`
-	Results []TavilyResult `json:"results"`
+// WebSearchResponse is the normalized search payload consumed by the evidence
+// pipeline.
+type WebSearchResponse struct {
+	Answer   string            `json:"answer"`
+	Results  []WebSearchResult `json:"results"`
+	Provider string            `json:"provider,omitempty"`
 }
 
-// TavilyAdapter extracts one EvidenceCandidate per Tavily search result.
-// It must be registered BEFORE NativeAdapter (which always Supports) in the
-// EvidenceAdapterRegistry.
-type TavilyAdapter struct{}
+// Tavily aliases preserve the existing public evidence API while allowing all
+// search providers to share the normalized runtime shape.
+type (
+	TavilyResult   = WebSearchResult
+	TavilyResponse = WebSearchResponse
+)
 
-func NewTavilyAdapter() *TavilyAdapter { return &TavilyAdapter{} }
+// WebSearchAdapter extracts one EvidenceCandidate per normalized search
+// result. It must be registered BEFORE NativeAdapter (which always Supports)
+// in the EvidenceAdapterRegistry.
+type WebSearchAdapter struct{}
 
-func (a *TavilyAdapter) Supports(tool port.ToolDefinition) bool {
+// NewWebSearchAdapter returns the provider-neutral web search adapter.
+func NewWebSearchAdapter() *WebSearchAdapter { return &WebSearchAdapter{} }
+
+// NewTavilyAdapter preserves the historical constructor name.
+func NewTavilyAdapter() *WebSearchAdapter { return &WebSearchAdapter{} }
+
+func (a *WebSearchAdapter) Supports(tool port.ToolDefinition) bool {
 	return tool.Name == "web_search"
 }
 
-func (a *TavilyAdapter) Extract(ctx context.Context, tool port.ToolDefinition, result *port.ToolExecutionResult) ([]EvidenceCandidate, error) {
+func (a *WebSearchAdapter) Extract(ctx context.Context, tool port.ToolDefinition, result *port.ToolExecutionResult) ([]EvidenceCandidate, error) {
 	resp, ok := result.Structured.(*TavilyResponse)
 	if !ok || resp == nil {
 		// Fall back to parsing the Output JSON.

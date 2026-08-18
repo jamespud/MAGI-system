@@ -253,6 +253,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Semantic judge** — `POST /evaluation/:id/judge` scores report quality, evidence consistency and reflection validity (LLM-as-a-Judge), persisted per case.
 - **Counterfactual stability & regression gate** — benchmark items repeat N times (`runs_per_item`), report stability, and fail the run when accuracy drops below `regression_threshold`.
 - **Model failover** - ordered global/per-role providers move build/generation failures to the next model, expose `magi_model_failovers_total`, and preserve provider-specific cost accounting.
+- **Pluggable web search** - ordered Tavily/Brave providers normalize results into the evidence pipeline and fail over with `magi_web_search_failovers_total` observability.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -296,6 +297,9 @@ magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_thresho
 # ordered global failover providers + per-role overrides (unset fields inherit primary)
 model.providers:
   - { base_url: "https://fallback.example.com", model_name: "fallback-model", api_key: "..." }
+search.providers:
+  - { provider: "tavily", api_key: "..." }
+  - { provider: "brave", api_key: "..." }
 magi.melchior.model: { model_name: "...", api_key: "...", base_url: "..." }
 magi.melchior.model.providers:
   - { model_name: "role-fallback-model" }

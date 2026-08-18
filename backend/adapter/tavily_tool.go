@@ -92,6 +92,7 @@ func (e *TavilyToolExecutor) Execute(ctx context.Context, req port.ToolExecution
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		return nil, fmt.Errorf("tavily: decode: %w", err)
 	}
+	tr.Provider = SearchProviderTavily
 	raw, _ := json.Marshal(tr)
 	sourceURI := ""
 	if len(tr.Results) > 0 {

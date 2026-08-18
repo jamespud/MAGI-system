@@ -212,7 +212,7 @@ func provideAgentLoop(
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
-		evidence.NewTavilyAdapter(),
+		evidence.NewWebSearchAdapter(),
 		evidence.NewNativeAdapter(),
 		evidence.NewRawObservationAdapter(),
 	)
@@ -237,17 +237,27 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 }
 
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
-func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolExecutorPort {
+func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry) (port.ToolExecutorPort, error) {
 	var local port.ToolExecutorPort
-	if cfg.Tavily.APIKey != "" {
-		local = magi.NewTavilyToolExecutor(cfg.Tavily.APIKey)
+	if providers := webSearchProviderSpecs(cfg); len(providers) > 0 {
+		specs := make([]magi.WebSearchProviderSpec, 0, len(providers))
+		for _, provider := range providers {
+			specs = append(specs, magi.WebSearchProviderSpec{
+				Provider: provider.Provider, APIKey: provider.APIKey, BaseURL: provider.BaseURL,
+			})
+		}
+		var err error
+		local, err = magi.NewWebSearchToolExecutor(specs, reg)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var mcpExec port.ToolExecutorPort
 	if len(cfg.MCP.Servers) > 0 {
 		mcpExec = mcpAdapter
 	}
 	return magi.NewToolExecutorMuxWithAll(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
-		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg), mcpExec)
+		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg), mcpExec), nil
 }
 
 // provideMCPAdapter builds the MCP client adapter from config. It is always
@@ -723,6 +733,9 @@ func provideHealthPinger(db *gorm.DB) func(context.Context) error {
 
 func provideRedactor(cfg *Config) *redact.Redactor {
 	secrets := []string{cfg.Model.APIKey, cfg.Tavily.APIKey}
+	for _, provider := range webSearchProviderSpecs(cfg) {
+		secrets = append(secrets, provider.APIKey)
+	}
 	for _, k := range cfg.Auth.APIKeys {
 		secrets = append(secrets, k.Key)
 	}
