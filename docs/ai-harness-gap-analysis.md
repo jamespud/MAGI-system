@@ -52,7 +52,7 @@
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈 | 计算型反馈传感器（Linter/编译/单测输出回喂）、更完整外部传感器与自我改进 Harness | 🟡 |
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily/Brave 搜索插件、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
-| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图 | 默认告警/看板栈、任务级 pause->hibernate->wake | 🟡 |
+| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job、前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 栈 | 任务级 pause->hibernate->wake | 🟡 |
 | **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge、GitHub Actions backend/frontend/ops CI 门禁 | 线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
 
 ### 2.2 明细能力矩阵
@@ -91,7 +91,7 @@
 | | 标准基准集 / 评测指标看板 | ❌ | 仅自定义数据集评测，无可复用行业基准与聚合看板 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ✅ | Replay 页 Trace 模式：按 run/agent 分泳道的时间轴可视化（事件按时间定位、按类型着色）、事件计数/运行数/智能体数/错误数统计、点击 marker 查看事件详情（`frontend/src/pages/Replay.tsx`、`api.getTrace`） |
-| | 告警默认部署 / 看板栈 | 🟡 | `metrics.auth_required`（D17）+ `deploy/prometheus-alerts.example.yml` 示例；无内置 Grafana/Jaeger |
+| | 告警默认部署 / 看板栈 | ✅ | `docker/docker-compose-monitoring.yml` 一键启动 Prometheus（抓取 `magi-server:8080/metrics`）+ Alertmanager + Grafana（自动 provisioning 数据源与 MAGI Overview 看板）；告警规则单一来源 `deploy/prometheus-alerts.example.yml`；`make monitoring-up` |
 | | **Hibernate-and-Wake** 长任务休眠/唤醒 | 🟡 | 有断点续跑 + durable job + 租约（per case/agent/round），无任务级"暂停→休眠→唤醒" |
 | **UI** | 决策工作台/证据图/时间线/审批/评测/数据集/模板/benchmark/history/memory/tools/settings | ✅ | `frontend/src/router.tsx`，14 个功能页 |
 | | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ✅ | `/me/usage` + `/admin/usage` 用量卡片（D9）、Users 页（D8）、Knowledge 页（D7）、prompt 管理（D12） |
@@ -176,7 +176,7 @@
 4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
 5. **多模型编排**：per-agent/commander/judge 独立模型配置与多供应商自动降级已完成；剩余集中式模型参数管理。
 6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
-7. **可观测性**：前端 trace 视图已完成；剩余默认 trace 落库、告警默认部署与看板栈。
+7. **可观测性**：前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 看板栈已完成；剩余默认 trace 落库与告警通道（邮件/IM）接入。
 8. **运营与交付**：K8s/Helm 与备份/恢复已完成；剩余 i18n 覆盖度与灾备演练自动化。
 
 ---

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: magi
+    orgId: 1
+    folder: MAGI
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

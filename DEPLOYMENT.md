@@ -40,6 +40,25 @@ to the next; alert on any increase because a healthy primary should not fail
 continuously.
 `magi_web_search_failovers_total` applies the same rule to search providers.
 
+### Default observability stack
+
+With the web stack running, start the bundled Prometheus + Alertmanager +
+Grafana stack in one command:
+
+```bash
+make monitoring-up
+# Prometheus:   http://localhost:9090
+# Alertmanager: http://localhost:9093
+# Grafana:      http://localhost:3000  (admin / admin; change GRAFANA_ADMIN_PASSWORD)
+```
+
+Prometheus scrapes `magi-server:8080/metrics` over the `magi-web_default`
+network, loads the alert rules from `deploy/prometheus-alerts.example.yml`, and
+forwards them to Alertmanager. Grafana auto-provisions the Prometheus data
+source and a prebuilt "MAGI Overview" dashboard (request rate, active/failed
+runs, tool/model/search failures and failovers, model cost) from
+`docker/grafana/`. Stop with `make monitoring-down`.
+
 ### Users and API keys
 
 - **Static bootstrap keys** (`auth.api_keys` in config) authenticate at

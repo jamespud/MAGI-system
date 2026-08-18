@@ -12,7 +12,8 @@ SCRIPTS_DIR := scripts
         fmt vet tidy lint \
         build clean \
         test backup \
-        web-up web-down web-logs web-ps
+        web-up web-down web-logs web-ps \
+        monitoring-up monitoring-down monitoring-logs monitoring-ps
 
 # =============================================================================
 # Environment
@@ -49,6 +50,12 @@ help:
 	@echo "  make web-down         Stop full stack"
 	@echo "  make web-logs         Full stack logs"
 	@echo "  make web-ps           Full stack status"
+	@echo ""
+	@echo "Observability"
+	@echo "  make monitoring-up    Start Prometheus + Alertmanager + Grafana"
+	@echo "  make monitoring-down  Stop observability stack"
+	@echo "  make monitoring-logs  Observability logs"
+	@echo "  make monitoring-ps    Observability status"
 	@echo ""
 	@echo "=============================================================="
 
@@ -149,6 +156,20 @@ web-logs:
 
 web-ps:
 	docker compose --project-directory . -f $(COMPOSE_WEB) ps
+
+COMPOSE_MONITORING := docker/docker-compose-monitoring.yml
+
+monitoring-up:
+	docker compose --project-directory . -f $(COMPOSE_MONITORING) up -d
+
+monitoring-down:
+	docker compose --project-directory . -f $(COMPOSE_MONITORING) down
+
+monitoring-logs:
+	docker compose --project-directory . -f $(COMPOSE_MONITORING) logs -f
+
+monitoring-ps:
+	docker compose --project-directory . -f $(COMPOSE_MONITORING) ps
 
 # stop: one-key stop all dev + web containers (both compose projects + debug nginx).
 stop:

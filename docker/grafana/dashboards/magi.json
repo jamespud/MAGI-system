@@ -1,0 +1,59 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(magi_requests_total[5m]))", "legendFormat": "requests" }
+      ],
+      "title": "Request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "magi_runs_active", "legendFormat": "active" },
+        { "expr": "sum(rate(magi_runs_failed_total[5m]))", "legendFormat": "failures/s" }
+      ],
+      "title": "Runs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "magi_tool_call_failures_total - magi_tool_call_failures_total offset 1h", "legendFormat": "tool failures" },
+        { "expr": "magi_model_failovers_total - magi_model_failovers_total offset 1h", "legendFormat": "model failovers" },
+        { "expr": "magi_web_search_failovers_total - magi_web_search_failovers_total offset 1h", "legendFormat": "search failovers" }
+      ],
+      "title": "Failures and failovers (last hour)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "increase(magi_cost_usd_total[1h])", "legendFormat": "cost/h" }
+      ],
+      "title": "Model cost",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["magi"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "MAGI Overview",
+  "uid": "magi-overview",
+  "version": 1
+}
