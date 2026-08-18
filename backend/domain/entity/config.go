@@ -97,6 +97,7 @@ type ModelRef struct {
 	PricePerMInputUSD  float64 // USD per million input tokens (cost accounting)
 	PricePerMOutputUSD float64 // USD per million output tokens (cost accounting)
 	ModelID            int64   // Coze model ID (0 = use direct mode)
+	Fallbacks          []ModelRef
 	Params             *LLMParams
 }
 

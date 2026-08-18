@@ -25,6 +25,13 @@ groups:
           severity: warning
         annotations:
           summary: "Tool failure rate above 40%"
+      - alert: MagiModelProviderFailover
+        expr: increase(magi_model_failovers_total[15m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A model provider failed and traffic moved to a fallback"
       - alert: MagiCostRunaway
         expr: increase(magi_cost_usd_total[1h]) > 5
         for: 30m

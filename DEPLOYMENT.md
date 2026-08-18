@@ -35,6 +35,9 @@ send bearer tokens). Do not expose it directly to the public internet: put it
 behind a reverse proxy that allows only the Prometheus server (e.g. nginx
 `allow` rules or a separate scrape port). Example alert rules live in
 `deploy/prometheus-alerts.example.yml`.
+`magi_model_failovers_total` counts automatic moves from one model provider
+to the next; alert on any increase because a healthy primary should not fail
+continuously.
 
 ### Users and API keys
 
@@ -126,7 +129,7 @@ path, and can drift from the GORM models. When they do, regenerate them from
 
 | Section | Purpose |
 | --- | --- |
-| `model` | `api_key` + `base_url` + `model_name` (direct) or `model_id` (Coze mode); `price_per_m_*_usd` for cost accounting |
+| `model` | `api_key` + `base_url` + `model_name` (direct) or `model_id` (Coze mode); ordered `providers[]` supplies automatic failover; `price_per_m_*_usd` for provider-accurate cost accounting |
 | `auth` | `enabled: true` + `api_keys` (name/key/user_id/role) act as static bootstrap credentials. Runtime users/keys are managed over the admin API (`/admin/users`) and stored in DB (`users` / `api_keys`, SHA-256-hashed, plaintext shown once at issuance) |
 | `limits` | `max_concurrent_runs_per_user` |
 | `code_runner` | enable + timeout/length/language/danger-pattern guardrails on top of the Coze WASM sandbox; `allow_*` lists map to Deno permission flags (empty = deny all), `memory_limit_mb` (default 100) |

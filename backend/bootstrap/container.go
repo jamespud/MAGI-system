@@ -65,7 +65,7 @@ var Module = fx.Options(
 		validation.NewJSONSchemaValidator,
 
 		// Adapters (standalone mode; Coze mode replaces these)
-		magi.NewModelAdapter,
+		magi.NewModelAdapterWithMetrics,
 		appserver.NewEventBroker,
 		provideEventPublisher,
 		provideContextBuilder,

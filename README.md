@@ -252,6 +252,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Ground-truth evaluation** — datasets of expected decisions run asynchronously through the full orchestrator and report accuracy / weighted accuracy with per-item results.
 - **Semantic judge** — `POST /evaluation/:id/judge` scores report quality, evidence consistency and reflection validity (LLM-as-a-Judge), persisted per case.
 - **Counterfactual stability & regression gate** — benchmark items repeat N times (`runs_per_item`), report stability, and fail the run when accuracy drops below `regression_threshold`.
+- **Model failover** - ordered global/per-role providers move build/generation failures to the next model, expose `magi_model_failovers_total`, and preserve provider-specific cost accounting.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -292,8 +293,12 @@ limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
 magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
-# per-role model overrides (inherit unset fields from the global `model` block)
+# ordered global failover providers + per-role overrides (unset fields inherit primary)
+model.providers:
+  - { base_url: "https://fallback.example.com", model_name: "fallback-model", api_key: "..." }
 magi.melchior.model: { model_name: "...", api_key: "...", base_url: "..." }
+magi.melchior.model.providers:
+  - { model_name: "role-fallback-model" }
 commander.model: { model_name: "..." }
 judge.model: { model_name: "..." }
 mcp:

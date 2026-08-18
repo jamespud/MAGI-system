@@ -227,7 +227,9 @@ func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	result := &LoopResult{Trace: trace, Ledger: ledger}
 	defer func() {
 		if result.Usage != nil {
-			result.Usage.CostUSD = result.Usage.Cost(cfg.Model.PricePerMInputUSD, cfg.Model.PricePerMOutputUSD)
+			if result.Usage.CostUSD == 0 {
+				result.Usage.CostUSD = result.Usage.Cost(cfg.Model.PricePerMInputUSD, cfg.Model.PricePerMOutputUSD)
+			}
 			l.metrics.AddCostUSD(result.Usage.CostUSD)
 			l.metrics.AddTokens(result.Usage.TotalTokens)
 			l.metrics.AddCostUSDForUser(actx.UserID, result.Usage.CostUSD)

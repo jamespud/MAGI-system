@@ -2,13 +2,16 @@ package magi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 
 	bot_common "github.com/coze-dev/coze-studio/backend/api/model/app/bot_common"
 	"github.com/coze-dev/coze-studio/backend/bizpkg/llm/modelbuilder"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -16,11 +19,49 @@ import (
 // ModelAdapter implements port.ModelPort with dual-mode model building.
 // - Direct mode: APIKey + ModelName -> eino-ext openai.NewChatModel (standalone)
 // - Coze mode: ModelID > 0 -> modelbuilder.BuildModelByID (integrated)
-type ModelAdapter struct{}
+type ModelAdapter struct {
+	metrics *metrics.Registry
+}
 
 func NewModelAdapter() *ModelAdapter { return &ModelAdapter{} }
 
+// NewModelAdapterWithMetrics records automatic provider failovers in the
+// operational metrics registry.
+func NewModelAdapterWithMetrics(reg *metrics.Registry) *ModelAdapter {
+	return &ModelAdapter{metrics: reg}
+}
+
 func (a *ModelAdapter) Build(ctx context.Context, ref entity.ModelRef) (model.ToolCallingChatModel, error) {
+	chain := append([]entity.ModelRef{ref}, ref.Fallbacks...)
+	var candidates []model.ToolCallingChatModel
+	var refs []entity.ModelRef
+	var errs []error
+
+	for i := range chain {
+		candidateRef := chain[i]
+		candidateRef.Fallbacks = nil
+		candidate, err := a.buildSingle(ctx, candidateRef)
+		if err != nil {
+			provider := modelRefLabel(candidateRef)
+			errs = append(errs, fmt.Errorf("provider %s: %w", provider, err))
+			if i < len(chain)-1 && ctx.Err() == nil {
+				if a.metrics != nil {
+					a.metrics.IncModelFailover()
+				}
+				log.Printf("model provider %s failed to build, trying next provider: %v", provider, err)
+			}
+			continue
+		}
+		candidates = append(candidates, candidate)
+		refs = append(refs, candidateRef)
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("build model provider chain: %w", errors.Join(errs...))
+	}
+	return NewFailoverChatModel(candidates, refs, a.metrics)
+}
+
+func (a *ModelAdapter) buildSingle(ctx context.Context, ref entity.ModelRef) (model.ToolCallingChatModel, error) {
 	if ref.APIKey != "" {
 		return a.buildDirect(ctx, ref)
 	}

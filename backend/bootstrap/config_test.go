@@ -452,6 +452,88 @@ judge:
 	}
 }
 
+func TestLoadConfig_ModelProviderFailoverChain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model-failover.yaml")
+	os.WriteFile(path, []byte(`
+model:
+  api_key: "global-key"
+  base_url: "https://global.example.com"
+  model_name: "global-model"
+  providers:
+    - api_key: "fallback-key"
+      base_url: "https://fallback.example.com"
+      model_name: "fallback-model"
+magi:
+  melchior:
+    model:
+      base_url: "https://role.example.com"
+      model_name: "role-model"
+      providers:
+        - base_url: "https://role-fallback.example.com"
+          model_name: "role-fallback-model"
+`), 0644)
+	cfg, err := bootstrap.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+
+	globalUser := cfg.Magi.Balthasar.ToConfig("balthasar", cfg)
+	if len(globalUser.Model.Fallbacks) != 1 {
+		t.Fatalf("global fallback count = %d, want 1: %+v", len(globalUser.Model.Fallbacks), globalUser.Model.Fallbacks)
+	}
+	globalFallback := globalUser.Model.Fallbacks[0]
+	if globalFallback.APIKey != "fallback-key" || globalFallback.BaseURL != "https://fallback.example.com" || globalFallback.ModelName != "fallback-model" {
+		t.Fatalf("global fallback wrong: %+v", globalFallback)
+	}
+
+	role := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	if role.Model.BaseURL != "https://role.example.com" || role.Model.ModelName != "role-model" {
+		t.Fatalf("role primary wrong: %+v", role.Model)
+	}
+	if len(role.Model.Fallbacks) != 1 {
+		t.Fatalf("role fallback count = %d, want 1: %+v", len(role.Model.Fallbacks), role.Model.Fallbacks)
+	}
+	roleFallback := role.Model.Fallbacks[0]
+	if roleFallback.APIKey != "global-key" || roleFallback.BaseURL != "https://role-fallback.example.com" || roleFallback.ModelName != "role-fallback-model" {
+		t.Fatalf("role fallback should inherit the role primary key and override URL/model: %+v", roleFallback)
+	}
+	if len(roleFallback.Fallbacks) != 0 {
+		t.Fatalf("provider must not recursively embed fallbacks: %+v", roleFallback.Fallbacks)
+	}
+
+	if got := cfg.CommanderModelRef(); len(got.Fallbacks) != 1 || got.Fallbacks[0].ModelName != "fallback-model" {
+		t.Fatalf("commander should inherit global providers: %+v", got)
+	}
+}
+
+func TestConfigValidate_ModelProviders(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.Model.Providers = []bootstrap.ModelSpec{{APIKey: "partial"}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "model.providers[0]") {
+		t.Fatalf("expected global provider validation error, got %v", err)
+	}
+	cfg.Model.Providers = []bootstrap.ModelSpec{{ModelName: "nested", Providers: []bootstrap.ModelSpec{{ModelName: "nested-child"}}}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "nested providers are not supported") {
+		t.Fatalf("expected nested provider validation error, got %v", err)
+	}
+	cfg.Model.Providers = nil
+	cfg.Magi.Melchior.Model = &bootstrap.ModelSpec{Providers: []bootstrap.ModelSpec{{}}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "magi.melchior.model.providers[0]") {
+		t.Fatalf("expected role provider validation error, got %v", err)
+	}
+}
+
 func TestConfigValidate_PerRoleModelOverride(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.Model.APIKey = "k"

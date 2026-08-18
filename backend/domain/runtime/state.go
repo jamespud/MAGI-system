@@ -44,7 +44,11 @@ func extractUsage(msg *schema.Message) *entity.Usage {
 		return &entity.Usage{}
 	}
 	u := msg.ResponseMeta.Usage
-	return &entity.Usage{PromptTokens: int64(u.PromptTokens), CompletionTokens: int64(u.CompletionTokens), TotalTokens: int64(u.TotalTokens)}
+	out := &entity.Usage{PromptTokens: int64(u.PromptTokens), CompletionTokens: int64(u.CompletionTokens), TotalTokens: int64(u.TotalTokens)}
+	if cost, ok := msg.Extra[entity.ModelCostExtraKey].(float64); ok {
+		out.CostUSD = cost
+	}
+	return out
 }
 
 func addUsage(a, b *entity.Usage) *entity.Usage {
@@ -54,7 +58,7 @@ func addUsage(a, b *entity.Usage) *entity.Usage {
 	if b == nil {
 		return a
 	}
-	return &entity.Usage{PromptTokens: a.PromptTokens + b.PromptTokens, CompletionTokens: a.CompletionTokens + b.CompletionTokens, TotalTokens: a.TotalTokens + b.TotalTokens}
+	return &entity.Usage{PromptTokens: a.PromptTokens + b.PromptTokens, CompletionTokens: a.CompletionTokens + b.CompletionTokens, TotalTokens: a.TotalTokens + b.TotalTokens, CostUSD: a.CostUSD + b.CostUSD}
 }
 
 func finalizeTrace(trace *LoopTrace, status LoopStatus) {

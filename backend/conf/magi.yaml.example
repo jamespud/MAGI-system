@@ -5,6 +5,12 @@ model:
   api_key: "sk-your-api-key-here"          # e.g. "sk-xxx" for OpenAI, Ark API key for Doubao
   base_url: "https://api.deepseek.com"     # e.g. "https://api.openai.com/v1", "https://ark.cn-beijing.volces.com/api/v3"
   model_name: "deepseek-v4-flash"          # e.g. "gpt-4o", "doubao-pro-32k", "deepseek-chat"
+  # Optional ordered failover providers. A generation/build failure moves to
+  # the next provider; unset fields inherit the primary model above.
+  # providers:
+  #   - api_key: "sk-fallback"
+  #     base_url: "https://api.openai.com/v1"
+  #     model_name: "gpt-4o"
 
 # Database (usually injected via env: MAGI_DB_DSN / MAGI_DB_DRIVER).
 database:

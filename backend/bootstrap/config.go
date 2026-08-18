@@ -14,15 +14,8 @@ import (
 
 // Config is the root YAML configuration for MAGI server.
 type Config struct {
-	Model struct {
-		APIKey             string  `yaml:"api_key"`
-		BaseURL            string  `yaml:"base_url"`
-		ModelName          string  `yaml:"model_name"`
-		ModelID            int64   `yaml:"model_id"`
-		PricePerMInputUSD  float64 `yaml:"price_per_m_input_usd"`
-		PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
-	} `yaml:"model"`
-	Magi struct {
+	Model ModelSpec `yaml:"model"`
+	Magi  struct {
 		MaxDebateRounds        int      `yaml:"max_debate_rounds"`
 		MaxSteps               int      `yaml:"max_steps"`
 		TimeoutSeconds         int      `yaml:"timeout_seconds"`
@@ -159,12 +152,13 @@ type RAGConfig struct {
 }
 
 type ModelSpec struct {
-	APIKey             string  `yaml:"api_key"`
-	BaseURL            string  `yaml:"base_url"`
-	ModelName          string  `yaml:"model_name"`
-	ModelID            int64   `yaml:"model_id"`
-	PricePerMInputUSD  float64 `yaml:"price_per_m_input_usd"`
-	PricePerMOutputUSD float64 `yaml:"price_per_m_output_usd"`
+	APIKey             string      `yaml:"api_key"`
+	BaseURL            string      `yaml:"base_url"`
+	ModelName          string      `yaml:"model_name"`
+	ModelID            int64       `yaml:"model_id"`
+	PricePerMInputUSD  float64     `yaml:"price_per_m_input_usd"`
+	PricePerMOutputUSD float64     `yaml:"price_per_m_output_usd"`
+	Providers          []ModelSpec `yaml:"providers"`
 }
 
 // empty reports whether an override is entirely unset. An empty override is a
@@ -172,7 +166,7 @@ type ModelSpec struct {
 func (m *ModelSpec) empty() bool {
 	return m == nil ||
 		(m.APIKey == "" && m.BaseURL == "" && m.ModelName == "" && m.ModelID == 0 &&
-			m.PricePerMInputUSD == 0 && m.PricePerMOutputUSD == 0)
+			m.PricePerMInputUSD == 0 && m.PricePerMOutputUSD == 0 && len(m.Providers) == 0)
 }
 
 type CommanderSpec struct {
@@ -405,23 +399,40 @@ func parseAPIKeys(raw string) []APIKeySpec {
 
 // modelRef builds the default ModelRef from the global model config.
 func (c *Config) modelRef() entity.ModelRef {
+	ref := modelSpecToRef(c.Model)
+	ref.Fallbacks = providerRefs(ref, c.Model.Providers)
+	return ref
+}
+
+func modelSpecToRef(spec ModelSpec) entity.ModelRef {
 	return entity.ModelRef{
-		APIKey:             c.Model.APIKey,
-		BaseURL:            c.Model.BaseURL,
-		ModelName:          c.Model.ModelName,
-		ModelID:            c.Model.ModelID,
-		PricePerMInputUSD:  c.Model.PricePerMInputUSD,
-		PricePerMOutputUSD: c.Model.PricePerMOutputUSD,
+		APIKey:             spec.APIKey,
+		BaseURL:            spec.BaseURL,
+		ModelName:          spec.ModelName,
+		ModelID:            spec.ModelID,
+		PricePerMInputUSD:  spec.PricePerMInputUSD,
+		PricePerMOutputUSD: spec.PricePerMOutputUSD,
 	}
 }
 
-// resolveModelRef returns the fallback ModelRef overlaid with any fields set
-// on the override. Zero values on the override fall back to the global model,
-// so a per-role override may specify only api_key/base_url/model_name (or a
-// model_id in Coze mode) and inherit the remaining fields.
-func resolveModelRef(fallback entity.ModelRef, override *ModelSpec) entity.ModelRef {
+func providerRefs(fallback entity.ModelRef, providers []ModelSpec) []entity.ModelRef {
+	refs := make([]entity.ModelRef, 0, len(providers))
+	for _, provider := range providers {
+		override := provider
+		override.Providers = nil
+		ref := applyModelSpec(fallback, &override)
+		ref.Fallbacks = nil
+		if modelRefsEqual(fallback, ref) {
+			continue
+		}
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+func applyModelSpec(fallback entity.ModelRef, override *ModelSpec) entity.ModelRef {
 	ref := fallback
-	if override == nil || override.empty() {
+	if override == nil {
 		return ref
 	}
 	if override.APIKey != "" {
@@ -445,6 +456,46 @@ func resolveModelRef(fallback entity.ModelRef, override *ModelSpec) entity.Model
 	return ref
 }
 
+func modelRefsEqual(a, b entity.ModelRef) bool {
+	return a.APIKey == b.APIKey && a.BaseURL == b.BaseURL && a.ModelName == b.ModelName &&
+		a.ModelID == b.ModelID && a.PricePerMInputUSD == b.PricePerMInputUSD &&
+		a.PricePerMOutputUSD == b.PricePerMOutputUSD
+}
+
+// resolveModelRef returns the fallback ModelRef overlaid with any fields set
+// on the override. Zero values on the override fall back to the global model,
+// so a per-role override may specify only api_key/base_url/model_name (or a
+// model_id in Coze mode) and inherit the remaining fields.
+func resolveModelRef(fallback entity.ModelRef, override *ModelSpec) entity.ModelRef {
+	ref := applyModelSpec(fallback, override)
+	if override == nil || override.empty() {
+		return ref
+	}
+	providers := fallback.Fallbacks
+	if override != nil && len(override.Providers) > 0 {
+		providers = providerRefs(ref, override.Providers)
+	}
+	ref.Fallbacks = dedupeModelRefs(append([]entity.ModelRef{ref}, providers...))[1:]
+	return ref
+}
+
+func dedupeModelRefs(refs []entity.ModelRef) []entity.ModelRef {
+	out := make([]entity.ModelRef, 0, len(refs))
+	for _, ref := range refs {
+		duplicate := false
+		for _, existing := range out {
+			if modelRefsEqual(ref, existing) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
 // CommanderModelRef returns the commander's resolved model ref: the
 // commander.model override if set, otherwise the global model.
 func (c *Config) CommanderModelRef() entity.ModelRef {
@@ -459,6 +510,23 @@ func (c *Config) JudgeModelRef() entity.ModelRef {
 
 // validateModelOverride returns an error for an invalid non-empty model
 // override. Empty overrides fall back to the global model and are valid.
+func validateModelProviders(scope string, providers []ModelSpec) error {
+	for i := range providers {
+		provider := providers[i]
+		childScope := fmt.Sprintf("%s.providers[%d]", scope, i)
+		if provider.empty() {
+			return fmt.Errorf("%s must set at least one field", childScope)
+		}
+		if len(provider.Providers) > 0 {
+			return fmt.Errorf("%s: nested providers are not supported", childScope)
+		}
+		if err := validateModelOverride(childScope, &provider); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateModelOverride(scope string, m *ModelSpec) error {
 	if m == nil || m.empty() {
 		return nil
@@ -469,7 +537,7 @@ func validateModelOverride(scope string, m *ModelSpec) error {
 	if m.APIKey != "" && m.ModelName == "" && m.ModelID == 0 {
 		return fmt.Errorf("%s model: model_name is required when api_key is set (or set model_id for coze mode)", scope)
 	}
-	return nil
+	return validateModelProviders(scope+".model", m.Providers)
 }
 
 // ToConfig converts a MagiSpec to an entity.MagiConfig.
@@ -563,6 +631,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Model.APIKey != "" && c.Model.ModelName == "" {
 		return fmt.Errorf("model: model_name is required when api_key is set")
+	}
+	if err := validateModelProviders("model", c.Model.Providers); err != nil {
+		return err
 	}
 	if c.Auth.Enabled {
 		if len(c.Auth.APIKeys) == 0 {

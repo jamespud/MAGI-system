@@ -63,7 +63,7 @@
 | | 角色契约（技术/风险/机会）门控 | ✅ | `evidence/role_gate.go`、`entity/role.go` |
 | **Agent 执行** | 手写 agent loop、工具循环、终止策略、上下文压缩 | ✅ | `domain/runtime/agent_loop.go`、`domain/runtime/compaction.go` |
 | | **多模型多样性**（per-role 独立模型） | ✅ | `magi.<role>.model` / `commander.model` / `judge.model` 逐字段覆盖全局、未设字段继承（D5，`bootstrap/config.go`），含 fail-fast 校验 |
-| | 多供应商路由/降级（failover） | ❌ | 仅单 OpenAI 兼容端点（`adapter/model_adapter.go`）；per-role 可配独立 BaseURL/APIKey，但无自动降级路由 |
+| | 多供应商路由/降级（failover） | ✅ | `model.providers` / per-role `model.providers` 有序 provider 链；Build / Generate / 工具绑定失败自动尝试下一家，Stream 可在首块前 failover；取消的请求不重试；`magi_model_failovers_total` 观测；fallback 按实际 provider 单价核算 usage 成本（`adapter/model_failover.go`） |
 | | **长任务规划 / 动态 subagent 派生** | ❌ | 三 agent 固定（`entity/role.go`），无 subagent 派生框架、无任务规划层 |
 | **工具生态** | Tavily web_search / MCP(stdio+http) / CodeRunner(WASM) | ✅ | `adapter/tavily_tool.go`、`adapter/mcp/mcp.go`、`coderunner_adapter.go` |
 | | 原生文件/代码库/浏览器/DB 工具 | ❌ | 只能靠外部 MCP 引入，无内置代码库/文件/浏览器工具集 |
@@ -174,7 +174,7 @@
 2. **会话与多轮追问（已补齐）**：`/assistant` 已升级为持久会话入口，支持 conversation/thread、追问、历史与既往结论水合、前端线程管理。
 3. **身份与访问管理**：登录/SSO、用户自助、密钥管理、角色粒度（当前只有 admin/非 admin）、审计 UI。
 4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
-5. **多模型编排**：per-agent/commander/judge 独立模型配置，多供应商路由与降级，模型参数管理。
+5. **多模型编排**：per-agent/commander/judge 独立模型配置与多供应商自动降级已完成；剩余集中式模型参数管理。
 6. **评估运营化**：CI 门禁已接入；剩余线上 golden、自动回归、评测指标看板与 prompt 版本运营。
 7. **可观测性**：默认 trace 落库 + 前端 trace 视图、通用 HTTP 限流、告警默认部署。
 8. **运营与交付**：K8s/Helm 与备份/恢复已完成；剩余 i18n 覆盖度与灾备演练自动化。
@@ -191,7 +191,7 @@
 
 ### Phase 2（横向能力第一波，约 4-6 周）
 - D4 跨实例实时：SSE 改 DB-backed 游标轮询或引入 Redis pub/sub。
-- D5 per-role 模型配置（`magi.<role>.model` 覆盖全局）。
+- D5 per-role 模型配置与多供应商 failover（已完成）：`magi.<role>.model` 覆盖全局，`model.providers` / role providers 按序自动降级。
 - D6/D7 知识管理：upload API + 文档入库走现有 RAG 管线 + Memory UI 接入语义检索。
 - 记忆治理（已完成）：memory PATCH/DELETE、标注/标签、RAG 索引同步与前端管理。
 - 会话模型（已完成）：conversation/thread + 多轮追问，`/assistant` 已升级为会话式，前端提供 Conversations 页面。
@@ -208,10 +208,10 @@
 
 MAGI 的**决策核心是高质量、可测试、可解释**的，在"证据驱动多智能体决策引擎"这个垂直定位上几乎没有明显的规则漏洞（测试全绿、设计文档与实现高度一致）。但作为"**全面的 AI harness**"，它当前更像一个**专注于决策的专用 harness**，而非**通用的任务执行平台**：
 
-- 最关键的横向缺口是：**通用任务执行能力、会话式交互、知识导入管理、身份体系、多模型编排、评估运营化**。
-- 最需要优先修复的实现缺陷是：**前端无认证通道（D1）、列表全表加载+内存过滤（D2）、RAG 静默失败（D3）**，三者分别影响"多租户可用性""规模化与数据隔离"和"记忆可靠性"。
+- 当前最关键的横向缺口是：**通用任务执行能力、身份与细粒度权限、计算型反馈传感器、评估运营化、默认可观测性栈**。
+- D1–D17 已完成修复；后续重点从实现缺陷转向平台能力缺口：通用工具/沙箱、IAM/RBAC、反馈传感器、线上评估与可观测性栈。
 
-建议先清 P0，再按 Phase 2 的"知识管理 + 会话 + 多模型"补横向能力，即可在不破坏决策核心的前提下把 MAGI 从"决策引擎"升级为"AI harness 平台"。
+知识管理、会话、多模型、CI、K8s/Helm 与备份恢复已经补齐；下一步应以通用任务执行、IAM/RBAC、反馈传感器与评估运营化为主线继续升级。
 
 ---
 

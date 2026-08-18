@@ -24,6 +24,7 @@ type Registry struct {
 	RequestsTotal    atomic.Int64
 
 	MemoryRetrievalFailures atomic.Int64
+	ModelFailovers          atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -58,6 +59,14 @@ func (r *Registry) IncRequests() {
 func (r *Registry) IncMemoryRetrievalFailure() {
 	if r != nil {
 		r.MemoryRetrievalFailures.Add(1)
+	}
+}
+
+// IncModelFailover records one automatic move from a failed model provider to
+// the next configured provider.
+func (r *Registry) IncModelFailover() {
+	if r != nil {
+		r.ModelFailovers.Add(1)
 	}
 }
 func (r *Registry) RunStart() {
@@ -185,6 +194,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_memory_retrieval_failures_total counter\nmagi_memory_retrieval_failures_total %d\n", r.MemoryRetrievalFailures.Load())
+	fmt.Fprintf(w, "# TYPE magi_model_failovers_total counter\nmagi_model_failovers_total %d\n", r.ModelFailovers.Load())
 
 	fmt.Fprintf(w, "# TYPE magi_run_duration_ms histogram\n")
 	fmt.Fprintf(w, "magi_run_duration_ms_sum %d\n", r.RunDurationSumMs.Load())

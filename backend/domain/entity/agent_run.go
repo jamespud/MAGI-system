@@ -54,6 +54,10 @@ type MessageRef struct {
 	Content string
 }
 
+// ModelCostExtraKey carries provider-accurate estimated cost in an Eino
+// message when the model port has selected a failover provider.
+const ModelCostExtraKey = "magi_model_cost_usd"
+
 // Usage aggregates token usage.
 type Usage struct {
 	PromptTokens     int64

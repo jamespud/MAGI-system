@@ -15,6 +15,7 @@ func TestRegistry_CountersAndPrometheus(t *testing.T) {
 	reg.RunStart()
 	reg.RunFinish(true)
 	reg.IncToolCall(false)
+	reg.IncModelFailover()
 	reg.AddTokens(120)
 
 	var b strings.Builder
@@ -28,6 +29,7 @@ func TestRegistry_CountersAndPrometheus(t *testing.T) {
 		"magi_runs_failed_total 0",
 		"magi_tool_calls_total 1",
 		"magi_tool_call_failures_total 1",
+		"magi_model_failovers_total 1",
 		"magi_tokens_total 120",
 	} {
 		if !strings.Contains(out, want) {
