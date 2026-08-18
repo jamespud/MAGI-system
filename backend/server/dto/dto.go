@@ -480,6 +480,41 @@ func FromEvalSummary(s *dataset.EvalSummary) EvalSummaryResponse {
 	return out
 }
 
+// AnalyzeSelfImproveRequest asks the harness to analyze one failed case.
+type AnalyzeSelfImproveRequest struct {
+	CaseID string `json:"case_id"`
+}
+
+// SelfImproveSuggestionResponse is one analyzed failure suggestion.
+type SelfImproveSuggestionResponse struct {
+	ID            string `json:"id"`
+	CaseID        string `json:"case_id"`
+	RunID         string `json:"run_id,omitempty"`
+	AgentCode     string `json:"agent_code,omitempty"`
+	Category      string `json:"category"`
+	Failure       string `json:"failure"`
+	Summary       string `json:"summary"`
+	SuggestedRule string `json:"suggested_rule"`
+	PromptKey     string `json:"prompt_key,omitempty"`
+	PromptContent string `json:"prompt_content,omitempty"`
+	Status        string `json:"status"`
+	CreatedAt     string `json:"created_at"`
+	AppliedAt     string `json:"applied_at,omitempty"`
+}
+
+func FromSelfImprove(s *entity.SelfImproveSuggestion) SelfImproveSuggestionResponse {
+	out := SelfImproveSuggestionResponse{
+		ID: s.ID, CaseID: s.CaseID, RunID: s.RunID, AgentCode: s.AgentCode,
+		Category: s.Category, Failure: s.Failure, Summary: s.Summary,
+		SuggestedRule: s.SuggestedRule, PromptKey: s.PromptKey, PromptContent: s.PromptContent,
+		Status: s.Status, CreatedAt: s.CreatedAt.Format(time.RFC3339),
+	}
+	if s.AppliedAt != nil {
+		out.AppliedAt = s.AppliedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

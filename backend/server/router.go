@@ -36,6 +36,7 @@ type RouteDeps struct {
 	Plugins      *plugins.Service
 	Recurring    *recurring.Service
 	Replay       *replay.Service
+	SelfImprove  *handler.SelfImproveHandler
 	Evaluation   *evaluation.Service
 	Judge        *judge.Service
 	Memory       *memory.Service
@@ -105,6 +106,12 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.GET("/cases/:id/timeline", repH.Timeline)
 	v1.GET("/cases/:id/trace", repH.Trace)
 	v1.GET("/cases/:id/stream", SSEHandlerWithHistory(deps.Broker, deps.EventRepo, deps.Decision))
+
+	if deps.SelfImprove != nil {
+		v1.POST("/admin/selfimprove/analyze", RequireAnyRole("admin", "operator"), deps.SelfImprove.Analyze)
+		v1.GET("/admin/selfimprove/suggestions", RequireAnyRole("admin", "operator"), deps.SelfImprove.List)
+		v1.POST("/admin/selfimprove/suggestions/:id/apply", RequireRole("admin"), deps.SelfImprove.Apply)
+	}
 
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)
 	v1.GET("/memory", memH.Search)

@@ -355,6 +355,27 @@ type RecurringCaseModel struct {
 
 func (RecurringCaseModel) TableName() string { return "magi_recurring_case" }
 
+// SelfImproveModel persists analyzed failure suggestions for the
+// self-improving harness loop.
+type SelfImproveModel struct {
+	ID            string `gorm:"primaryKey"`
+	CaseID        string `gorm:"index"`
+	RunID         string
+	AgentCode     string
+	Category      string
+	Failure       string `gorm:"type:text"`
+	Summary       string `gorm:"type:text"`
+	SuggestedRule string `gorm:"type:text"`
+	PromptKey     string
+	PromptContent string `gorm:"type:mediumtext"`
+	Status        string `gorm:"index"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	AppliedAt     *time.Time
+}
+
+func (SelfImproveModel) TableName() string { return "self_improve_suggestion" }
+
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
@@ -373,6 +394,7 @@ func AllModels() []any {
 		&ApiKeyModel{},
 		&PromptTemplateModel{},
 		&ConversationModel{},
+		&SelfImproveModel{},
 		&ConversationMessageModel{},
 	}
 }

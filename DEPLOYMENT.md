@@ -40,6 +40,17 @@ to the next; alert on any increase because a healthy primary should not fail
 continuously.
 `magi_web_search_failovers_total` applies the same rule to search providers.
 
+### Self-improving harness (human-in-the-loop)
+
+Failed cases can be analyzed into deterministic, categorized improvement
+suggestions (`POST /admin/selfimprove/analyze` with `{case_id}`). The analyzer
+reads the case events and agent-run errors, classifies the failure
+(gate/tool/model/timeout), and proposes a rule. Gate failures additionally
+propose a prompt change. Suggestions stay `open` until an admin applies them
+(`POST /admin/selfimprove/suggestions/:id/apply`), which writes any proposed
+prompt to the versioned prompt registry and marks the suggestion `applied`.
+Nothing is applied automatically; the operator is the approval gate.
+
 ### Default observability stack
 
 With the web stack running, start the bundled Prometheus + Alertmanager +

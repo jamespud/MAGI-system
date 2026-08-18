@@ -37,6 +37,7 @@ import (
 	"github.com/jamespud/magi/backend/application/recurring"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/application/replay"
+	"github.com/jamespud/magi/backend/application/selfimprove"
 	"github.com/jamespud/magi/backend/application/tool"
 	"github.com/jamespud/magi/backend/application/toolpolicy"
 	"github.com/jamespud/magi/backend/application/toolquota"
@@ -106,6 +107,9 @@ var Module = fx.Options(
 		provideRunManager,
 		provideDecisionService,
 		provideReplayService,
+		provideSelfImproveRepository,
+		provideSelfImproveService,
+		provideSelfImproveHandler,
 		provideEvaluationService,
 		provideMemoryIndexer,
 		provideMemoryService,
@@ -137,6 +141,7 @@ var Module = fx.Options(
 		authSvc *auth.Service,
 		dsSvc *dataset.Service,
 		repSvc *replay.Service,
+		siH *handler.SelfImproveHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -164,6 +169,7 @@ var Module = fx.Options(
 			Recurring:    recSvc,
 			Assistant:    askSvc,
 			Replay:       repSvc,
+			SelfImprove:  siH,
 			Evaluation:   evalSvc,
 			Memory:       memSvc,
 			Knowledge:    knowSvc,
@@ -516,6 +522,19 @@ func provideEvaluationService(repo port.Repository) *evaluation.Service {
 
 func provideReplayService(repo port.Repository) *replay.Service {
 	return replay.NewService(repo.EventRepo())
+}
+
+func provideSelfImproveRepository(db *gorm.DB) port.SelfImproveRepository {
+	return magi.NewSelfImproveRepository(db)
+}
+
+func provideSelfImproveService(repo port.Repository, sir port.SelfImproveRepository, prompts port.PromptRepository) *selfimprove.Service {
+	return selfimprove.NewService(sir, repo.CaseRepo(), repo.EventRepo(), repo.AgentRunRepo(),
+		selfimprove.WithPrompts(prompts))
+}
+
+func provideSelfImproveHandler(svc *selfimprove.Service) *handler.SelfImproveHandler {
+	return handler.NewSelfImproveHandler(svc)
 }
 
 func provideMemoryIndexer(knowledge port.KnowledgePort) port.MemoryIndexer {

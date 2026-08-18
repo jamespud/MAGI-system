@@ -259,6 +259,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Built-in benchmark suite + dashboard** - one-click seed of a reusable decision sanity suite and an aggregate evaluation summary (accuracy/stability/regression per dataset and recent runs).
 - **Fine-grained roles** - admin / operator / user roles with route-level gating (`RequireAnyRole`); operators can run evals, benchmarks, and manage prompts while user/API-key administration stays admin-only.
 - **Deterministic feedback sensors** - the `check_output` tool lints the model's own JSON against a schema and constraint rules, and violations are fed back so the agent self-corrects before human review.
+- **Self-improving harness (human-in-the-loop)** - analyze a failed case into a categorized, rule-based improvement suggestion; an admin confirms before a proposed prompt change is written to the versioned registry.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -285,6 +286,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | GET/PUT/POST | `/admin/prompts`, `/admin/prompts/:key` (+`/restore`) | Versioned prompt registry (P2) |
 | POST/GET/DELETE | `/admin/users`, `/admin/users/:id` | User management (admin) |
 | POST/GET | `/admin/benchmarks/seed`, `/admin/eval/summary` | Seed built-in benchmark suite / aggregate evaluation dashboard (admin) |
+| POST/GET/POST | `/admin/selfimprove/analyze`, `/admin/selfimprove/suggestions`, `/admin/selfimprove/suggestions/:id/apply` | Analyze failed cases into improvement suggestions and apply them under admin approval |
 | GET/POST | `/admin/users/:id/keys` | List / issue user API keys (admin) |
 | POST | `/admin/keys/:id/revoke`, `/admin/keys/:id/rotate` | Revoke / rotate an API key |
 | GET | `/me` (+`POST /me/keys`) | Current principal + self-issued keys |

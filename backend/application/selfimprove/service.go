@@ -1,0 +1,207 @@
+package selfimprove
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
+)
+
+// Service analyzes failed cases into deterministic, human-reviewable
+// improvement suggestions. Nothing is applied automatically: the harness
+// proposes, an operator approves.
+type Service struct {
+	repo       port.SelfImproveRepository
+	cases      port.CaseRepository
+	events     port.EventRepository
+	agentRuns  port.AgentRunRepository
+	prompts    port.PromptRepository
+	eventLimit int
+}
+
+type Option func(*Service)
+
+// WithPrompts enables applying prompt-content suggestions to the versioned
+// prompt registry.
+func WithPrompts(p port.PromptRepository) Option {
+	return func(s *Service) { s.prompts = p }
+}
+
+func NewService(repo port.SelfImproveRepository, cases port.CaseRepository, events port.EventRepository, agentRuns port.AgentRunRepository, opts ...Option) *Service {
+	s := &Service{repo: repo, cases: cases, events: events, agentRuns: agentRuns, eventLimit: 200}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// Analyze inspects a failed case and creates one improvement suggestion.
+func (s *Service) Analyze(ctx context.Context, caseID string) (*entity.SelfImproveSuggestion, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("selfimprove: repository not configured")
+	}
+	c, err := s.cases.Get(ctx, caseID)
+	if err != nil || c == nil {
+		return nil, fmt.Errorf("selfimprove: case not found")
+	}
+	var agentCode, runID string
+	if s.agentRuns != nil {
+		runs, rerr := s.agentRuns.ListByCase(ctx, caseID)
+		if rerr == nil {
+			for _, r := range runs {
+				if r == nil {
+					continue
+				}
+				if r.Err != "" && agentCode == "" {
+					agentCode = string(r.MagiCode)
+					runID = r.ID
+				}
+			}
+		}
+	}
+	events, _ := s.events.ListByCase(ctx, caseID)
+	if len(events) > s.eventLimit {
+		events = events[:s.eventLimit]
+	}
+	category := s.classify(c, events)
+	failure := s.failureSummary(c, events)
+	rule := s.suggestRule(category, failure)
+	suggestion := &entity.SelfImproveSuggestion{
+		ID: "selfimp-" + uuid.NewString(), CaseID: caseID, RunID: runID, AgentCode: agentCode,
+		Category: category, Failure: failure, SuggestedRule: rule,
+		Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+	}
+	if category == entity.SelfImproveGateFailure && s.prompts != nil {
+		if current, err := s.prompts.Get(ctx, "agent.workflow_tools"); err == nil && current != nil && current.Content != "" {
+			suggestion.PromptKey = "agent.workflow_tools"
+			suggestion.PromptContent = current.Content + "\n\n" + rule
+		}
+	}
+	if err := s.repo.Create(ctx, suggestion); err != nil {
+		return nil, fmt.Errorf("selfimprove: create suggestion: %w", err)
+	}
+	return suggestion, nil
+}
+
+// List returns all suggestions, newest first.
+func (s *Service) List(ctx context.Context) ([]*entity.SelfImproveSuggestion, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("selfimprove: repository not configured")
+	}
+	return s.repo.List(ctx)
+}
+
+// Apply marks a suggestion applied. When the suggestion carries proposed
+// prompt content, it writes a new version to the prompt registry (still a
+// deterministic, versioned, human-approved change).
+func (s *Service) Apply(ctx context.Context, id string) (*entity.SelfImproveSuggestion, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("selfimprove: repository not configured")
+	}
+	suggestion, err := s.repo.Get(ctx, id)
+	if err != nil || suggestion == nil {
+		return nil, fmt.Errorf("selfimprove: suggestion not found")
+	}
+	if suggestion.PromptKey != "" && suggestion.PromptContent != "" && s.prompts != nil {
+		if _, err := s.prompts.Save(ctx, suggestion.PromptKey, suggestion.PromptContent); err != nil {
+			return nil, fmt.Errorf("selfimprove: apply prompt: %w", err)
+		}
+	}
+	if err := s.repo.UpdateStatus(ctx, id, entity.SelfImproveApplied); err != nil {
+		return nil, err
+	}
+	suggestion.Status = entity.SelfImproveApplied
+	return suggestion, nil
+}
+
+func (s *Service) classify(c *entity.DecisionCase, events []*entity.MagiEvent) string {
+	switch c.Status {
+	case entity.CaseStatusTimedOut:
+		return entity.SelfImproveTimeout
+	case entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
+		return entity.SelfImproveGateFailure
+	case entity.CaseStatusFailed:
+		// fall through to event-based classification
+	default:
+		return entity.SelfImproveOther
+	}
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		if e.Type == entity.EventEvidenceGateFailed {
+			return entity.SelfImproveGateFailure
+		}
+	}
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		switch e.Type {
+		case entity.EventModelRequested:
+			return entity.SelfImproveModelError
+		}
+	}
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		if e.Type == entity.EventToolCallFailed {
+			return entity.SelfImproveToolError
+		}
+	}
+	return entity.SelfImproveOther
+}
+
+func (s *Service) failureSummary(c *entity.DecisionCase, events []*entity.MagiEvent) string {
+	var parts []string
+	for _, e := range events {
+		if e == nil {
+			continue
+		}
+		switch e.Type {
+		case entity.EventCaseFailed, entity.EventToolCallFailed, entity.EventEvidenceGateFailed, entity.EventMemoryRetrievalFailed:
+			msg := strings.TrimSpace(string(e.Payload))
+			if msg != "" {
+				parts = append(parts, fmt.Sprintf("%s: %s", e.Type, msg))
+			}
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	return "case status: " + string(c.Status)
+}
+
+func (s *Service) suggestRule(category, failure string) string {
+	switch category {
+	case entity.SelfImproveGateFailure:
+		return "Gate guidance: before voting, the EvidenceSummary must satisfy every required evidence type and minimum count; gather additional evidence instead of fabricating EV-IDs."
+	case entity.SelfImproveToolError:
+		return "Tool guidance: when a tool fails, retry once with corrected arguments or switch to an alternative tool; never fabricate the tool result."
+	case entity.SelfImproveValidation:
+		return "Format guidance: output exactly the required JSON schema; use the check_output tool to self-lint before submitting."
+	case entity.SelfImproveTimeout:
+		return "Budget guidance: keep reasoning compact so the run completes within the configured timeout; reduce repeated tool calls."
+	case entity.SelfImproveModelError:
+		return "Model guidance: the provider call failed; consider a fallback provider or retrying with a shorter request."
+	default:
+		if failure == "" {
+			return "Review the failed case event log before the next run."
+		}
+		return "Review failure: " + truncate(failure, 200)
+	}
+}
+
+func truncate(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
