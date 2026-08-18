@@ -116,7 +116,7 @@ func newE2EServer(t *testing.T) *hzserver.Hertz {
 		Assistant:  askSvc,
 		Replay:     replay.NewService(repo.EventRepo()),
 		Evaluation: evaluation.NewService(evaluation.WithRepository(repo)),
-		Memory:     memory.NewService(knowledge, repo.MemoryRepo()),
+		Memory:     memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo())),
 		Tool:       tool.NewService(nil),
 		Broker:     broker,
 		EventRepo:  repo.EventRepo(),
@@ -144,6 +144,19 @@ func post(t *testing.T, h *hzserver.Hertz, path, body, token string) (int, strin
 	} else {
 		w = ut.PerformRequest(h.Engine, "POST", path, &ut.Body{Body: bytes.NewBuffer(b), Len: len(b)}, ut.Header{Key: "Content-Type", Value: "application/json"})
 	}
+	return w.Code, w.Body.String()
+}
+
+func patch(t *testing.T, h *hzserver.Hertz, path, body, token string) (int, string) {
+	t.Helper()
+	b := []byte(body)
+	w := ut.PerformRequest(h.Engine, "PATCH", path, &ut.Body{Body: bytes.NewBuffer(b), Len: len(b)}, ut.Header{Key: "Authorization", Value: "Bearer " + token}, ut.Header{Key: "Content-Type", Value: "application/json"})
+	return w.Code, w.Body.String()
+}
+
+func delete(t *testing.T, h *hzserver.Hertz, path, token string) (int, string) {
+	t.Helper()
+	w := ut.PerformRequest(h.Engine, "DELETE", path, nil, ut.Header{Key: "Authorization", Value: "Bearer " + token})
 	return w.Code, w.Body.String()
 }
 
@@ -286,6 +299,25 @@ func TestE2E_HarnessFlow(t *testing.T) {
 	_, mbody2 := get(t, h, "/api/v1/memory?q=stack", "k7")
 	if !strings.Contains(mbody2, "keep the stack?") || !strings.Contains(mbody2, `"Resolution":"approve"`) {
 		t.Fatalf("memory search: %s", mbody2)
+	}
+
+	// Memory governance: edit/annotate/tag, reject cross-user mutation, then
+	// delete and verify retrieval no longer exposes the projection.
+	code, body = patch(t, h, "/api/v1/memory/"+caseID, `{"annotation":"verified memory","tags":["stack","verified"],"learned":"keep current stack"}`, "k7")
+	if code != 200 || !strings.Contains(body, `"Annotation":"verified memory"`) || !strings.Contains(body, `"Learned":"keep current stack"`) {
+		t.Fatalf("memory update: %d %s", code, body)
+	}
+	code, _ = patch(t, h, "/api/v1/memory/"+caseID, `{"annotation":"not allowed"}`, "k8")
+	if code != 403 {
+		t.Fatalf("cross-user memory update: %d", code)
+	}
+	code, _ = delete(t, h, "/api/v1/memory/"+caseID, "k7")
+	if code != 204 {
+		t.Fatalf("memory delete: %d", code)
+	}
+	code, _ = get(t, h, "/api/v1/memory/"+caseID, "k7")
+	if code != 404 {
+		t.Fatalf("deleted memory get: %d", code)
 	}
 
 	// Ask MAGI starts a persistent thread and executes the case through the

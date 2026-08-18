@@ -37,6 +37,15 @@ func RenderDocument(proj *entity.CaseMemoryProjection) string {
 			fmt.Fprintf(&b, "- %s: %s (confidence %.2f)\n", v.MagiCode, v.Decision, v.Confidence)
 		}
 	}
+	if len(proj.Tags) > 0 {
+		b.WriteString("Tags:\n")
+		for _, tag := range proj.Tags {
+			fmt.Fprintf(&b, "- %s\n", tag)
+		}
+	}
+	if proj.Annotation != "" {
+		fmt.Fprintf(&b, "Annotation: %s\n", proj.Annotation)
+	}
 	if proj.Resolution != "" {
 		fmt.Fprintf(&b, "Resolution: %s\n", proj.Resolution)
 	}

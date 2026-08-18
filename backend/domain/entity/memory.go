@@ -11,6 +11,8 @@ type CaseMemoryProjection struct {
 	Votes             []MemoryVote
 	Resolution        string
 	Outcome           *CaseOutcome
+	Annotation        string
+	Tags              []string
 	ProjectionVersion int
 }
 

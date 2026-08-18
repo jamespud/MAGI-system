@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -51,4 +52,49 @@ func (h *MemoryHandler) Search(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.JSON(consts.StatusOK, dto.MemorySearchResponse{Results: projs})
+}
+
+// Update edits a memory projection owned by the caller and refreshes its RAG
+// index.
+func (h *MemoryHandler) Update(ctx context.Context, c *app.RequestContext) {
+	var req dto.MemoryUpdateRequest
+	if err := c.BindAndValidate(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	proj, err := h.svc.Update(ctx, CurrentUserID(ctx), c.Param("id"), memory.UpdatePatch{
+		QuestionSummary: req.QuestionSummary,
+		ContextSummary:  req.ContextSummary,
+		Resolution:      req.Resolution,
+		Learned:         req.Learned,
+		Annotation:      req.Annotation,
+		Tags:            req.Tags,
+	})
+	if err != nil {
+		writeMemoryError(c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, proj)
+}
+
+// Delete removes a caller-owned memory projection and its indexed chunks.
+func (h *MemoryHandler) Delete(ctx context.Context, c *app.RequestContext) {
+	if err := h.svc.Delete(ctx, CurrentUserID(ctx), c.Param("id")); err != nil {
+		writeMemoryError(c, err)
+		return
+	}
+	c.Status(consts.StatusNoContent)
+}
+
+func writeMemoryError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, memory.ErrForbidden):
+		Forbidden(c)
+	case errors.Is(err, memory.ErrMemoryNotFound):
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "memory not found"})
+	case errors.Is(err, memory.ErrNoFields), errors.Is(err, memory.ErrInvalidMemory):
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+	default:
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+	}
 }

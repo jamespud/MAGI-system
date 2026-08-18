@@ -656,6 +656,17 @@ type MemorySearchResponse struct {
 	Results []*entity.CaseMemoryProjection `json:"results"`
 }
 
+// MemoryUpdateRequest edits user-owned long-term-memory metadata and display
+// fields. Nil pointers preserve fields; an empty tags array clears tags.
+type MemoryUpdateRequest struct {
+	QuestionSummary *string  `json:"question_summary,omitempty"`
+	ContextSummary  *string  `json:"context_summary,omitempty"`
+	Resolution      *string  `json:"resolution,omitempty"`
+	Learned         *string  `json:"learned,omitempty"`
+	Annotation      *string  `json:"annotation,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+}
+
 // KnowledgeDocDTO is the API representation of a knowledge document.
 type KnowledgeDocDTO struct {
 	ID         string `json:"id"`

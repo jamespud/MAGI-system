@@ -13,10 +13,17 @@ type Service struct {
 	knowledge port.KnowledgePort
 	memRepo   port.MemoryRepository
 	cases     port.CaseRepository
+	indexer   port.MemoryIndexer
 }
 
 // Option configures a MemoryService.
 type Option func(*Service)
+
+// WithIndexer enables atomic refresh/removal of case-memory RAG chunks on
+// memory edit and delete.
+func WithIndexer(indexer port.MemoryIndexer) Option {
+	return func(s *Service) { s.indexer = indexer }
+}
 
 // WithCaseRepo enables owner filtering on memory search.
 func WithCaseRepo(repo port.CaseRepository) Option {

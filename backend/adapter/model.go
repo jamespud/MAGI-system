@@ -184,6 +184,8 @@ type MemoryProjectionModel struct {
 	VotesJSON         string `gorm:"type:text"`
 	Resolution        string `gorm:"type:text"`
 	OutcomeJSON       string `gorm:"type:text"`
+	Annotation        string `gorm:"type:text"`
+	TagsJSON          string `gorm:"type:text"`
 	ProjectionVersion int
 }
 
@@ -432,9 +434,9 @@ type ConversationMessageModel struct {
 	ID             string `gorm:"primaryKey;size:64"`
 	ConversationID string `gorm:"index;size:64"`
 	UserID         int64
-	Role           string `gorm:"size:16"`
-	Content        string `gorm:"type:longtext"`
-	CaseID         string `gorm:"size:64;index"`
+	Role           string    `gorm:"size:16"`
+	Content        string    `gorm:"type:longtext"`
+	CaseID         string    `gorm:"size:64;index"`
 	CreatedAt      time.Time `gorm:"index"`
 }
 

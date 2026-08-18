@@ -262,6 +262,14 @@ export const api = {
   searchMemory: (query: string, limit = 20) =>
     request<{ results: ApiMemoryProjection[] }>(`/memory?q=${encodeURIComponent(query)}&limit=${limit}`),
 
+  updateMemory: (id: string, patch: ApiMemoryProjectionUpdate) =>
+    request<ApiMemoryProjection>('/memory/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  deleteMemory: (id: string) => request<void>('/memory/' + encodeURIComponent(id), { method: 'DELETE' }),
+
   evaluateCase: (id: string) => request<ApiEvaluation>(`/evaluation/${id}`, { method: 'POST' }),
 
   judgeCase: (id: string) => request<ApiJudgeResult>(`/evaluation/${id}/judge`, { method: 'POST' }),
@@ -465,13 +473,24 @@ interface ApiEvaluation {
   consensus_round: number;
 }
 
-interface ApiMemoryProjection {
+export interface ApiMemoryProjection {
   CaseID: string;
   QuestionSummary: string;
   ContextSummary: string;
   Resolution: string;
+  Annotation?: string;
+  Tags?: string[];
   Outcome?: { Status: string; Learned: string } | null;
   ProjectionVersion: number;
+}
+
+export interface ApiMemoryProjectionUpdate {
+  question_summary?: string;
+  context_summary?: string;
+  resolution?: string;
+  learned?: string;
+  annotation?: string;
+  tags?: string[];
 }
 
 interface ApiDataset {
@@ -621,7 +640,6 @@ export type {
   ApiDataset,
   ApiBenchmarkRun,
   ApiBenchmarkDetail,
-  ApiMemoryProjection,
   ApiEvaluation,
   ApiRecurring,
   ApiConsensus,

@@ -32,23 +32,23 @@
 
 > 参考定义：**Agent = Model + Harness**。Harness 不是 Prompt 或应用框架本身，而是围绕模型构建的完整运行时环境与控制基础设施，覆盖上下文/记忆、前馈引导/反馈传感器、工具连接/沙箱、权限护栏、可观测性/断点续传，以及评估回归六大部分。
 > 参考能力域来自主流 AI harness（LangGraph、AutoGen、CrewAI、Claude Code、OpenHands 等）的功能空间。✅=已实现且较完整，🟡=部分实现/有缺陷，❌=缺失。
-> 更新记录：2026-08-18 补充六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
+> 更新记录：2026-08-18 补充 Prompt / Agent Framework / Agent Harness 概念边界对照与六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
 
 ### 2.1 概念边界与组件级总览
 
-先校准概念边界，避免把 MAGI 误判为“提示词集合”或普通“Agent SDK”：
+按 `Agent = Model + Harness` 校准：Model 是概率性推理大脑；Harness 是智能体的运行时躯干、感官、手脚与规则边界，在概率性模型推理和确定性外部系统之间充当控制与反馈闭环。概念边界对照如下：
 
-| 对象 | 定位 | 与 MAGI 的关系 |
-| --- | --- | --- |
-| Prompt Engineering | 给模型的文本指令输入，解决“模型怎么想” | MAGI 的版本化 prompt 只是前馈引导的一部分，不构成 Harness 全部 |
-| Agent Framework | 开发应用所需的 SDK/组件库，解决“代码怎么组装” | MAGI 不是 LangChain/CrewAI 这类框架复用问题，而是已落地的运行时服务 |
-| Agent Harness | 智能体在真实环境中的完整运行时与控制基础设施，解决“如何可靠、安全地完成任务” | MAGI 的评估目标：以确定性 Go 控制面驾驭概率性 LLM，并横向补齐通用 Harness 能力 |
+| 对照对象 | 定位 | 工作方式 | 类比 | 与 MAGI 的关系 |
+| --- | --- | --- | --- | --- |
+| Prompt Engineering | 给模型的文本指令输入，解决“模型怎么想” | 编写和调优 System/User Prompt | 乐谱 | MAGI 的版本化 prompt 是前馈引导的一部分，不构成 Harness 全部 |
+| Agent Framework | 开发 AI 应用所需的 SDK/组件库，解决“代码怎么组装” | 在 Python/TS 中调用封装好的模型、工具与执行 API | 乐器组件库 | MAGI 不是 LangChain/CrewAI 这类框架复用问题，而是已落地的运行时服务 |
+| Agent Harness | 智能体在真实环境中的完整运行时与控制基础设施，解决“如何可靠、安全地完成任务” | 配置与编排上下文、记忆、沙箱、工具、传感器、权限和反馈循环 | 音乐厅声学环境、指挥家控制台与录音设备 | MAGI 的评估目标：以确定性 Go 控制面驾驭概率性 LLM，并横向补齐通用 Harness 能力 |
 
 六大核心组件的组件级状态如下（组件级状态用于总体判断，不计入下方明细行状态统计）：
 
 | Harness 核心组件 | 定义拆解 | MAGI 已覆盖 | 仍未覆盖 / 待补齐 | 组件状态 |
 | --- | --- | --- | --- | --- |
-| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入 | 记忆编辑/删除/标注；更通用的任务级文件/状态树 | 🟡 |
+| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入、记忆编辑/删除/标注与索引同步 | 更通用的任务级文件/状态树 | 🟡 |
 | **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈 | 计算型反馈传感器（Linter/编译/单测输出回喂）、更完整外部传感器与自我改进 Harness | 🟡 |
 | **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱；多搜索提供商抽象 | 🟡 |
 | **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
@@ -72,7 +72,7 @@
 | **记忆/知识** | case 记忆投影 + RAG（Milvus+ES+MySQL 混合 RRF） | ✅ | `adapter/rag/` |
 | | 语义检索接入 UI | ✅ | `/api/v1/memory` 先 Milvus+ES 语义检索（限定 `case_memory` 源）再 LIKE 兜底、去重、Owner 过滤（D6，`application/memory/service.go`） |
 | | 文档/URL 知识导入管理 | ✅ | `POST/GET/DELETE /api/v1/knowledge`，文档经 `StoreDocument` 索引进 RAG（独立 `knowledge_doc` 命名空间）（D7，`application/knowledge/`、`server/router.go`） |
-| | 长期记忆编辑/删除/标注 | ❌ | memory 只读查询（`GET /memory` 系列），无 PATCH / DELETE |
+| | 长期记忆编辑/删除/标注 | ✅ | `PATCH/DELETE /api/v1/memory/:id` 支持摘要/结论/经验/标注/标签编辑、校验与 Owner 隔离；更新/删除同步 RAG case-memory chunks，失败回滚 SQL 投影；前端 Memory 页支持标注、标签与删除 |
 | **会话** | 单次 question→decision（`/assistant`） | ✅ | `application/assistant/service.go` |
 | | **持久对话线程/多轮追问/对话内上下文** | ✅ | `magi_conversation`/`magi_conversation_message` + owner-scoped List/Get/Delete API；`POST /assistant` 支持 `conversation_id`，追问水合最近历史与关联 case resolution；前端 Conversations 页支持线程列表、追问、删除与 case 跳转 |
 | **身份与多租户** | API-Key 认证（常量时间比较）+ 按用户所有权 | ✅ | `application/auth`、`server/auth.go` |
@@ -193,6 +193,7 @@
 - D4 跨实例实时：SSE 改 DB-backed 游标轮询或引入 Redis pub/sub。
 - D5 per-role 模型配置（`magi.<role>.model` 覆盖全局）。
 - D6/D7 知识管理：upload API + 文档入库走现有 RAG 管线 + Memory UI 接入语义检索。
+- 记忆治理（已完成）：memory PATCH/DELETE、标注/标签、RAG 索引同步与前端管理。
 - 会话模型（已完成）：conversation/thread + 多轮追问，`/assistant` 已升级为会话式，前端提供 Conversations 页面。
 
 ### Phase 3（平台化，约 8-12 周）

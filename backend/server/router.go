@@ -54,7 +54,7 @@ type RouteDeps struct {
 	// MetricsAuth requires the admin role for /metrics when true (P2 D17).
 	MetricsAuth bool
 	// MaxTokensPerUser / MaxCostUSDPerUser feed /me/usage budget display (P2 D9).
-	MaxTokensPerUser int64
+	MaxTokensPerUser  int64
 	MaxCostUSDPerUser float64
 	// PromptRepo backs the admin prompt registry (P2 D12).
 	PromptRepo port.PromptRepository
@@ -107,6 +107,8 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	memH := handler.NewMemoryHandler(deps.Memory, deps.Decision)
 	v1.GET("/memory", memH.Search)
 	v1.GET("/memory/:id", memH.Get)
+	v1.PATCH("/memory/:id", memH.Update)
+	v1.DELETE("/memory/:id", memH.Delete)
 
 	knowH := handler.NewKnowledgeHandler(deps.Knowledge)
 	v1.POST("/knowledge", knowH.Create)

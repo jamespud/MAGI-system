@@ -82,7 +82,7 @@ func (r *magiRepository) EventRepo() port.EventRepository           { return &ev
 func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{db: r.db} }
 func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
 func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
-func (r *magiRepository) PromptRepo() port.PromptRepository        { return NewPromptRepository(r.db) }
+func (r *magiRepository) PromptRepo() port.PromptRepository         { return NewPromptRepository(r.db) }
 
 var _ port.Repository = (*magiRepository)(nil)
 
@@ -630,7 +630,8 @@ func (r *memoryRepo) Get(ctx context.Context, caseID string) (*entity.CaseMemory
 		CaseID: m.CaseID, QuestionSummary: m.QuestionSummary, ContextSummary: m.ContextSummary,
 		KeyEvidence: fromJSON[[]entity.MemoryEvidence](m.KeyEvidenceJSON), KeyClaims: fromJSON[[]entity.MemoryClaim](m.KeyClaimsJSON),
 		Votes: fromJSON[[]entity.MemoryVote](m.VotesJSON), Resolution: m.Resolution,
-		Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), ProjectionVersion: m.ProjectionVersion,
+		Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), Annotation: m.Annotation,
+		Tags: fromJSON[[]string](m.TagsJSON), ProjectionVersion: m.ProjectionVersion,
 	}, nil
 }
 func (r *memoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection) error {
@@ -638,7 +639,7 @@ func (r *memoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 		CaseID: proj.CaseID, QuestionSummary: proj.QuestionSummary, ContextSummary: proj.ContextSummary,
 		KeyEvidenceJSON: toJSON(proj.KeyEvidence), KeyClaimsJSON: toJSON(proj.KeyClaims),
 		VotesJSON: toJSON(proj.Votes), Resolution: proj.Resolution, OutcomeJSON: toJSON(proj.Outcome),
-		ProjectionVersion: proj.ProjectionVersion,
+		Annotation: proj.Annotation, TagsJSON: toJSON(proj.Tags), ProjectionVersion: proj.ProjectionVersion,
 	}
 	return r.db.WithContext(ctx).Save(&m).Error
 }
@@ -649,7 +650,8 @@ func memoryProjectionFromModel(m *MemoryProjectionModel) *entity.CaseMemoryProje
 		KeyEvidence: fromJSON[[]entity.MemoryEvidence](m.KeyEvidenceJSON),
 		KeyClaims:   fromJSON[[]entity.MemoryClaim](m.KeyClaimsJSON),
 		Votes:       fromJSON[[]entity.MemoryVote](m.VotesJSON), Resolution: m.Resolution,
-		Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), ProjectionVersion: m.ProjectionVersion,
+		Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), Annotation: m.Annotation,
+		Tags: fromJSON[[]string](m.TagsJSON), ProjectionVersion: m.ProjectionVersion,
 	}
 }
 
@@ -664,6 +666,12 @@ func (r *memoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, 
 		out[i] = memoryProjectionFromModel(&models[i])
 	}
 	return out, nil
+}
+
+// Delete removes a case-memory projection. RAG chunks are removed by the
+// application service so this repository operation remains SQL-only.
+func (r *memoryRepo) Delete(ctx context.Context, caseID string) error {
+	return r.db.WithContext(ctx).Delete(&MemoryProjectionModel{}, "case_id = ?", caseID).Error
 }
 
 // Search provides a deterministic local fallback for historical decision
@@ -681,7 +689,7 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 	pattern := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
 	var models []MemoryProjectionModel
 	if err := r.db.WithContext(ctx).
-		Where("question_summary LIKE ? OR context_summary LIKE ? OR resolution LIKE ?", pattern, pattern, pattern).
+		Where("question_summary LIKE ? OR context_summary LIKE ? OR resolution LIKE ? OR annotation LIKE ? OR tags_json LIKE ?", pattern, pattern, pattern, pattern, pattern).
 		Order("projection_version DESC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, err
 	}
@@ -693,7 +701,8 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 			KeyEvidence: fromJSON[[]entity.MemoryEvidence](m.KeyEvidenceJSON),
 			KeyClaims:   fromJSON[[]entity.MemoryClaim](m.KeyClaimsJSON),
 			Votes:       fromJSON[[]entity.MemoryVote](m.VotesJSON), Resolution: m.Resolution,
-			Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), ProjectionVersion: m.ProjectionVersion,
+			Outcome: fromJSON[*entity.CaseOutcome](m.OutcomeJSON), Annotation: m.Annotation,
+			Tags: fromJSON[[]string](m.TagsJSON), ProjectionVersion: m.ProjectionVersion,
 		}
 	}
 	return out, nil

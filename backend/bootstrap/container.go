@@ -48,8 +48,8 @@ import (
 	"github.com/jamespud/magi/backend/domain/evidence"
 	domainmemory "github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/orchestration"
-	promptpkg "github.com/jamespud/magi/backend/domain/prompt"
 	"github.com/jamespud/magi/backend/domain/port"
+	promptpkg "github.com/jamespud/magi/backend/domain/prompt"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/validation"
@@ -107,6 +107,7 @@ var Module = fx.Options(
 		provideDecisionService,
 		provideReplayService,
 		provideEvaluationService,
+		provideMemoryIndexer,
 		provideMemoryService,
 		provideKnowledgeRepository,
 		provideKnowledgeService,
@@ -175,13 +176,13 @@ var Module = fx.Options(
 			ModelName:    cfg.Model.ModelName,
 			MaxSteps:     cfg.Magi.MaxSteps,
 			Export:       handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
-			RateLimit:    appserver.RateLimitConfig{
+			RateLimit: appserver.RateLimitConfig{
 				Enabled:          cfg.HTTPRateLimit.Enabled,
 				PerUserPerMinute: cfg.HTTPRateLimit.PerUserPerMinute,
 				PerIPPerMinute:   cfg.HTTPRateLimit.PerIPPerMinute,
 			},
-			MetricsAuth:      cfg.Metrics.AuthRequired,
-			MaxTokensPerUser: cfg.Limits.MaxTokensPerUser,
+			MetricsAuth:       cfg.Metrics.AuthRequired,
+			MaxTokensPerUser:  cfg.Limits.MaxTokensPerUser,
 			MaxCostUSDPerUser: cfg.Limits.MaxCostUSDPerUser,
 			PromptRepo:        repo.PromptRepo(),
 		})
@@ -473,8 +474,15 @@ func provideReplayService(repo port.Repository) *replay.Service {
 	return replay.NewService(repo.EventRepo())
 }
 
-func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository) *memory.Service {
-	return memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo()))
+func provideMemoryIndexer(knowledge port.KnowledgePort) port.MemoryIndexer {
+	if indexer, ok := knowledge.(port.MemoryIndexer); ok {
+		return indexer
+	}
+	return nil
+}
+
+func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository, indexer port.MemoryIndexer) *memory.Service {
+	return memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo()), memory.WithIndexer(indexer))
 }
 
 func provideKnowledgeRepository(db *gorm.DB) port.KnowledgeRepository {

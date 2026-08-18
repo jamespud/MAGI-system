@@ -245,6 +245,31 @@ describe('api.searchMemory', () => {
 });
 
 
+describe('api memory governance', () => {
+  it('updates a memory projection', async () => {
+    const memory = { CaseID: 'case-1', QuestionSummary: 'q', ContextSummary: '', Resolution: 'approve', Annotation: 'trusted', Tags: ['ops'], ProjectionVersion: 1 };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(memory),
+    } as Response);
+    await expect(api.updateMemory('case 1', { annotation: 'trusted', tags: ['ops'] })).resolves.toEqual(memory);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/memory/case%201', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ annotation: 'trusted', tags: ['ops'] }),
+    });
+  });
+
+  it('deletes a memory projection', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: true, status: 204 } as Response);
+    await expect(api.deleteMemory('case-1')).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/memory/case-1', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+});
+
 describe('api auth channel (P0: D1)', () => {
   it('injects X-API-Key header when a key is stored', async () => {
     setApiKey('sk-test');

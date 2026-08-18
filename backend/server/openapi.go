@@ -36,7 +36,11 @@ const openAPISpec = `{
     "/api/v1/cases/{id}/trace": {"get": {"summary": "Case trace", "responses": {"200": {"description": "trace"}}}},
     "/api/v1/cases/{id}/stream": {"get": {"summary": "SSE stream", "responses": {"200": {"description": "stream"}}}},
     "/api/v1/memory": {"get": {"summary": "Search case memory", "responses": {"200": {"description": "memories"}}}},
-    "/api/v1/memory/{id}": {"get": {"summary": "Get case memory", "responses": {"200": {"description": "memory"}}}},
+    "/api/v1/memory/glm-5.3_common": {
+      "get": {"summary": "Get case memory", "responses": {"200": {"description": "memory"}}},
+      "patch": {"summary": "Edit, annotate, or tag case memory", "responses": {"200": {"description": "memory"}}},
+      "delete": {"summary": "Delete case memory and its RAG chunks", "responses": {"204": {"description": "deleted"}}}
+    },
     "/api/v1/evaluation": {"post": {"summary": "Evaluate a case (case_id in body/query)", "responses": {"200": {"description": "evaluation"}}}},
     "/api/v1/evaluation/{id}": {"post": {"summary": "Evaluate a case by ID", "responses": {"200": {"description": "evaluation"}}}},
     "/api/v1/evaluation/{id}/judge": {"post": {"summary": "Run LLM-as-a-Judge on a case", "responses": {"200": {"description": "judge"}}}},

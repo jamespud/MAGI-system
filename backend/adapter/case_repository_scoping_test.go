@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
-	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 // TestCaseRepository_ListForUser verifies the multi-tenant, paginated listing
@@ -135,5 +135,50 @@ func TestMemoryRepository_Search_LIKE(t *testing.T) {
 	resMiss, err := mr.Search(ctx, "no-such-term", 10)
 	if err != nil || len(resMiss) != 0 {
 		t.Fatalf("expected 0 matches, got %d err=%v", len(resMiss), err)
+	}
+}
+
+func TestMemoryRepository_AnnotationTagsAndDelete(t *testing.T) {
+	db := openDatasetDB(t)
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	mr := repo.MemoryRepo()
+
+	proj := &entity.CaseMemoryProjection{
+		CaseID:            "memory-edit",
+		QuestionSummary:   "database choice",
+		ContextSummary:    "latency matters",
+		Resolution:        "use postgres",
+		Annotation:        "verified by SRE",
+		Tags:              []string{"ops", "database"},
+		Outcome:           &entity.CaseOutcome{Status: "resolved", Learned: "use managed postgres"},
+		ProjectionVersion: 3,
+	}
+	if err := mr.Save(ctx, proj); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	loaded, err := mr.Get(ctx, proj.CaseID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if loaded.Annotation != proj.Annotation || len(loaded.Tags) != 2 || loaded.Outcome.Learned != proj.Outcome.Learned {
+		t.Fatalf("roundtrip: %+v", loaded)
+	}
+
+	byTag, err := mr.Search(ctx, "database", 10)
+	if err != nil || len(byTag) != 1 {
+		t.Fatalf("tag search: len=%d err=%v", len(byTag), err)
+	}
+	byAnnotation, err := mr.Search(ctx, "verified", 10)
+	if err != nil || len(byAnnotation) != 1 {
+		t.Fatalf("annotation search: len=%d err=%v", len(byAnnotation), err)
+	}
+
+	if err := mr.Delete(ctx, proj.CaseID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	deleted, err := mr.Get(ctx, proj.CaseID)
+	if err == nil || deleted != nil {
+		t.Fatalf("expected deleted memory, got=%v err=%v", deleted, err)
 	}
 }

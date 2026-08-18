@@ -59,6 +59,13 @@ const (
 // DocumentIndexer indexes and deletes arbitrary knowledge documents in the
 // RAG pipeline. It is intentionally separate from KnowledgePort so existing
 // case-memory fakes stay valid.
+// MemoryIndexer updates and removes case-memory chunks in the RAG pipeline.
+// It is separate from KnowledgePort so retrieval-only fakes remain valid.
+type MemoryIndexer interface {
+	Store(ctx context.Context, proj *entity.CaseMemoryProjection) (StoreStats, error)
+	DeleteSource(ctx context.Context, source, sourceRef string) error
+}
+
 type DocumentIndexer interface {
 	StoreDocument(ctx context.Context, doc *entity.KnowledgeDoc) (StoreStats, error)
 	DeleteSource(ctx context.Context, source, sourceRef string) error

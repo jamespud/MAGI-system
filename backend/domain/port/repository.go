@@ -130,6 +130,7 @@ type MemoryRepository interface {
 	// List returns all memory projections ordered by projection_version DESC
 	// (P2 D15 export).
 	List(ctx context.Context) ([]*entity.CaseMemoryProjection, error)
+	Delete(ctx context.Context, caseID string) error
 }
 
 type ToolCallRepository interface {

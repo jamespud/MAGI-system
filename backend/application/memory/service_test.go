@@ -24,7 +24,10 @@ func (s *stubMemoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjec
 func (s *stubMemoryRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
 	return nil, nil
 }
-func (s *stubMemoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) { return nil, nil }
+func (s *stubMemoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
+func (s *stubMemoryRepo) Delete(ctx context.Context, caseID string) error { return nil }
 
 func TestMemoryService_Get(t *testing.T) {
 	want := &entity.CaseMemoryProjection{QuestionSummary: "test"}
@@ -68,6 +71,7 @@ func (s *searchMemRepo) Search(ctx context.Context, query string, limit int) ([]
 func (s *searchMemRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
 	return nil, nil
 }
+func (s *searchMemRepo) Delete(ctx context.Context, caseID string) error { return nil }
 
 type memCaseRepo struct {
 	byID map[string]*entity.DecisionCase
@@ -87,7 +91,9 @@ func (s *memCaseRepo) UpdateTask(ctx context.Context, id string, task *entity.De
 func (s *memCaseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize int) ([]*entity.DecisionCase, int64, error) {
 	return nil, 0, nil
 }
-func (s *memCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error { return nil }
+func (s *memCaseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error {
+	return nil
+}
 func (s *memCaseRepo) Delete(ctx context.Context, id string) error { return nil }
 
 func TestMemoryService_SearchFiltersByOwner(t *testing.T) {
@@ -136,6 +142,10 @@ func (s *mapMemRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection
 }
 func (s *mapMemRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
 	return s.like, s.likeErr
+}
+func (s *mapMemRepo) Delete(ctx context.Context, caseID string) error {
+	delete(s.byID, caseID)
+	return nil
 }
 func (s *mapMemRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
 	if s.byID == nil {
@@ -260,5 +270,147 @@ func TestMemoryService_SearchEmptyQuery(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Fatalf("expected no results for empty query, got %+v", out)
+	}
+}
+
+type mutableMemoryRepo struct {
+	byID map[string]*entity.CaseMemoryProjection
+}
+
+func cloneMemoryProjection(in *entity.CaseMemoryProjection) *entity.CaseMemoryProjection {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.KeyEvidence = append([]entity.MemoryEvidence(nil), in.KeyEvidence...)
+	out.KeyClaims = append([]entity.MemoryClaim(nil), in.KeyClaims...)
+	out.Votes = append([]entity.MemoryVote(nil), in.Votes...)
+	out.Tags = append([]string(nil), in.Tags...)
+	if in.Outcome != nil {
+		outcome := *in.Outcome
+		out.Outcome = &outcome
+	}
+	return &out
+}
+
+func (s *mutableMemoryRepo) Get(ctx context.Context, caseID string) (*entity.CaseMemoryProjection, error) {
+	if proj, ok := s.byID[caseID]; ok {
+		return cloneMemoryProjection(proj), nil
+	}
+	return nil, nil
+}
+
+func (s *mutableMemoryRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection) error {
+	s.byID[proj.CaseID] = cloneMemoryProjection(proj)
+	return nil
+}
+
+func (s *mutableMemoryRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
+
+func (s *mutableMemoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
+
+func (s *mutableMemoryRepo) Delete(ctx context.Context, caseID string) error {
+	delete(s.byID, caseID)
+	return nil
+}
+
+type recordingMemoryIndexer struct {
+	stored   []*entity.CaseMemoryProjection
+	deleted  []string
+	storeErr error
+}
+
+func (i *recordingMemoryIndexer) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
+	return port.RetrieveResult{}, nil
+}
+
+func (i *recordingMemoryIndexer) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
+	if i.storeErr != nil {
+		return port.StoreStats{}, i.storeErr
+	}
+	i.stored = append(i.stored, cloneMemoryProjection(proj))
+	return port.StoreStats{Chunks300: 1}, nil
+}
+
+func (i *recordingMemoryIndexer) DeleteSource(ctx context.Context, source, sourceRef string) error {
+	i.deleted = append(i.deleted, source+":"+sourceRef)
+	return nil
+}
+
+func TestMemoryService_UpdateEditsAnnotatesTagsAndReindexes(t *testing.T) {
+	repo := &mutableMemoryRepo{byID: map[string]*entity.CaseMemoryProjection{
+		"c1": {CaseID: "c1", QuestionSummary: "old q", ContextSummary: "old ctx", Resolution: "old", Outcome: &entity.CaseOutcome{Status: "resolved"}},
+	}}
+	indexer := &recordingMemoryIndexer{}
+	svc := memory.NewService(nil, repo, memory.WithIndexer(indexer))
+
+	question, contextSummary, resolution, learned, annotation := "new q", "new ctx", "new result", "new lesson", "trusted memory"
+	got, err := svc.Update(context.Background(), 0, "c1", memory.UpdatePatch{
+		QuestionSummary: &question,
+		ContextSummary:  &contextSummary,
+		Resolution:      &resolution,
+		Learned:         &learned,
+		Annotation:      &annotation,
+		Tags:            []string{"ops", "Ops", "database"},
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got.QuestionSummary != question || got.ContextSummary != contextSummary || got.Resolution != resolution ||
+		got.Outcome.Learned != learned || got.Annotation != annotation || len(got.Tags) != 2 {
+		t.Fatalf("updated projection: %+v", got)
+	}
+	if len(indexer.stored) != 1 || indexer.stored[0].Annotation != annotation {
+		t.Fatalf("reindex calls: %+v", indexer.stored)
+	}
+}
+
+func TestMemoryService_UpdateRejectsOtherOwner(t *testing.T) {
+	repo := &mutableMemoryRepo{byID: map[string]*entity.CaseMemoryProjection{"c1": {CaseID: "c1"}}}
+	indexer := &recordingMemoryIndexer{}
+	cases := &memCaseRepo{byID: map[string]*entity.DecisionCase{"c1": {ID: "c1", UserID: 8}}}
+	svc := memory.NewService(nil, repo, memory.WithCaseRepo(cases), memory.WithIndexer(indexer))
+
+	annotation := "not mine"
+	if _, err := svc.Update(context.Background(), 7, "c1", memory.UpdatePatch{Annotation: &annotation}); err != memory.ErrForbidden {
+		t.Fatalf("error=%v, want forbidden", err)
+	}
+	if len(indexer.stored) != 0 {
+		t.Fatal("forbidden update must not reindex")
+	}
+}
+
+func TestMemoryService_DeleteRemovesAndRestoresOnIndexFailure(t *testing.T) {
+	repo := &mutableMemoryRepo{byID: map[string]*entity.CaseMemoryProjection{"c1": {CaseID: "c1", QuestionSummary: "kept"}}}
+	indexer := &recordingMemoryIndexer{}
+	svc := memory.NewService(nil, repo, memory.WithIndexer(indexer))
+	if err := svc.Delete(context.Background(), 0, "c1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, exists := repo.byID["c1"]; exists || len(indexer.deleted) != 1 || indexer.deleted[0] != "case_memory:c1" {
+		t.Fatalf("delete state: repo=%v deleted=%v", repo.byID, indexer.deleted)
+	}
+
+	repo.byID["c2"] = &entity.CaseMemoryProjection{
+		CaseID: "c2", QuestionSummary: "kept",
+		Outcome: &entity.CaseOutcome{Learned: "old lesson"},
+		Tags:    []string{"old"},
+	}
+	failing := &recordingMemoryIndexer{storeErr: errors.New("index unavailable")}
+	svc = memory.NewService(nil, repo, memory.WithIndexer(failing))
+	annotation, learned := "edit", "new lesson"
+	if _, err := svc.Update(context.Background(), 0, "c2", memory.UpdatePatch{
+		Annotation: &annotation,
+		Learned:    &learned,
+	}); err == nil {
+		t.Fatal("expected reindex failure")
+	}
+	if repo.byID["c2"].Annotation != "" || repo.byID["c2"].QuestionSummary != "kept" ||
+		repo.byID["c2"].Outcome.Learned != "old lesson" || len(repo.byID["c2"].Tags) != 1 || repo.byID["c2"].Tags[0] != "old" {
+		t.Fatalf("failed update must restore original: %+v", repo.byID["c2"])
 	}
 }
