@@ -131,6 +131,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 		{Source: entity.ToolSourceLocal, ToolName: magi.RepoToolName},
 		{Source: entity.ToolSourceLocal, ToolName: magi.WebFetchToolName},
 		{Source: entity.ToolSourceLocal, ToolName: magi.DelegateToolName},
+		{Source: entity.ToolSourceLocal, ToolName: magi.SensorToolName},
 	}
 
 	all := magi.NewLocalToolRegistry()
@@ -138,7 +139,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
-	if len(defs) != 7 {
+	if len(defs) != 8 {
 		t.Fatalf("all-local registry should resolve every local tool, got %+v", defs)
 	}
 
@@ -203,6 +204,15 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	}
 	if len(defs) != 1 || defs[0].Name != magi.DelegateToolName {
 		t.Fatalf("delegate-only registry resolved %+v", defs)
+	}
+
+	sensorOnly := magi.NewLocalToolRegistry(magi.SensorToolName)
+	defs, err = sensorOnly.List(context.Background(), bindings)
+	if err != nil {
+		t.Fatalf("list sensor only: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != magi.SensorToolName {
+		t.Fatalf("sensor-only registry resolved %+v", defs)
 	}
 }
 

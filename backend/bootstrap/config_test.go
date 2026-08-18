@@ -482,6 +482,41 @@ func TestConfigValidate_SelfImproveAutoApply(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_SensorTool(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.SensorTool.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "sensor_tool: at least one check") {
+		t.Fatalf("expected sensor_tool checks error, got %v", err)
+	}
+	cfg.SensorTool.Checks = []bootstrap.SensorCheckConfig{{Name: "lint", Command: "gofmt"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid sensor_tool rejected: %v", err)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsSensorToolWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.SensorTool.Enabled = true
+	cfg.SensorTool.Checks = []bootstrap.SensorCheckConfig{{Name: "lint", Command: "gofmt"}}
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "run_check" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("run_check not bound when sensor_tool enabled: %+v", c.Tools)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsDelegateToolWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.DelegateTool.Enabled = true

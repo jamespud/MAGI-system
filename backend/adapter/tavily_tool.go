@@ -107,6 +107,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == SensorToolName && r.isEnabled(SensorToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       SensorToolName,
+				Desc:       "Run a registered external deterministic check (linter, compiler, unit test) and return its output for self-correction.",
+				ArgsSchema: []byte(sensorArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil

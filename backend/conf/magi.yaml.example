@@ -256,6 +256,16 @@ selfimprove:
   auto_apply_enabled: false
   auto_apply_threshold: 3
 
+# External deterministic sensor tool (run_check): register linters, compilers,
+# or unit-test commands; the agent can invoke them and the output is fed back
+# for self-correction. Only registered commands are executable. Disabled by
+# default.
+sensor_tool:
+  enabled: false
+  checks:
+    - { name: "lint", command: "gofmt", args: ["-l", "."], timeout_seconds: 30 }
+    # - { name: "test", command: "go", args: ["test", "./..."], timeout_seconds: 120 }
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

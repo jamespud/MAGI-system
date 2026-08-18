@@ -365,6 +365,19 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		}
 		executors[magi.DelegateToolName] = delegate
 	}
+	if cfg.SensorTool.Enabled {
+		checks := make([]magi.SensorCheck, 0, len(cfg.SensorTool.Checks))
+		for _, check := range cfg.SensorTool.Checks {
+			checks = append(checks, magi.SensorCheck{
+				Name: check.Name, Command: check.Command, Args: check.Args, Timeout: check.Timeout,
+			})
+		}
+		sensorTool, err := magi.NewSensorToolExecutor(magi.SensorToolConfig{Enabled: true, Checks: checks}, nil)
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.SensorToolName] = sensorTool
+	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)
 	if err != nil {

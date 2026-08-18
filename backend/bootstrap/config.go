@@ -72,6 +72,7 @@ type Config struct {
 	WebTool      WebToolConfig      `yaml:"web_tool"`
 	DelegateTool DelegateToolConfig `yaml:"delegate_tool"`
 	SelfImprove  SelfImproveConfig  `yaml:"selfimprove"`
+	SensorTool   SensorToolConfig   `yaml:"sensor_tool"`
 	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -221,6 +222,20 @@ type DelegateToolConfig struct {
 type SelfImproveConfig struct {
 	AutoApplyEnabled   bool `yaml:"auto_apply_enabled"`
 	AutoApplyThreshold int  `yaml:"auto_apply_threshold"`
+}
+
+// SensorToolConfig registers external deterministic checks (linters,
+// compilers, unit-test commands) for the run_check tool.
+type SensorToolConfig struct {
+	Enabled bool                `yaml:"enabled"`
+	Checks  []SensorCheckConfig `yaml:"checks"`
+}
+
+type SensorCheckConfig struct {
+	Name    string   `yaml:"name"`
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
+	Timeout int      `yaml:"timeout_seconds"`
 }
 
 type EmbeddingConfig struct {
@@ -666,6 +681,9 @@ func enabledLocalTools(cfg *Config) []string {
 	if cfg.DelegateTool.Enabled {
 		tools = append(tools, magi.DelegateToolName)
 	}
+	if cfg.SensorTool.Enabled {
+		tools = append(tools, magi.SensorToolName)
+	}
 	return tools
 }
 
@@ -856,6 +874,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 	if cfg.DelegateTool.Enabled {
 		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.DelegateToolName})
 	}
+	if cfg.SensorTool.Enabled {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.SensorToolName})
+	}
 	return tools
 }
 
@@ -921,6 +942,21 @@ func (c *Config) Validate() error {
 	}
 	if c.SelfImprove.AutoApplyEnabled && c.SelfImprove.AutoApplyThreshold < 1 {
 		return fmt.Errorf("selfimprove: auto_apply_threshold must be at least 1 when auto_apply_enabled")
+	}
+	if c.SensorTool.Enabled {
+		if len(c.SensorTool.Checks) == 0 {
+			return fmt.Errorf("sensor_tool: at least one check is required when enabled")
+		}
+		seen := map[string]bool{}
+		for i, check := range c.SensorTool.Checks {
+			if strings.TrimSpace(check.Name) == "" || strings.TrimSpace(check.Command) == "" {
+				return fmt.Errorf("sensor_tool.checks[%d]: name and command are required", i)
+			}
+			if seen[check.Name] {
+				return fmt.Errorf("sensor_tool.checks[%d]: duplicate check name %q", i, check.Name)
+			}
+			seen[check.Name] = true
+		}
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")

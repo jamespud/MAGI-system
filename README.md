@@ -271,6 +271,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Online golden regression** - promote completed production cases to a golden set (`/admin/golden`) and sync them into the built-in suite so the automated regression gate covers real decisions.
 - **Self-improving automation (guarded)** - after each automated regression, recurring failure suggestions can be auto-applied to the versioned prompt registry once a category reaches a configured threshold (`selfimprove.auto_apply_enabled`).
 - **Task state tree** - each agent/round execution is recorded as a node (`GET /cases/:id/task-tree`) and shown in the Replay trace view.
+- **External deterministic sensors** - register linter/compiler/unit-test commands (`sensor_tool`); the `run_check` tool executes only registered checks and feeds output back for self-correction.
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -321,6 +322,7 @@ repo_tool: { enabled: true, roots: ["/srv/app"] }
 web_tool: { enabled: true, allowed_domains: ["docs.example.com"] }
 delegate_tool: { enabled: true }
 selfimprove: { auto_apply_enabled: false, auto_apply_threshold: 3 }
+sensor_tool: { enabled: true, checks: [{ name: "lint", command: "gofmt" }] }
 feedback_tool: { enabled: true }
 benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
