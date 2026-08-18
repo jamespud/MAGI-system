@@ -194,14 +194,14 @@
 
 按用户视角的优先级排序：
 
-1. **通用任务执行层（最重要）**：MAGI 是"决策引擎"，不是"任务执行 harness"。缺文件/代码库编辑、shell、浏览器/computer-use、长任务规划与 subagent 派生。这是从"决策产品"走向"AI harness 平台"的分水岭。
+1. **通用任务执行层（已补齐）**：原生只读 DB/文件/代码库工具（`db_query`/`file_query`/`repo_query`）+ 受限 `web_fetch` + Docker/WASM 沙箱 + `delegate` 动态 subagent（单/并行、上限 4）+ 可编辑调查计划 + 任务状态树；完整浏览器自动化经 MCP stdio/http 接入外部 Playwright/Chrome MCP（集成缝）。剩余可选项：文件/代码库写操作与 shell（当前刻意只读，配合审批门扩展）。
 2. **会话与多轮追问（已补齐）**：`/assistant` 已升级为持久会话入口，支持 conversation/thread、追问、历史与既往结论水合、前端线程管理。
-3. **身份与访问管理**：登录/SSO、用户自助、密钥管理、角色粒度（当前只有 admin/非 admin）、审计 UI。
-4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
-5. **多模型编排**：per-agent/commander/judge 独立模型配置与多供应商自动降级已完成；剩余集中式模型参数管理。
-6. **评估运营化**：CI 门禁、内置基准集与聚合看板已完成；剩余线上 golden、自动回归与 prompt 版本运营。
-7. **可观测性**：前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 看板栈已完成；剩余默认 trace 落库与告警通道（邮件/IM）接入。
-8. **运营与交付**：K8s/Helm 与备份/恢复已完成；剩余 i18n 覆盖度与灾备演练自动化。
+3. **身份与访问管理（已补齐）**：登录/SSO（OIDC）、用户自助注册、DB 密钥管理与轮换、admin/operator/user 细粒度 RBAC、**审计轨迹 + 管理页**（`/admin/audit`）。
+4. **知识管理（已补齐）**：文档/URL 导入、删除与索引同步，语义检索已接入 Memory UI 与 `/assistant` 上下文构建。
+5. **多模型编排（已补齐）**：per-agent/commander/judge 独立模型配置 + 多供应商自动降级；剩余可选项：集中式模型参数管理。
+6. **评估运营化（已补齐）**：CI 门禁、内置基准集与聚合看板、定时自动回归、线上 golden、prompt 版本注册表。
+7. **可观测性（已补齐）**：前端 trace 视图、默认 Prometheus/Grafana/Alertmanager 看板栈与告警规则；剩余可选项：默认 trace 落库与邮件/IM 告警通道接入。
+8. **运营与交付（已补齐）**：K8s/Helm 清单、MySQL+RAG 备份/恢复脚本、i18n（en/zh）；剩余可选项：灾备演练自动化。
 
 ---
 
