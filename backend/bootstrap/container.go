@@ -298,6 +298,17 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		}
 		executors[magi.FileToolName] = fileTool
 	}
+	if cfg.RepoTool.Enabled {
+		repoTool, err := magi.NewRepoQueryToolExecutor(magi.RepoToolConfig{
+			Enabled: cfg.RepoTool.Enabled, Roots: cfg.RepoTool.Roots,
+			Includes: cfg.RepoTool.Includes, MaxResults: cfg.RepoTool.MaxResults,
+			MaxFileBytes: cfg.RepoTool.MaxFileBytes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.RepoToolName] = repoTool
+	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)
 	if err != nil {

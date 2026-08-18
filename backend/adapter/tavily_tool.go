@@ -83,6 +83,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == RepoToolName && r.isEnabled(RepoToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       RepoToolName,
+				Desc:       "Grep for a substring or list matching files inside the allow-listed repository roots. Returns hits or file paths as JSON.",
+				ArgsSchema: []byte(repoArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil

@@ -208,6 +208,16 @@ file_tool:
   # max_file_bytes: 262144
   # max_list_items: 100
 
+# Built-in read-only repository query tool (repo_query): grep a substring or
+# list files inside allow-listed roots. Searches are bounded and never follow
+# symlinks out of the roots. Disabled by default.
+repo_tool:
+  enabled: false
+  roots: []                # absolute repository roots, e.g. ["/srv/app"]
+  # includes: ["*.go", "*.ts", "*.tsx", "*.py", "*.md", "*.sql", "*.yaml", "*.yml"]
+  # max_results: 50
+  # max_file_bytes: 4194304
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

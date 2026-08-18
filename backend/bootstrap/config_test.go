@@ -400,6 +400,41 @@ func TestConfigValidate_FileTool(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_RepoTool(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.RepoTool.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "repo_tool: at least one root") {
+		t.Fatalf("expected repo_tool roots validation error, got %v", err)
+	}
+	cfg.RepoTool.Roots = []string{"/srv/repo"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid repo_tool rejected: %v", err)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsRepoToolWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.RepoTool.Enabled = true
+	cfg.RepoTool.Roots = []string{"/srv/repo"}
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "repo_query" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("repo_query not bound when repo_tool enabled: %+v", c.Tools)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsFileToolWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.FileTool.Enabled = true

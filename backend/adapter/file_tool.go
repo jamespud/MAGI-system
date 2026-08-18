@@ -97,22 +97,26 @@ func (e *FileToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRe
 
 // resolve returns the absolute, containment-checked path for the request.
 func (e *FileToolExecutor) resolve(path string) (string, error) {
+	return resolveInRoots(e.roots, path)
+}
+
+func resolveInRoots(roots []string, path string) (string, error) {
 	var candidates []string
 	if filepath.IsAbs(path) {
 		candidates = []string{filepath.Clean(path)}
 	} else {
-		for _, root := range e.roots {
+		for _, root := range roots {
 			candidates = append(candidates, filepath.Join(root, path))
 		}
 	}
 	for _, candidate := range candidates {
-		for _, root := range e.roots {
+		for _, root := range roots {
 			if withinRoot(root, candidate) {
 				return candidate, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("file_query: path %q is outside the configured roots", path)
+	return "", fmt.Errorf("path %q is outside the configured roots", path)
 }
 
 func withinRoot(root, candidate string) bool {
