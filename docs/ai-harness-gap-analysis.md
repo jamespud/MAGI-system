@@ -30,8 +30,32 @@
 
 ## 二、"全面 AI Harness" 能力矩阵对照
 
+> 参考定义：**Agent = Model + Harness**。Harness 不是 Prompt 或应用框架本身，而是围绕模型构建的完整运行时环境与控制基础设施，覆盖上下文/记忆、前馈引导/反馈传感器、工具连接/沙箱、权限护栏、可观测性/断点续传，以及评估回归六大部分。
 > 参考能力域来自主流 AI harness（LangGraph、AutoGen、CrewAI、Claude Code、OpenHands 等）的功能空间。✅=已实现且较完整，🟡=部分实现/有缺陷，❌=缺失。
-> 更新记录：2026-08-18 按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
+> 更新记录：2026-08-18 补充六大核心组件级对照，并按 AI Harness 6 大核心组件（Context & Memory / Feedforward & Sensors / Tool & Sandbox / Guardrails & Permissions / Observability & Checkpoint / Evaluation）复核；D1–D17 已修复项状态同步为 ✅/🟡，并新增通用任务执行、反馈传感器、设计模式等缺口行。
+
+### 2.1 概念边界与组件级总览
+
+先校准概念边界，避免把 MAGI 误判为“提示词集合”或普通“Agent SDK”：
+
+| 对象 | 定位 | 与 MAGI 的关系 |
+| --- | --- | --- |
+| Prompt Engineering | 给模型的文本指令输入，解决“模型怎么想” | MAGI 的版本化 prompt 只是前馈引导的一部分，不构成 Harness 全部 |
+| Agent Framework | 开发应用所需的 SDK/组件库，解决“代码怎么组装” | MAGI 不是 LangChain/CrewAI 这类框架复用问题，而是已落地的运行时服务 |
+| Agent Harness | 智能体在真实环境中的完整运行时与控制基础设施，解决“如何可靠、安全地完成任务” | MAGI 的评估目标：以确定性 Go 控制面驾驭概率性 LLM，并横向补齐通用 Harness 能力 |
+
+六大核心组件的组件级状态如下（组件级状态用于总体判断，不计入下方明细行状态统计）：
+
+| Harness 核心组件 | 定义拆解 | MAGI 已覆盖 | 仍未覆盖 / 待补齐 | 组件状态 |
+| --- | --- | --- | --- | --- |
+| **1. Context & Memory** | 短期工作记忆、上下文压缩、长期记忆持久化、跨会话水合、文件/状态树 | agent loop 工作记忆、context compaction、case 记忆投影、Milvus+ES+MySQL 混合 RAG、知识库导入 | 记忆编辑/删除/标注；更通用的任务级文件/状态树 | 🟡 |
+| **2. Feedforward & Sensors** | 事前规范/模板/架构约束，事后编译、Lint、测试、语义审查并回喂自愈 | 版本化 prompt、角色契约/RoleGate、FSM 编排、反思/复议/LLM judge 等推理型反馈 | 计算型反馈传感器（Linter/编译/单测输出回喂）、更完整外部传感器与自我改进 Harness | 🟡 |
+| **3. Tool & Sandbox** | MCP/API 连接器、文件/代码库/浏览器/DB 工具，Docker/WASM/MicroVM 隔离 | Tavily、MCP stdio/http、CodeRunner WASM 沙箱、工具策略 | 原生文件/代码库/浏览器/DB 工具；Docker/MicroVM 沙箱；多搜索提供商抽象 | 🟡 |
+| **4. Guardrails & Permissions** | 最小权限、HITL 审批、策略执行、租户/身份治理、敏感操作拦截 | API Key 认证、资源所有权校验、审批门、配额/预算/工具限额、注入防护与脱敏 | SSO/OAuth/自助注册、细粒度 RBAC、更完整的敏感数据分级与审计 UI | 🟡 |
+| **5. Observability & Checkpointing** | Thought/Action/Observation 追踪、成本观测、检查点休眠/唤醒 | OTel、Trace ID、事件流、Prometheus 指标、case/agent/round checkpoint、durable job | 前端 trace 可视化、默认告警/看板栈、任务级 pause->hibernate->wake | 🟡 |
+| **6. Evaluation & Regression** | 自定义/行业基准、指标看板、CI 回归、线上 golden、Harness 变更评估 | 数据集评测、benchmark/stability/regression gate、LLM judge | CI 集成与线上 golden、标准基准集、评测指标看板、自动回归运营闭环 | 🟡 |
+
+### 2.2 明细能力矩阵
 
 | 能力域 | 子能力 | 状态 | 说明 / 证据 |
 | --- | --- | --- | --- |
@@ -50,7 +74,7 @@
 | | 文档/URL 知识导入管理 | ✅ | `POST/GET/DELETE /api/v1/knowledge`，文档经 `StoreDocument` 索引进 RAG（独立 `knowledge_doc` 命名空间）（D7，`application/knowledge/`、`server/router.go`） |
 | | 长期记忆编辑/删除/标注 | ❌ | memory 只读查询（`GET /memory` 系列），无 PATCH / DELETE |
 | **会话** | 单次 question→decision（`/assistant`） | ✅ | `application/assistant/service.go` |
-| | **持久对话线程/多轮追问/对话内上下文** | ❌ | 无 conversation/thread 模型，无追问链路 |
+| | **持久对话线程/多轮追问/对话内上下文** | ✅ | `magi_conversation`/`magi_conversation_message` + owner-scoped List/Get/Delete API；`POST /assistant` 支持 `conversation_id`，追问水合最近历史与关联 case resolution；前端 Conversations 页支持线程列表、追问、删除与 case 跳转 |
 | **身份与多租户** | API-Key 认证（常量时间比较）+ 按用户所有权 | ✅ | `application/auth`、`server/auth.go` |
 | | Web UI 认证通道 / 登录页 | ✅ | `X-API-Key` header 注入 + 401 `magi:unauthorized` 事件 + `/login` 页（D1，`frontend/src/api/client.ts`、`pages/Login.tsx`、`api/stream.ts` fetch-streaming） |
 | | 用户管理 / 密钥轮换（DB 用户 + SHA-256 存储） | ✅ | `/admin/users`、`/admin/keys/:id/revoke` + `rotate`、`/me`；明文仅展示一次（D8，`application/users/`、`pages/Users.tsx`） |
@@ -147,7 +171,7 @@
 按用户视角的优先级排序：
 
 1. **通用任务执行层（最重要）**：MAGI 是"决策引擎"，不是"任务执行 harness"。缺文件/代码库编辑、shell、浏览器/computer-use、长任务规划与 subagent 派生。这是从"决策产品"走向"AI harness 平台"的分水岭。
-2. **会话与多轮追问**：`/assistant` 是一次性问答；无 conversation/thread 模型、无追问、无"基于上次决策继续"。
+2. **会话与多轮追问（已补齐）**：`/assistant` 已升级为持久会话入口，支持 conversation/thread、追问、历史与既往结论水合、前端线程管理。
 3. **身份与访问管理**：登录/SSO、用户自助、密钥管理、角色粒度（当前只有 admin/非 admin）、审计 UI。
 4. **知识管理**：文档导入/URL 抓取/语料管理/删除/版本，并把语义检索接到 UI 与 `/assistant`。
 5. **多模型编排**：per-agent/commander/judge 独立模型配置，多供应商路由与降级，模型参数管理。
@@ -169,7 +193,7 @@
 - D4 跨实例实时：SSE 改 DB-backed 游标轮询或引入 Redis pub/sub。
 - D5 per-role 模型配置（`magi.<role>.model` 覆盖全局）。
 - D6/D7 知识管理：upload API + 文档入库走现有 RAG 管线 + Memory UI 接入语义检索。
-- 会话模型：conversation/thread + 多轮追问，`/assistant` 升级为会话式。
+- 会话模型（已完成）：conversation/thread + 多轮追问，`/assistant` 已升级为会话式，前端提供 Conversations 页面。
 
 ### Phase 3（平台化，约 8-12 周）
 - 身份体系（SSO/OAuth/用户自助/密钥轮换）。

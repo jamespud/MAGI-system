@@ -646,9 +646,10 @@ func FromRecurring(r *entity.RecurringCase) RecurringResponse {
 }
 
 type AskRequest struct {
-	Message     string          `json:"message"`
-	Background  string          `json:"background,omitempty"`
-	Constraints []ConstraintDTO `json:"constraints,omitempty"`
+	Message        string          `json:"message"`
+	Background     string          `json:"background,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Constraints    []ConstraintDTO `json:"constraints,omitempty"`
 }
 
 type MemorySearchResponse struct {
@@ -775,17 +776,17 @@ func FromApiKey(k *entity.ApiKey) ApiKeyDTO {
 
 // CaseExport is the full audit bundle for one case.
 type CaseExport struct {
-	Case       CaseResponse               `json:"case"`
-	Resolution *ResolutionExport          `json:"resolution,omitempty"`
-	Report     string                     `json:"report,omitempty"`
-	Agents     []*entity.AgentRun         `json:"agents"`
-	Evidence   []*entity.EvidenceRecord   `json:"evidence"`
-	Claims     []*entity.Claim            `json:"claims"`
-	Votes      []*entity.Vote             `json:"votes"`
-	ToolCalls  []*entity.ToolCall         `json:"tool_calls"`
-	Events     []*entity.MagiEvent        `json:"events"`
+	Case       CaseResponse                 `json:"case"`
+	Resolution *ResolutionExport            `json:"resolution,omitempty"`
+	Report     string                       `json:"report,omitempty"`
+	Agents     []*entity.AgentRun           `json:"agents"`
+	Evidence   []*entity.EvidenceRecord     `json:"evidence"`
+	Claims     []*entity.Claim              `json:"claims"`
+	Votes      []*entity.Vote               `json:"votes"`
+	ToolCalls  []*entity.ToolCall           `json:"tool_calls"`
+	Events     []*entity.MagiEvent          `json:"events"`
 	Memory     *entity.CaseMemoryProjection `json:"memory,omitempty"`
-	ExportedAt string                     `json:"exported_at"`
+	ExportedAt string                       `json:"exported_at"`
 }
 
 // ResolutionExport is a JSON-friendly view of the resolution.
@@ -830,10 +831,10 @@ type MemoryExport struct {
 
 // EvaluationExport bundles quantitative evaluation and the latest judge verdict.
 type EvaluationExport struct {
-	CaseID     string             `json:"case_id"`
-	Evaluation *entity.Evaluation `json:"evaluation,omitempty"`
+	CaseID     string              `json:"case_id"`
+	Evaluation *entity.Evaluation  `json:"evaluation,omitempty"`
 	Judge      *entity.JudgeResult `json:"judge,omitempty"`
-	ExportedAt string             `json:"exported_at"`
+	ExportedAt string              `json:"exported_at"`
 }
 
 // --- P2 D12: Prompt registry DTOs ---
@@ -858,5 +859,52 @@ func FromPrompt(t *entity.PromptTemplate) PromptDTO {
 	return PromptDTO{
 		Key: t.Key, Version: t.Version, Active: t.Active, Content: t.Content,
 		UpdatedAt: t.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// ConversationDTO is the API representation of a conversation thread.
+type ConversationDTO struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ConversationMessageDTO is one turn of a conversation.
+type ConversationMessageDTO struct {
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CaseID    string `json:"case_id,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+type ConversationListResponse struct {
+	Conversations []ConversationDTO `json:"conversations"`
+}
+
+type ConversationDetailResponse struct {
+	Conversation ConversationDTO          `json:"conversation"`
+	Messages     []ConversationMessageDTO `json:"messages"`
+}
+
+type AskInConversationResponse struct {
+	CaseResponse
+	ConversationID string `json:"conversation_id,omitempty"`
+}
+
+// FromConversation maps a conversation entity to its DTO.
+func FromConversation(c *entity.Conversation) ConversationDTO {
+	return ConversationDTO{
+		ID: c.ID, Title: c.Title,
+		CreatedAt: c.CreatedAt.Format(time.RFC3339), UpdatedAt: c.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// FromConversationMessage maps a conversation message entity to its DTO.
+func FromConversationMessage(m *entity.ConversationMessage) ConversationMessageDTO {
+	return ConversationMessageDTO{
+		ID: m.ID, Role: m.Role, Content: m.Content, CaseID: m.CaseID,
+		CreatedAt: m.CreatedAt.Format(time.RFC3339),
 	}
 }

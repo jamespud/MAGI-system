@@ -98,7 +98,8 @@ func newE2EServer(t *testing.T) *hzserver.Hertz {
 	plugsSvc := plugins.NewService(magi.NewPluginBindingRepository(db))
 	admSvc := admin.NewService(repo.CaseRepo(), repo.AgentRunRepo())
 	recSvc := recurring.NewService(magi.NewRecurringRepository(db), repo.CaseRepo(), rm, 1)
-	askSvc := assistant.NewService(decSvc)
+	convRepo := magi.NewConversationRepository(db)
+	askSvc := assistant.NewService(decSvc, assistant.WithConversationRepository(convRepo))
 	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "admin", Key: "k7", UserID: 7, Role: "admin"}, {Name: "u8", Key: "k8", UserID: 8, Role: "user"}})
 	broker := server.NewEventBroker()
 	knowledge := &stubKnowledge{}
@@ -287,20 +288,50 @@ func TestE2E_HarnessFlow(t *testing.T) {
 		t.Fatalf("memory search: %s", mbody2)
 	}
 
-	// Ask MAGI (conversational decision): returns 202 + case id; the run is
-	// executed through the governed async runner.
+	// Ask MAGI starts a persistent thread and executes the case through the
+	// governed async runner. A follow-up turn must stay in the same thread and
+	// hydrate the linked prior decision into the new case context.
 	code, body = post(t, h, "/api/v1/assistant", `{"message":"Should we migrate the database?","background":"scale concerns"}`, "k7")
-	if code != 202 || !strings.Contains(body, `"id":"case-`) {
+	if code != 202 || !strings.Contains(body, `"id":"case-`) || !strings.Contains(body, `"conversation_id":"conv-`) {
 		t.Fatalf("ask async: %d %s", code, body)
 	}
-	// The async run executes on the run manager goroutine; wait for it to
-	// finish before asserting aggregates so the counts are deterministic.
 	askID := field(t, body, "id")
+	conversationID := field(t, body, "conversation_id")
 	waitFor(t, h, "/api/v1/cases/"+askID, "k7", "status", "RESOLVED")
+
+	followUp := `{"message":"What is the rollback plan?","conversation_id":"` + conversationID + `"}`
+	code, body = post(t, h, "/api/v1/assistant", followUp, "k7")
+	if code != 202 || field(t, body, "conversation_id") != conversationID {
+		t.Fatalf("ask follow-up: %d %s", code, body)
+	}
+	followUpID := field(t, body, "id")
+	waitFor(t, h, "/api/v1/cases/"+followUpID, "k7", "status", "RESOLVED")
+	_, followUpCase := get(t, h, "/api/v1/cases/"+followUpID, "k7")
+	if !strings.Contains(followUpCase, "[Conversation history]") || !strings.Contains(followUpCase, "Previous decision ("+askID+")") {
+		t.Fatalf("follow-up context missing thread history: %s", followUpCase)
+	}
+
+	code, body = get(t, h, "/api/v1/conversations", "k7")
+	if code != 200 || !strings.Contains(body, conversationID) {
+		t.Fatalf("list conversations: %d %s", code, body)
+	}
+	code, body = get(t, h, "/api/v1/conversations/"+conversationID, "k7")
+	if code != 200 || !strings.Contains(body, "Should we migrate the database?") || !strings.Contains(body, followUpID) {
+		t.Fatalf("conversation detail: %d %s", code, body)
+	}
+	if code, body := get(t, h, "/api/v1/conversations/"+conversationID, "k8"); code != 403 {
+		t.Fatalf("cross-user conversation access: %d %s", code, body)
+	}
+	if w := ut.PerformRequest(h.Engine, "DELETE", "/api/v1/conversations/"+conversationID, nil, ut.Header{Key: "Authorization", Value: "Bearer k7"}); w.Code != 204 {
+		t.Fatalf("delete conversation: %d %s", w.Code, w.Body.String())
+	}
+	if code, _ := get(t, h, "/api/v1/conversations/"+conversationID, "k7"); code != 404 {
+		t.Fatalf("deleted conversation still reachable: %d", code)
+	}
 
 	// Admin usage (admin role token)
 	code, body = get(t, h, "/api/v1/admin/usage", "k7")
-	if code != 200 || !strings.Contains(body, `"total_cases":5`) || !strings.Contains(body, `"total_runs":5`) || !strings.Contains(body, `"total_tokens":500`) {
+	if code != 200 || !strings.Contains(body, `"total_cases":6`) || !strings.Contains(body, `"total_runs":6`) || !strings.Contains(body, `"total_tokens":600`) {
 		t.Fatalf("admin usage: %d %s", code, body)
 	}
 }

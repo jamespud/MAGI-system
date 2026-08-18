@@ -190,7 +190,11 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 	v1.POST("/recurring/:id/run", recH.RunNow)
 
 	askH := handler.NewAssistantHandler(deps.Assistant)
+	convH := handler.NewConversationHandler(deps.Assistant)
 	v1.POST("/assistant", askH.Ask)
+	v1.GET("/conversations", convH.List)
+	v1.GET("/conversations/:id", convH.Get)
+	v1.DELETE("/conversations/:id", convH.Delete)
 
 	if deps.Export != nil {
 		v1.GET("/cases/:id/export", deps.Export.Case)

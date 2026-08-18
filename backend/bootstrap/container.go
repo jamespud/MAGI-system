@@ -116,6 +116,7 @@ var Module = fx.Options(
 		provideAdminService,
 		provideRecurringRepository,
 		provideRecurringService,
+		provideConversationRepository,
 		provideAssistantService,
 		metrics.New,
 		provideToolPolicy,
@@ -694,8 +695,12 @@ func registerScheduler(lc fx.Lifecycle, svc *recurring.Service, lock port.Schedu
 	})
 }
 
-func provideAssistantService(decSvc *decision.Service) *assistant.Service {
-	return assistant.NewService(decSvc)
+func provideConversationRepository(db *gorm.DB) port.ConversationRepository {
+	return magi.NewConversationRepository(db)
+}
+
+func provideAssistantService(decSvc *decision.Service, convRepo port.ConversationRepository) *assistant.Service {
+	return assistant.NewService(decSvc, assistant.WithConversationRepository(convRepo))
 }
 
 func provideHealthPinger(db *gorm.DB) func(context.Context) error {

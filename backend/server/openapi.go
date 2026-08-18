@@ -18,6 +18,11 @@ const openAPISpec = `{
     "/ready": {"get": {"summary": "Readiness check", "responses": {"200": {"description": "ready"}}}},
     "/version": {"get": {"summary": "Version info", "responses": {"200": {"description": "version"}}}},
     "/api/v1/assistant": {"post": {"summary": "Ask MAGI: run a decision from a message", "responses": {"200": {"description": "decision"}}}},
+    "/api/v1/conversations": {"get": {"summary": "List my conversation threads", "responses": {"200": {"description": "conversations"}}}},
+    "/api/v1/conversations/{conversationID}": {
+      "get": {"summary": "Get a conversation with messages", "responses": {"200": {"description": "conversation"}}},
+      "delete": {"summary": "Delete a conversation thread (cases remain)", "responses": {"204": {"description": "deleted"}}}
+    },
     "/api/v1/cases": {
       "post": {"summary": "Create a decision case", "responses": {"201": {"description": "created"}}},
       "get": {"summary": "List all cases", "responses": {"200": {"description": "list"}}}

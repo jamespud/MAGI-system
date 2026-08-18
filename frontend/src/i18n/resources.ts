@@ -52,6 +52,22 @@ export const en: Record<string, string> = {
   'ws.deleteConfirm': 'Delete case {id} and all its artifacts? This cannot be undone.',
   'ws.forkOf': 'Fork of {id}',
 
+  // Conversations
+  'conversations.title': 'Threads',
+  'conversations.loading': 'Loading conversations…',
+  'conversations.empty': 'No conversations yet.',
+  'conversations.new': 'New conversation',
+  'conversations.emptyThread': 'Ask a question to start a persistent decision thread.',
+  'conversations.newPlaceholder': 'What decision should MAGI analyze?',
+  'conversations.followUpPlaceholder': 'Ask a follow-up question…',
+  'conversations.autoRunHint': 'A new linked decision case starts automatically.',
+  'conversations.contextHint': 'History and prior outcomes hydrate the next case context.',
+  'conversations.send': 'Ask',
+  'conversations.sending': 'Starting…',
+  'conversations.delete': 'Delete',
+  'conversations.deleteConfirm': 'Delete this conversation thread? Linked decision cases remain as audit records.',
+  'conversations.openCase': 'Open decision case',
+
   // Memory
   'memory.title': 'Memory',
   'memory.searchPlaceholder': 'Search historical decisions (e.g. stack, database, Rust)',
@@ -131,6 +147,22 @@ export const en: Record<string, string> = {
 };
 
 export const zh: Record<string, string> = {
+  // Conversations
+  'conversations.title': '会话',
+  'conversations.loading': '会话加载中…',
+  'conversations.empty': '暂无会话。',
+  'conversations.new': '新会话',
+  'conversations.emptyThread': '提出问题，开始一个可持续追踪的决策线程。',
+  'conversations.newPlaceholder': 'MAGI 应该分析什么决策？',
+  'conversations.followUpPlaceholder': '继续追问…',
+  'conversations.autoRunHint': '将自动创建并启动关联决策 case。',
+  'conversations.contextHint': '历史消息与此前结论会注入下一轮 case 上下文。',
+  'conversations.send': '提问',
+  'conversations.sending': '启动中…',
+  'conversations.delete': '删除',
+  'conversations.deleteConfirm': '删除这个会话线程？关联决策 case 将保留作为审计记录。',
+  'conversations.openCase': '打开决策 case',
+
   'app.decisionCenter': '决策中心',
   'app.loadMore': '加载更多…',
   'app.noCases': '暂无决策',

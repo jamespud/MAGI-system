@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, BookOpen, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck, Users as UsersIcon } from 'lucide-react';
+import { Activity, BookOpen, Database, Play, BarChart3, Wrench, Settings, Layers, ShieldCheck, Users as UsersIcon, MessagesSquare } from 'lucide-react';
 import { PulseDot, MonoText } from '@/components/shared';
 import { api, type ApiStatus } from '@/api/client';
 import { useAgentStore } from '@/stores';
@@ -8,6 +8,7 @@ import { useT, useLang } from '@/i18n';
 
 const NAV_ITEMS = [
   { to: '/', icon: Activity, label: 'nav.decision' },
+  { to: '/conversations', icon: MessagesSquare, label: 'nav.conversations' },
   { to: '/memory', icon: Layers, label: 'nav.memory' },
   { to: '/replay', icon: Play, label: 'nav.replay' },
   { to: '/approvals', icon: ShieldCheck, label: 'nav.approvals' },

@@ -32,6 +32,34 @@ interface ApiCaseListResponse {
   page_size?: number;
 }
 
+export interface ApiAskResponse extends ApiCaseResponse {
+  conversation_id: string;
+}
+
+export interface ApiConversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  case_id?: string;
+  created_at: string;
+}
+
+export interface ApiConversationListResponse {
+  conversations: ApiConversation[];
+}
+
+export interface ApiConversationDetailResponse {
+  conversation: ApiConversation;
+  messages: ApiConversationMessage[];
+}
+
 interface ApiRunResponse {
   id: string;
   status: string;
@@ -157,10 +185,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
 export const api = {
+  // --- Persistent assistant conversations ---
+  askAssistant: (message: string, conversationId?: string, background?: string) =>
+    request<ApiAskResponse>('/assistant', {
+      method: 'POST',
+      body: JSON.stringify({ message, conversation_id: conversationId || undefined, background }),
+    }),
+
+  listConversations: (limit = 50, offset = 0) =>
+    request<ApiConversationListResponse>(`/conversations?limit=${limit}&offset=${offset}`),
+
+  getConversation: (id: string) =>
+    request<ApiConversationDetailResponse>(`/conversations/${encodeURIComponent(id)}`),
+
+  deleteConversation: (id: string) =>
+    request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // verifyAuth returns true when the currently stored API key authenticates
   // against the protected /status endpoint (200). It is used by the login page.
   verifyAuth: async (): Promise<boolean> => {

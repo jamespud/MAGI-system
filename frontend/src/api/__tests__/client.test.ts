@@ -307,3 +307,57 @@ describe('api auth channel (P0: D1)', () => {
     });
   });
 });
+
+describe('api conversations', () => {
+  it('starts or continues a conversation through /assistant', async () => {
+    const response = { ...MOCK_CASE, conversation_id: 'conv-001' };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      json: () => Promise.resolve(response),
+    } as Response);
+
+    await expect(api.askAssistant('Follow up?', 'conv-001', 'budget')).resolves.toEqual(response);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Follow up?', conversation_id: 'conv-001', background: 'budget' }),
+    });
+  });
+
+  it('lists and fetches conversation threads', async () => {
+    const conversation = { id: 'conv-001', title: 'Launch', created_at: '2026-08-18T01:00:00Z', updated_at: '2026-08-18T02:00:00Z' };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ conversations: [conversation] }),
+    } as Response);
+    await expect(api.listConversations(20, 10)).resolves.toEqual({ conversations: [conversation] });
+    expect(fetch).toHaveBeenCalledWith('/api/v1/conversations?limit=20&offset=10', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const detail = { conversation, messages: [] };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(detail),
+    } as Response);
+    await expect(api.getConversation('conv 001')).resolves.toEqual(detail);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/conversations/conv%20001', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('handles 204 from conversation deletion', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      json: () => Promise.resolve(null),
+    } as Response);
+
+    await expect(api.deleteConversation('conv-001')).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith('/api/v1/conversations/conv-001', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+});

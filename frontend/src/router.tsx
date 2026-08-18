@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '@/components/layout';
 import DecisionWorkspace from '@/pages/DecisionWorkspace';
+import Conversations from '@/pages/Conversations';
 import Login from '@/pages/Login';
 import Dataset from '@/pages/Dataset';
 import Memory from '@/pages/Memory';
@@ -22,6 +23,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DecisionWorkspace /> },
       { path: 'case/:caseId', element: <DecisionWorkspace /> },
+      { path: 'conversations', element: <Conversations /> },
+      { path: 'conversations/:conversationId', element: <Conversations /> },
       { path: 'memory', element: <Memory /> },
       { path: 'replay', element: <Replay /> },
       { path: 'approvals', element: <Approvals /> },

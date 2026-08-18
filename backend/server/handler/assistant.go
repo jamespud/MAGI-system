@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -28,9 +29,22 @@ func (h *AssistantHandler) Ask(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "message is required"})
 		return
 	}
-	cs, err := h.svc.AskAsync(ctx, CurrentUserID(ctx), req.Message, req.Background, toConstraints(req.Constraints))
+	cs, conv, err := h.svc.AskInConversation(ctx, CurrentUserID(ctx), req.ConversationID, req.Message, req.Background, toConstraints(req.Constraints))
 	if err != nil {
-		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: err.Error()})
+		status := consts.StatusBadRequest
+		if errors.Is(err, assistant.ErrForbidden) {
+			status = consts.StatusForbidden
+		} else if errors.Is(err, assistant.ErrConversationNotFound) {
+			status = consts.StatusNotFound
+		}
+		c.JSON(status, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if conv != nil {
+		c.JSON(consts.StatusAccepted, dto.AskInConversationResponse{
+			CaseResponse:   dto.FromCase(cs, nil),
+			ConversationID: conv.ID,
+		})
 		return
 	}
 	c.JSON(consts.StatusAccepted, dto.CaseResponse{ID: cs.ID, Status: string(cs.Status)})

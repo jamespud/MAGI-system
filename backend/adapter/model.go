@@ -369,6 +369,8 @@ func AllModels() []any {
 		&UserModel{},
 		&ApiKeyModel{},
 		&PromptTemplateModel{},
+		&ConversationModel{},
+		&ConversationMessageModel{},
 	}
 }
 
@@ -413,3 +415,27 @@ type ApiKeyModel struct {
 }
 
 func (ApiKeyModel) TableName() string { return "api_keys" }
+
+// ConversationModel persists a multi-turn assistant conversation thread.
+type ConversationModel struct {
+	ID        string `gorm:"primaryKey;size:64"`
+	UserID    int64  `gorm:"index"`
+	Title     string `gorm:"size:200"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (ConversationModel) TableName() string { return "magi_conversation" }
+
+// ConversationMessageModel persists one turn of a conversation.
+type ConversationMessageModel struct {
+	ID             string `gorm:"primaryKey;size:64"`
+	ConversationID string `gorm:"index;size:64"`
+	UserID         int64
+	Role           string `gorm:"size:16"`
+	Content        string `gorm:"type:longtext"`
+	CaseID         string `gorm:"size:64;index"`
+	CreatedAt      time.Time `gorm:"index"`
+}
+
+func (ConversationMessageModel) TableName() string { return "magi_conversation_message" }
