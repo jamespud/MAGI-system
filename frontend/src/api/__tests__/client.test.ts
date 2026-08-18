@@ -238,6 +238,42 @@ describe('api.getTaskTree', () => {
   });
 });
 
+describe('api.investigationPlan', () => {
+  it('fetches the investigation plan for a case', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        case_id: 'case-001',
+        items: [{ question: '网络可达性？', background: '排查 DNS/TCP/TLS' }],
+        updated_at: '2026-08-18T10:00:00Z',
+      }),
+    } as Response);
+    const result = await api.getInvestigationPlan('case-001');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/plan', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(result.items[0].question).toBe('网络可达性？');
+  });
+
+  it('updates the investigation plan for a case', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        case_id: 'case-001',
+        items: [{ question: '只查一个问题' }],
+        updated_at: '2026-08-18T10:05:00Z',
+      }),
+    } as Response);
+    const result = await api.updateInvestigationPlan('case-001', [{ question: '只查一个问题' }]);
+    expect(fetch).toHaveBeenCalledWith('/api/v1/cases/case-001/plan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ question: '只查一个问题' }] }),
+    });
+    expect(result.items).toHaveLength(1);
+  });
+});
+
 describe('api.seedBuiltinBenchmark and getEvalSummary', () => {
   it('seeds the built-in suite and fetches the aggregate summary', async () => {
     vi.spyOn(globalThis, 'fetch')

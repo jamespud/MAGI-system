@@ -271,6 +271,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Online golden regression** - promote completed production cases to a golden set (`/admin/golden`) and sync them into the built-in suite so the automated regression gate covers real decisions.
 - **Self-improving automation (guarded)** - after each automated regression, recurring failure suggestions can be auto-applied to the versioned prompt registry once a category reaches a configured threshold (`selfimprove.auto_apply_enabled`).
 - **Task state tree** - each agent/round execution is recorded as a node (`GET /cases/:id/task-tree`) and shown in the Replay trace view.
+- **Editable investigation plan** - a per-case sub-question list persisted via `GET/PUT /cases/:id/plan` and editable in the Replay trace view; it feeds the parallel `delegate` sub-investigations and the task state tree.
 - **External deterministic sensors** - register linter/compiler/unit-test commands (`sensor_tool`); the `run_check` tool executes only registered checks and feeds output back for self-correction.
 - **Lightweight VM sandboxing** - the Docker sandbox accepts a container `runtime` (e.g. gVisor `runsc`) for lightweight-virtualization isolation on top of network/memory/CPU/PID/time limits.
 - **Parallel sub-investigation** - the `delegate` tool accepts a `questions` array to spawn up to 4 sub-agents concurrently and merge their evidence.
@@ -295,6 +296,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 | GET | `/datasets`, `/datasets/:id`, `/:id/items`, `/:id/runs`, `/benchmarks/:runID` (+`DELETE /datasets/:id`) | Ground-truth evaluation |
 | GET | `/memory`, `/memory/:id`, `/memory/export` | Case-memory search (semantic + LIKE) and full export |
 | GET | `/cases/:id/task-tree` | Task state tree (agent/round execution nodes) |
+| GET/PUT | `/cases/:id/plan` | Editable investigation plan (sub-question list for a case) |
 | GET | `/evaluation/:id/export` | Export evaluation + judge verdict |
 | GET/POST | `/approvals`, `/approvals/:id`, `/approvals/:id/approve`, `/approvals/:id/reject` | Human-in-the-loop tool approvals |
 | GET/POST/PATCH/DELETE | `/plugins`, `/plugins/:id` | User plugin bindings |

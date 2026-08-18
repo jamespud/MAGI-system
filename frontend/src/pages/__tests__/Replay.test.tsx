@@ -5,12 +5,14 @@ import Replay from '../Replay';
 const mockGetEvents = vi.fn();
 const mockGetTrace = vi.fn();
 const mockGetTaskTree = vi.fn();
+const mockGetInvestigationPlan = vi.fn();
 
 vi.mock('@/api/client', () => ({
   api: {
     getEvents: (...a: unknown[]) => mockGetEvents(...a),
     getTrace: (...a: unknown[]) => mockGetTrace(...a),
     getTaskTree: (...a: unknown[]) => mockGetTaskTree(...a),
+    getInvestigationPlan: (...a: unknown[]) => mockGetInvestigationPlan(...a),
   },
 }));
 
@@ -19,7 +21,9 @@ beforeEach(() => {
   mockGetEvents.mockReset();
   mockGetTrace.mockReset();
   mockGetTaskTree.mockReset();
+  mockGetInvestigationPlan.mockReset();
   mockGetTaskTree.mockResolvedValue({ nodes: [] });
+  mockGetInvestigationPlan.mockResolvedValue({ items: [] });
 });
 
 describe('Replay page', () => {

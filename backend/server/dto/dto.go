@@ -645,6 +645,24 @@ func (d FSMBlueprintDTO) ToEntity() entity.FSMBlueprint {
 	return out
 }
 
+// InvestigationPlanDTO is the case investigation plan.
+type InvestigationPlanDTO struct {
+	CaseID    string                         `json:"case_id"`
+	Items     []entity.InvestigationPlanItem `json:"items"`
+	UpdatedAt string                         `json:"updated_at"`
+}
+
+func FromInvestigationPlan(p *entity.InvestigationPlan) InvestigationPlanDTO {
+	if p == nil {
+		return InvestigationPlanDTO{Items: []entity.InvestigationPlanItem{}}
+	}
+	out := InvestigationPlanDTO{CaseID: p.CaseID, Items: p.Items, UpdatedAt: p.UpdatedAt.Format(time.RFC3339)}
+	if out.Items == nil {
+		out.Items = []entity.InvestigationPlanItem{}
+	}
+	return out
+}
+
 type AddDatasetItemsRequest struct {
 	Items []DatasetItemDTO `json:"items"`
 }

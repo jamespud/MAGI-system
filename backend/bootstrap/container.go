@@ -33,6 +33,7 @@ import (
 	"github.com/jamespud/magi/backend/application/evaluation"
 	"github.com/jamespud/magi/backend/application/fsmblueprint"
 	"github.com/jamespud/magi/backend/application/golden"
+	"github.com/jamespud/magi/backend/application/investigationplan"
 	"github.com/jamespud/magi/backend/application/judge"
 	"github.com/jamespud/magi/backend/application/knowledge"
 	"github.com/jamespud/magi/backend/application/memory"
@@ -105,6 +106,9 @@ var Module = fx.Options(
 		provideFSMBlueprintHandler,
 		provideTaskTreeRepository,
 		provideTaskTreeHandler,
+		provideInvestigationPlanRepository,
+		provideInvestigationPlanService,
+		provideInvestigationPlanHandler,
 		providePromptProvider,
 		provideDecisionJobRepository,
 		provideDatasetRepository,
@@ -169,6 +173,7 @@ var Module = fx.Options(
 		cpH *handler.ConsensusPolicyHandler,
 		fbH *handler.FSMBlueprintHandler,
 		ttH *handler.TaskTreeHandler,
+		ipH *handler.InvestigationPlanHandler,
 		evalSvc *evaluation.Service,
 		memSvc *memory.Service,
 		knowSvc *knowledge.Service,
@@ -186,36 +191,37 @@ var Module = fx.Options(
 		tp *trace.TracerProvider,
 	) {
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
-			Decision:        decSvc,
-			Approval:        apprSvc,
-			Judge:           judgeSvc,
-			Auth:            authSvc,
-			Metrics:         reg,
-			Dataset:         dsSvc,
-			Plugins:         plugs,
-			Admin:           admSvc,
-			Recurring:       recSvc,
-			Assistant:       askSvc,
-			Replay:          repSvc,
-			SelfImprove:     siH,
-			RolePolicy:      rpH,
-			Golden:          goldenH,
-			ConsensusPolicy: cpH,
-			FSMBlueprint:    fbH,
-			TaskTree:        ttH,
-			Evaluation:      evalSvc,
-			Memory:          memSvc,
-			Knowledge:       knowSvc,
-			Users:           usersSvc,
-			OIDC:            oidcH,
-			Tool:            toolSvc,
-			Broker:          broker,
-			EventRepo:       repo.EventRepo(),
-			HealthPinger:    dbPing,
-			Tracing:         tp,
-			ModelName:       cfg.Model.ModelName,
-			MaxSteps:        cfg.Magi.MaxSteps,
-			Export:          handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
+			Decision:          decSvc,
+			Approval:          apprSvc,
+			Judge:             judgeSvc,
+			Auth:              authSvc,
+			Metrics:           reg,
+			Dataset:           dsSvc,
+			Plugins:           plugs,
+			Admin:             admSvc,
+			Recurring:         recSvc,
+			Assistant:         askSvc,
+			Replay:            repSvc,
+			SelfImprove:       siH,
+			RolePolicy:        rpH,
+			Golden:            goldenH,
+			ConsensusPolicy:   cpH,
+			FSMBlueprint:      fbH,
+			TaskTree:          ttH,
+			InvestigationPlan: ipH,
+			Evaluation:        evalSvc,
+			Memory:            memSvc,
+			Knowledge:         knowSvc,
+			Users:             usersSvc,
+			OIDC:              oidcH,
+			Tool:              toolSvc,
+			Broker:            broker,
+			EventRepo:         repo.EventRepo(),
+			HealthPinger:      dbPing,
+			Tracing:           tp,
+			ModelName:         cfg.Model.ModelName,
+			MaxSteps:          cfg.Magi.MaxSteps,
+			Export:            handler.NewExportHandler(decSvc, repo.EventRepo(), memSvc, evalSvc, judgeSvc),
 			RateLimit: appserver.RateLimitConfig{
 				Enabled:          cfg.HTTPRateLimit.Enabled,
 				PerUserPerMinute: cfg.HTTPRateLimit.PerUserPerMinute,
@@ -269,6 +275,18 @@ func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
 
 func provideTaskTreeHandler(repo port.TaskTreeRepository, caseSvc port.CaseRepository) *handler.TaskTreeHandler {
 	return handler.NewTaskTreeHandler(repo, caseSvc)
+}
+
+func provideInvestigationPlanRepository(db *gorm.DB) port.InvestigationPlanRepository {
+	return magi.NewInvestigationPlanRepository(db)
+}
+
+func provideInvestigationPlanService(repo port.InvestigationPlanRepository) *investigationplan.Service {
+	return investigationplan.NewService(repo)
+}
+
+func provideInvestigationPlanHandler(svc *investigationplan.Service, caseSvc port.CaseRepository) *handler.InvestigationPlanHandler {
+	return handler.NewInvestigationPlanHandler(svc, caseSvc)
 }
 
 // ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.

@@ -252,6 +252,11 @@ export const api = {
 
   getTaskTree: (id: string) => request<{ nodes: ApiTaskNode[] }>(`/cases/${id}/task-tree`),
 
+  getInvestigationPlan: (id: string) => request<ApiInvestigationPlan>(`/cases/${id}/plan`),
+
+  updateInvestigationPlan: (id: string, items: ApiInvestigationPlanItem[]) =>
+    request<ApiInvestigationPlan>(`/cases/${id}/plan`, { method: 'PUT', body: JSON.stringify({ items }) }),
+
   listDatasets: () => request<{ datasets: ApiDataset[] }>('/datasets'),
 
   createDataset: (name: string, description?: string) =>
@@ -627,6 +632,17 @@ interface ApiTaskNode {
   completed_at?: string;
 }
 
+interface ApiInvestigationPlanItem {
+  question: string;
+  background?: string;
+}
+
+interface ApiInvestigationPlan {
+  case_id: string;
+  items: ApiInvestigationPlanItem[];
+  updated_at: string;
+}
+
 interface ApiApproval {
   id: string;
   case_id: string;
@@ -691,6 +707,8 @@ export type {
   ApiDataset,
   ApiEvalSummary,
   ApiTaskNode,
+  ApiInvestigationPlan,
+  ApiInvestigationPlanItem,
   ApiBenchmarkRun,
   ApiBenchmarkDetail,
   ApiEvaluation,

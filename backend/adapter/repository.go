@@ -214,6 +214,7 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
 		&ResolutionModel{}, &EventModel{}, &DebateRoundModel{},
 		&MemoryProjectionModel{}, &DecisionJobModel{}, &ApprovalModel{}, &JudgeModel{},
+		&InvestigationPlanModel{},
 	}
 	for _, t := range tables {
 		if err := tx.Where("case_id = ?", id).Delete(t).Error; err != nil {

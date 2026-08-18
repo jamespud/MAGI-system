@@ -396,6 +396,7 @@ func AllModels() []any {
 		&RolePolicyModel{},
 		&ConsensusPolicyModel{},
 		&FSMBlueprintModel{},
+		&InvestigationPlanModel{},
 		&GoldenCaseModel{},
 		&TaskNodeModel{},
 		&ConversationModel{},

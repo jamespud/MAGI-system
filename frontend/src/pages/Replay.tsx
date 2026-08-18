@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { api, type ApiEvent, type ApiTaskNode } from '@/api/client';
+import { api, type ApiEvent, type ApiInvestigationPlanItem, type ApiTaskNode } from '@/api/client';
 import { useT } from '@/i18n';
 
 type ViewMode = 'timeline' | 'trace';
@@ -56,6 +56,9 @@ export default function Replay() {
   const [mode, setMode] = useState<ViewMode>('timeline');
   const [selectedEvent, setSelectedEvent] = useState<ApiEvent | null>(null);
   const [taskTree, setTaskTree] = useState<ApiTaskNode[] | null>(null);
+  const [plan, setPlan] = useState<ApiInvestigationPlanItem[] | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planMsg, setPlanMsg] = useState('');
 
   const load = async (nextMode: ViewMode = mode) => {
     if (!caseId.trim()) return;
@@ -72,8 +75,12 @@ export default function Replay() {
         api.getTaskTree(caseId.trim())
           .then((r) => setTaskTree(r.nodes))
           .catch(() => setTaskTree(null));
+        api.getInvestigationPlan(caseId.trim())
+          .then((r) => { setPlan(r.items); setPlanMsg(''); })
+          .catch(() => setPlan(null));
       } else {
         setTaskTree(null);
+        setPlan(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'load failed');
@@ -97,6 +104,30 @@ export default function Replay() {
     agents: new Set((events ?? []).map((e) => e.agent_code).filter(Boolean)).size,
     errors: (events ?? []).filter((e) => e.type === 'ERROR').length,
   }), [events, lanes.length]);
+
+  const savePlan = async () => {
+    if (!caseId.trim() || !plan || plan.length === 0) return;
+    setPlanBusy(true);
+    setPlanMsg('');
+    try {
+      const saved = await api.updateInvestigationPlan(caseId.trim(), plan);
+      setPlan(saved.items);
+      setPlanMsg(t('replay.planSaved'));
+    } catch (e) {
+      setPlanMsg(e instanceof Error ? e.message : 'save failed');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const updatePlanItem = (index: number, patch: Partial<ApiInvestigationPlanItem>) => {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const next = prev.slice();
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -193,6 +224,56 @@ export default function Replay() {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {plan && (
+            <div className="rounded border border-border-dim bg-raised p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-mono text-xs text-text-muted">{t('replay.plan')}</p>
+                <div className="flex items-center gap-2">
+                  {planMsg && <span className="text-xs text-text-muted">{planMsg}</span>}
+                  <button
+                    className="rounded bg-accent px-3 py-1 text-xs disabled:opacity-50"
+                    disabled={planBusy || plan.length === 0}
+                    onClick={() => void savePlan()}
+                  >
+                    {planBusy ? t('replay.planSaving') : t('replay.planSave')}
+                  </button>
+                </div>
+              </div>
+              <ul className="mt-2 space-y-2">
+                {plan.map((item, index) => (
+                  <li key={index} className="flex flex-col gap-1 rounded border border-border-dim bg-background p-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded border border-border-dim bg-background px-2 py-1 text-xs"
+                        placeholder={t('replay.planQuestionPlaceholder')}
+                        value={item.question}
+                        onChange={(e) => updatePlanItem(index, { question: e.target.value })}
+                      />
+                      <button
+                        className="rounded border border-border-dim px-2 py-1 text-xs text-text-muted hover:text-text-secondary"
+                        onClick={() => setPlan((prev) => (prev ?? []).filter((_, i) => i !== index))}
+                      >
+                        {t('replay.planRemove')}
+                      </button>
+                    </div>
+                    <input
+                      className="w-full rounded border border-border-dim bg-background px-2 py-1 text-xs"
+                      placeholder={t('replay.planBackgroundPlaceholder')}
+                      value={item.background ?? ''}
+                      onChange={(e) => updatePlanItem(index, { background: e.target.value })}
+                    />
+                  </li>
+                ))}
+              </ul>
+              <button
+                className="mt-2 rounded border border-border-dim px-3 py-1 text-xs text-text-muted hover:text-text-secondary"
+                onClick={() => setPlan((prev) => [...(prev ?? []), { question: '' }])}
+              >
+                {t('replay.planAdd')}
+              </button>
             </div>
           )}
 
