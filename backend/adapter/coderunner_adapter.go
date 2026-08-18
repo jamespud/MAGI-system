@@ -56,6 +56,31 @@ func NewCodeRunnerAdapterWithRunner(runner coderunner.Runner, p CodeRunnerPolicy
 	return &CodeRunnerAdapter{policy: p, runner: runner}
 }
 
+// validateCodeRequest applies the shared deterministic guardrails: language
+// allow-list, code length, and danger-pattern block-list.
+func validateCodeRequest(policy CodeRunnerPolicy, lang, code string) error {
+	langOK := false
+	for _, l := range policy.AllowedLanguages {
+		if l == lang {
+			langOK = true
+			break
+		}
+	}
+	if !langOK {
+		return fmt.Errorf("coderunner: language %q not allowed", lang)
+	}
+	if len(code) > policy.MaxCodeChars {
+		return fmt.Errorf("coderunner: code exceeds %d chars", policy.MaxCodeChars)
+	}
+	lower := strings.ToLower(code)
+	for _, p := range policy.BlockedPatterns {
+		if strings.Contains(lower, strings.ToLower(p)) {
+			return fmt.Errorf("coderunner: blocked pattern %q", p)
+		}
+	}
+	return nil
+}
+
 func (a *CodeRunnerAdapter) activate(ctx context.Context) error {
 	a.activateOnce.Do(func() {
 		if a.runner != nil {
@@ -76,24 +101,8 @@ func (a *CodeRunnerAdapter) activate(ctx context.Context) error {
 // Run validates the request against the policy, then executes it in a
 // time-bounded context.
 func (a *CodeRunnerAdapter) Run(ctx context.Context, lang, code string) (string, error) {
-	langOK := false
-	for _, l := range a.policy.AllowedLanguages {
-		if l == lang {
-			langOK = true
-			break
-		}
-	}
-	if !langOK {
-		return "", fmt.Errorf("coderunner: language %q not allowed", lang)
-	}
-	if len(code) > a.policy.MaxCodeChars {
-		return "", fmt.Errorf("coderunner: code exceeds %d chars", a.policy.MaxCodeChars)
-	}
-	lower := strings.ToLower(code)
-	for _, p := range a.policy.BlockedPatterns {
-		if strings.Contains(lower, strings.ToLower(p)) {
-			return "", fmt.Errorf("coderunner: blocked pattern %q", p)
-		}
+	if err := validateCodeRequest(a.policy, lang, code); err != nil {
+		return "", err
 	}
 	if err := a.activate(ctx); err != nil {
 		return "", fmt.Errorf("coderunner adapter: Coze code runner unavailable: %w", err)

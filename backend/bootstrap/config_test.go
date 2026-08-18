@@ -362,6 +362,25 @@ func TestConfigValidate_DBTool(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_DockerCodeRunner(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.CodeRunner.Docker.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "code_runner.docker: image is required") {
+		t.Fatalf("expected docker image validation error, got %v", err)
+	}
+	cfg.CodeRunner.Docker.Image = "python:3.12-slim"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid docker config rejected: %v", err)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsDBQueryWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.DBTool.Enabled = true

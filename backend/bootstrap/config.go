@@ -48,19 +48,20 @@ type Config struct {
 		MaxCostUSDPerUser        float64 `yaml:"max_cost_usd_per_user"`
 	} `yaml:"limits"`
 	CodeRunner struct {
-		Enabled          *bool    `yaml:"enabled"`
-		TimeoutSeconds   int      `yaml:"timeout_seconds"`
-		MaxCodeChars     int      `yaml:"max_code_chars"`
-		AllowedLanguages []string `yaml:"allowed_languages"`
-		BlockedPatterns  []string `yaml:"blocked_patterns"`
-		AllowEnv         []string `yaml:"allow_env"`
-		AllowRead        []string `yaml:"allow_read"`
-		AllowWrite       []string `yaml:"allow_write"`
-		AllowNet         []string `yaml:"allow_net"`
-		AllowRun         []string `yaml:"allow_run"`
-		AllowFFI         []string `yaml:"allow_ffi"`
-		NodeModulesDir   string   `yaml:"node_modules_dir"`
-		MemoryLimitMB    int64    `yaml:"memory_limit_mb"`
+		Enabled          *bool                  `yaml:"enabled"`
+		TimeoutSeconds   int                    `yaml:"timeout_seconds"`
+		MaxCodeChars     int                    `yaml:"max_code_chars"`
+		AllowedLanguages []string               `yaml:"allowed_languages"`
+		BlockedPatterns  []string               `yaml:"blocked_patterns"`
+		AllowEnv         []string               `yaml:"allow_env"`
+		AllowRead        []string               `yaml:"allow_read"`
+		AllowWrite       []string               `yaml:"allow_write"`
+		AllowNet         []string               `yaml:"allow_net"`
+		AllowRun         []string               `yaml:"allow_run"`
+		AllowFFI         []string               `yaml:"allow_ffi"`
+		NodeModulesDir   string                 `yaml:"node_modules_dir"`
+		MemoryLimitMB    int64                  `yaml:"memory_limit_mb"`
+		Docker           DockerCodeRunnerConfig `yaml:"docker"`
 	} `yaml:"code_runner"`
 	DBTool       DBToolConfig       `yaml:"db_tool"`
 	FeedbackTool FeedbackToolConfig `yaml:"feedback_tool"`
@@ -92,6 +93,16 @@ type Config struct {
 	ToolQuota     ToolQuotaConfig `yaml:"tool_quota"`
 	Commander     CommanderSpec   `yaml:"commander"`
 	Judge         JudgeSpec       `yaml:"judge"`
+}
+
+// DockerCodeRunnerConfig enables the optional Docker sandbox runtime as an
+// alternative to the Coze WASM sandbox.
+type DockerCodeRunnerConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Image          string `yaml:"image"`
+	MemoryMB       int64  `yaml:"memory_mb"`
+	CPUs           string `yaml:"cpus"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 type ToolQuotaConfig struct {
@@ -806,6 +817,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.MaxCostUSDPerUser < 0 {
 		return fmt.Errorf("limits: max_cost_usd_per_user cannot be negative")
+	}
+	if c.CodeRunner.Docker.Enabled && strings.TrimSpace(c.CodeRunner.Docker.Image) == "" {
+		return fmt.Errorf("code_runner.docker: image is required when enabled")
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")

@@ -736,7 +736,7 @@ func providePluginsService(repo port.PluginBindingRepository) *plugins.Service {
 	return plugins.NewService(repo)
 }
 
-func codeRunnerAdapter(cfg *Config) *magi.CodeRunnerAdapter {
+func codeRunnerAdapter(cfg *Config) port.CodeRunnerPort {
 	enabled := true
 	if cfg.CodeRunner.Enabled != nil {
 		enabled = *cfg.CodeRunner.Enabled
@@ -756,6 +756,21 @@ func codeRunnerAdapter(cfg *Config) *magi.CodeRunnerAdapter {
 	}
 	if len(cfg.CodeRunner.BlockedPatterns) > 0 {
 		p.BlockedPatterns = cfg.CodeRunner.BlockedPatterns
+	}
+	if cfg.CodeRunner.Docker.Enabled {
+		docker, err := magi.NewDockerCodeRunnerAdapter(magi.DockerCodeRunnerPolicy{
+			CodeRunnerPolicy: p,
+			Image:            cfg.CodeRunner.Docker.Image,
+			MemoryMB:         cfg.CodeRunner.Docker.MemoryMB,
+			CPUs:             cfg.CodeRunner.Docker.CPUs,
+			DockerTimeout:    cfg.CodeRunner.Docker.TimeoutSeconds,
+			DefaultTimeout:   p.TimeoutSeconds,
+		}, nil)
+		if err != nil {
+			log.Printf("code_runner docker: %v", err)
+			return nil
+		}
+		return docker
 	}
 	sr := coderunnersandbox.NewRunner(&coderunnersandbox.Config{
 		AllowEnv:       cfg.CodeRunner.AllowEnv,

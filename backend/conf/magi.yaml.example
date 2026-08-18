@@ -171,6 +171,15 @@ code_runner:
   allow_ffi: []
   node_modules_dir: ""
   memory_limit_mb: 100
+  # Optional Docker sandbox runtime (alternative to the Coze WASM sandbox):
+  # runs code in a throwaway, network-isolated container with memory/CPU/PID
+  # and timeout limits. Requires a local docker CLI.
+  docker:
+    enabled: false
+    image: "python:3.12-slim"
+    memory_mb: 512
+    cpus: "1.0"
+    timeout_seconds: 30
 
 # Built-in read-only database query tool (db_query). Executes a single
 # SELECT inside a read-only transaction; write statements and multi-statement
