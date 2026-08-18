@@ -288,6 +288,16 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 			reg,
 		)
 	}
+	if cfg.FileTool.Enabled {
+		fileTool, err := magi.NewFileToolExecutor(magi.FileToolConfig{
+			Enabled: cfg.FileTool.Enabled, Roots: cfg.FileTool.Roots,
+			MaxFileBytes: cfg.FileTool.MaxFileBytes, MaxListItems: cfg.FileTool.MaxListItems,
+		})
+		if err != nil {
+			return nil, err
+		}
+		executors[magi.FileToolName] = fileTool
+	}
 	var err error
 	local, err = magi.NewLocalToolMux(executors)
 	if err != nil {

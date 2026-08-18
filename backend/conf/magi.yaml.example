@@ -199,6 +199,15 @@ db_tool:
 feedback_tool:
   enabled: true
 
+# Built-in read-only file query tool (file_query): read a file or list a
+# directory inside allow-listed roots. Path traversal is rejected; reads are
+# size-bounded and lists are item-bounded. Disabled by default.
+file_tool:
+  enabled: false
+  roots: []                # absolute allow-listed paths, e.g. ["/var/lib/magi"]
+  # max_file_bytes: 262144
+  # max_list_items: 100
+
 # External MCP servers (config-driven; tools appear as mcp_<server>_<tool>).
 # stdio servers are spawned as child processes; http servers use MCP Streamable HTTP.
 mcp:

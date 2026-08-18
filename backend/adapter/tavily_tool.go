@@ -75,6 +75,14 @@ func (r *LocalToolRegistry) List(ctx context.Context, bindings []entity.ToolBind
 				Source:     entity.ToolSourceLocal,
 				Binding:    b,
 			})
+		case b.ToolName == FileToolName && r.isEnabled(FileToolName):
+			out = append(out, port.ToolDefinition{
+				Name:       FileToolName,
+				Desc:       "Read a file or list a directory inside the configured allow-listed roots. Returns content or entries as JSON.",
+				ArgsSchema: []byte(fileArgsSchema),
+				Source:     entity.ToolSourceLocal,
+				Binding:    b,
+			})
 		}
 	}
 	return out, nil

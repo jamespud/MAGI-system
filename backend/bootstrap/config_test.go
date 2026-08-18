@@ -381,6 +381,41 @@ func TestConfigValidate_DockerCodeRunner(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_FileTool(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.Model.APIKey = "k"
+	cfg.Model.ModelName = "m"
+	cfg.Magi.MaxDebateRounds = 1
+	cfg.Magi.MaxSteps = 1
+	cfg.Magi.TimeoutSeconds = 1
+	cfg.Magi.CallTimeoutSeconds = 1
+
+	cfg.FileTool.Enabled = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "file_tool: at least one root") {
+		t.Fatalf("expected file_tool roots validation error, got %v", err)
+	}
+	cfg.FileTool.Roots = []string{"/tmp"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid file_tool rejected: %v", err)
+	}
+}
+
+func TestMagiSpec_ToConfigBindsFileToolWhenEnabled(t *testing.T) {
+	cfg := &bootstrap.Config{}
+	cfg.FileTool.Enabled = true
+	cfg.FileTool.Roots = []string{"/tmp"}
+	c := cfg.Magi.Melchior.ToConfig("melchior", cfg)
+	found := false
+	for _, tool := range c.Tools {
+		if tool.ToolName == "file_query" && tool.Source == entity.ToolSourceLocal {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("file_query not bound when file_tool enabled: %+v", c.Tools)
+	}
+}
+
 func TestMagiSpec_ToConfigBindsDBQueryWhenEnabled(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.DBTool.Enabled = true

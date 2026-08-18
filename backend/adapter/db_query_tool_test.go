@@ -127,6 +127,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 		{Source: entity.ToolSourceLocal, ToolName: "web_search"},
 		{Source: entity.ToolSourceLocal, ToolName: magi.DBQueryToolName},
 		{Source: entity.ToolSourceLocal, ToolName: magi.FeedbackToolName},
+		{Source: entity.ToolSourceLocal, ToolName: magi.FileToolName},
 	}
 
 	all := magi.NewLocalToolRegistry()
@@ -134,7 +135,7 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list all: %v", err)
 	}
-	if len(defs) != 3 {
+	if len(defs) != 4 {
 		t.Fatalf("all-local registry should resolve every local tool, got %+v", defs)
 	}
 
@@ -163,6 +164,15 @@ func TestLocalToolRegistryResolvesEnabledLocalTools(t *testing.T) {
 	}
 	if len(defs) != 1 || defs[0].Name != magi.FeedbackToolName {
 		t.Fatalf("feedback-only registry resolved %+v", defs)
+	}
+
+	fileOnly := magi.NewLocalToolRegistry(magi.FileToolName)
+	defs, err = fileOnly.List(context.Background(), bindings)
+	if err != nil {
+		t.Fatalf("list file only: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != magi.FileToolName {
+		t.Fatalf("file-only registry resolved %+v", defs)
 	}
 }
 

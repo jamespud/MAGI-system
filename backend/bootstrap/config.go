@@ -65,6 +65,7 @@ type Config struct {
 	} `yaml:"code_runner"`
 	DBTool       DBToolConfig       `yaml:"db_tool"`
 	FeedbackTool FeedbackToolConfig `yaml:"feedback_tool"`
+	FileTool     FileToolConfig     `yaml:"file_tool"`
 	ToolPolicy   struct {
 		RequireApproval []string `yaml:"require_approval"`
 		AutoApproved    []string `yaml:"auto_approved"`
@@ -165,6 +166,14 @@ type DBToolConfig struct {
 // FeedbackToolConfig controls the built-in deterministic check_output tool.
 type FeedbackToolConfig struct {
 	Enabled *bool `yaml:"enabled"`
+}
+
+// FileToolConfig configures the built-in read-only file query tool.
+type FileToolConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Roots        []string `yaml:"roots"`
+	MaxFileBytes int64    `yaml:"max_file_bytes"`
+	MaxListItems int      `yaml:"max_list_items"`
 }
 
 type EmbeddingConfig struct {
@@ -588,7 +597,7 @@ func webSearchProviderSpecs(cfg *Config) []SearchProviderConfig {
 // enabledLocalTools returns the built-in local tools that should be exposed
 // to agents based on configuration.
 func enabledLocalTools(cfg *Config) []string {
-	tools := make([]string, 0, 3)
+	tools := make([]string, 0, 4)
 	if len(webSearchProviderSpecs(cfg)) > 0 {
 		tools = append(tools, "web_search")
 	}
@@ -597,6 +606,9 @@ func enabledLocalTools(cfg *Config) []string {
 	}
 	if feedbackToolEnabled(cfg) {
 		tools = append(tools, magi.FeedbackToolName)
+	}
+	if cfg.FileTool.Enabled {
+		tools = append(tools, magi.FileToolName)
 	}
 	return tools
 }
@@ -776,6 +788,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 	if feedbackToolEnabled(cfg) {
 		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.FeedbackToolName})
 	}
+	if cfg.FileTool.Enabled {
+		tools = append(tools, entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: magi.FileToolName})
+	}
 	return tools
 }
 
@@ -820,6 +835,9 @@ func (c *Config) Validate() error {
 	}
 	if c.CodeRunner.Docker.Enabled && strings.TrimSpace(c.CodeRunner.Docker.Image) == "" {
 		return fmt.Errorf("code_runner.docker: image is required when enabled")
+	}
+	if c.FileTool.Enabled && len(c.FileTool.Roots) == 0 {
+		return fmt.Errorf("file_tool: at least one root is required when enabled")
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")

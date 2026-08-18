@@ -262,6 +262,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Self-improving harness (human-in-the-loop)** - analyze a failed case into a categorized, rule-based improvement suggestion; an admin confirms before a proposed prompt change is written to the versioned registry.
 - **Automated regression gate** - schedule periodic re-runs of the built-in decision sanity suite (`benchmark.auto_interval_seconds`); regression failures are counted and alerted.
 - **Docker sandbox** - optional container runtime (`code_runner.docker`) that runs code in a throwaway, network-isolated container with memory/CPU/PID/time limits on top of the shared guardrails.
+- **Read-only file tool** - `file_query` reads files and lists directories inside allow-listed roots with traversal rejection and size/item bounds (`file_tool` config).
 - **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
@@ -304,6 +305,7 @@ limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 code_runner.docker: { enabled: true, image: "python:3.12-slim", memory_mb: 512, cpus: "1.0" }
 db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
+file_tool: { enabled: true, roots: ["/var/lib/magi"] }
 feedback_tool: { enabled: true }
 benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
