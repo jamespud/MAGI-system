@@ -105,7 +105,9 @@ var Module = fx.Options(
 		provideFSMBlueprintRepository,
 		provideFSMBlueprintService,
 		provideFSMBlueprintHandler,
+		provideCaseRepository,
 		provideTaskTreeRepository,
+		provideTaskTreeRecorder,
 		provideTaskTreeHandler,
 		provideInvestigationPlanRepository,
 		provideInvestigationPlanService,
@@ -128,6 +130,7 @@ var Module = fx.Options(
 		provideBudgetChecker,
 
 		// Agent runtime
+		provideAgentLoopHolder,
 		provideAgentLoop,
 		provideCommander,
 		provideMagiConfigs,
@@ -264,6 +267,7 @@ func provideAgentLoop(
 	quota *toolquota.Service,
 	prompts port.PromptProvider,
 	taskTree port.TaskTreeRecorder,
+	loopHolder *agentLoopHolder,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
 		evidence.FullReliabilityResolver(),
@@ -271,13 +275,28 @@ func provideAgentLoop(
 		evidence.NewNativeAdapter(),
 		evidence.NewRawObservationAdapter(),
 	)
-	return runtime.NewAgentLoop(runtime.AgentLoopDeps{
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
 		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts, TaskTree: taskTree,
 	})
+	if err != nil {
+		return nil, err
+	}
+	loopHolder.set(loop)
+	return loop, nil
 }
 
 func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
+	return magi.NewTaskTreeRepository(db)
+}
+
+func provideCaseRepository(db *gorm.DB) port.CaseRepository {
+	return magi.NewRepository(db).CaseRepo()
+}
+
+func provideTaskTreeRecorder(db *gorm.DB) port.TaskTreeRecorder {
+	// The same taskTreeRepo backs both the repository and the recorder; the
+	// loop only needs the narrow write-only surface (see port.TaskTreeRecorder).
 	return magi.NewTaskTreeRepository(db)
 }
 
@@ -325,7 +344,7 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
 func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metrics.Registry, val validation.Validator,
-	loop *runtime.AgentLoop, magiConfigs []*entity.MagiConfig) (port.ToolExecutorPort, error) {
+	loopHolder *agentLoopHolder, magiConfigs []*entity.MagiConfig) (port.ToolExecutorPort, error) {
 	var local port.ToolExecutorPort
 	executors := map[string]port.ToolExecutorPort{}
 	if providers := webSearchProviderSpecs(cfg); len(providers) > 0 {
@@ -405,7 +424,7 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		if len(magiConfigs) > 0 {
 			roleCfg = magiConfigs[0]
 		}
-		investigator, err := magi.NewLoopSubInvestigator(loop, roleCfg)
+		investigator, err := magi.NewLoopSubInvestigator(loopHolder, roleCfg)
 		if err != nil {
 			return nil, err
 		}
