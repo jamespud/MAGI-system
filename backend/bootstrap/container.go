@@ -678,17 +678,24 @@ func provideDecisionService(
 	repo port.Repository,
 	cfg *Config,
 	rm *decision.RunManager,
+	ttRepo port.TaskTreeRepository,
 ) *decision.Service {
-	return decision.NewService(orch, decision.ServiceConfig{
-		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
-	}, decision.WithCaseRepo(repo.CaseRepo()),
+	opts := []decision.Option{
+		decision.WithCaseRepo(repo.CaseRepo()),
 		decision.WithResolutionRepo(repo.ResolutionRepo()),
 		decision.WithEvidenceRepo(repo.EvidenceRepo()),
 		decision.WithClaimRepo(repo.ClaimRepo()),
 		decision.WithVoteRepo(repo.VoteRepo()),
 		decision.WithAgentRunRepo(repo.AgentRunRepo()),
 		decision.WithToolCallRepo(repo.ToolCallRepo()),
-		decision.WithRunManager(rm))
+		decision.WithRunManager(rm),
+	}
+	if tt, ok := ttRepo.(port.TaskTreeCleaner); ok {
+		opts = append(opts, decision.WithTaskTreeCleaner(tt))
+	}
+	return decision.NewService(orch, decision.ServiceConfig{
+		MaxDebateRounds: cfg.Magi.MaxDebateRounds,
+	}, opts...)
 }
 
 func provideEventPublisher(repo port.Repository, broker *appserver.EventBroker, red *redact.Redactor) port.EventPublisher {

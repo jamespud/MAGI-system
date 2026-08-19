@@ -68,6 +68,12 @@ func WithRunManager(rm RunController) Option {
 	return func(s *Service) { s.runs = rm }
 }
 
+// WithTaskTreeCleaner injects the optional task-tree repository so StartRun
+// can reset a case's tree to a fresh state for the latest run.
+func WithTaskTreeCleaner(tt port.TaskTreeCleaner) Option {
+	return func(s *Service) { s.taskTreeCleaner = tt }
+}
+
 // WithResolutionRepo injects a ResolutionRepository so Get can enrich the
 // case response with consensus/round/confidence.
 func WithResolutionRepo(repo port.ResolutionRepository) Option {
@@ -81,16 +87,17 @@ func WithToolCallRepo(repo port.ToolCallRepository) Option {
 
 // Service is the application-layer service for decision cases.
 type Service struct {
-	orch         Orchestrator
-	cfg          ServiceConfig
-	caseRepo     port.CaseRepository
-	resRepo      port.ResolutionRepository
-	evidenceRepo port.EvidenceRepository
-	claimRepo    port.ClaimRepository
-	voteRepo     port.VoteRepository
-	agentRunRepo port.AgentRunRepository
-	toolCallRepo port.ToolCallRepository
-	runs         RunController
+	orch            Orchestrator
+	cfg             ServiceConfig
+	caseRepo        port.CaseRepository
+	resRepo         port.ResolutionRepository
+	evidenceRepo    port.EvidenceRepository
+	claimRepo       port.ClaimRepository
+	voteRepo        port.VoteRepository
+	agentRunRepo    port.AgentRunRepository
+	toolCallRepo    port.ToolCallRepository
+	runs            RunController
+	taskTreeCleaner port.TaskTreeCleaner
 }
 
 // NewService creates a DecisionService.
@@ -134,6 +141,11 @@ func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.
 // ErrAlreadyRunning if the case already has an active run. When no RunManager
 // is configured, falls back to synchronous Run.
 func (s *Service) StartRun(ctx context.Context, case_ *entity.DecisionCase) error {
+	// Reset the task tree so it reflects only the latest run (fresh tree per
+	// run bounds growth; per-run nodes are idempotently upserted).
+	if s.taskTreeCleaner != nil && case_ != nil {
+		_ = s.taskTreeCleaner.DeleteByCase(ctx, case_.ID)
+	}
 	if s.runs == nil {
 		_, err := s.Run(ctx, case_)
 		return err

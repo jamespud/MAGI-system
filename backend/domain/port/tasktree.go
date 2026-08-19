@@ -16,3 +16,10 @@ type TaskTreeRepository interface {
 type TaskTreeRecorder interface {
 	RecordAgent(ctx context.Context, caseID, runID, agentCode, status string) error
 }
+
+// TaskTreeCleaner is an optional TaskTreeRepository capability that removes a
+// case's task nodes. Used to reset the tree on re-run and to cascade-delete
+// nodes when a case is removed.
+type TaskTreeCleaner interface {
+	DeleteByCase(ctx context.Context, caseID string) error
+}
