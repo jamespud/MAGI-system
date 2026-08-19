@@ -2,8 +2,8 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -79,19 +79,10 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	if case_ == nil {
 		return nil, fmt.Errorf("nil case")
 	}
-	maxDebate := case_.MaxDebateRounds
-	if maxDebate == 0 {
-		maxDebate = 1
+	st := &State{MaxDebate: case_.MaxDebateRounds, Round: 1}
+	if st.MaxDebate == 0 {
+		st.MaxDebate = 1
 	}
-
-	var task *entity.DecisionTask
-	var results []*runtime.LoopResult
-	var votes []*entity.Vote
-	var consResult entity.ConsensusResult
-	var resolution *entity.Resolution
-	var artifactRemap *ArtifactRemap // old in-memory ID -> persisted ID, latest round
-	var allRemaps []*ArtifactRemap   // every round's remap, for report/reflection rewriting
-	round := 1
 
 	status := case_.Status
 	if status == "" {
@@ -130,198 +121,24 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			}
 		}
 		prevStatus = status
-		switch status {
-
-		case entity.CaseStatusDraft:
-			status = entity.CaseStatusNormalizing
-
-		case entity.CaseStatusNormalizing:
-			t, err := o.commander.Normalize(ctx, case_)
-			if err != nil {
-				return o.fail(ctx, case_, fmt.Sprintf("normalize: %v", err))
-			}
-			task = t
-			if o.caseRepo != nil {
-				_ = o.caseRepo.UpdateTask(ctx, case_.ID, task)
-			}
-			status = entity.CaseStatusContextBuilding
-
-		case entity.CaseStatusContextBuilding:
-			o.publish(ctx, case_, entity.EventTaskNormalized, map[string]any{"canonical_question": task.CanonicalQuestion})
-			status = entity.CaseStatusRetrievingMemory
-
-		case entity.CaseStatusRetrievingMemory:
-			o.publish(ctx, case_, entity.EventMemoryRetrieved, nil)
-			status = entity.CaseStatusInvestigating
-
-		case entity.CaseStatusInvestigating:
-			o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": round})
-			results = o.dispatcher.Dispatch(ctx, case_, task, o.configs, round)
-			results = o.retryFailedAgents(ctx, case_, task, results, round, "investigate")
-			status = entity.CaseStatusEvidenceGating
-
-		case entity.CaseStatusEvidenceGating:
-			o.publish(ctx, case_, entity.EventEvidenceGatePassed, nil)
-			status = entity.CaseStatusCollectingVotes
-
-		case entity.CaseStatusCollectingVotes:
-			votes = o.extractVotes(results)
-			if o.failPolicy.Mode == "fail_case" && o.lastAgentErr != nil {
-				return o.fail(ctx, case_, o.lastAgentErr.Error())
-			}
-			artifactRemap = o.persistArtifacts(ctx, case_, results, votes, round, "investigate")
-			allRemaps = append(allRemaps, artifactRemap)
-			o.publish(ctx, case_, entity.EventVoteSubmitted, map[string]any{"round": round, "votes": len(votes)})
-			status = entity.CaseStatusConsensusCheck
-
-		case entity.CaseStatusConsensusCheck:
-			consResult = o.consensus.Evaluate(derefVotes(votes), round, o.policy)
-			o.publish(ctx, case_, entity.EventConsensusEvaluated, map[string]any{"outcome": string(consResult.Outcome), "round": round})
-			switch consResult.Outcome {
-			case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection, entity.ConsensusConditional:
-				status = entity.CaseStatusResolving
-			case entity.ConsensusMajorityApprovalDissent, entity.ConsensusMajorityRejectionDissent:
-				if o.shouldDebate(round, maxDebate) {
-					status = entity.CaseStatusDebating
-				} else {
-					status = entity.CaseStatusResolving
-				}
-			case entity.ConsensusDeadlock, entity.ConsensusInsufficientQuorum:
-				// A tie caused by agent FAILURES is not a genuine deadlock: it
-				// means the decision could not be reached because an agent
-				// malfunctioned. Surface that as a case failure with the
-				// reasons instead of a misleading DEADLOCKED terminal state.
-				if reasons := failedAgentReasons(votes); len(reasons) > 0 {
-					return o.fail(ctx, case_, "deadlock caused by agent failures: "+strings.Join(reasons, "; "))
-				}
-				status = entity.CaseStatusDeadlocked
-			default:
-				status = entity.CaseStatusResolving
-			}
-
-		case entity.CaseStatusDebating:
-			o.publish(ctx, case_, entity.EventDebateStarted, map[string]any{"round": round})
-			allClaims := o.collectClaims(results)
-			allEvidence := o.collectEvidence(results)
-			packet := o.debate.BuildPacket(derefVotes(votes), allClaims, round, allEvidence)
-			if o.repo != nil {
-				_ = o.repo.DebateRepo().Create(ctx, &entity.DebateRound{
-					ID: fmt.Sprintf("deb-%s-r%d", case_.ID, round), CaseID: case_.ID, Round: round,
-					Packet: packet, StartedAt: time.Now(),
-				})
-			}
-			results = o.dispatcher.DispatchReconsider(ctx, case_, task, packet, results, o.configs, round)
-			results = o.retryFailedAgents(ctx, case_, task, results, round, "reconsider")
-			status = entity.CaseStatusReflecting
-
-		case entity.CaseStatusReflecting:
-			o.publish(ctx, case_, entity.EventReflectionSubmitted, nil)
-			status = entity.CaseStatusRevoting
-
-		case entity.CaseStatusRevoting:
-			o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": round})
-			newVotes := o.extractVotes(results)
-			artifactRemap = o.persistArtifacts(ctx, case_, results, newVotes, round, "reconsider")
-			allRemaps = append(allRemaps, artifactRemap)
-			reflections := EnforceReflectionRule(votes, newVotes, results, o.configs, round)
-			if o.repo != nil {
-				for idx, rf := range reflections {
-					// IDs must be unique per case/attempt/round/agent: inferred
-					// reflections are re-created on every retry attempt.
-					rf.ID = fmt.Sprintf("refl-%s-a%d-r%d-%d", case_.ID, case_.ExecutionAttempt, rf.Round, idx)
-					if rf.AgentRunID == "" && idx < len(newVotes) && newVotes[idx] != nil {
-						rf.AgentRunID = newVotes[idx].AgentRunID
-					}
-					remapReflection(rf, artifactRemap)
-					_ = o.repo.ReflectionRepo().Create(ctx, rf)
-				}
-			}
-			votes = newVotes
-			round++
-			status = entity.CaseStatusConsensusCheck
-
-		case entity.CaseStatusResolving:
-			consResult.Round = round
-			// Remap the resolution's cited IDs so the persisted record points
-			// at the same namespaced artifacts the vote/evidence tables hold.
-			remap := mergeRemaps(allRemaps)
-			resolution = &entity.Resolution{
-				Consensus:      consResult,
-				FinalDecision:  finalDecision(consResult),
-				KeyEvidenceIDs: remap.RemapList(o.collectEvidenceIDs(results)),
-				KeyClaimIDs:    remap.RemapList(o.collectClaimIDs(results)),
-				VoteIDs:        voteIDs(votes),
-			}
-			resolution.ID = fmt.Sprintf("res-%s", case_.ID)
-			resolution.CaseID = case_.ID
-			resolution.CreatedAt = time.Now()
-			status = entity.CaseStatusGeneratingReport
-
-		case entity.CaseStatusGeneratingReport:
-			report, err := o.commander.GenerateReport(ctx, case_, resolution, votes,
-				resolution.KeyEvidenceIDs, resolution.KeyClaimIDs)
-			if err != nil {
-				return o.fail(ctx, case_, fmt.Sprintf("report generation: %v", err))
-			}
-			// The report body cites IDs as free text; rewrite them to the
-			// persisted namespaced forms so citations resolve in the DB.
-			resolution.FinalReport = mergeRemaps(allRemaps).RemapText(report)
-			o.publish(ctx, case_, entity.EventResolutionCreated, map[string]any{"final_decision": string(resolution.FinalDecision)})
-			status = entity.CaseStatusSavingMemory
-
-		case entity.CaseStatusSavingMemory:
-			ledger := o.mergeLedgers(results)
-			proj := memory.BuildProjection(case_, resolution, ledger, votes, mergeRemaps(allRemaps))
-			if o.knowledge != nil {
-				// The knowledge adapter owns the MEMORY_INDEXED event: it is
-				// published after indexing actually completes (sync) or by the
-				// async worker, with chunk counts in the payload.
-				_, _ = o.knowledge.Store(ctx, proj)
-			}
-			if o.memRepo != nil {
-				// Persist the projection row itself. The Memory page search
-				// reads case_memory_projection (LIKE fallback); RAG chunks are
-				// derived from the same projection.
-				if err := o.memRepo.Save(ctx, proj); err != nil {
-					log.Printf("orchestrator: save memory projection for case %s failed: %v", case_.ID, err)
-				}
-			}
-			status = entity.CaseStatusEvaluating
-
-		case entity.CaseStatusEvaluating:
-			resolution.Evaluation = service.Evaluate(results, round, consResult.Outcome)
-			status = entity.CaseStatusResolved
-
-		case entity.CaseStatusResolved:
-			// Persist the resolution here, after FinalReport (GeneratingReport) and
-			// Evaluation (Evaluating) are set. Persisting earlier would snapshot
-			// an empty FinalReport.
-			if o.repo != nil && resolution != nil {
-				if err := o.repo.ResolutionRepo().Create(ctx, resolution); err != nil {
-					return o.fail(ctx, case_, fmt.Sprintf("persist resolution: %v", err))
-				}
-			}
-			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status)})
-			case_.Status = status
-			return resolution, nil
-
-		case entity.CaseStatusDeadlocked:
-			// Deadlock is a legitimate terminal outcome, not a retryable failure:
-			// finish the run without an error so the durable worker marks it done.
-			o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(status), "outcome": "deadlocked", "round": round})
-			case_.Status = status
-			return nil, nil
-
-		default:
-			o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"status": string(status)})
-			case_.Status = status
-			return resolution, fmt.Errorf("case ended: %s", status)
+		next, done, err := o.dispatch(ctx, case_, status, st)
+		if errors.Is(err, errCaseEnded) {
+			// Legacy "default" branch: unrecognized terminal status surfaces as
+			// an error (dispatch already set case_.Status and published).
+			return st.Resolution, err
 		}
+		if err != nil {
+			return o.fail(ctx, case_, err.Error())
+		}
+		if done {
+			return st.Resolution, nil
+		}
+		status = next
 		case_.Status = status
 		if o.caseRepo != nil {
 			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
 		}
-		o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(status), "round": round})
+		o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(status), "round": st.Round})
 	}
 }
 
