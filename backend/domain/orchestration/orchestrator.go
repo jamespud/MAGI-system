@@ -32,6 +32,7 @@ type Orchestrator struct {
 	lastAgentErr error
 	configs      []*entity.MagiConfig
 	blueprint    *entity.FSMBlueprint
+	actions      map[string]ActionHandler
 }
 
 type OrchestratorDeps struct {
@@ -57,7 +58,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 	if fp.Mode == "" {
 		fp = DefaultFailurePolicy()
 	}
-	return &Orchestrator{
+	o := &Orchestrator{
 		dispatcher:   NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
 		consensus:    d.Consensus,
 		debate:       d.Debate,
@@ -73,6 +74,8 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		configs:      d.Configs,
 		blueprint:    d.Blueprint,
 	}
+	o.actions = o.buildActionRegistry()
+	return o
 }
 
 func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
@@ -108,20 +111,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			if violations := o.blueprint.ValidatePath([]string{string(prevStatus), string(status)}); len(violations) > 0 {
 				return o.fail(ctx, case_, fmt.Sprintf("fsm blueprint violation: %s", violations[0]))
 			}
-			// NLAH action binding: the blueprint declares which action runs on
-			// each transition; the runtime fails fast if the declaration does
-			// not match the deterministic handler bound to the target status.
-			if expected := o.blueprint.ActionFor(string(prevStatus), string(status)); expected != "" {
-				actual := entity.ActionForStatus(string(status))
-				if expected != actual {
-					return o.fail(ctx, case_, fmt.Sprintf(
-						"fsm blueprint action mismatch for %s -> %s: declared %q, actual %q",
-						prevStatus, status, expected, actual))
-				}
-			}
 		}
-		prevStatus = status
-		next, done, err := o.dispatch(ctx, case_, status, st)
+		next, done, err := o.dispatch(ctx, case_, prevStatus, status, st)
 		if errors.Is(err, errCaseEnded) {
 			// Legacy "default" branch: unrecognized terminal status surfaces as
 			// an error (dispatch already set case_.Status and published).
@@ -130,6 +121,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		if err != nil {
 			return o.fail(ctx, case_, err.Error())
 		}
+		prevStatus = status
 		if done {
 			return st.Resolution, nil
 		}

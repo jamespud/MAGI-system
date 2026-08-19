@@ -32,50 +32,59 @@ type State struct {
 // sentinel for the legacy "default" branch).
 var errCaseEnded = errors.New("case ended")
 
-// dispatch executes the step bound to status and returns the next status.
-// Phase 0 dispatches by status (behavior-equivalent extraction of the old
-// switch); Phase 1 replaces the switch with a blueprint-driven action registry.
-func (o *Orchestrator) dispatch(ctx context.Context, case_ *entity.DecisionCase, status entity.CaseStatus, st *State) (entity.CaseStatus, bool, error) {
-	switch status {
-	case entity.CaseStatusDraft:
-		return o.stepStart(ctx, case_, st)
-	case entity.CaseStatusNormalizing:
-		return o.stepNormalize(ctx, case_, st)
-	case entity.CaseStatusContextBuilding:
-		return o.stepBuildContext(ctx, case_, st)
-	case entity.CaseStatusRetrievingMemory:
-		return o.stepRetrieveMemory(ctx, case_, st)
-	case entity.CaseStatusInvestigating:
-		return o.stepInvestigate(ctx, case_, st)
-	case entity.CaseStatusEvidenceGating:
-		return o.stepGateEvidence(ctx, case_, st)
-	case entity.CaseStatusCollectingVotes:
-		return o.stepCollectVotes(ctx, case_, st)
-	case entity.CaseStatusConsensusCheck:
-		return o.stepCheckConsensus(ctx, case_, st)
-	case entity.CaseStatusDebating:
-		return o.stepDebate(ctx, case_, st)
-	case entity.CaseStatusReflecting:
-		return o.stepReflect(ctx, case_, st)
-	case entity.CaseStatusRevoting:
-		return o.stepRevote(ctx, case_, st)
-	case entity.CaseStatusResolving:
-		return o.stepResolve(ctx, case_, st)
-	case entity.CaseStatusGeneratingReport:
-		return o.stepGenerateReport(ctx, case_, st)
-	case entity.CaseStatusSavingMemory:
-		return o.stepSaveMemory(ctx, case_, st)
-	case entity.CaseStatusEvaluating:
-		return o.stepEvaluate(ctx, case_, st)
-	case entity.CaseStatusResolved:
-		return o.stepComplete(ctx, case_, st)
-	case entity.CaseStatusDeadlocked:
-		return o.stepDeadlock(ctx, case_, st)
-	default:
+// ActionHandler is the deterministic business step executed for an FSM action.
+// It mirrors the old switch-case branch: returns the next status, whether the
+// FSM terminates after this step, and an error (surfaced as a case failure).
+type ActionHandler func(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error)
+
+// buildActionRegistry returns the action -> handler table. Every action name
+// returned by entity.KnownFSMActions is registered here, so a blueprint that
+// passes save-time validation always resolves to a real handler.
+func (o *Orchestrator) buildActionRegistry() map[string]ActionHandler {
+	return map[string]ActionHandler{
+		"start":           o.stepStart,
+		"normalize":       o.stepNormalize,
+		"build_context":   o.stepBuildContext,
+		"retrieve_memory": o.stepRetrieveMemory,
+		"investigate":     o.stepInvestigate,
+		"gate_evidence":   o.stepGateEvidence,
+		"collect_votes":   o.stepCollectVotes,
+		"check_consensus": o.stepCheckConsensus,
+		"debate":          o.stepDebate,
+		"reflect":         o.stepReflect,
+		"revote":          o.stepRevote,
+		"resolve":         o.stepResolve,
+		"generate_report": o.stepGenerateReport,
+		"save_memory":     o.stepSaveMemory,
+		"evaluate":        o.stepEvaluate,
+		"complete":        o.stepComplete,
+		"deadlock":        o.stepDeadlock,
+	}
+}
+
+// dispatch resolves the action for the transition into status and executes its
+// registered handler (table-driven NLAH dispatch). The action comes from the
+// FSM blueprint when one declares it for this transition, otherwise it falls
+// back to the canonical action bound to the target status. An unregistered
+// action fails fast; an unrecognized status preserves the legacy default.
+func (o *Orchestrator) dispatch(ctx context.Context, case_ *entity.DecisionCase, prevStatus, status entity.CaseStatus, st *State) (entity.CaseStatus, bool, error) {
+	action := entity.ActionForStatus(string(status))
+	if action == "" {
+		// Unrecognized status: preserve the legacy "default" branch behavior.
 		o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"status": string(status)})
 		case_.Status = status
 		return status, false, fmt.Errorf("%w: %s", errCaseEnded, status)
 	}
+	if o.blueprint != nil && prevStatus != "" {
+		if declared := o.blueprint.ActionFor(string(prevStatus), string(status)); declared != "" {
+			action = declared
+		}
+	}
+	handler := o.actions[action]
+	if handler == nil {
+		return "", false, fmt.Errorf("fsm blueprint action %q is not a registered handler for status %s", action, status)
+	}
+	return handler(ctx, case_, st)
 }
 
 func (o *Orchestrator) stepStart(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {

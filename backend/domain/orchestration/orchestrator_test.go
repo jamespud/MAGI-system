@@ -215,13 +215,13 @@ func TestOrchestrate_RejectsBlueprintViolation(t *testing.T) {
 	}
 }
 
-func TestOrchestrate_RejectsBlueprintActionMismatch(t *testing.T) {
+func TestOrchestrate_RejectsUnregisteredAction(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	blueprint := entity.DefaultFSMBlueprint()
 	for i := range blueprint.Transitions {
 		if blueprint.Transitions[i].From == string(entity.CaseStatusDraft) &&
 			blueprint.Transitions[i].To == string(entity.CaseStatusNormalizing) {
-			blueprint.Transitions[i].Action = "wrong_action"
+			blueprint.Transitions[i].Action = "wrong_action" // not in the registry
 		}
 	}
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
@@ -234,8 +234,40 @@ func TestOrchestrate_RejectsBlueprintActionMismatch(t *testing.T) {
 		Blueprint: &blueprint,
 	})
 	_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
-	if err == nil || !strings.Contains(err.Error(), "fsm blueprint action mismatch") {
-		t.Fatalf("expected fsm blueprint action mismatch, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "not a registered handler") {
+		t.Fatalf("expected unregistered-action fail-fast, got %v", err)
+	}
+}
+
+// TestOrchestrate_BlueprintDrivesDispatch proves the blueprint genuinely
+// selects the action: remapping DRAFT->NORMALIZING to a different registered
+// action ("complete") makes the FSM terminate there instead of normalizing.
+func TestOrchestrate_BlueprintDrivesDispatch(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	blueprint := entity.DefaultFSMBlueprint()
+	for i := range blueprint.Transitions {
+		if blueprint.Transitions[i].From == string(entity.CaseStatusDraft) &&
+			blueprint.Transitions[i].To == string(entity.CaseStatusNormalizing) {
+			blueprint.Transitions[i].Action = "complete"
+		}
+	}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Blueprint: &blueprint,
+	})
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 1})
+	if err != nil {
+		t.Fatalf("blueprint-driven complete should not error: %v", err)
+	}
+	// stepComplete terminates the FSM with a nil resolution (no agents ran),
+	// proving the blueprint action, not the canonical handler, was dispatched.
+	if res != nil {
+		t.Fatalf("expected nil resolution from blueprint-driven complete, got %+v", res)
 	}
 }
 
