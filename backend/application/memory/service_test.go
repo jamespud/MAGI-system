@@ -441,3 +441,83 @@ func TestMemoryService_SearchHidesUnownedFromAuthenticated(t *testing.T) {
 		t.Fatalf("open mode should see all: %+v", outOpen)
 	}
 }
+
+// pagedMemRepo implements MemoryRepository + MemoryListPager to exercise the
+// streaming export path.
+type pagedMemRepo struct {
+	pages [][]*entity.CaseMemoryProjection
+}
+
+func (p *pagedMemRepo) Get(ctx context.Context, caseID string) (*entity.CaseMemoryProjection, error) {
+	for _, page := range p.pages {
+		for _, proj := range page {
+			if proj.CaseID == caseID {
+				return proj, nil
+			}
+		}
+	}
+	return nil, nil
+}
+func (p *pagedMemRepo) Save(ctx context.Context, proj *entity.CaseMemoryProjection) error { return nil }
+func (p *pagedMemRepo) Search(ctx context.Context, query string, limit int) ([]*entity.CaseMemoryProjection, error) {
+	return nil, nil
+}
+func (p *pagedMemRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, error) {
+	var out []*entity.CaseMemoryProjection
+	for _, page := range p.pages {
+		out = append(out, page...)
+	}
+	return out, nil
+}
+func (p *pagedMemRepo) Delete(ctx context.Context, caseID string) error { return nil }
+func (p *pagedMemRepo) ListPaged(ctx context.Context, limit, offset int) ([]*entity.CaseMemoryProjection, error) {
+	var flat []*entity.CaseMemoryProjection
+	for _, page := range p.pages {
+		flat = append(flat, page...)
+	}
+	if offset >= len(flat) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(flat) {
+		end = len(flat)
+	}
+	return flat[offset:end], nil
+}
+
+func TestMemoryService_ListOwnPaged(t *testing.T) {
+	repo := &pagedMemRepo{pages: [][]*entity.CaseMemoryProjection{
+		{{CaseID: "c-own"}, {CaseID: "c-open"}},
+		{{CaseID: "c-other"}},
+	}}
+	cases := &memCaseRepo{byID: map[string]*entity.DecisionCase{
+		"c-own":   {ID: "c-own", UserID: 7},
+		"c-open":  {ID: "c-open", UserID: 0},
+		"c-other": {ID: "c-other", UserID: 8},
+	}}
+	svc := memory.NewService(nil, repo, memory.WithCaseRepo(cases))
+
+	out, err := svc.ListOwn(context.Background(), 7, 0)
+	if err != nil {
+		t.Fatalf("listown: %v", err)
+	}
+	if len(out) != 1 || out[0].CaseID != "c-own" {
+		t.Fatalf("user7 paged export leaked: %+v", out)
+	}
+
+	outOpen, err := svc.ListOwn(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("listown open: %v", err)
+	}
+	if len(outOpen) != 3 {
+		t.Fatalf("open export should see all: %+v", outOpen)
+	}
+
+	limited, err := svc.ListOwn(context.Background(), 7, 1)
+	if err != nil {
+		t.Fatalf("listown limited: %v", err)
+	}
+	if len(limited) != 1 || limited[0].CaseID != "c-own" {
+		t.Fatalf("limited export: %+v", limited)
+	}
+}

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -66,10 +67,67 @@ func NewService(cases port.CaseRepository, runs port.AgentRunRepository) *Servic
 
 // Usage aggregates persisted agent runs per owner, including token usage and
 // estimated cost captured at run time.
+// Usage aggregates persisted agent runs per owner, including token usage and
+// estimated cost captured at run time. The production path aggregates in SQL
+// (COUNT/GROUP BY + JSON_EXTRACT) so a large case history is never fully
+// loaded into memory (OOM fix); repositories that do not implement the
+// aggregation capabilities fall back to the legacy full-list + N+1 loop.
 func (s *Service) Usage(ctx context.Context) (*UsageSummary, error) {
 	if s.cases == nil || s.runs == nil {
 		return nil, fmt.Errorf("admin: repositories are not configured")
 	}
+	if cases, ok := s.cases.(port.CaseUsageByUser); ok {
+		if runs, ok2 := s.runs.(port.RunUsageByUser); ok2 {
+			return usageAggregated(ctx, cases, runs)
+		}
+	}
+	return s.usageLegacy(ctx)
+}
+
+// usageAggregated builds the usage summary from per-owner SQL aggregation.
+func usageAggregated(ctx context.Context, cases port.CaseUsageByUser, runs port.RunUsageByUser) (*UsageSummary, error) {
+	caseCounts, err := cases.CountCasesByUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admin: count cases: %w", err)
+	}
+	runAggs, err := runs.UsageByUserGrouped(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admin: aggregate runs: %w", err)
+	}
+	ids := make(map[int64]bool, len(caseCounts)+len(runAggs))
+	for uid := range caseCounts {
+		ids[uid] = true
+	}
+	for uid := range runAggs {
+		ids[uid] = true
+	}
+	userIDs := make([]int64, 0, len(ids))
+	for uid := range ids {
+		userIDs = append(userIDs, uid)
+	}
+	sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
+
+	sum := &UsageSummary{}
+	for _, uid := range userIDs {
+		row := UsageRow{UserID: uid, Cases: int(caseCounts[uid])}
+		if agg, ok := runAggs[uid]; ok {
+			row.Runs = int(agg.Runs)
+			row.Tokens = agg.Tokens
+			row.CostUSD = agg.Cost
+		}
+		sum.TotalCases += row.Cases
+		sum.TotalRuns += row.Runs
+		sum.TotalTokens += row.Tokens
+		sum.TotalCostUSD += row.CostUSD
+		sum.ByUser = append(sum.ByUser, row)
+	}
+	return sum, nil
+}
+
+// usageLegacy aggregates in memory from the full case list and per-case runs.
+// It is retained for test/in-memory repositories that do not implement the
+// SQL aggregation capabilities.
+func (s *Service) usageLegacy(ctx context.Context) (*UsageSummary, error) {
 	cases, err := s.cases.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("admin: list cases: %w", err)

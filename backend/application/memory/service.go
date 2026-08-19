@@ -124,10 +124,16 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 }
 
 // ListOwn returns every memory projection the user may access, newest
-// projection version first (P2 D15 export).
+// projection version first (P2 D15 export). When the repository supports it,
+// results are streamed in bounded SQL pages so exporting a large projection
+// table never materializes the whole table in memory (export OOM fix);
+// otherwise it falls back to the legacy full List plus owner filtering.
 func (s *Service) ListOwn(ctx context.Context, userID int64, limit int) ([]*entity.CaseMemoryProjection, error) {
 	if s.memRepo == nil {
 		return nil, nil
+	}
+	if pager, ok := s.memRepo.(port.MemoryListPager); ok {
+		return s.listOwnPaged(ctx, userID, limit, pager)
 	}
 	all, err := s.memRepo.List(ctx)
 	if err != nil {
@@ -143,6 +149,35 @@ func (s *Service) ListOwn(ctx context.Context, userID int64, limit int) ([]*enti
 		}
 		out = append(out, proj)
 		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// listOwnPaged streams projections in bounded pages, applying the same owner
+// filter, until the requested limit is reached or the table is exhausted.
+func (s *Service) listOwnPaged(ctx context.Context, userID int64, limit int, pager port.MemoryListPager) ([]*entity.CaseMemoryProjection, error) {
+	const pageSize = 500
+	out := make([]*entity.CaseMemoryProjection, 0, pageSize)
+	for offset := 0; ; offset += pageSize {
+		page, err := pager.ListPaged(ctx, pageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, proj := range page {
+			if proj == nil {
+				continue
+			}
+			if !s.allowed(ctx, userID, proj.CaseID) {
+				continue
+			}
+			out = append(out, proj)
+			if limit > 0 && len(out) >= limit {
+				return out, nil
+			}
+		}
+		if len(page) < pageSize {
 			break
 		}
 	}

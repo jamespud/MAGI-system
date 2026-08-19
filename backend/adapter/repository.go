@@ -680,8 +680,33 @@ func (r *memoryRepo) List(ctx context.Context) ([]*entity.CaseMemoryProjection, 
 
 // Delete removes a case-memory projection. RAG chunks are removed by the
 // application service so this repository operation remains SQL-only.
+
 func (r *memoryRepo) Delete(ctx context.Context, caseID string) error {
 	return r.db.WithContext(ctx).Delete(&MemoryProjectionModel{}, "case_id = ?", caseID).Error
+}
+
+// ListPaged returns one bounded page of projections (SQL LIMIT/OFFSET), used
+// by streaming memory exports so the full projection table is never loaded
+// into memory at once.
+func (r *memoryRepo) ListPaged(ctx context.Context, limit, offset int) ([]*entity.CaseMemoryProjection, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var models []MemoryProjectionModel
+	if err := r.db.WithContext(ctx).
+		Order("projection_version DESC, case_id ASC").
+		Limit(limit).Offset(offset).
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.CaseMemoryProjection, len(models))
+	for i := range models {
+		out[i] = memoryProjectionFromModel(&models[i])
+	}
+	return out, nil
 }
 
 // Search provides a deterministic local fallback for historical decision
@@ -756,3 +781,54 @@ var _ port.CaseRepository = (*caseRepo)(nil)
 var _ port.CaseListFilter = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
 var _ port.ToolCallRepository = (*toolCallRepo)(nil)
+
+// CountCasesByUser returns the number of cases per owner (SQL GROUP BY). It
+// backs admin.Usage so a large case history is never fully loaded into memory.
+func (r *caseRepo) CountCasesByUser(ctx context.Context) (map[int64]int64, error) {
+	var rows []struct {
+		UserID int64
+		Cases  int64
+	}
+	if err := r.db.WithContext(ctx).Model(&CaseModel{}).
+		Select("user_id, COUNT(*) AS cases").
+		Group("user_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.UserID] = row.Cases
+	}
+	return out, nil
+}
+
+// UsageByUserGrouped aggregates runs/tokens/cost per owner in one SQL query
+// (JSON_EXTRACT over usage_json, mirroring SumUsageByUser). It backs
+// admin.Usage, replacing the per-case ListByCase N+1 loop.
+func (r *agentRunRepo) UsageByUserGrouped(ctx context.Context) (map[int64]port.UsageByUserRow, error) {
+	var rows []struct {
+		UserID int64
+		Runs   int64
+		Tokens int64
+		Cost   float64
+	}
+	if err := r.db.WithContext(ctx).Table("magi_agent_run AS ar").
+		Select(`c.user_id AS user_id,
+			COUNT(ar.id) AS runs,
+			COALESCE(SUM(CAST(JSON_EXTRACT(ar.usage_json, '$.TotalTokens') AS SIGNED)), 0) AS tokens,
+			COALESCE(SUM(CAST(JSON_EXTRACT(ar.usage_json, '$.CostUSD') AS DECIMAL(18,6))), 0) AS cost`).
+		Joins("JOIN decision_case AS c ON c.id = ar.case_id").
+		Where("ar.usage_json IS NOT NULL AND ar.usage_json <> ''").
+		Group("c.user_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[int64]port.UsageByUserRow, len(rows))
+	for _, row := range rows {
+		out[row.UserID] = port.UsageByUserRow{Runs: row.Runs, Tokens: row.Tokens, Cost: row.Cost}
+	}
+	return out, nil
+}
+
+var _ port.CaseUsageByUser = (*caseRepo)(nil)
+var _ port.RunUsageByUser = (*agentRunRepo)(nil)

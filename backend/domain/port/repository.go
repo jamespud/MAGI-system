@@ -149,3 +149,10 @@ type ToolCallRepository interface {
 	Create(ctx context.Context, t *entity.ToolCall) error
 	ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error)
 }
+
+// MemoryListPager is an optional MemoryRepository capability that returns a
+// bounded page of projections (SQL LIMIT/OFFSET) so streaming exports never
+// materialize the whole projection table into memory.
+type MemoryListPager interface {
+	ListPaged(ctx context.Context, limit, offset int) ([]*entity.CaseMemoryProjection, error)
+}
