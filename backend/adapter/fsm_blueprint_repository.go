@@ -28,7 +28,7 @@ func NewFSMBlueprintRepository(db *gorm.DB) port.FSMBlueprintRepository {
 
 func (r *fsmBlueprintRepo) Get(ctx context.Context) (*entity.FSMBlueprint, error) {
 	var model FSMBlueprintModel
-	if err := r.db.WithContext(ctx).Where("key = ?", fsmBlueprintKey).First(&model).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("`key` = ?", fsmBlueprintKey).First(&model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}

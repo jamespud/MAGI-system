@@ -28,7 +28,7 @@ func NewConsensusPolicyRepository(db *gorm.DB) port.ConsensusPolicyRepository {
 
 func (r *consensusPolicyRepo) Get(ctx context.Context) (*consensus.ConsensusPolicy, error) {
 	var model ConsensusPolicyModel
-	if err := r.db.WithContext(ctx).Where("key = ?", consensusPolicyKey).First(&model).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("`key` = ?", consensusPolicyKey).First(&model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
 		}
