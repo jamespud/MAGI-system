@@ -46,8 +46,10 @@ func TestCaseRepository_UpdatePausedRoundtrip(t *testing.T) {
 }
 
 // TestCaseRepository_ListForUser verifies the multi-tenant, paginated listing
-// is scoped in SQL: a user sees only their own cases plus unowned (owner 0)
-// cases, and never rows owned by another user (P0: D2).
+// is scoped in SQL: a user sees only their own cases, never rows owned by
+// another user, and unowned (owner 0) legacy cases are NOT surfaced to
+// non-owners (multi-tenant leak closure, P0: D2). Open mode (userID 0) still
+// lists everything.
 func TestCaseRepository_ListForUser_ScopesByOwner(t *testing.T) {
 	db := openDatasetDB(t)
 	repo := magi.NewRepository(db)
@@ -65,7 +67,7 @@ func TestCaseRepository_ListForUser_ScopesByOwner(t *testing.T) {
 	create("c-u8-1", 8)
 	create("c-open", 0)
 
-	// user 7 sees own + open, not user 8's
+	// user 7 sees own only: neither user 8's nor unowned "c-open"
 	list, err := cr.(port.CaseListFilter).
 		ListForUser(ctx, 7, 100, 0)
 	if err != nil {
@@ -75,24 +77,24 @@ func TestCaseRepository_ListForUser_ScopesByOwner(t *testing.T) {
 	for _, c := range list {
 		got[c.ID] = true
 	}
-	if len(list) != 3 {
-		t.Fatalf("user 7 expected 3 cases (2 own + 1 open), got %d: %+v", len(list), got)
+	if len(list) != 2 {
+		t.Fatalf("user 7 expected 2 own cases (unowned hidden), got %d: %+v", len(list), got)
 	}
-	if !got["c-u7-1"] || !got["c-u7-2"] || !got["c-open"] {
-		t.Fatalf("user 7 missing expected cases: %+v", got)
+	if !got["c-u7-1"] || !got["c-u7-2"] {
+		t.Fatalf("user 7 missing own cases: %+v", got)
 	}
-	if got["c-u8-1"] {
-		t.Fatalf("user 7 must NOT see user 8's case: %+v", got)
+	if got["c-u8-1"] || got["c-open"] {
+		t.Fatalf("user 7 must NOT see user 8's or unowned cases: %+v", got)
 	}
 
-	// user 8 sees own + open, not user 7's
+	// user 8 sees own only
 	list8, err := cr.(port.CaseListFilter).
 		ListForUser(ctx, 8, 100, 0)
 	if err != nil {
 		t.Fatalf("list user 8: %v", err)
 	}
-	if len(list8) != 2 {
-		t.Fatalf("user 8 expected 2 cases (1 own + 1 open), got %d", len(list8))
+	if len(list8) != 1 {
+		t.Fatalf("user 8 expected 1 own case, got %d", len(list8))
 	}
 
 	// open mode (userID 0) sees everything

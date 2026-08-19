@@ -178,12 +178,18 @@ func PrincipalFrom(ctx context.Context) *Principal {
 }
 
 // CanAccess reports whether a principal may access an owner-scoped resource.
-// Owner 0 means the resource is unowned (open mode); a nil principal is the
-// unauthenticated open mode where every resource is readable.
+// A nil principal is the unauthenticated open mode where every resource is
+// readable. An ownerID of 0 means the resource is unowned (legacy cases
+// created before multi-tenant ownership was enforced): when authenticated
+// those are only visible to admins, closing the "unowned = world-readable"
+// multi-tenant leak.
 func CanAccess(ctx context.Context, ownerID int64) bool {
 	p := PrincipalFrom(ctx)
-	if p == nil || ownerID == 0 {
+	if p == nil {
 		return true
+	}
+	if ownerID == 0 {
+		return p.Role == "admin"
 	}
 	return p.UserID == ownerID
 }

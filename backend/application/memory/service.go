@@ -150,8 +150,11 @@ func (s *Service) ListOwn(ctx context.Context, userID int64, limit int) ([]*enti
 }
 
 // allowed reports whether the user may see a projection. Open mode (userID 0)
-// and unowned cases pass; when a case repository is configured and the case
-// cannot be resolved the projection is treated as inaccessible.
+// passes; when a case repository is configured and the case cannot be
+// resolved the projection is treated as inaccessible. Unowned (user_id 0)
+// legacy cases are hidden from authenticated users, consistent with
+// auth.CanAccess (unowned = admin-only), closing the memory-side mirror of the
+// multi-tenant leak.
 func (s *Service) allowed(ctx context.Context, userID int64, caseID string) bool {
 	if s.cases == nil {
 		return true
@@ -160,7 +163,13 @@ func (s *Service) allowed(ctx context.Context, userID int64, caseID string) bool
 	if err != nil || case_ == nil {
 		return false
 	}
-	return userID == 0 || case_.UserID == 0 || case_.UserID == userID
+	if userID == 0 {
+		return true
+	}
+	if case_.UserID == 0 {
+		return false
+	}
+	return case_.UserID == userID
 }
 
 // Store persists a case memory projection.

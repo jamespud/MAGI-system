@@ -40,9 +40,12 @@ func (h *ApprovalHandler) List(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
+	// Ownership is checked on every result: the case_id filter must never
+	// bypass the per-approval access check (multi-tenant leak fix). A
+	// non-owner's case_id yields an empty list rather than their approvals.
 	out := make([]dto.ApprovalRequestDTO, 0, len(reqs))
 	for _, r := range reqs {
-		if caseID != "" || h.canAccess(ctx, r.CaseID) {
+		if h.canAccess(ctx, r.CaseID) {
 			out = append(out, dto.FromApproval(r))
 		}
 	}

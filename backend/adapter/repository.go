@@ -159,9 +159,11 @@ func (r *caseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize i
 
 // ListForUser returns a user-scoped, paginated page of cases
 // (port.CaseListFilter, P0: D2). userID == 0 is open mode (all cases); a
-// non-zero userID returns the user's own cases plus unowned (owner 0) cases,
-// mirroring auth.CanAccess semantics. The filter and paging happen in SQL so a
-// large case table is never loaded fully into memory or filtered per-row in Go.
+// non-zero userID returns only the user's own cases. Unowned (owner 0) legacy
+// cases are intentionally NOT surfaced here to non-owners, consistent with
+// auth.CanAccess (unowned = admin-only when authenticated). The filter and
+// paging happen in SQL so a large case table is never loaded fully into
+// memory or filtered per-row in Go.
 func (r *caseRepo) ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error) {
 	if limit <= 0 {
 		limit = 100
@@ -175,7 +177,7 @@ func (r *caseRepo) ListForUser(ctx context.Context, userID int64, limit, offset 
 	var models []CaseModel
 	q := r.db.WithContext(ctx)
 	if userID != 0 {
-		q = q.Where("user_id = ? OR user_id = 0", userID)
+		q = q.Where("user_id = ?", userID)
 	}
 	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&models).Error; err != nil {
 		return nil, err

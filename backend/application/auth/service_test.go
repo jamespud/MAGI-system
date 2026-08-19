@@ -61,3 +61,28 @@ func TestPrincipalContext(t *testing.T) {
 		t.Fatal("other owner must fail")
 	}
 }
+
+func TestCanAccess_UnownedClosure(t *testing.T) {
+	ctx := context.Background()
+	// open mode: everything readable (unchanged)
+	if !auth.CanAccess(ctx, 0) {
+		t.Fatal("open mode must allow unowned resource")
+	}
+	// authenticated non-admin must NOT read unowned (owner 0) resource
+	user := auth.WithPrincipal(ctx, &auth.Principal{UserID: 5, Role: "user"})
+	if auth.CanAccess(user, 0) {
+		t.Fatal("non-admin must not access unowned resource")
+	}
+	// admin may read unowned resource
+	admin := auth.WithPrincipal(ctx, &auth.Principal{UserID: 1, Role: "admin"})
+	if !auth.CanAccess(admin, 0) {
+		t.Fatal("admin must access unowned resource")
+	}
+	// owner access still works for non-admin
+	if !auth.CanAccess(user, 5) {
+		t.Fatal("owner must pass")
+	}
+	if auth.CanAccess(user, 6) {
+		t.Fatal("other owner must fail")
+	}
+}

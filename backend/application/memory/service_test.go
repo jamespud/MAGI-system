@@ -414,3 +414,30 @@ func TestMemoryService_DeleteRemovesAndRestoresOnIndexFailure(t *testing.T) {
 		t.Fatalf("failed update must restore original: %+v", repo.byID["c2"])
 	}
 }
+
+func TestMemoryService_SearchHidesUnownedFromAuthenticated(t *testing.T) {
+	repo := &searchMemRepo{results: []*entity.CaseMemoryProjection{{CaseID: "c-own"}, {CaseID: "c-open"}}}
+	cases := &memCaseRepo{byID: map[string]*entity.DecisionCase{
+		"c-own":  {ID: "c-own", UserID: 7},
+		"c-open": {ID: "c-open", UserID: 0}, // unowned legacy case
+	}}
+	svc := memory.NewService(nil, repo, memory.WithCaseRepo(cases))
+
+	// authenticated user (userID 7): own case visible, unowned hidden
+	out, err := svc.Search(context.Background(), 7, "q", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(out) != 1 || out[0].CaseID != "c-own" {
+		t.Fatalf("authenticated search leaked unowned: %+v", out)
+	}
+
+	// open mode (userID 0): everything visible (unchanged)
+	outOpen, err := svc.Search(context.Background(), 0, "q", 10)
+	if err != nil {
+		t.Fatalf("search open: %v", err)
+	}
+	if len(outOpen) != 2 {
+		t.Fatalf("open mode should see all: %+v", outOpen)
+	}
+}
