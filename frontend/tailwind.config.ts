@@ -19,8 +19,8 @@ export default {
         'border-dim': 'var(--border-dim)',
       },
       fontFamily: {
-        sans: ['IBM Plex Sans', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['IBM Plex Sans', 'Noto Sans SC', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Noto Sans SC', 'monospace'],
       },
     },
   },
