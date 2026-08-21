@@ -129,3 +129,29 @@ func TestDockerCodeRunner_SurfacesStderrOnFailure(t *testing.T) {
 		t.Fatalf("expected stderr in error, got %v", err)
 	}
 }
+
+func TestDockerCodeRunner_SecurityFlags(t *testing.T) {
+	var capturedArgs []string
+	runCmd := func(ctx context.Context, args ...string) ([]byte, error) {
+		capturedArgs = args
+		return []byte("ok"), nil
+	}
+	a, err := magi.NewDockerCodeRunnerAdapter(magi.DockerCodeRunnerPolicy{
+		CodeRunnerPolicy: magi.DefaultCodeRunnerPolicy(),
+		Image: "test:latest", MemoryMB: 256, DockerTimeout: 30, DefaultTimeout: 30,
+	}, runCmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.Run(context.Background(), "Python", "print(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(capturedArgs, " ")
+	for _, want := range []string{"--security-opt=no-new-privileges:true", "--read-only", "--tmpfs"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing flag %q in args: %s", want, args)
+		}
+	}
+}
+

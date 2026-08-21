@@ -77,7 +77,9 @@ func (a *DockerCodeRunnerAdapter) Run(ctx context.Context, lang, code string) (s
 	if !ok {
 		return "", fmt.Errorf("docker coderunner: no interpreter for language %q", lang)
 	}
-	args := []string{"run", "--rm", "--network", "none", "--pids-limit", "64"}
+	args := []string{"run", "--rm", "--network", "none", "--pids-limit", "64",
+		"--security-opt=no-new-privileges:true", "--read-only",
+		"--tmpfs", "/tmp:noexec,nosuid,size=64m"}
 	if a.runtime != "" {
 		args = append(args, "--runtime", a.runtime)
 	}
@@ -113,6 +115,10 @@ func (a *DockerCodeRunnerAdapter) interpreter(lang string) ([]string, bool) {
 	switch strings.ToLower(lang) {
 	case "python", "python3":
 		return []string{"python3", "-c"}, true
+	case "javascript", "js":
+		return []string{"node", "-e"}, true
+	case "bash", "sh":
+		return []string{"bash", "-c"}, true
 	default:
 		return nil, false
 	}
