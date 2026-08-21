@@ -12,4 +12,5 @@ type SelfImproveRepository interface {
 	List(ctx context.Context) ([]*entity.SelfImproveSuggestion, error)
 	Get(ctx context.Context, id string) (*entity.SelfImproveSuggestion, error)
 	UpdateStatus(ctx context.Context, id, status string) error
+	UpdateRule(ctx context.Context, id, rule string) error
 }

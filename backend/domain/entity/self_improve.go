@@ -24,6 +24,7 @@ type SelfImproveSuggestion struct {
 
 const (
 	SelfImproveOpen      = "open"
+	SelfImproveAnalyzing = "analyzing"
 	SelfImproveApplied   = "applied"
 	SelfImproveDismissed = "dismissed"
 )

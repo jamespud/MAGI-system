@@ -2,8 +2,13 @@ package selfimprove_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/jamespud/magi/backend/application/selfimprove"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -31,6 +36,13 @@ func (s *stubSIRepo) Get(ctx context.Context, id string) (*entity.SelfImproveSug
 func (s *stubSIRepo) UpdateStatus(ctx context.Context, id, status string) error {
 	if it, ok := s.items[id]; ok {
 		it.Status = status
+	}
+	return nil
+}
+func (s *stubSIRepo) UpdateRule(ctx context.Context, id, rule string) error {
+	if it, ok := s.items[id]; ok {
+		it.SuggestedRule = rule
+		it.Status = entity.SelfImproveOpen
 	}
 	return nil
 }
@@ -239,3 +251,90 @@ func contains(s, sub string) bool {
 
 var _ port.SelfImproveRepository = (*stubSIRepo)(nil)
 var _ port.PromptRepository = (*stubSIPromptRepo)(nil)
+
+
+type stubSIModelPort struct{ content string }
+
+func (s *stubSIModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.ToolCallingChatModel, error) {
+	return &stubChatModel{content: s.content}, nil
+}
+
+type stubChatModel struct {
+	content string
+}
+
+func (m *stubChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage(m.content, nil), nil
+}
+func (m *stubChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("not implemented")
+}
+func (m *stubChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func TestService_ModeRuleUsesTemplate(t *testing.T) {
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	cases := &stubSICaseRepo{c: &entity.DecisionCase{ID: "case-1", Status: entity.CaseStatusFailed}}
+	events := &stubSIEventRepo{events: []*entity.MagiEvent{
+		{Type: entity.EventEvidenceGateFailed, Payload: []byte(`{}`)},
+	}}
+	svc := selfimprove.NewService(repo, cases, events, &stubSIAgentRunRepo{}, selfimprove.WithMode("rule"))
+	s, err := svc.Analyze(context.Background(), "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.SuggestedRule, "Gate guidance") {
+		t.Errorf("rule mode should use template, got: %q", s.SuggestedRule)
+	}
+	if s.Status != entity.SelfImproveOpen {
+		t.Errorf("status = %s, want open", s.Status)
+	}
+}
+
+func TestService_ModeLLMUsesModel(t *testing.T) {
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	cases := &stubSICaseRepo{c: &entity.DecisionCase{ID: "case-1", Status: entity.CaseStatusFailed}}
+	events := &stubSIEventRepo{events: []*entity.MagiEvent{
+		{Type: entity.EventEvidenceGateFailed, Payload: []byte(`{}`)},
+	}}
+	svc := selfimprove.NewService(repo, cases, events, &stubSIAgentRunRepo{},
+		selfimprove.WithMode("llm"), selfimprove.WithModel(&stubSIModelPort{content: "LLM: add more quantitative evidence before voting"}))
+	s, err := svc.Analyze(context.Background(), "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.SuggestedRule, "LLM:") {
+		t.Errorf("llm mode should use model output, got: %q", s.SuggestedRule)
+	}
+}
+
+func TestService_ModeHybridAnalyzesThenEnhances(t *testing.T) {
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	cases := &stubSICaseRepo{c: &entity.DecisionCase{ID: "case-1", Status: entity.CaseStatusFailed}}
+	events := &stubSIEventRepo{events: []*entity.MagiEvent{
+		{Type: entity.EventEvidenceGateFailed, Payload: []byte(`{}`)},
+	}}
+	svc := selfimprove.NewService(repo, cases, events, &stubSIAgentRunRepo{},
+		selfimprove.WithMode("hybrid"), selfimprove.WithModel(&stubSIModelPort{content: "LLM: add more quantitative evidence before voting"}))
+	s, err := svc.Analyze(context.Background(), "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s.SuggestedRule, "Gate guidance") {
+		t.Errorf("hybrid should return template immediately, got: %q", s.SuggestedRule)
+	}
+	if s.Status != entity.SelfImproveAnalyzing {
+		t.Errorf("status = %s, want analyzing", s.Status)
+	}
+	// Wait for the async goroutine to complete.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got := repo.items[s.ID]
+		if got != nil && got.Status == entity.SelfImproveOpen && strings.Contains(got.SuggestedRule, "LLM:") {
+			return // success
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("async enhancement did not complete; final = %+v", repo.items[s.ID])
+}

@@ -221,8 +221,9 @@ type DelegateToolConfig struct {
 
 // SelfImproveConfig gates the automatic rule-evolution loop.
 type SelfImproveConfig struct {
-	AutoApplyEnabled   bool `yaml:"auto_apply_enabled"`
-	AutoApplyThreshold int  `yaml:"auto_apply_threshold"`
+	AutoApplyEnabled   bool   `yaml:"auto_apply_enabled"`
+	AutoApplyThreshold int    `yaml:"auto_apply_threshold"`
+	Mode               string `yaml:"mode"` // "rule" | "llm" | "hybrid"; empty defaults to rule
 }
 
 // SensorToolConfig registers external deterministic checks (linters,

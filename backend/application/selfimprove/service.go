@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -21,9 +22,11 @@ type Service struct {
 	events     port.EventRepository
 	agentRuns  port.AgentRunRepository
 	prompts    port.PromptRepository
+	model      port.ModelPort
 	eventLimit int
 	autoApply  bool
 	threshold  int
+	mode       string // "rule" | "llm" | "hybrid"
 }
 
 type Option func(*Service)
@@ -32,6 +35,23 @@ type Option func(*Service)
 // prompt registry.
 func WithPrompts(p port.PromptRepository) Option {
 	return func(s *Service) { s.prompts = p }
+}
+
+// WithMode sets the suggestion-generation mode: "rule" (deterministic
+// templates), "llm" (generated inline), or "hybrid" (rule first, LLM
+// enhancement applied asynchronously).
+func WithMode(mode string) Option {
+	return func(s *Service) {
+		if mode != "" {
+			s.mode = mode
+		}
+	}
+}
+
+// WithModel supplies the model builder used to generate contextual
+// suggestions in llm/hybrid modes. A nil model falls back to rule templates.
+func WithModel(m port.ModelPort) Option {
+	return func(s *Service) { s.model = m }
 }
 
 // WithAutoApply enables applying recurring suggestions automatically once a
@@ -47,7 +67,7 @@ func WithAutoApply(enabled bool, threshold int) Option {
 }
 
 func NewService(repo port.SelfImproveRepository, cases port.CaseRepository, events port.EventRepository, agentRuns port.AgentRunRepository, opts ...Option) *Service {
-	s := &Service{repo: repo, cases: cases, events: events, agentRuns: agentRuns, eventLimit: 200}
+	s := &Service{repo: repo, cases: cases, events: events, agentRuns: agentRuns, eventLimit: 200, mode: "rule"}
 	for _, o := range opts {
 		o(s)
 	}
@@ -99,7 +119,26 @@ func (s *Service) Analyze(ctx context.Context, caseID string) (*entity.SelfImpro
 	if err := s.repo.Create(ctx, suggestion); err != nil {
 		return nil, fmt.Errorf("selfimprove: create suggestion: %w", err)
 	}
+	if s.mode == "hybrid" && s.model != nil {
+		s.enhanceAsync(ctx, suggestion)
+	}
 	return suggestion, nil
+}
+
+// enhanceAsync re-analyzes a suggestion with the model in the background and
+// updates its rule once ready. The returned suggestion keeps the deterministic
+// rule template and an "analyzing" status until the enhancement lands.
+func (s *Service) enhanceAsync(ctx context.Context, suggestion *entity.SelfImproveSuggestion) {
+	_ = s.repo.UpdateStatus(ctx, suggestion.ID, entity.SelfImproveAnalyzing)
+	go func() {
+		rule := s.llmSuggest(suggestion.Category, suggestion.Failure)
+		if rule != "" {
+			_ = s.repo.UpdateRule(context.Background(), suggestion.ID, rule)
+		} else {
+			// Enhancement failed; leave the rule template and reopen.
+			_ = s.repo.UpdateStatus(context.Background(), suggestion.ID, entity.SelfImproveOpen)
+		}
+	}()
 }
 
 // List returns all suggestions, newest first.
@@ -233,6 +272,51 @@ func (s *Service) failureSummary(c *entity.DecisionCase, events []*entity.MagiEv
 }
 
 func (s *Service) suggestRule(category, failure string) string {
+	switch s.mode {
+	case "llm":
+		if rule := s.llmSuggest(category, failure); rule != "" {
+			return rule
+		}
+	}
+	return ruleTemplate(category, failure)
+}
+
+// llmSuggest generates a contextual improvement suggestion via the configured
+// model. On any failure (no model, build error, generation error) it returns
+// "" so callers fall back to the deterministic rule template.
+func (s *Service) llmSuggest(category, failure string) string {
+	if s.model == nil {
+		return ""
+	}
+	prompt := "You are the MAGI harness self-improvement engine. The failure category is " + category +
+		". Details: " + truncate(failure, 1500) +
+		". Suggest ONE concrete, actionable improvement rule (at most 300 characters)."
+	cm, err := s.model.Build(context.Background(), s.modelRef())
+	if err != nil {
+		return ""
+	}
+	resp, err := cm.Generate(context.Background(), []*schema.Message{
+		schema.SystemMessage("You are the MAGI harness self-improvement engine. Respond with a single concise improvement rule."),
+		schema.UserMessage(prompt),
+	})
+	if err != nil || resp == nil {
+		return ""
+	}
+	rule := strings.TrimSpace(resp.Content)
+	if rule == "" {
+		return ""
+	}
+	return rule
+}
+
+// modelRef returns an empty ModelRef; callers may override via wiring to the
+// default global model when no per-instance ref is configured.
+func (s *Service) modelRef() entity.ModelRef {
+	return entity.ModelRef{}
+}
+
+// ruleTemplate returns the deterministic, category-based suggestion template.
+func ruleTemplate(category, failure string) string {
 	switch category {
 	case entity.SelfImproveGateFailure:
 		return "Gate guidance: before voting, the EvidenceSummary must satisfy every required evidence type and minimum count; gather additional evidence instead of fabricating EV-IDs."

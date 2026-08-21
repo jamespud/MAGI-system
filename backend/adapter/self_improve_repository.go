@@ -49,6 +49,11 @@ func (r *selfImproveRepo) UpdateStatus(ctx context.Context, id, status string) e
 	return r.db.WithContext(ctx).Model(&SelfImproveModel{}).Where("id = ?", id).Updates(updates).Error
 }
 
+func (r *selfImproveRepo) UpdateRule(ctx context.Context, id, rule string) error {
+	updates := map[string]any{"suggested_rule": rule, "status": entity.SelfImproveOpen, "updated_at": time.Now()}
+	return r.db.WithContext(ctx).Model(&SelfImproveModel{}).Where("id = ?", id).Updates(updates).Error
+}
+
 func selfImproveToModel(s *entity.SelfImproveSuggestion) *SelfImproveModel {
 	return &SelfImproveModel{
 		ID: s.ID, CaseID: s.CaseID, RunID: s.RunID, AgentCode: s.AgentCode,
