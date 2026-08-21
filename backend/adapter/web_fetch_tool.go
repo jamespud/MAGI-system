@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -136,8 +137,15 @@ func (e *WebFetchToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 	return &port.ToolExecutionResult{Output: string(raw), Structured: out, SourceURI: parsed.String()}, nil
 }
 
-// stripHTML reduces HTML to readable text: drops tags, scripts, and styles.
+var (
+	scriptRe  = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleRe   = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+)
+
+// stripHTML reduces HTML to readable text: drops scripts, styles, then tags.
 func stripHTML(input string) string {
+	input = scriptRe.ReplaceAllString(input, "")
+	input = styleRe.ReplaceAllString(input, "")
 	var b strings.Builder
 	inTag := false
 	for _, r := range input {

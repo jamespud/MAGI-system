@@ -428,7 +428,7 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		if err != nil {
 			return nil, err
 		}
-		delegate, err := magi.NewDelegateToolExecutor(investigator)
+		delegate, err := magi.NewDelegateToolExecutor(investigator, magi.DelegateToolConfig{})
 		if err != nil {
 			return nil, err
 		}

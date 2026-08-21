@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -159,7 +160,18 @@ func (e *DBQueryToolExecutor) Execute(ctx context.Context, req port.ToolExecutio
 		}
 		row := map[string]any{}
 		for i, col := range columns {
-			row[col] = values[i]
+			switch v := values[i].(type) {
+			case []byte:
+				if utf8.Valid(v) {
+					row[col] = string(v)
+				} else {
+					row[col] = fmt.Sprintf("<binary:%d bytes>", len(v))
+				}
+			case time.Time:
+				row[col] = v.Format(time.RFC3339)
+			default:
+				row[col] = v
+			}
 		}
 		results = append(results, row)
 	}

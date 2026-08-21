@@ -76,19 +76,29 @@ func (s *LoopSubInvestigator) Investigate(ctx context.Context, question, backgro
 	return out, nil
 }
 
+// DelegateToolConfig configures the delegate tool.
+type DelegateToolConfig struct {
+	MaxParallel int
+}
+
 // DelegateToolExecutor runs a sub-investigation and returns its evidence as
 // structured output for the calling agent to cite.
 type DelegateToolExecutor struct {
 	investigator SubInvestigator
+	maxParallel  int
 }
 
 // NewDelegateToolExecutor wraps a sub-investigator behind the local tool
 // contract.
-func NewDelegateToolExecutor(investigator SubInvestigator) (port.ToolExecutorPort, error) {
+func NewDelegateToolExecutor(investigator SubInvestigator, cfg DelegateToolConfig) (port.ToolExecutorPort, error) {
 	if investigator == nil {
 		return nil, fmt.Errorf("delegate: sub-investigator is required")
 	}
-	return &DelegateToolExecutor{investigator: investigator}, nil
+	mp := cfg.MaxParallel
+	if mp <= 0 {
+		mp = 4
+	}
+	return &DelegateToolExecutor{investigator: investigator, maxParallel: mp}, nil
 }
 
 func (e *DelegateToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
@@ -134,7 +144,7 @@ func (e *DelegateToolExecutor) executeParallel(ctx context.Context, questions []
 	}
 	results := make([]*DelegateResult, len(questions))
 	errs := make([]error, len(questions))
-	limit := delegateParallelLimit
+	limit := e.maxParallel
 	if len(questions) < limit {
 		limit = len(questions)
 	}

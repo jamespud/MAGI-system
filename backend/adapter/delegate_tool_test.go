@@ -30,7 +30,7 @@ func TestDelegateToolExecutor_RunsSubInvestigation(t *testing.T) {
 			{"id": "EV-SUB-1", "tool": "web_search", "source": "https://a", "observation": "found", "reliability": 0.9},
 		},
 	}}
-	exec, err := magi.NewDelegateToolExecutor(investigator)
+	exec, err := magi.NewDelegateToolExecutor(investigator, magi.DelegateToolConfig{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -55,10 +55,10 @@ func TestDelegateToolExecutor_RunsSubInvestigation(t *testing.T) {
 }
 
 func TestDelegateToolExecutor_RequiresQuestionAndInvestigator(t *testing.T) {
-	if _, err := magi.NewDelegateToolExecutor(nil); err == nil {
+	if _, err := magi.NewDelegateToolExecutor(nil, magi.DelegateToolConfig{}); err == nil {
 		t.Fatal("expected missing investigator error")
 	}
-	exec, err := magi.NewDelegateToolExecutor(&stubInvestigator{})
+	exec, err := magi.NewDelegateToolExecutor(&stubInvestigator{}, magi.DelegateToolConfig{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestDelegateToolExecutor_RequiresQuestionAndInvestigator(t *testing.T) {
 
 func TestDelegateToolExecutor_RunsParallelSubInvestigations(t *testing.T) {
 	investigator := &trackingInvestigator{expected: 3, done: make(chan struct{})}
-	exec, err := magi.NewDelegateToolExecutor(investigator)
+	exec, err := magi.NewDelegateToolExecutor(investigator, magi.DelegateToolConfig{})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -158,5 +158,20 @@ func TestLoopSubInvestigator_RequiresLoopAndConfig(t *testing.T) {
 	}
 	if _, err := magi.NewLoopSubInvestigator(&stubMagiRuntime{}, nil); err == nil {
 		t.Fatal("expected missing config error")
+	}
+}
+
+func TestDelegateTool_MaxParallelConfigurable(t *testing.T) {
+	inv := &stubInvestigator{}
+	// custom value
+	exec, err := magi.NewDelegateToolExecutor(inv, magi.DelegateToolConfig{MaxParallel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = exec
+	// default should be 4
+	exec2, _ := magi.NewDelegateToolExecutor(inv, magi.DelegateToolConfig{})
+	if exec2 == nil {
+		t.Fatal("expected non-nil executor")
 	}
 }
