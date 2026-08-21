@@ -950,9 +950,9 @@ func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyReposi
 	return users.NewServiceWithOptions(userRepo, keyRepo, users.WithSelfRegistration(selfRegistration))
 }
 
-func provideSessionCodec(cfg *Config) *auth.SessionCodec {
+func provideSessionCodec(cfg *Config) (*auth.SessionCodec, error) {
 	if !cfg.Auth.OIDC.Enabled || strings.TrimSpace(cfg.Auth.OIDC.SessionSecret) == "" {
-		return nil
+		return nil, nil
 	}
 	ttl := time.Duration(cfg.Auth.OIDC.SessionTTLSeconds) * time.Second
 	if ttl <= 0 {

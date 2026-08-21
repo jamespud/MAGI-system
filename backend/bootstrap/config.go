@@ -916,8 +916,8 @@ func (c *Config) Validate() error {
 			strings.TrimSpace(c.Auth.OIDC.RedirectURL) == "" {
 			return fmt.Errorf("auth.oidc: issuer, client_id and redirect_url are required when enabled")
 		}
-		if strings.TrimSpace(c.Auth.OIDC.SessionSecret) == "" {
-			return fmt.Errorf("auth.oidc: session_secret is required when enabled")
+		if len(c.Auth.OIDC.SessionSecret) < 32 {
+			return fmt.Errorf("auth.oidc: session_secret must be at least 32 bytes")
 		}
 	}
 	if c.Limits.MaxConcurrentRunsPerUser < 0 {

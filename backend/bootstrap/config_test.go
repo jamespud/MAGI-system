@@ -454,10 +454,10 @@ func TestConfigValidate_OIDC(t *testing.T) {
 	cfg.Auth.OIDC.Issuer = "https://issuer.example"
 	cfg.Auth.OIDC.ClientID = "cid"
 	cfg.Auth.OIDC.RedirectURL = "http://localhost/auth/oidc/callback"
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "session_secret is required") {
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "session_secret must be at least 32 bytes") {
 		t.Fatalf("expected session_secret error, got %v", err)
 	}
-	cfg.Auth.OIDC.SessionSecret = "s3cret"
+	cfg.Auth.OIDC.SessionSecret = "abcdefghijklmnopqrstuvwxyz012345"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("valid oidc rejected: %v", err)
 	}

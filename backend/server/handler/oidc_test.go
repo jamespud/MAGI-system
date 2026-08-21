@@ -103,7 +103,7 @@ func newOIDCStack(t *testing.T) (*handler.OIDCHandler, *memRepo) {
 	if err != nil {
 		t.Fatalf("oidc client: %v", err)
 	}
-	codec := auth.NewSessionCodec("secret", time.Hour)
+	codec, _ := auth.NewSessionCodec(strings.Repeat("x", 32), time.Hour)
 	usersSvc := users.NewServiceWithOptions(repo, &memKeyRepo{keys: map[string]*entity.ApiKey{}}, users.WithSelfRegistration(true))
 	return handler.NewOIDCHandler(client, codec, usersSvc, nil), repo
 }
@@ -148,7 +148,8 @@ func TestOIDCHandler_RegisterDisabledForbidden(t *testing.T) {
 		t.Fatalf("oidc client: %v", err)
 	}
 	usersSvc := users.NewServiceWithOptions(repo, &memKeyRepo{keys: map[string]*entity.ApiKey{}}, users.WithSelfRegistration(false))
-	oidc := handler.NewOIDCHandler(client, auth.NewSessionCodec("s", time.Hour), usersSvc, nil)
+	codec2, _ := auth.NewSessionCodec(strings.Repeat("x", 32), time.Hour)
+	oidc := handler.NewOIDCHandler(client, codec2, usersSvc, nil)
 	h := server.Default(server.WithHostPorts("127.0.0.1:0"))
 	h.POST("/register", oidc.Register)
 	w := ut.PerformRequest(h.Engine, "POST", "/register",

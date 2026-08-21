@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -25,11 +26,14 @@ type SessionCodec struct {
 }
 
 // NewSessionCodec builds a codec from a secret and TTL.
-func NewSessionCodec(secret string, ttl time.Duration) *SessionCodec {
+func NewSessionCodec(secret string, ttl time.Duration) (*SessionCodec, error) {
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("session: secret must be at least 32 bytes")
+	}
 	if ttl <= 0 {
 		ttl = 12 * time.Hour
 	}
-	return &SessionCodec{secret: []byte(secret), ttl: ttl}
+	return &SessionCodec{secret: []byte(secret), ttl: ttl}, nil
 }
 
 // SessionTTL returns the cookie lifetime.
