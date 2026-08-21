@@ -119,3 +119,74 @@ func TestFileTool_SymlinkTraversalBlocked(t *testing.T) {
 		t.Fatal("expected symlink traversal to be blocked")
 	}
 }
+
+func TestFileTool_WriteActions(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	os.MkdirAll(root, 0755)
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true, Roots: []string{root}, AllowDelete: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// write
+	_, err = exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: fmt.Sprintf(`{"path":"test.txt","action":"write","content":"hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "test.txt"))
+	if string(data) != "hello" {
+		t.Errorf("content = %q, want hello", string(data))
+	}
+
+	// append
+	_, err = exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: fmt.Sprintf(`{"path":"test.txt","action":"append","content":" world"}`),
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	data, _ = os.ReadFile(filepath.Join(root, "test.txt"))
+	if string(data) != "hello world" {
+		t.Errorf("content = %q, want 'hello world'", string(data))
+	}
+
+	// mkdir
+	_, err = exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: fmt.Sprintf(`{"path":"subdir","action":"mkdir"}`),
+	})
+	if err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	info, _ := os.Stat(filepath.Join(root, "subdir"))
+	if !info.IsDir() {
+		t.Error("subdir should be a directory")
+	}
+
+	// delete
+	_, err = exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: fmt.Sprintf(`{"path":"test.txt","action":"delete"}`),
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "test.txt")); !os.IsNotExist(err) {
+		t.Error("test.txt should be deleted")
+	}
+}
+
+func TestFileTool_DeleteBlockedWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	os.MkdirAll(root, 0755)
+	os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0644)
+	exec, _ := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true, Roots: []string{root}, AllowDelete: false})
+	_, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: fmt.Sprintf(`{"path":"f.txt","action":"delete"}`),
+	})
+	if err == nil {
+		t.Fatal("delete should be blocked when AllowDelete is false")
+	}
+}

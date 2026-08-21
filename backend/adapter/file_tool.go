@@ -20,7 +20,7 @@ const (
 )
 
 // fileArgsSchema is the JSON Schema for file_query arguments.
-const fileArgsSchema = `{"type":"object","properties":{"path":{"type":"string"},"action":{"type":"string","enum":["read","list"]}},"required":["path","action"],"additionalProperties":false}`
+const fileArgsSchema = `{"type":"object","properties":{"path":{"type":"string"},"action":{"type":"string","enum":["read","list","write","append","delete","mkdir"]},"content":{"type":"string"}},"required":["path","action"],"additionalProperties":false}`
 
 // FileToolConfig bounds the read-only file tool to configured roots.
 type FileToolConfig struct {
@@ -28,6 +28,7 @@ type FileToolConfig struct {
 	Roots        []string
 	MaxFileBytes int64
 	MaxListItems int
+	AllowDelete  bool
 }
 
 // FileToolExecutor reads or lists files inside configured allow-listed roots.
@@ -37,6 +38,7 @@ type FileToolExecutor struct {
 	roots        []string
 	maxFileBytes int64
 	maxListItems int
+	allowDelete  bool
 }
 
 // NewFileToolExecutor normalizes and validates the allow-listed roots.
@@ -67,13 +69,14 @@ func NewFileToolExecutor(cfg FileToolConfig) (port.ToolExecutorPort, error) {
 	if maxItems <= 0 {
 		maxItems = defaultFileMaxItems
 	}
-	return &FileToolExecutor{roots: roots, maxFileBytes: maxBytes, maxListItems: maxItems}, nil
+	return &FileToolExecutor{roots: roots, maxFileBytes: maxBytes, maxListItems: maxItems, allowDelete: cfg.AllowDelete}, nil
 }
 
 func (e *FileToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
 	var args struct {
-		Path   string `json:"path"`
-		Action string `json:"action"`
+		Path    string `json:"path"`
+		Action  string `json:"action"`
+		Content string `json:"content"`
 	}
 	if err := json.Unmarshal([]byte(req.ArgumentsJSON), &args); err != nil {
 		return nil, fmt.Errorf("file_query: parse args: %w", err)
@@ -90,8 +93,16 @@ func (e *FileToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRe
 		return e.read(ctx, resolved)
 	case "list":
 		return e.list(ctx, resolved)
+	case "write":
+		return e.write(ctx, resolved, args.Content)
+	case "append":
+		return e.append(ctx, resolved, args.Content)
+	case "delete":
+		return e.delete(ctx, resolved)
+	case "mkdir":
+		return e.mkdir(ctx, resolved)
 	default:
-		return nil, fmt.Errorf("file_query: action must be \"read\" or \"list\"")
+		return nil, fmt.Errorf("file_query: unknown action %q", args.Action)
 	}
 }
 
@@ -110,9 +121,16 @@ func resolveInRoots(roots []string, path string) (string, error) {
 		}
 	}
 	for _, candidate := range candidates {
+		// Resolve symlinks on the deepest existing ancestor so writes/mkdir
+		// to not-yet-existing paths are still containment-checked.
 		real, err := filepath.EvalSymlinks(candidate)
 		if err != nil {
-			continue
+			dir := filepath.Dir(candidate)
+			realDir, derr := filepath.EvalSymlinks(dir)
+			if derr != nil {
+				continue
+			}
+			real = filepath.Join(realDir, filepath.Base(candidate))
 		}
 		for _, root := range roots {
 			if withinRoot(root, real) {
@@ -174,5 +192,58 @@ func (e *FileToolExecutor) list(ctx context.Context, path string) (*port.ToolExe
 	raw, _ := json.Marshal(out)
 	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
 }
+
+
+func (e *FileToolExecutor) write(ctx context.Context, path, content string) (*port.ToolExecutionResult, error) {
+	if len([]byte(content)) > int(e.maxFileBytes) {
+		return nil, fmt.Errorf("file_query: write exceeds %d bytes", e.maxFileBytes)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return nil, fmt.Errorf("file_query: write %s: %w", path, err)
+	}
+	out := map[string]any{"path": path, "written": len([]byte(content))}
+	raw, _ := json.Marshal(out)
+	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
+func (e *FileToolExecutor) append(ctx context.Context, path, content string) (*port.ToolExecutionResult, error) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("file_query: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err == nil && info.Size()+int64(len([]byte(content))) > e.maxFileBytes {
+		return nil, fmt.Errorf("file_query: append exceeds %d bytes", e.maxFileBytes)
+	}
+	n, err := f.WriteString(content)
+	if err != nil {
+		return nil, fmt.Errorf("file_query: append %s: %w", path, err)
+	}
+	out := map[string]any{"path": path, "appended": n}
+	raw, _ := json.Marshal(out)
+	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
+func (e *FileToolExecutor) delete(ctx context.Context, path string) (*port.ToolExecutionResult, error) {
+	if !e.allowDelete {
+		return nil, fmt.Errorf("file_query: delete is disabled (allow_delete=false)")
+	}
+	if err := os.Remove(path); err != nil {
+		return nil, fmt.Errorf("file_query: delete %s: %w", path, err)
+	}
+	out := map[string]any{"path": path, "deleted": true}
+	raw, _ := json.Marshal(out)
+	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
+func (e *FileToolExecutor) mkdir(ctx context.Context, path string) (*port.ToolExecutionResult, error) {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return nil, fmt.Errorf("file_query: mkdir %s: %w", path, err)
+	}
+	out := map[string]any{"path": path, "created": true}
+	raw, _ := json.Marshal(out)
+	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
+}
+
 
 var _ port.ToolExecutorPort = (*FileToolExecutor)(nil)
