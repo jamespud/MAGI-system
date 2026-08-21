@@ -110,9 +110,13 @@ func resolveInRoots(roots []string, path string) (string, error) {
 		}
 	}
 	for _, candidate := range candidates {
+		real, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			continue
+		}
 		for _, root := range roots {
-			if withinRoot(root, candidate) {
-				return candidate, nil
+			if withinRoot(root, real) {
+				return real, nil
 			}
 		}
 	}

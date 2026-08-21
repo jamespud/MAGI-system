@@ -2,6 +2,7 @@ package magi_test
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -94,5 +95,27 @@ func TestFileTool_RequiresRoots(t *testing.T) {
 	}
 	if _, err := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true}); err == nil {
 		t.Fatal("expected missing roots error")
+	}
+}
+
+func TestFileTool_SymlinkTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	outside := filepath.Join(dir, "outside")
+	os.MkdirAll(root, 0755)
+	os.MkdirAll(outside, 0755)
+	secret := filepath.Join(outside, "secret.txt")
+	os.WriteFile(secret, []byte("should-not-read"), 0644)
+	link := filepath.Join(root, "escape")
+	os.Symlink(outside, link)
+
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true, Roots: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := fmt.Sprintf(`{"path":"%s","action":"read"}`, filepath.Join(root, "escape", "secret.txt"))
+	_, err = exec.Execute(context.Background(), port.ToolExecutionRequest{ToolName: magi.FileToolName, ArgumentsJSON: args})
+	if err == nil {
+		t.Fatal("expected symlink traversal to be blocked")
 	}
 }
