@@ -258,6 +258,9 @@ delegate_tool:
 selfimprove:
   auto_apply_enabled: false
   auto_apply_threshold: 3
+  # mode: rule (deterministic templates) | llm (inline model suggestion) |
+  # hybrid (rule first, then async LLM enhancement). Empty defaults to rule.
+  mode: rule
 
 # External deterministic sensor tool (run_check): register linters, compilers,
 # or unit-test commands; the agent can invoke them and the output is fed back
