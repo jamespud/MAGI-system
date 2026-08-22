@@ -266,6 +266,10 @@ type RAGConfig struct {
 	OrphanStrategy     string `yaml:"orphan_strategy"`
 	StoreAsync         bool   `yaml:"store_async"`
 	StoreWorkers       int    `yaml:"store_workers"`
+	IndexJobMaxAttempts int   `yaml:"index_job_max_attempts"`
+	IndexLeaseSeconds  int    `yaml:"index_lease_seconds"`
+	IndexPollIntervalMS int   `yaml:"index_poll_interval_ms"`
+	IndexRetryBaseMS   int    `yaml:"index_retry_base_ms"`
 }
 
 type ModelSpec struct {
@@ -426,6 +430,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.RAG.StoreWorkers == 0 {
 		cfg.RAG.StoreWorkers = 4
+	}
+	if cfg.RAG.IndexJobMaxAttempts == 0 {
+		cfg.RAG.IndexJobMaxAttempts = 3
+	}
+	if cfg.RAG.IndexLeaseSeconds == 0 {
+		cfg.RAG.IndexLeaseSeconds = 60
+	}
+	if cfg.RAG.IndexPollIntervalMS == 0 {
+		cfg.RAG.IndexPollIntervalMS = 1000
+	}
+	if cfg.RAG.IndexRetryBaseMS == 0 {
+		cfg.RAG.IndexRetryBaseMS = 1000
 	}
 	if cfg.Benchmark.RunsPerItem == 0 {
 		cfg.Benchmark.RunsPerItem = 1

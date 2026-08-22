@@ -350,6 +350,10 @@ rag:
   orphan_strategy: "keep_300"
   store_async: true
   store_workers: 4
+  index_job_max_attempts: 3
+  index_lease_seconds: 60
+  index_poll_interval_ms: 1000
+  index_retry_base_ms: 1000
 
 # Optional model overrides for the Commander (task normalization + report
 # drafting) and the semantic Judge (LLM-as-a-Judge evaluation). Unset fields

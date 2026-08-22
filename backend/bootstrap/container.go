@@ -40,6 +40,7 @@ import (
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/plugins"
+	"github.com/jamespud/magi/backend/application/ragindex"
 	"github.com/jamespud/magi/backend/application/recurring"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/application/replay"
@@ -144,8 +145,11 @@ var Module = fx.Options(
 		provideSelfImproveService,
 		provideSelfImproveHandler,
 		provideEvaluationService,
-		provideMemoryIndexer,
 		provideMemoryService,
+		provideRagIndexJobRepository,
+		provideRagIndexService,
+		provideRagIndexPoller,
+		provideAdminRagHandler,
 		provideKnowledgeRepository,
 		provideKnowledgeService,
 		provideToolService,
@@ -196,6 +200,7 @@ var Module = fx.Options(
 		admSvc *admin.Service,
 		recSvc *recurring.Service,
 		askSvc *assistant.Service,
+		ragH *handler.AdminRagHandler,
 		dbPing func(context.Context) error,
 		tp *trace.TracerProvider,
 	) {
@@ -214,6 +219,7 @@ var Module = fx.Options(
 			SelfImprove:       siH,
 			RolePolicy:        rpH,
 			Golden:            goldenH,
+			AdminRag:          ragH,
 			ConsensusPolicy:   cpH,
 			FSMBlueprint:      fbH,
 			TaskTree:          ttH,
@@ -484,7 +490,7 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 // knowledge service. When async store is enabled, the KnowledgePort is the
 // AsyncIndexer while the DocumentIndexer stays the synchronous adapter (doc
 // uploads are user-triggered and return their index status immediately).
-func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, port.DocumentIndexer, error) {
+func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, port.DocumentIndexer, port.MemoryIndexer, error) {
 	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
 	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
 
@@ -492,7 +498,7 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 	if cfg.Milvus.Address != "" {
 		real, err := rag.NewMilvusIndexer(cfg.Milvus.Address, cfg.Milvus.Collection, cfg.Embedding.Dim)
 		if err != nil {
-			return nil, nil, fmt.Errorf("milvus connect %q: %w (set milvus.address empty to use fake index)", cfg.Milvus.Address, err)
+			return nil, nil, nil, fmt.Errorf("milvus connect %q: %w (set milvus.address empty to use fake index)", cfg.Milvus.Address, err)
 		}
 		vec = real
 	} else {
@@ -502,7 +508,7 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 	if len(cfg.Elasticsearch.Addresses) > 0 {
 		real, err := rag.NewESIndexer(cfg.Elasticsearch.Addresses, cfg.Elasticsearch.Index)
 		if err != nil {
-			return nil, nil, fmt.Errorf("elasticsearch connect %v: %w (set elasticsearch.addresses empty to use fake index)", cfg.Elasticsearch.Addresses, err)
+			return nil, nil, nil, fmt.Errorf("elasticsearch connect %v: %w (set elasticsearch.addresses empty to use fake index)", cfg.Elasticsearch.Addresses, err)
 		}
 		lex = real
 	} else {
@@ -515,14 +521,19 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 		Thr900: cfg.RAG.MergeThreshold900, Thr1800: cfg.RAG.MergeThreshold1800,
 		Orphan: cfg.RAG.OrphanStrategy,
 	})
-	adapter := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, pub)
+	// inner shares the event publisher so storeRaw emits MEMORY_INDEXED on
+	// successful indexing (the poller executes synchronously through inner).
+	inner := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, pub)
 	if cfg.RAG.StoreAsync {
-		// Async path: the inner adapter must not publish MEMORY_INDEXED
-		// itself; the worker publishes once indexing actually completes.
-		inner := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, nil)
-		return rag.NewAsyncIndexer(inner, pub, cfg.RAG.StoreWorkers), adapter, nil
+		// Durable queue path: all RAG mutations are enqueued into
+		// rag_index_job and executed by the RagIndexPoller. The same
+		// DurableIndexer satisfies all three port interfaces.
+		jobRepo := magi.NewRagIndexJobRepository(db)
+		durable := rag.NewDurableIndexer(inner, jobRepo)
+		return durable, durable, durable, nil
 	}
-	return adapter, adapter, nil
+	// Sync path: the adapter itself satisfies all three interfaces.
+	return inner, inner, inner, nil
 }
 
 func provideCommander(
@@ -751,15 +762,39 @@ func provideSelfImproveHandler(svc *selfimprove.Service) *handler.SelfImproveHan
 	return handler.NewSelfImproveHandler(svc)
 }
 
-func provideMemoryIndexer(knowledge port.KnowledgePort) port.MemoryIndexer {
-	if indexer, ok := knowledge.(port.MemoryIndexer); ok {
-		return indexer
-	}
-	return nil
-}
-
 func provideMemoryService(knowledge port.KnowledgePort, repo port.Repository, indexer port.MemoryIndexer) *memory.Service {
 	return memory.NewService(knowledge, repo.MemoryRepo(), memory.WithCaseRepo(repo.CaseRepo()), memory.WithIndexer(indexer))
+}
+
+func provideRagIndexJobRepository(db *gorm.DB) port.RagIndexJobRepository {
+	return magi.NewRagIndexJobRepository(db)
+}
+
+func provideRagIndexService(repo port.RagIndexJobRepository, agg port.Repository, knowRepo port.KnowledgeRepository, cfg *Config) *ragindex.Service {
+	return ragindex.NewService(repo, agg.MemoryRepo(), knowRepo, cfg.RAG.IndexJobMaxAttempts)
+}
+
+func provideRagIndexPoller(repo port.RagIndexJobRepository, agg port.Repository, knowRepo port.KnowledgeRepository, kp port.KnowledgePort, cfg *Config) *ragindex.RagIndexPoller {
+	// In async mode kp is *DurableIndexer; in sync mode it is the adapter
+	// itself. The poller needs the concrete inner adapter to execute jobs.
+	var inner *rag.HybridKnowledgeAdapter
+	switch v := kp.(type) {
+	case *rag.HybridKnowledgeAdapter:
+		inner = v
+	case *rag.DurableIndexer:
+		inner = v.Inner()
+	}
+	host, _ := os.Hostname()
+	return ragindex.NewRagIndexPoller(repo, agg.MemoryRepo(), knowRepo, inner, ragindex.PollerConfig{
+		Interval:  time.Duration(cfg.RAG.IndexPollIntervalMS) * time.Millisecond,
+		Lease:     time.Duration(cfg.RAG.IndexLeaseSeconds) * time.Second,
+		RetryBase: time.Duration(cfg.RAG.IndexRetryBaseMS) * time.Millisecond,
+		WorkerID:  "rag-index-" + host,
+	})
+}
+
+func provideAdminRagHandler(svc *ragindex.Service) *handler.AdminRagHandler {
+	return handler.NewAdminRagHandler(svc)
 }
 
 func provideKnowledgeRepository(db *gorm.DB) port.KnowledgeRepository {
@@ -805,8 +840,9 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, cfg *Config) {
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config) {
 	var autoCancel context.CancelFunc
+	var ragCancel context.CancelFunc
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
@@ -814,6 +850,11 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 			}
 			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
 				return err
+			}
+			if poller != nil {
+				ragCtx, cancel := context.WithCancel(context.Background())
+				ragCancel = cancel
+				go poller.Run(ragCtx)
 			}
 			if cfg.Benchmark.AutoIntervalSeconds > 0 {
 				autoCtx, cancel := context.WithCancel(context.Background())
@@ -850,6 +891,9 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 		OnStop: func(context.Context) error {
 			if autoCancel != nil {
 				autoCancel()
+			}
+			if ragCancel != nil {
+				ragCancel()
 			}
 			return nil
 		},

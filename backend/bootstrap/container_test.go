@@ -79,7 +79,7 @@ func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.Embedding.Dim = 3
 	// Empty Milvus/ES addresses -> fake indexes; no real connections.
-	kp, idx, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
+	kp, idx, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("ProvideKnowledgePort: %v", err)
 	}
@@ -88,5 +88,25 @@ func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
 	}
 	if idx == nil {
 		t.Error("expected non-nil DocumentIndexer")
+	}
+	if mem == nil {
+		t.Error("expected non-nil MemoryIndexer")
+	}
+}
+
+func TestProvideKnowledgePort_AsyncReturnsMemoryIndexer(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	cfg := &bootstrap.Config{}
+	cfg.Embedding.Dim = 3
+	cfg.RAG.StoreAsync = true
+	kp, doc, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
+	if err != nil {
+		t.Fatalf("ProvideKnowledgePort: %v", err)
+	}
+	if kp == nil || doc == nil || mem == nil {
+		t.Fatalf("nil interface in async mode: kp=%v doc=%v mem=%v", kp == nil, doc == nil, mem == nil)
 	}
 }
