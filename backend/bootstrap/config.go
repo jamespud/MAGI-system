@@ -440,7 +440,7 @@ func LoadConfig(path string) (*Config, error) {
 // applyEnvOverrides overrides config fields from environment variables when set.
 // The containerized deployment injects DSN and secrets this way (12-factor)
 // instead of baking them into the image. Empty vars leave the YAML value intact,
-// so local `make debug` (which sets none of these) behaves unchanged.
+// so local `make dev` (which sets none of these) behaves unchanged.
 func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MAGI_DB_DSN"); v != "" {
 		cfg.Database.DSN = v

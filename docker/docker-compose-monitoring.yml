@@ -1,8 +1,8 @@
 # Default observability stack: Prometheus scraping MAGI + Alertmanager +
 # Grafana with a pre-provisioned MAGI dashboard.
 #
-# Usage (web stack must be running first, `make web-up`):
-#   make monitoring-up
+# Usage (web stack must be running first, `make up`):
+#   docker compose -f docker/docker-compose-monitoring.yml up -d
 #
 #   Prometheus:  http://localhost:9090
 #   Alertmanager: http://localhost:9093

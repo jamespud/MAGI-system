@@ -13,16 +13,17 @@ Go module at `backend/` (`github.com/jamespud/magi/backend`), Go 1.24+.
 Makefile targets run from repo root:
 
 ```bash
-make prepare     # bootstrap deps and env
-make debug       # MySQL + Go server (:8080) + nginx (:80)
+make setup       # interactive wizard: collect model/embedding/search keys -> .env + magi.yaml
+make install     # install Go + npm dependencies
+make dev         # hot-reload: middleware + Vite (:5173) + Go server (:8080)
+make start       # production-ish: middleware + nginx (:80) + Go binary
 make backend     # Go server only
 make frontend    # Vite dev server
-make db-up       # MySQL middleware only
-make rag_up      # Milvus + Elasticsearch middleware
-make web-up      # containerized full stack
+make up          # containerized full stack
+make docker-start  # middleware (MySQL + Milvus + ES)
 make test        # backend Go tests + frontend vitest
 make fmt vet tidy lint   # Go quality targets
-make stop        # stop all dev/web containers
+make stop        # stop local services
 ```
 
 Direct Go (from `backend/`):
@@ -34,7 +35,7 @@ go test ./domain/validation/ -run TestTypedValidator -v   # single test
 go vet ./...
 ```
 
-Config: `backend/conf/magi.yaml` (override path with `MAGI_CONFIG` env var; local overrides in `backend/conf/magi.local.yaml`, gitignored). The `model` block points at any OpenAI-compatible endpoint (default DeepSeek).
+Config: `backend/conf/magi.yaml` (override path with `MAGI_CONFIG` env var). Secrets come from `.env` (`MAGI_*`) at runtime — `make dev`/`make start` and `make up` all load `.env`. The `model` block points at any OpenAI-compatible endpoint (default DeepSeek).
 
 ## Critical: Coze Studio dependency
 

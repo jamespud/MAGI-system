@@ -43,5 +43,9 @@ docs/superpowers/
 # build artifacts
 backend/magi-server
 
+# Python tooling caches
+__pycache__/
+*.pyc
+
 # local backup bundles
 backups/

@@ -15,10 +15,10 @@ that requires real model/plugin/workflow credentials.
 ## Quick start (containerized stack)
 
 ```bash
-make prepare                       # bootstrap deps, .env, dirs
-cp backend/conf/magi.yaml.example backend/conf/magi.yaml
-# edit backend/conf/magi.yaml: model.api_key/model_name (+ auth, limits as needed)
-make web-up                        # mysql + magi-server + nginx (port 80)
+make config                        # copy backend/conf/magi.yaml + .env from templates
+# edit backend/conf/magi.yaml: model.base_url/model_name (+ auth, limits as needed)
+make setup                         # interactive: collect model/embedding/search keys into .env
+make up                            # mysql + magi-server + nginx (port 80)
 ```
 
 - API: `http://localhost/api/v1`
@@ -26,7 +26,7 @@ make web-up                        # mysql + magi-server + nginx (port 80)
 - Metrics: `http://localhost/metrics`
 - Health/readiness: `/health`, `/ready` (readiness pings the database)
 
-Stop with `make web-down`; logs with `make web-logs`.
+Stop with `make down`.
 
 ### Metrics endpoint exposure
 
@@ -98,10 +98,9 @@ With the web stack running, start the bundled Prometheus + Alertmanager +
 Grafana stack in one command:
 
 ```bash
-make monitoring-up
-# Prometheus:   http://localhost:9090
-# Alertmanager: http://localhost:9093
-# Grafana:      http://localhost:3000  (admin / admin; change GRAFANA_ADMIN_PASSWORD)
+make up                                             # web stack first (creates magi-web_default)
+docker compose -f docker/docker-compose-monitoring.yml up -d
+# Prometheus: http://localhost:9090 | Alertmanager: http://localhost:9093 | Grafana: http://localhost:3000
 ```
 
 Prometheus scrapes `magi-server:8080/metrics` over the `magi-web_default`
@@ -109,7 +108,7 @@ network, loads the alert rules from `deploy/prometheus-alerts.example.yml`, and
 forwards them to Alertmanager. Grafana auto-provisions the Prometheus data
 source and a prebuilt "MAGI Overview" dashboard (request rate, active/failed
 runs, tool/model/search failures and failovers, model cost) from
-`docker/grafana/`. Stop with `make monitoring-down`.
+`docker/grafana/`. Stop with `docker compose -f docker/docker-compose-monitoring.yml down`.
 
 ### Users and API keys
 
@@ -345,8 +344,8 @@ release blocker.
 ### Create a full-stack backup
 
 ```bash
-make backup
-# or with explicit retention/output settings:
+scripts/backup.sh                     # full-stack consistent backup
+# with explicit retention/output:
 MAGI_BACKUP_RETAIN=30 MAGI_BACKUP_DIR=/secure/magi-backups scripts/backup.sh
 ```
 

@@ -1,4 +1,4 @@
-# Containerized web stack for `make web-up`: MySQL + magi-server + web (nginx)
+# Containerized web stack for `make up`: MySQL + magi-server + web (nginx)
 # + RAG (Milvus + Elasticsearch + etcd + minio). All services are containers on
 # the magi-web network; only the web nginx exposes a host port (80).
 #
@@ -55,8 +55,12 @@ services:
       MAGI_EMBEDDING_API_KEY: ${MAGI_EMBEDDING_API_KEY:-}
       MAGI_EMBEDDING_BASE_URL: ${MAGI_EMBEDDING_BASE_URL:-}
       MAGI_EMBEDDING_MODEL_NAME: ${MAGI_EMBEDDING_MODEL_NAME:-}
-      MAGI_MILVUS_ADDRESS: ${MAGI_MILVUS_ADDRESS:-milvus-standalone:19530}
-      MAGI_ES_ADDRESSES: ${MAGI_ES_ADDRESSES:-http://elasticsearch:9200}
+      # Bundled RAG services use the compose-internal service names. Do NOT read
+      # MAGI_MILVUS_ADDRESS / MAGI_ES_ADDRESSES from the shared .env here: those
+      # are host-local (localhost:...) for `make dev` and are wrong inside the
+      # container, where localhost refers to the magi-server container itself.
+      MAGI_MILVUS_ADDRESS: "milvus-standalone:19530"
+      MAGI_ES_ADDRESSES: "http://elasticsearch:9200"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 5s

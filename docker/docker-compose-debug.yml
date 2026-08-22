@@ -1,11 +1,11 @@
-# Debug middleware for `make debug`: MySQL (host port 3307 for go-run) + RAG
+# Debug middleware for `make dev`: MySQL (host port 3307 for go-run) + RAG
 # (Milvus + Elasticsearch + etcd + minio). The go-run backend and nginx debug
-# container run on the host (see scripts/dev.sh); this file provides only the
+# container run on the host (see scripts/serve.sh); this file provides only the
 # stateful services they depend on.
 #
 # RAG data lives in external named volumes (magi-*-data), shared with
 # docker-compose-web.yml so indexes persist when switching stacks. Run
-# `make rag-prepare` once to create them (dev.sh does this automatically).
+# `make docker-init` once to create them (serve.sh/docker.sh do this automatically).
 # MySQL shares docker/data/mysql with the web stack - run `make stop` before
 # switching stacks.
 #

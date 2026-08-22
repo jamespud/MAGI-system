@@ -1,179 +1,164 @@
 # =============================================================================
-# MAGI Makefile
+# MAGI - Unified Development Environment
+#
+# Mirrors deer-flow's Makefile: a single entry point with categorized help,
+# OS detection, per-component Makefile delegation, and thin shell/Python
+# scripts as executors.
 # =============================================================================
 
 .DEFAULT_GOAL := help
-SCRIPTS_DIR := scripts
 
-.PHONY: help prepare debug backend frontend \
-        db-up db-down db-logs db-reset \
-        rag_up rag_down \
-        stop \
-        fmt vet tidy lint \
-        build clean \
-        test backup \
-        web-up web-down web-logs web-ps \
-        monitoring-up monitoring-down monitoring-logs monitoring-ps
-
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Environment
-# =============================================================================
+# ---------------------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+    SHELL := cmd.exe
+else
+    SHELL := /bin/bash
+endif
 
+BASH ?= bash
+PYTHON ?= python3
+SCRIPTS_DIR := scripts
+BACKEND := backend
+FRONTEND := frontend
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
+.PHONY: help setup doctor check install config config-upgrade \
+        dev start stop clean \
+        backend frontend \
+        up down \
+        docker-init docker-start docker-stop docker-logs \
+        test fmt vet tidy lint
+
+# ---------------------------------------------------------------------------
+# Help
+# ---------------------------------------------------------------------------
 help:
 	@echo ""
 	@echo "============================ MAGI ============================"
 	@echo ""
-	@echo "Environment"
-	@echo "  make prepare          Bootstrap: deps, .env, dirs"
+	@echo "Setup & Bootstrap"
+	@echo "  make setup          - Interactive wizard: collect model/embedding/search/RAG -> .env + magi.yaml"
+	@echo "  make doctor         - Read-only health report (deps, config, credentials)"
+	@echo "  make check          - Check required tools are installed"
+	@echo "  make install        - Install dependencies (go mod download + npm install)"
+	@echo "  make config         - Copy config templates if missing (non-interactive)"
+	@echo "  make config-upgrade - Merge missing fields from magi.yaml.example (backup first)"
 	@echo ""
-	@echo "Dev (local development)"
-	@echo "  make debug            MySQL + backend (go run) + nginx (:80)"
-	@echo "  make backend          Backend only (go run :8080)"
-	@echo "  make frontend         Frontend only (vite dev :5173)"
+	@echo "Local Dev"
+	@echo "  make dev            - Hot-reload stack: middleware + vite (:5173) + backend (:8080)"
+	@echo "  make start          - Production-ish local: middleware + nginx (:80) + go binary"
+	@echo "  make backend        - Backend only (go run :8080)"
+	@echo "  make frontend       - Frontend only (vite dev :5173)"
+	@echo "  make stop           - Stop local services"
+	@echo "  make clean          - Remove build artifacts (bin/, frontend/dist/)"
 	@echo ""
-	@echo "Database"
-	@echo "  make db-up            Start MySQL middleware"
-	@echo "  make db-down          Stop MySQL middleware"
-	@echo "  make db-logs          MySQL middleware logs"
-	@echo "  make db-reset         Drop all tables (AutoMigrate recreates)"
+	@echo "Containerized Stack"
+	@echo "  make up             - Build + start full web stack (mysql + server + nginx + RAG)"
+	@echo "  make down           - Stop + remove full web stack"
 	@echo ""
-	@echo "Build"
-	@echo "  make build            Build binary + frontend + Docker images"
-	@echo "  make clean            Remove build artifacts (not images)"
+	@echo "Middleware (MySQL + Milvus + Elasticsearch)"
+	@echo "  make docker-init    - Pull middleware images + create RAG volumes"
+	@echo "  make docker-start   - Start dev middleware"
+	@echo "  make docker-stop    - Stop dev middleware"
+	@echo "  make docker-logs    - Follow dev middleware logs"
 	@echo ""
 	@echo "Quality"
-	@echo "  make test             Run all tests (Go + frontend)"
-	@echo "  make backup           Create a verified full-stack backup bundle"
-	@echo ""
-	@echo "Web (containerized stack)"
-	@echo "  make web-up           Build + start full stack (mysql + server + nginx)"
-	@echo "  make web-down         Stop full stack"
-	@echo "  make web-logs         Full stack logs"
-	@echo "  make web-ps           Full stack status"
-	@echo ""
-	@echo "Observability"
-	@echo "  make monitoring-up    Start Prometheus + Alertmanager + Grafana"
-	@echo "  make monitoring-down  Stop observability stack"
-	@echo "  make monitoring-logs  Observability logs"
-	@echo "  make monitoring-ps    Observability status"
+	@echo "  make test           - Run all tests (Go + frontend)"
+	@echo "  make fmt            - Format Go code"
+	@echo "  make vet            - Static analysis (Go vet)"
+	@echo "  make tidy           - Tidy Go modules"
+	@echo "  make lint           - Lint backend + frontend"
 	@echo ""
 	@echo "=============================================================="
 
-prepare:
-	bash $(SCRIPTS_DIR)/env.sh
+# ---------------------------------------------------------------------------
+# Setup & Bootstrap
+# ---------------------------------------------------------------------------
+setup:
+	$(PYTHON) $(SCRIPTS_DIR)/setup_wizard.py
 
-# =============================================================================
-# Dev (local development)
-# =============================================================================
+doctor:
+	$(PYTHON) $(SCRIPTS_DIR)/doctor.py
 
-debug:
-	bash $(SCRIPTS_DIR)/dev.sh debug
+check:
+	$(PYTHON) $(SCRIPTS_DIR)/check.py
+
+install:
+	@mkdir -p bin
+	go -C $(BACKEND) mod download
+	npm -C $(FRONTEND) install
+
+config:
+	$(PYTHON) $(SCRIPTS_DIR)/configure.py
+
+config-upgrade:
+	bash $(SCRIPTS_DIR)/config-upgrade.sh
+
+# ---------------------------------------------------------------------------
+# Local Dev
+# ---------------------------------------------------------------------------
+dev:
+	bash $(SCRIPTS_DIR)/serve.sh --dev
+
+start:
+	bash $(SCRIPTS_DIR)/serve.sh --prod
 
 backend:
-	bash $(SCRIPTS_DIR)/dev.sh backend
+	$(MAKE) -C $(BACKEND) run
 
 frontend:
-	bash $(SCRIPTS_DIR)/dev.sh frontend
+	$(MAKE) -C $(FRONTEND) dev
 
-# =============================================================================
-# Database
-# =============================================================================
-
-db-up:
-	bash $(SCRIPTS_DIR)/docker.sh up
-
-db-down:
-	bash $(SCRIPTS_DIR)/docker.sh down
-
-db-logs:
-	bash $(SCRIPTS_DIR)/docker.sh logs
-
-db-reset:
-	bash $(SCRIPTS_DIR)/db.sh reset
-
-# =============================================================================
-# Build
-# =============================================================================
-
-build:
-	bash $(SCRIPTS_DIR)/build.sh all
+stop:
+	bash $(SCRIPTS_DIR)/serve.sh --stop
 
 clean:
 	bash $(SCRIPTS_DIR)/build.sh clean
 
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Containerized Stack
+# ---------------------------------------------------------------------------
+up:
+	bash $(SCRIPTS_DIR)/deploy.sh up
+
+down:
+	bash $(SCRIPTS_DIR)/deploy.sh down
+
+# ---------------------------------------------------------------------------
+# Middleware (MySQL + Milvus + Elasticsearch)
+# ---------------------------------------------------------------------------
+docker-init:
+	bash $(SCRIPTS_DIR)/docker.sh init
+
+docker-start:
+	bash $(SCRIPTS_DIR)/docker.sh start
+
+docker-stop:
+	bash $(SCRIPTS_DIR)/docker.sh stop
+
+docker-logs:
+	bash $(SCRIPTS_DIR)/docker.sh logs
+
+# ---------------------------------------------------------------------------
 # Quality
-# =============================================================================
-
+# ---------------------------------------------------------------------------
 test:
-	go -C backend test ./...
-	npm -C frontend test
-
-backup:
-	bash $(SCRIPTS_DIR)/backup.sh
+	$(MAKE) -C $(BACKEND) test
+	$(MAKE) -C $(FRONTEND) test
 
 fmt:
-	go -C backend fmt ./...
+	$(MAKE) -C $(BACKEND) fmt
 
 vet:
-	go -C backend vet ./...
+	$(MAKE) -C $(BACKEND) vet
 
 tidy:
-	go -C backend mod tidy
+	$(MAKE) -C $(BACKEND) tidy
 
-lint: fmt vet
-
-# =============================================================================
-# Web (containerized stack)
-# =============================================================================
-
-COMPOSE_DEBUG := docker/docker-compose-debug.yml
-COMPOSE_WEB := docker/docker-compose-web.yml
-
-web-down:
-	docker compose --project-directory . -f $(COMPOSE_WEB) down
-
-rag_up:
-	docker compose --project-directory . -f $(COMPOSE_DEBUG) up -d milvus-standalone elasticsearch
-
-rag_down:
-	docker compose --project-directory . -f $(COMPOSE_DEBUG) stop milvus-standalone elasticsearch
-
-# rag-prepare: create the external named volumes shared by debug + web RAG
-# stacks (Milvus/ES/etcd/minio data). Idempotent; run once before first web-up/debug.
-rag-prepare:
-	docker volume create magi-milvus-data 2>/dev/null || true
-	docker volume create magi-es-data 2>/dev/null || true
-	docker volume create magi-etcd-data 2>/dev/null || true
-	docker volume create magi-minio-data 2>/dev/null || true
-
-web-up:
-	$(MAKE) rag-prepare
-	docker compose --project-directory . -f $(COMPOSE_WEB) up -d --build
-
-web-logs:
-	docker compose --project-directory . -f $(COMPOSE_WEB) logs -f
-
-web-ps:
-	docker compose --project-directory . -f $(COMPOSE_WEB) ps
-
-COMPOSE_MONITORING := docker/docker-compose-monitoring.yml
-
-monitoring-up:
-	docker compose --project-directory . -f $(COMPOSE_MONITORING) up -d
-
-monitoring-down:
-	docker compose --project-directory . -f $(COMPOSE_MONITORING) down
-
-monitoring-logs:
-	docker compose --project-directory . -f $(COMPOSE_MONITORING) logs -f
-
-monitoring-ps:
-	docker compose --project-directory . -f $(COMPOSE_MONITORING) ps
-
-# stop: one-key stop all dev + web containers (both compose projects + debug nginx).
-stop:
-	docker compose --project-directory . -f $(COMPOSE_DEBUG) down 2>/dev/null || true
-	docker compose --project-directory . -f $(COMPOSE_WEB) down 2>/dev/null || true
-	docker rm -f magi-dev-nginx 2>/dev/null || true
-	@echo "All dev/web containers stopped."
+lint:
+	$(MAKE) -C $(BACKEND) lint
+	$(MAKE) -C $(FRONTEND) lint

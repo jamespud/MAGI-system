@@ -51,10 +51,17 @@ The Commander (an LLM) is deliberately *not* a "god agent" - it cannot count vot
 ### 1. Configure the model
 
 ```bash
-cp backend/conf/magi.yaml.example backend/conf/magi.yaml
+make config      # copies backend/conf/magi.yaml + .env from templates (first run)
 ```
 
-Edit `backend/conf/magi.yaml` and set your model credentials:
+Or run the interactive wizard to collect model / embedding / search credentials
+into `.env` (single secret source) and generate `backend/conf/magi.yaml`:
+
+```bash
+make setup
+```
+
+Edit `backend/conf/magi.yaml` (or `.env`) and set your model credentials:
 
 ```yaml
 model:
@@ -73,8 +80,8 @@ tavily:
 ### 2. Start MySQL + backend + frontend
 
 ```bash
-make prepare        # one-time: check deps, install Go + npm dependencies
-make debug          # start MySQL (docker) + Go server + Vite dev server, in parallel
+make install        # one-time: install Go + npm dependencies
+make dev            # middleware + Go server (:8080) + Vite dev (:5173), hot reload
 ```
 
 Open the frontend at **http://localhost:5173**. The Vite dev server proxies `/api` to the Go server on `:8080`.
@@ -183,16 +190,18 @@ All run from the repo root.
 
 | Command | Description |
 |---------|-------------|
-| `make prepare` | Bootstrap: check deps, init `.env`, install Go + npm dependencies |
-| `make db-up` / `make db-down` | Start/stop MySQL middleware on `127.0.0.1:3307` |
-| `make debug` | MySQL + Go backend + nginx on `:80` |
+| `make setup` | Interactive wizard: collect model/embedding/search/RAG keys → `.env` + `magi.yaml` |
+| `make doctor` / `make check` | Verify environment + config + credentials (read-only) |
+| `make install` | Install Go + frontend dependencies |
+| `make config` / `make config-upgrade` | Copy config templates / merge missing fields |
+| `make dev` | Hot-reload local stack: middleware + Vite (`:5173`) + Go server (`:8080`) |
+| `make start` | Production-ish local stack: middleware + nginx (`:80`) + Go binary |
 | `make backend` / `make frontend` | Run Go server (`:8080`) / Vite dev (`:5173`) |
-| `make build` | Build `bin/magi` + `frontend/dist/` + Docker images |
+| `make up` / `make down` | Containerized full stack (mysql + server + nginx + RAG) |
+| `make docker-init` / `make docker-start` / `make docker-stop` | Middleware lifecycle (MySQL + Milvus + ES) |
 | `make test` | Go tests + frontend tests |
 | `make fmt` / `make vet` / `make tidy` / `make lint` | Go quality tools |
-| `make web-up` / `make web-down` | Containerized full stack (mysql + server + nginx + RAG) |
-| `make rag_up` / `make rag_down` | RAG middleware (Milvus + ES) |
-| `make stop` | Stop all dev/web containers |
+| `make stop` | Stop local services |
 | `make clean` | Remove build artifacts |
 
 Frontend (from `frontend/`): `npm run dev` · `npm run build` · `npm test` (Vitest) · `npm run lint`.
