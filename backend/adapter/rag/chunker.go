@@ -19,7 +19,30 @@ func (r RuneTokenCounter) Count(s string) int {
 	if r.CharsPerToken <= 0 {
 		r.CharsPerToken = 4
 	}
-	return len([]rune(s)) / r.CharsPerToken
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return 0
+	}
+	cjk := 0
+	for _, ru := range runes {
+		if isCJK(ru) {
+			cjk++
+		}
+	}
+	ratio := float64(cjk) / float64(len(runes))
+	// Pure ASCII keeps CharsPerToken; pure CJK approaches 1 char/token.
+	charsPerToken := float64(r.CharsPerToken)*(1-ratio) + 1.0*ratio
+	if charsPerToken < 1 {
+		charsPerToken = 1
+	}
+	return int(float64(len(runes)) / charsPerToken)
+}
+
+// isCJK reports common CJK Unified Ideographs (used for adaptive token counts).
+func isCJK(r rune) bool {
+	return (r >= 0x4E00 && r <= 0x9FFF) ||
+		(r >= 0x3400 && r <= 0x4DBF) ||
+		(r >= 0xF900 && r <= 0xFAFF)
 }
 
 // ChunkLevels holds the token targets for the three hierarchy levels.
@@ -127,7 +150,7 @@ func splitSentences(text string) []string {
 	cur := strings.Builder{}
 	for _, r := range text {
 		cur.WriteRune(r)
-		if r == '.' || r == '!' || r == '?' || r == '\n' {
+		if isSentenceEnd(r) {
 			out = append(out, cur.String())
 			cur.Reset()
 		}
@@ -145,6 +168,16 @@ func splitSentences(text string) []string {
 		res = []string{text}
 	}
 	return res
+}
+
+// isSentenceEnd reports ASCII and CJK sentence-final punctuation. Commas and
+// enumeration marks (，、) are NOT sentence ends and stay inside the sentence.
+func isSentenceEnd(r rune) bool {
+	switch r {
+	case '.', '!', '?', '\n', '。', '！', '？', '；', '．':
+		return true
+	}
+	return false
 }
 
 func chunkID(sourceRef, level string, groupIdx, subIdx int) string {

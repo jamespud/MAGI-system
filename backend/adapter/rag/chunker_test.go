@@ -1,6 +1,9 @@
 package rag
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestChunkNestedHierarchy(t *testing.T) {
 	// With charsPerToken=1: 300 tokens = 300 chars. Each 50-char sentence = one
@@ -62,4 +65,37 @@ func joinSentences(ss []string) string {
 		out += s
 	}
 	return out
+}
+
+func TestSplitSentencesChinesePunctuation(t *testing.T) {
+	got := splitSentences("句一。句二！句三？句四；句五")
+	if len(got) != 5 {
+		t.Fatalf("sentences = %d, want 5: %v", len(got), got)
+	}
+	if got[0] != "句一。" || got[4] != "句五" {
+		t.Errorf("sentences = %v", got)
+	}
+}
+
+func TestSplitSentencesKeepsCommaInSentence(t *testing.T) {
+	got := splitSentences("甲，乙。丙。")
+	if len(got) != 2 {
+		t.Fatalf("sentences = %d, want 2: %v", len(got), got)
+	}
+}
+
+func TestRuneTokenCounterCJKAdaptive(t *testing.T) {
+	c := RuneTokenCounter{CharsPerToken: 4}
+	ascii := strings.Repeat("a", 400)
+	if n := c.Count(ascii); n != 100 {
+		t.Errorf("ascii 400 chars = %d, want 100 (charsPerToken 4)", n)
+	}
+	chinese := strings.Repeat("中", 400)
+	if n := c.Count(chinese); n != 400 {
+		t.Errorf("chinese 400 chars = %d, want 400 (charsPerToken ~1)", n)
+	}
+	mixed := strings.Repeat("中a", 200) // 400 runes, 50% CJK
+	if n := c.Count(mixed); n != 160 {
+		t.Errorf("mixed 400 runes = %d, want 160 (charsPerToken ~2.5)", n)
+	}
 }
