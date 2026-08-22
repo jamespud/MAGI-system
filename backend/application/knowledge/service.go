@@ -59,7 +59,9 @@ func (s *Service) Create(ctx context.Context, userID int64, title, content, sour
 		Content:    content,
 		SourceKind: sourceKind,
 		SourceURL:  strings.TrimSpace(sourceURL),
-		Status:     entity.KnowledgeStatusIndexed,
+		// Async (durable) indexing completes in the background; the poller
+		// writes back the final status/chunks. Sync adapters set it below.
+		Status: entity.KnowledgeStatusPending,
 	}
 	if s.repo == nil {
 		return nil, fmt.Errorf("knowledge: repository is not configured")
@@ -76,10 +78,15 @@ func (s *Service) Create(ctx context.Context, userID int64, title, content, sour
 			_ = s.repo.Update(ctx, doc)
 			return doc, nil
 		}
-		doc.Status = entity.KnowledgeStatusIndexed
-		doc.Chunks = stats.Chunks300
-		doc.Error = ""
-		_ = s.repo.Update(ctx, doc)
+		// A durable adapter returns zero stats (it only enqueues), so status
+		// stays pending until the poller writes indexed/failed. A sync adapter
+		// returns real stats and finalizes immediately.
+		if stats.Chunks300 > 0 {
+			doc.Status = entity.KnowledgeStatusIndexed
+			doc.Chunks = stats.Chunks300
+			doc.Error = ""
+			_ = s.repo.Update(ctx, doc)
+		}
 	}
 	return doc, nil
 }

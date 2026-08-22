@@ -53,6 +53,14 @@ func (r *memKnowRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *memKnowRepo) ListAll(_ context.Context) ([]*entity.KnowledgeDoc, error) {
+	out := make([]*entity.KnowledgeDoc, 0, len(r.byID))
+	for _, d := range r.byID {
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 type fakeDocIndexer struct {
 	storeErr    error
 	deletedSrc  []string

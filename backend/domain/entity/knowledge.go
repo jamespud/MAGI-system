@@ -24,4 +24,5 @@ const (
 
 	KnowledgeStatusIndexed = "indexed"
 	KnowledgeStatusFailed  = "failed"
+	KnowledgeStatusPending = "pending"
 )

@@ -102,7 +102,13 @@ export default function Knowledge() {
               <div>
                 <p className="font-medium">{d.title}</p>
                 <p className="text-xs text-text-muted mt-1">
-                  {d.status} · {d.chunks} chunks · {new Date(d.created_at).toLocaleString()}
+                  {d.status === 'pending' ? (
+                    <span className="text-amber-400">Indexing…</span>
+                  ) : (
+                    <>
+                      {d.status} · {d.chunks} chunks · {new Date(d.created_at).toLocaleString()}
+                    </>
+                  )}
                 </p>
                 {d.status === 'failed' && d.error && (
                   <p className="text-xs text-red-500 mt-1">{d.error}</p>
