@@ -52,3 +52,20 @@ func TestRenderDocumentNoTruncation(t *testing.T) {
 		t.Error("RenderDocument truncated the question; full content must be preserved for indexing")
 	}
 }
+
+func TestRenderDocumentPrefersIndexDoc(t *testing.T) {
+	proj := &entity.CaseMemoryProjection{
+		CaseID: "case-3", QuestionSummary: "q",
+		IndexDoc: "FULL INDEX DOC",
+	}
+	if got := RenderDocument(proj); got != "FULL INDEX DOC" {
+		t.Errorf("RenderDocument = %q, want IndexDoc", got)
+	}
+}
+
+func TestRenderDocumentFallsBackWhenIndexDocEmpty(t *testing.T) {
+	proj := &entity.CaseMemoryProjection{CaseID: "case-4", QuestionSummary: "visible"}
+	if got := RenderDocument(proj); !strings.Contains(got, "visible") {
+		t.Errorf("RenderDocument fallback missing question: %q", got)
+	}
+}

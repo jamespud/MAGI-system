@@ -1,6 +1,9 @@
 package memory
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
 )
@@ -73,7 +76,60 @@ func BuildProjection(
 		})
 	}
 
+	proj.IndexDoc = renderIndexDoc(proj, case_, resolution)
 	return proj
+}
+
+// renderIndexDoc renders the full long-text index document: full background
+// and full resolution (not truncated) plus the projection's evidence/claims/
+// votes. It mirrors RenderDocument but is decoupled from the truncated display
+// fields so a case can fill the 900/1800 hierarchy levels.
+func renderIndexDoc(proj *entity.CaseMemoryProjection, case_ *entity.DecisionCase, resolution *entity.Resolution) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Question: %s\n", proj.QuestionSummary)
+	ctx := ""
+	if case_ != nil {
+		ctx = case_.Context
+	}
+	fmt.Fprintf(&b, "Context: %s\n", ctx)
+	if len(proj.KeyEvidence) > 0 {
+		b.WriteString("Evidence:\n")
+		for _, ev := range proj.KeyEvidence {
+			fmt.Fprintf(&b, "- [%s] (reliability %.2f) %s\n", ev.EvidenceID, ev.Reliability, ev.Observation)
+		}
+	}
+	if len(proj.KeyClaims) > 0 {
+		b.WriteString("Claims:\n")
+		for _, cl := range proj.KeyClaims {
+			fmt.Fprintf(&b, "- [%s] %s\n", cl.ClaimID, cl.Statement)
+		}
+	}
+	if len(proj.Votes) > 0 {
+		b.WriteString("Votes:\n")
+		for _, v := range proj.Votes {
+			fmt.Fprintf(&b, "- %s: %s (confidence %.2f)\n", v.MagiCode, v.Decision, v.Confidence)
+		}
+	}
+	if len(proj.Tags) > 0 {
+		b.WriteString("Tags:\n")
+		for _, tag := range proj.Tags {
+			fmt.Fprintf(&b, "- %s\n", tag)
+		}
+	}
+	if proj.Annotation != "" {
+		fmt.Fprintf(&b, "Annotation: %s\n", proj.Annotation)
+	}
+	res := ""
+	if resolution != nil {
+		res = resolution.FinalReport
+	}
+	if res != "" {
+		fmt.Fprintf(&b, "Resolution: %s\n", res)
+	}
+	if proj.Outcome != nil {
+		fmt.Fprintf(&b, "Outcome: status=%s learned=%s\n", proj.Outcome.Status, proj.Outcome.Learned)
+	}
+	return b.String()
 }
 
 func remapID(remap *entity.ArtifactRemap, id string) string {

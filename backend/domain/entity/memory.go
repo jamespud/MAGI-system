@@ -14,6 +14,10 @@ type CaseMemoryProjection struct {
 	Annotation        string
 	Tags              []string
 	ProjectionVersion int
+	// IndexDoc is the full-text document used for RAG indexing only. It is
+	// carried in memory (AsyncIndexer job / sync Store) and is NOT persisted
+	// to the case_memory_projection table, which keeps truncated display fields.
+	IndexDoc string
 }
 
 type CaseOutcome struct {

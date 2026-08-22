@@ -16,6 +16,11 @@ func RenderDocument(proj *entity.CaseMemoryProjection) string {
 	if proj == nil {
 		return ""
 	}
+	// Full index document wins when present (case-run path). The legacy
+	// projection rendering below remains the fallback (memory-edit reindex).
+	if proj.IndexDoc != "" {
+		return proj.IndexDoc
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Question: %s\n", proj.QuestionSummary)
 	fmt.Fprintf(&b, "Context: %s\n", proj.ContextSummary)
