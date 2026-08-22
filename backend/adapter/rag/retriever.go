@@ -53,37 +53,58 @@ func NewRetriever(vec VectorIndex, lex LexicalIndex, emb Embedder, repo *ChunkRe
 	return &Retriever{vec: vec, lex: lex, emb: emb, repo: repo, opts: opts, log: log.Default()}
 }
 
-// Retrieve runs hybrid recall + RRF + dynamic merge. A non-nil filter
-// narrows both the vector and lexical recalls by source metadata.
+// Retrieve is a single-query convenience wrapper over RetrieveMulti.
 func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride MergeOpts, filter *IndexFilter) ([]MergedBlock, error) {
+	return r.RetrieveMulti(ctx, []string{query}, optsOverride, filter)
+}
+
+// RetrieveMulti runs hybrid recall (vector + lexical) for every query, fuses
+// all hits through one RRF pool, then merges up the 300/900/1800 hierarchy.
+// Degradation (D6): a query whose embedding/vector/lexical leg fails is
+// skipped; the other queries still contribute. Only when every query yields no
+// usable hit list is an error returned.
+func (r *Retriever) RetrieveMulti(ctx context.Context, queries []string, optsOverride MergeOpts, filter *IndexFilter) ([]MergedBlock, error) {
 	opts := r.opts
 	if optsOverride.TopK != 0 {
 		opts = optsOverride
 	}
-
-	qvec, err := r.emb.Embed(ctx, []string{query})
-	if err != nil {
-		return nil, err
-	}
-	var queryVec []float32
-	if len(qvec) > 0 {
-		queryVec = qvec[0]
+	if len(queries) == 0 {
+		return nil, nil
 	}
 
-	vecHits, vecErr := r.vec.Search(ctx, queryVec, opts.TopK, filter)
-	lexHits, lexErr := r.lex.Search(ctx, query, opts.TopK, filter)
-	if vecErr != nil && lexErr != nil {
-		r.logf("rag retrieve: BOTH indexes failed (query=%q): vector=%v lexical=%v", query, vecErr, lexErr)
-		return nil, fmt.Errorf("rag retrieve: vector %v; lexical %v", vecErr, lexErr)
+	var allHits [][]rrfHit
+	embFails, vecFails, lexFails := 0, 0, 0
+	for _, q := range queries {
+		qvecs, err := r.emb.Embed(ctx, []string{q})
+		if err != nil {
+			r.logf("rag retrieve: embed failed (query=%q): %v", q, err)
+			embFails++
+			continue
+		}
+		var queryVec []float32
+		if len(qvecs) > 0 {
+			queryVec = qvecs[0]
+		}
+		vecHits, vecErr := r.vec.Search(ctx, queryVec, opts.TopK, filter)
+		lexHits, lexErr := r.lex.Search(ctx, q, opts.TopK, filter)
+		if vecErr != nil {
+			r.logf("rag retrieve: vector index degraded (query=%q): %v", q, vecErr)
+			vecFails++
+		} else {
+			allHits = append(allHits, vectorToRRF(vecHits))
+		}
+		if lexErr != nil {
+			r.logf("rag retrieve: lexical index degraded (query=%q): %v", q, lexErr)
+			lexFails++
+		} else {
+			allHits = append(allHits, textToRRF(lexHits))
+		}
 	}
-	if vecErr != nil {
-		r.logf("rag retrieve: vector index degraded, falling back to lexical only (query=%q): %v", query, vecErr)
-	}
-	if lexErr != nil {
-		r.logf("rag retrieve: lexical index degraded, falling back to vector only (query=%q): %v", query, lexErr)
+	if len(allHits) == 0 {
+		return nil, fmt.Errorf("rag retrieve: no usable hits across %d queries (embed=%d vector=%d lexical=%d)", len(queries), embFails, vecFails, lexFails)
 	}
 
-	fused := rrf(vecHits, lexHits, opts.RRFK, opts.TopK)
+	fused := rrfMany(allHits, opts.RRFK, opts.TopK)
 	if len(fused) == 0 {
 		return nil, nil
 	}
@@ -179,7 +200,7 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, optsOverride Mer
 			blocks = append(blocks, MergedBlock{Level: 300, Content: r.repo.get300Content(ctx, id), SourceRef: "", ChunkIDs: []string{id}})
 		}
 	}
-	r.logf("rag retrieve: query=%q blocks=%d", query, len(blocks))
+	r.logf("rag retrieve: queries=%d blocks=%d", len(queries), len(blocks))
 	return blocks, nil
 }
 
@@ -193,21 +214,40 @@ func (r *Retriever) logf(format string, args ...any) {
 	l.Printf(format, args...)
 }
 
-// rrf fuses vector + lexical hits by Reciprocal Rank Fusion.
-func rrf(vec []VectorHit, lex []TextHit, k, topK int) []VectorHit {
+// rrfHit is a rank-only hit for RRF fusion. VectorHit/TextHit both carry a
+// ChunkID + Score; RRF ignores the absolute score and uses only the rank.
+type rrfHit struct {
+	id    string
+	score float32
+}
+
+func vectorToRRF(hits []VectorHit) []rrfHit {
+	out := make([]rrfHit, len(hits))
+	for i, h := range hits {
+		out[i] = rrfHit{id: h.ChunkID, score: h.Score}
+	}
+	return out
+}
+
+func textToRRF(hits []TextHit) []rrfHit {
+	out := make([]rrfHit, len(hits))
+	for i, h := range hits {
+		out[i] = rrfHit{id: h.ChunkID, score: float32(h.Score)}
+	}
+	return out
+}
+
+// rrfMany fuses any number of ranked hit lists by Reciprocal Rank Fusion.
+func rrfMany(lists [][]rrfHit, k, topK int) []VectorHit {
 	scores := map[string]float64{}
 	order := []string{}
-	for i, h := range vec {
-		if _, ok := scores[h.ChunkID]; !ok {
-			order = append(order, h.ChunkID)
+	for _, list := range lists {
+		for i, h := range list {
+			if _, ok := scores[h.id]; !ok {
+				order = append(order, h.id)
+			}
+			scores[h.id] += 1.0 / float64(k+i+1)
 		}
-		scores[h.ChunkID] += 1.0 / float64(k+i+1)
-	}
-	for i, h := range lex {
-		if _, ok := scores[h.ChunkID]; !ok {
-			order = append(order, h.ChunkID)
-		}
-		scores[h.ChunkID] += 1.0 / float64(k+i+1)
 	}
 	sort.Slice(order, func(i, j int) bool { return scores[order[i]] > scores[order[j]] })
 	if len(order) > topK {

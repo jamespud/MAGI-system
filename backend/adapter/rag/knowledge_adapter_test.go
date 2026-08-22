@@ -278,3 +278,40 @@ func TestHybridKnowledgeAdapterSourcesScoped(t *testing.T) {
 		t.Errorf("doc chunks=%d case chunks=%d, want both > 0", docN, caseN)
 	}
 }
+
+func TestHybridKnowledgeAdapterRetrieveMultiQueries(t *testing.T) {
+	db := newTestDB(t)
+	repo := NewChunkRepository(db)
+	// Seed two orphan 300s (c1, c2) under separate 900s so both surface as 300 blocks.
+	repo.WriteChunks(context.Background(), ChunkedDoc{
+		Chunks1800: []ChunkBlock{{ID: "p18", Source: "case_memory", SourceRef: "case-1", Content: "top", TokenCount: 1800}},
+		Chunks900: []ChunkBlock{
+			{ID: "p9a", Parent1800ID: "p18", Source: "case_memory", SourceRef: "case-1", Content: "mid", TokenCount: 900},
+			{ID: "p9b", Parent1800ID: "p18", Source: "case_memory", SourceRef: "case-1", Content: "midb", TokenCount: 900},
+		},
+		Chunks300: []ChunkBlock{
+			{ID: "c1", Parent900ID: "p9a", Source: "case_memory", SourceRef: "case-1", Content: "leaf1", TokenCount: 300},
+			{ID: "c2", Parent900ID: "p9b", Source: "case_memory", SourceRef: "case-1", Content: "leaf2", TokenCount: 300},
+		},
+	})
+	vec := &FakeVectorIndex{Hits: []VectorHit{{ChunkID: "c1"}}}
+	lex := &perQueryLex{byQuery: map[string][]TextHit{"q2": {{ChunkID: "c2"}}}}
+	ch := NewChunker(RuneTokenCounter{CharsPerToken: 1}, ChunkLevels{L1800: 300, L900: 150, L300: 50})
+	emb := FakeEmbedder{Dim: 3}
+	retriever := NewRetriever(vec, lex, emb, repo, MergeOpts{TopK: 15, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"})
+	adapter := NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, nil)
+
+	res, err := adapter.Retrieve(context.Background(), port.RetrieveRequest{Queries: []string{"q1", "q2"}, TopK: 15})
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, b := range res.Blocks {
+		for _, id := range b.ChunkIDs {
+			ids[id] = true
+		}
+	}
+	if !ids["c1"] || !ids["c2"] {
+		t.Errorf("multi-query adapter blocks missing c1/c2: %+v", res.Blocks)
+	}
+}

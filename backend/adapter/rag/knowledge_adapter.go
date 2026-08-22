@@ -157,7 +157,11 @@ func (a *HybridKnowledgeAdapter) Retrieve(ctx context.Context, req port.Retrieve
 	if len(req.Sources) > 0 || len(req.SourceRefs) > 0 {
 		filter = &IndexFilter{Sources: req.Sources, SourceRefs: req.SourceRefs}
 	}
-	blocks, err := a.retriever.Retrieve(ctx, req.Query, opts, filter)
+	queries := req.Queries
+	if len(queries) == 0 {
+		queries = []string{req.Query}
+	}
+	blocks, err := a.retriever.RetrieveMulti(ctx, queries, opts, filter)
 	if err != nil {
 		return port.RetrieveResult{}, err
 	}

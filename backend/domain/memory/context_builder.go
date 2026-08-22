@@ -34,6 +34,10 @@ func WithMetrics(r *metrics.Registry) ContextBuilderOption {
 	return func(b *ContextBuilder) { b.metrics = r }
 }
 
+// maxQueryRunes caps a background expansion query so it cannot blow an
+// embedding API input budget (D6: overly long expansion adds little recall).
+const maxQueryRunes = 2000
+
 func NewContextBuilder(knowledge port.KnowledgePort, opts ...ContextBuilderOption) *ContextBuilder {
 	b := &ContextBuilder{knowledge: knowledge, logger: log.Default()}
 	for _, o := range opts {
@@ -59,7 +63,13 @@ func (b *ContextBuilder) Build(
 
 	var chunks []port.KnowledgeChunk
 	if b.knowledge != nil && query != "" {
-		result, err := b.knowledge.Retrieve(ctx, port.RetrieveRequest{Query: query, TopK: 15})
+		queries := []string{query}
+		// Background shapes recall only (D2) and is appended as a second query
+		// (D3). case_ may be nil; guard before reading Context.
+		if case_ != nil && case_.Context != "" {
+			queries = append(queries, truncateRunes(case_.Context, maxQueryRunes))
+		}
+		result, err := b.knowledge.Retrieve(ctx, port.RetrieveRequest{Queries: queries, TopK: 15})
 		if err != nil {
 			// P0: D3 — surface retrieval failures instead of silently degrading
 			// the agent context. Log + metric + event make a RAG outage visible.

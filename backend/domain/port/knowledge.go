@@ -15,7 +15,8 @@ type KnowledgeChunk struct {
 
 // RetrieveRequest configures a knowledge retrieval.
 type RetrieveRequest struct {
-	Query      string
+	Query      string   // single-query convenience; used when Queries is empty
+	Queries    []string // multi-query retrieval; when non-empty it takes precedence
 	TopK       int
 	MinScore   float64
 	Sources    []string

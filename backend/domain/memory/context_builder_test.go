@@ -3,6 +3,7 @@ package memory_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jamespud/magi/backend/application/metrics"
@@ -108,5 +109,64 @@ func TestContextBuilder_SurfacesRetrievalFailure(t *testing.T) {
 	}
 	if len(pub.events) != 1 || pub.events[0].Type != entity.EventMemoryRetrievalFailed || pub.events[0].CaseID != "c1" {
 		t.Fatalf("expected MEMORY_RETRIEVAL_FAILED event for c1, got %+v", pub.events)
+	}
+}
+
+type captureRetrieve struct {
+	last   port.RetrieveRequest
+	blocks []port.MergedBlock
+}
+
+func (c *captureRetrieve) Retrieve(ctx context.Context, req port.RetrieveRequest) (port.RetrieveResult, error) {
+	c.last = req
+	return port.RetrieveResult{Blocks: c.blocks}, nil
+}
+func (c *captureRetrieve) Store(ctx context.Context, proj *entity.CaseMemoryProjection) (port.StoreStats, error) {
+	return port.StoreStats{}, nil
+}
+
+func TestContextBuilder_AppendsBackgroundToQueries(t *testing.T) {
+	k := &captureRetrieve{blocks: []port.MergedBlock{{Level: 300, Content: "hist", SourceRef: "case-old"}}}
+	b := memory.NewContextBuilder(k)
+	_, err := b.Build(context.Background(),
+		&entity.DecisionCase{ID: "c1", Question: "q", Context: "bg text"},
+		&entity.DecisionTask{CanonicalQuestion: "compute"},
+		nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(k.last.Queries) != 2 || k.last.Queries[0] != "compute" || k.last.Queries[1] != "bg text" {
+		t.Fatalf("queries = %v, want [compute bg text]", k.last.Queries)
+	}
+}
+
+func TestContextBuilder_NoBackgroundKeepsSingleQuery(t *testing.T) {
+	k := &captureRetrieve{}
+	b := memory.NewContextBuilder(k)
+	_, err := b.Build(context.Background(),
+		&entity.DecisionCase{ID: "c1", Question: "q"},
+		&entity.DecisionTask{CanonicalQuestion: "compute"},
+		nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(k.last.Queries) != 1 || k.last.Queries[0] != "compute" {
+		t.Fatalf("queries = %v, want [compute]", k.last.Queries)
+	}
+}
+
+func TestContextBuilder_TruncatesLongBackground(t *testing.T) {
+	long := strings.Repeat("长", 3000)
+	k := &captureRetrieve{}
+	b := memory.NewContextBuilder(k)
+	_, err := b.Build(context.Background(),
+		&entity.DecisionCase{ID: "c1", Question: "q", Context: long},
+		&entity.DecisionTask{CanonicalQuestion: "compute"},
+		nil, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(k.last.Queries) != 2 || len([]rune(k.last.Queries[1])) != 2000 {
+		t.Fatalf("background query runes = %d, want 2000", len([]rune(k.last.Queries[1])))
 	}
 }
