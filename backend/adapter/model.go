@@ -59,6 +59,25 @@ type DecisionJobModel struct {
 
 func (DecisionJobModel) TableName() string { return "decision_job" }
 
+// RagIndexJobModel is the durable envelope for one RAG index mutation.
+type RagIndexJobModel struct {
+	ID          string `gorm:"primaryKey"`
+	Kind        string
+	Source      string
+	SourceRef   string `gorm:"index"`
+	Status      string `gorm:"index:idx_runnable"`
+	Attempt     int
+	MaxAttempts int
+	WorkerID    string
+	LeaseUntil  *time.Time
+	AvailableAt time.Time `gorm:"index:idx_runnable"`
+	LastError   string    `gorm:"type:text"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (RagIndexJobModel) TableName() string { return "rag_index_job" }
+
 // CheckpointModel stores the durable working-memory snapshot used by the
 // runtime to resume an interrupted agent run. It intentionally lives in its
 // own table: checkpoint writes are frequent and should not rewrite the
@@ -379,7 +398,7 @@ func (SelfImproveModel) TableName() string { return "self_improve_suggestion" }
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
-		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
+		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
 		&ToolCallModel{}, &ApprovalModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},

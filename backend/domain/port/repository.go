@@ -43,6 +43,20 @@ type DecisionJobRepository interface {
 	GetByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error)
 	CountActiveByUser(ctx context.Context, userID int64) (int, error)
 }
+// RagIndexJobRepository persists and leases asynchronous RAG index mutations
+// (store case memory / store knowledge doc / delete by source_ref). It is
+// separate from Repository so existing aggregate fakes remain valid.
+type RagIndexJobRepository interface {
+	Enqueue(ctx context.Context, kind entity.RagIndexJobKind, source, sourceRef string, maxAttempts int) (*entity.RagIndexJob, error)
+	Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.RagIndexJob, bool, error)
+	Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error
+	MarkSucceeded(ctx context.Context, jobID, workerID string) error
+	MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error
+	Cancel(ctx context.Context, jobID string) error
+	RequeueExpired(ctx context.Context, now time.Time) error
+	ListRunnable(ctx context.Context, now time.Time) ([]*entity.RagIndexJob, error)
+}
+
 type CaseRepository interface {
 	Create(ctx context.Context, c *entity.DecisionCase) error
 	Get(ctx context.Context, id string) (*entity.DecisionCase, error)
