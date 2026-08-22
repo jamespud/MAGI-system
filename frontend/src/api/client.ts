@@ -299,10 +299,10 @@ export const api = {
 
   listRecurring: () => request<ApiRecurring[]>(`/recurring`),
 
-  createRecurring: (name: string, question: string, intervalSeconds: number) =>
+  createRecurring: (name: string, question: string, background: string | undefined, intervalSeconds: number) =>
     request<ApiRecurring>(`/recurring`, {
       method: 'POST',
-      body: JSON.stringify({ name, question, interval_seconds: intervalSeconds }),
+      body: JSON.stringify({ name, question, background, interval_seconds: intervalSeconds }),
     }),
 
   setRecurringEnabled: (id: string, enabled: boolean) =>

@@ -50,9 +50,9 @@ export default function DecisionWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
-  const handleCreate = async (question: string) => {
+  const handleCreate = async (question: string, background?: string) => {
     try {
-      const c = await useCaseStore.getState().createCase(question);
+      const c = await useCaseStore.getState().createCase(question, background || undefined);
       navigate(`/case/${c.id}`);
     } catch {
       // error already set in store
@@ -93,8 +93,10 @@ export default function DecisionWorkspace() {
             onSubmit={(e) => {
               e.preventDefault();
               const form = e.currentTarget;
-              const input = form.elements.namedItem('question') as HTMLInputElement;
-              if (input.value.trim()) handleCreate(input.value.trim());
+              const qInput = form.elements.namedItem('question') as HTMLInputElement;
+              const bgInput = form.elements.namedItem('background') as HTMLTextAreaElement;
+              const question = qInput.value.trim();
+              if (question) handleCreate(question, bgInput.value.trim() || undefined);
             }}
           >
             <input
@@ -102,6 +104,12 @@ export default function DecisionWorkspace() {
               className="w-full bg-raised border border-border-dim rounded px-3 py-2 text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-accent mb-3"
               placeholder="What decision should MAGI analyze?"
               autoFocus
+            />
+            <textarea
+              name="background"
+              rows={3}
+              className="w-full bg-raised border border-border-dim rounded px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent mb-3"
+              placeholder={t('replay.planBackgroundPlaceholder')}
             />
             <div className="flex gap-2">
               <Button type="submit" disabled={loading}>

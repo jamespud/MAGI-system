@@ -28,6 +28,20 @@ beforeEach(() => {
 });
 
 describe('Templates page', () => {
+  it('creates a template with optional background', async () => {
+    mocks.create.mockResolvedValue({ id: 'rc3', name: 'bg', question: 'q?', background: 'ctx', interval_seconds: 3600, enabled: true, created_at: 'x' });
+    mocks.list.mockResolvedValue([{ id: 'rc1', name: 'daily review', question: 'keep the stack?', background: '', interval_seconds: 3600, enabled: true, created_at: 'x' }]);
+
+    const { getByPlaceholderText, getByText, findByText } = render(<Templates />);
+    await findByText('daily review');
+    fireEvent.change(getByPlaceholderText('Template name'), { target: { value: 'bg' } });
+    fireEvent.change(getByPlaceholderText('Decision question'), { target: { value: 'q?' } });
+    fireEvent.change(getByPlaceholderText('Background / hints (optional)'), { target: { value: 'ctx' } });
+    fireEvent.click(getByText('Create template'));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('bg', 'q?', 'ctx', 3600));
+  });
+
   it('creates a template and renders the list', async () => {
     mocks.create.mockResolvedValue({ id: 'rc2', name: 'weekly', question: 'expand?', background: '', interval_seconds: 604800, enabled: true, created_at: 'x' });
     mocks.list.mockResolvedValue([
@@ -43,6 +57,6 @@ describe('Templates page', () => {
     fireEvent.change(getByPlaceholderText('Decision question'), { target: { value: 'expand?' } });
     fireEvent.click(getByText('Create template'));
 
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('weekly', 'expand?', 3600));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('weekly', 'expand?', undefined, 3600));
   });
 });

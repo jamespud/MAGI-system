@@ -3,6 +3,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import DecisionWorkspace from '../DecisionWorkspace';
 
+const mockCreateCase = vi.fn().mockResolvedValue({ id: 'case-new', status: 'DRAFT' });
 const mockFetchCase = vi.fn();
 const mockRunCase = vi.fn().mockResolvedValue(undefined);
 const mockForkCase = vi.fn().mockResolvedValue({ id: 'case-forked', status: 'NORMALIZING' });
@@ -48,7 +49,7 @@ vi.mock('@/stores', () => {
       fetchCase: mockFetchCase,
       runCase: mockRunCase,
       forkCase: mockForkCase,
-      createCase: vi.fn(),
+      createCase: mockCreateCase,
       case: currentCase,
     }),
   });
@@ -119,6 +120,21 @@ describe('DecisionWorkspace', () => {
     const { getByText } = renderAt('/case/case-001');
     const btn = getByText('Running...') as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+  });
+
+  it('creates a case with question and optional background', async () => {
+    const { getByPlaceholderText, getByText } = renderAt('/');
+    fireEvent.change(getByPlaceholderText('What decision should MAGI analyze?'), { target: { value: 'rewrite in Rust?' } });
+    fireEvent.change(getByPlaceholderText('Background / hints (optional)'), { target: { value: 'team has 2 rust engineers' } });
+    fireEvent.click(getByText('Create Case'));
+    await waitFor(() => expect(mockCreateCase).toHaveBeenCalledWith('rewrite in Rust?', 'team has 2 rust engineers'));
+  });
+
+  it('creates a case without background', async () => {
+    const { getByPlaceholderText, getByText } = renderAt('/');
+    fireEvent.change(getByPlaceholderText('What decision should MAGI analyze?'), { target: { value: 'plain question' } });
+    fireEvent.click(getByText('Create Case'));
+    await waitFor(() => expect(mockCreateCase).toHaveBeenCalledWith('plain question', undefined));
   });
 
   it('forks and navigates when Re-run is clicked on a terminal case', async () => {

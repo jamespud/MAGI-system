@@ -7,6 +7,7 @@ export default function Templates() {
   const [templates, setTemplates] = useState<ApiRecurring[]>([]);
   const [name, setName] = useState('');
   const [question, setQuestion] = useState('');
+  const [background, setBackground] = useState('');
   const [interval, setInterval] = useState('3600');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -30,9 +31,10 @@ export default function Templates() {
     setBusy('create');
     setError('');
     try {
-      await api.createRecurring(name.trim(), question.trim(), secs);
+      await api.createRecurring(name.trim(), question.trim(), background.trim() || undefined, secs);
       setName('');
       setQuestion('');
+      setBackground('');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'create failed');
@@ -97,6 +99,13 @@ export default function Templates() {
           placeholder="Decision question"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
+        />
+        <textarea
+          className="w-full rounded border border-border-dim bg-background px-3 py-2 text-sm"
+          placeholder="Background / hints (optional)"
+          value={background}
+          onChange={(e) => setBackground(e.target.value)}
+          rows={2}
         />
         <div className="flex gap-2">
           <input
