@@ -138,7 +138,7 @@ func TestDockerCodeRunner_SecurityFlags(t *testing.T) {
 	}
 	a, err := magi.NewDockerCodeRunnerAdapter(magi.DockerCodeRunnerPolicy{
 		CodeRunnerPolicy: magi.DefaultCodeRunnerPolicy(),
-		Image: "test:latest", MemoryMB: 256, DockerTimeout: 30, DefaultTimeout: 30,
+		Image:            "test:latest", MemoryMB: 256, DockerTimeout: 30, DefaultTimeout: 30,
 	}, runCmd)
 	if err != nil {
 		t.Fatal(err)
@@ -154,4 +154,3 @@ func TestDockerCodeRunner_SecurityFlags(t *testing.T) {
 		}
 	}
 }
-

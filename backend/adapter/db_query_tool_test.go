@@ -225,4 +225,3 @@ func (s *stubLocalExec) Execute(ctx context.Context, req port.ToolExecutionReque
 }
 
 var _ port.ToolExecutorPort = (*stubLocalExec)(nil)
-

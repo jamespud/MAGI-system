@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,35 +17,62 @@ import (
 )
 
 type stubSIRepo struct {
+	mu    sync.Mutex
 	items map[string]*entity.SelfImproveSuggestion
 }
 
 func (s *stubSIRepo) Create(ctx context.Context, it *entity.SelfImproveSuggestion) error {
-	s.items[it.ID] = it
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Store a copy so the returned suggestion object is not shared with the
+	// persisted record; the async enhancement goroutine mutates the stored
+	// copy, matching the real DB-backed repo's separation of in-memory and
+	// persisted state.
+	s.items[it.ID] = cloneSISuggestion(it)
 	return nil
 }
 func (s *stubSIRepo) List(ctx context.Context) ([]*entity.SelfImproveSuggestion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := make([]*entity.SelfImproveSuggestion, 0, len(s.items))
 	for _, it := range s.items {
-		out = append(out, it)
+		out = append(out, cloneSISuggestion(it))
 	}
 	return out, nil
 }
 func (s *stubSIRepo) Get(ctx context.Context, id string) (*entity.SelfImproveSuggestion, error) {
-	return s.items[id], nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneSISuggestion(s.items[id]), nil
 }
 func (s *stubSIRepo) UpdateStatus(ctx context.Context, id, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if it, ok := s.items[id]; ok {
 		it.Status = status
 	}
 	return nil
 }
 func (s *stubSIRepo) UpdateRule(ctx context.Context, id, rule string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if it, ok := s.items[id]; ok {
 		it.SuggestedRule = rule
 		it.Status = entity.SelfImproveOpen
 	}
 	return nil
+}
+
+func cloneSISuggestion(s *entity.SelfImproveSuggestion) *entity.SelfImproveSuggestion {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	if s.AppliedAt != nil {
+		v := *s.AppliedAt
+		c.AppliedAt = &v
+	}
+	return &c
 }
 
 type stubSICaseRepo struct {
@@ -252,7 +280,6 @@ func contains(s, sub string) bool {
 var _ port.SelfImproveRepository = (*stubSIRepo)(nil)
 var _ port.PromptRepository = (*stubSIPromptRepo)(nil)
 
-
 type stubSIModelPort struct{ content string }
 
 func (s *stubSIModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.ToolCallingChatModel, error) {
@@ -324,17 +351,20 @@ func TestService_ModeHybridAnalyzesThenEnhances(t *testing.T) {
 	if !strings.Contains(s.SuggestedRule, "Gate guidance") {
 		t.Errorf("hybrid should return template immediately, got: %q", s.SuggestedRule)
 	}
-	if s.Status != entity.SelfImproveAnalyzing {
-		t.Errorf("status = %s, want analyzing", s.Status)
+	// The async enhancement may land before this assertion if the model
+	// returns immediately; accept either the analyzing or the finished state.
+	if s.Status != entity.SelfImproveAnalyzing && s.Status != entity.SelfImproveOpen {
+		t.Errorf("status = %s, want analyzing or open", s.Status)
 	}
 	// Wait for the async goroutine to complete.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		got := repo.items[s.ID]
+		got, _ := repo.Get(context.Background(), s.ID)
 		if got != nil && got.Status == entity.SelfImproveOpen && strings.Contains(got.SuggestedRule, "LLM:") {
 			return // success
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("async enhancement did not complete; final = %+v", repo.items[s.ID])
+	got, _ := repo.Get(context.Background(), s.ID)
+	t.Fatalf("async enhancement did not complete; final = %+v", got)
 }

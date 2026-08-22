@@ -193,7 +193,6 @@ func (e *FileToolExecutor) list(ctx context.Context, path string) (*port.ToolExe
 	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
 }
 
-
 func (e *FileToolExecutor) write(ctx context.Context, path, content string) (*port.ToolExecutionResult, error) {
 	if len([]byte(content)) > int(e.maxFileBytes) {
 		return nil, fmt.Errorf("file_query: write exceeds %d bytes", e.maxFileBytes)
@@ -244,6 +243,5 @@ func (e *FileToolExecutor) mkdir(ctx context.Context, path string) (*port.ToolEx
 	raw, _ := json.Marshal(out)
 	return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
 }
-
 
 var _ port.ToolExecutorPort = (*FileToolExecutor)(nil)

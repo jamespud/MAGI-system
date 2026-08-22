@@ -138,8 +138,8 @@ func (e *WebFetchToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 }
 
 var (
-	scriptRe  = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleRe   = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	scriptRe = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleRe  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
 )
 
 // stripHTML reduces HTML to readable text: drops scripts, styles, then tags.

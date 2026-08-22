@@ -106,4 +106,3 @@ func TestWebFetchTool_RequiresEnabledAndDomains(t *testing.T) {
 		t.Fatal("expected missing domains error")
 	}
 }
-

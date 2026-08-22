@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/jamespud/magi/backend/domain/port"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func openSQLiteInternal(t *testing.T) *sql.DB {
