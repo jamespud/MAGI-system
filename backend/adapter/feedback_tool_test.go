@@ -54,8 +54,8 @@ func TestFeedbackToolExecutor_RequiresPayloadOrChecks(t *testing.T) {
 	}
 	if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
 		ToolName: magi.FeedbackToolName, ArgumentsJSON: `{"payload":{"x":1}}`,
-	}); err == nil || !strings.Contains(err.Error(), "schema or constraint rules") {
-		t.Fatalf("expected checks error, got %v", err)
+	}); err != nil {
+		t.Fatalf("no schema/rules must be benign, got err: %v", err)
 	}
 }
 
@@ -70,6 +70,55 @@ func TestFeedbackToolExecutor_PassesCleanPayload(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, `"ok":true`) {
 		t.Fatalf("clean payload must pass: %s", res.Output)
+	}
+}
+
+func TestFeedbackToolExecutor_UsesExpectedSchemaFallback(t *testing.T) {
+	reg := metrics.New()
+	sensors := runtime.NewCompositeFeedbackSensor(runtime.NewSchemaFeedbackSensor(validation.NewJSONSchemaValidator()))
+	exec := magi.NewFeedbackToolExecutor(sensors, reg)
+	expected := []byte(`{"type":"object","properties":{"decision":{"type":"string","enum":["approve","reject"]}},"required":["decision"]}`)
+	res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName:       magi.FeedbackToolName,
+		ArgumentsJSON:  `{"payload":{"decision":"maybe"}}`,
+		ExpectedSchema: expected,
+	})
+	if err != nil {
+		t.Fatalf("expected fallback to ExpectedSchema, got err: %v", err)
+	}
+	if !strings.Contains(res.Output, `"ok":false`) || !strings.Contains(res.Output, "decision") {
+		t.Fatalf("expected schema violation from ExpectedSchema, got %s", res.Output)
+	}
+}
+
+func TestFeedbackToolExecutor_InvalidSchemaFallsBack(t *testing.T) {
+	sensors := runtime.NewCompositeFeedbackSensor(runtime.NewSchemaFeedbackSensor(validation.NewJSONSchemaValidator()))
+	exec := magi.NewFeedbackToolExecutor(sensors, nil)
+	expected := []byte(`{"type":"object","properties":{"decision":{"type":"string"}}}`)
+	res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName:       magi.FeedbackToolName,
+		ArgumentsJSON:  `{"payload":{"decision":"x"},"schema":"{\"type\":\"object\",\"broken"}`,
+		ExpectedSchema: expected,
+	})
+	if err != nil {
+		t.Fatalf("invalid model schema must fall back, got err: %v", err)
+	}
+	if !strings.Contains(res.Output, `"ok":true`) {
+		t.Fatalf("expected ok against ExpectedSchema, got %s", res.Output)
+	}
+}
+
+func TestFeedbackToolExecutor_NoChecksIsBenign(t *testing.T) {
+	exec := magi.NewFeedbackToolExecutor(runtime.NewCompositeFeedbackSensor(runtime.NewConstraintFeedbackSensor()), nil)
+	res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName:      magi.FeedbackToolName,
+		ArgumentsJSON: `{"payload":{"x":1}}`,
+	})
+	if err != nil {
+		t.Fatalf("no schema/rules must be benign, got err: %v", err)
+	}
+	if !strings.Contains(res.Output, `"ok":true`) {
+		t.Fatalf("expected benign ok, got %s", res.Output)
 	}
 }
 

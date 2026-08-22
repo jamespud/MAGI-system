@@ -83,3 +83,18 @@ func TestCompositeFeedbackSensor_Aggregates(t *testing.T) {
 		t.Fatalf("both sensors must report: schema=%+v constraints=%+v", violations, constr)
 	}
 }
+
+func TestSchemaFeedbackSensor_BrokenSchemaReturnsViolation(t *testing.T) {
+	s := runtime.NewSchemaFeedbackSensor(validation.NewJSONSchemaValidator())
+	violations, err := s.Check(context.Background(), runtime.FeedbackCheck{
+		Kind:    runtime.FeedbackCheckSchema,
+		Payload: map[string]any{"decision": "x"},
+		Schema:  []byte(`{"type":"object","broken`),
+	})
+	if err != nil {
+		t.Fatalf("broken schema must not hard-fail, got err: %v", err)
+	}
+	if len(violations) == 0 || violations[0].Field != "" {
+		t.Fatalf("expected a schema-invalid violation, got %+v", violations)
+	}
+}

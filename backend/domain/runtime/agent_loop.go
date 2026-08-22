@@ -24,6 +24,27 @@ import (
 
 var ErrMaxSteps = errors.New("magi agent loop: max steps exceeded")
 
+// feedbackToolName is the deterministic check_output tool. It mirrors
+// magi.FeedbackToolName (adapter) but is defined here to avoid an adapter<->runtime
+// import cycle (adapter imports runtime).
+const feedbackToolName = "check_output"
+
+// phaseExpectedSchema returns the authoritative output schema for the current
+// phase, or nil when the phase is not mapped. Used to supply check_output's
+// self-lint schema so the model never has to reproduce it.
+func phaseExpectedSchema(phase string, summary, vote, reflection []byte) []byte {
+	switch phase {
+	case "vote":
+		return vote
+	case "reflect", "reconsider_reflect":
+		return reflection
+	case "gather", "reconsider_gather":
+		return summary
+	default:
+		return nil
+	}
+}
+
 // RelaxEvidenceStandard drops count/type requirements when no tools are bound
 // (the agent reasons from intrinsic knowledge), but preserves CustomRules so
 // semantic claim rules (e.g. worst-case claim) remain enforced without tools.
@@ -423,10 +444,14 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 
 				toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
 
-				execRes, execErr := l.toolExec.Execute(toolCtx, port.ToolExecutionRequest{
+				exeReq := port.ToolExecutionRequest{
 					ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments,
 					UserID: actx.UserID, Binding: td.Binding,
-				})
+				}
+				if tc.Function.Name == feedbackToolName {
+					exeReq.ExpectedSchema = phaseExpectedSchema(phase, summarySchema, voteSchema, reflectionSchema)
+				}
+				execRes, execErr := l.toolExec.Execute(toolCtx, exeReq)
 
 				tcr.Duration = time.Since(toolStart)
 

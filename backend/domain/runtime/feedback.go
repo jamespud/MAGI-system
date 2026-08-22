@@ -69,7 +69,7 @@ func (s *SchemaFeedbackSensor) Check(ctx context.Context, check FeedbackCheck) (
 		return nil, nil
 	}
 	if !res.Valid && len(res.Violations) > 0 && strings.HasPrefix(res.Violations[0].Code, "SCHEMA_") {
-		return nil, fmt.Errorf("feedback schema: %s", res.Error())
+		return []FeedbackViolation{{Field: "", Message: res.Error()}}, nil
 	}
 	if res.Valid {
 		return nil, nil

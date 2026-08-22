@@ -21,6 +21,10 @@ type ToolExecutionRequest struct {
 	ArgumentsJSON string
 	UserID        string
 	Binding       entity.ToolBinding
+	// ExpectedSchema is the authoritative output schema for the current phase.
+	// Optional; only set by the agent loop for check_output so models need not
+	// reproduce it. Other tools ignore it.
+	ExpectedSchema []byte
 }
 
 // ToolExecutionResult is the raw tool output.

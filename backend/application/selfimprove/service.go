@@ -323,7 +323,7 @@ func ruleTemplate(category, failure string) string {
 	case entity.SelfImproveToolError:
 		return "Tool guidance: when a tool fails, retry once with corrected arguments or switch to an alternative tool; never fabricate the tool result."
 	case entity.SelfImproveValidation:
-		return "Format guidance: output exactly the required JSON schema; use the check_output tool to self-lint before submitting."
+		return "Format guidance: output the required structured JSON; the system lints it against the expected schema automatically. You may use the check_output tool with 'rules' for extra field constraints."
 	case entity.SelfImproveTimeout:
 		return "Budget guidance: keep reasoning compact so the run completes within the configured timeout; reduce repeated tool calls."
 	case entity.SelfImproveModelError:

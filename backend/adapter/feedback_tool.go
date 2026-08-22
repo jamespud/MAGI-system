@@ -13,8 +13,12 @@ import (
 // FeedbackToolName is the local deterministic check tool.
 const FeedbackToolName = "check_output"
 
+// maxModelSchemaLen caps the model-supplied schema bytes. Larger schemas are
+// ignored in favour of the injected ExpectedSchema to avoid bloat/truncation.
+const maxModelSchemaLen = 2000
+
 // feedbackArgsSchema is the JSON Schema for check_output arguments.
-const feedbackArgsSchema = `{"type":"object","properties":{"payload":{},"schema":{"type":"string","description":"optional JSON Schema to lint the payload against"},"rules":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"op":{"type":"string","enum":["eq","ne","gt","gte","lt","lte","contains"]},"value":{}},"required":["field","op"],"additionalProperties":false}},"required":["payload"],"additionalProperties":false}`
+const feedbackArgsSchema = `{"type":"object","properties":{"payload":{},"schema":{"type":"string","description":"optional JSON Schema to lint the payload against"},"rules":{"type":"array","items":{"type":"object","properties":{"field":{"type":"string"},"op":{"type":"string","enum":["eq","ne","gt","gte","lt","lte","contains"]},"value":{}},"required":["field","op"],"additionalProperties":false}}},"required":["payload"],"additionalProperties":false}`
 
 // FeedbackToolExecutor runs deterministic feedback sensors on the model's own
 // output and returns violations so the loop feeds them back for self-correction.
@@ -44,10 +48,19 @@ func (e *FeedbackToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 	if args.Payload == nil {
 		return nil, fmt.Errorf("check_output: payload is required")
 	}
+	// Prefer a valid, short model-supplied schema; otherwise use the injected
+	// authoritative ExpectedSchema; otherwise skip the schema check.
+	var effectiveSchema []byte
+	if model := args.Schema; model != "" && len(model) <= maxModelSchemaLen && json.Valid([]byte(model)) {
+		effectiveSchema = []byte(model)
+	} else if len(req.ExpectedSchema) > 0 {
+		effectiveSchema = req.ExpectedSchema
+	}
+
 	var checks []runtime.FeedbackCheck
-	if args.Schema != "" {
+	if len(effectiveSchema) > 0 {
 		checks = append(checks, runtime.FeedbackCheck{
-			Kind: runtime.FeedbackCheckSchema, Payload: args.Payload, Schema: []byte(args.Schema),
+			Kind: runtime.FeedbackCheckSchema, Payload: args.Payload, Schema: effectiveSchema,
 		})
 	}
 	if len(args.Rules) > 0 {
@@ -56,7 +69,9 @@ func (e *FeedbackToolExecutor) Execute(ctx context.Context, req port.ToolExecuti
 		})
 	}
 	if len(checks) == 0 {
-		return nil, fmt.Errorf("check_output: provide a schema or constraint rules")
+		out := map[string]any{"ok": true, "note": "no schema or rules provided"}
+		raw, _ := json.Marshal(out)
+		return &port.ToolExecutionResult{Output: string(raw), Structured: out}, nil
 	}
 	var all []runtime.FeedbackViolation
 	for _, check := range checks {
