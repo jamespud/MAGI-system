@@ -739,7 +739,7 @@ func provideSelfImproveRepository(db *gorm.DB) port.SelfImproveRepository {
 	return magi.NewSelfImproveRepository(db)
 }
 
-func provideSelfImproveService(repo port.Repository, sir port.SelfImproveRepository, prompts port.PromptRepository, modelPort port.ModelPort, cfg *Config) *selfimprove.Service {
+func provideSelfImproveService(repo port.Repository, sir port.SelfImproveRepository, prompts port.PromptRepository, modelPort *magi.ModelAdapter, cfg *Config) *selfimprove.Service {
 	return selfimprove.NewService(sir, repo.CaseRepo(), repo.EventRepo(), repo.AgentRunRepo(),
 		selfimprove.WithPrompts(prompts),
 		selfimprove.WithAutoApply(cfg.SelfImprove.AutoApplyEnabled, cfg.SelfImprove.AutoApplyThreshold),
