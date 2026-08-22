@@ -79,4 +79,7 @@ type KnowledgeRepository interface {
 	ListByUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.KnowledgeDoc, error)
 	Update(ctx context.Context, doc *entity.KnowledgeDoc) error
 	Delete(ctx context.Context, id string) error
+	// ListAll returns every knowledge document regardless of owner (admin
+	// reindex path).
+	ListAll(ctx context.Context) ([]*entity.KnowledgeDoc, error)
 }

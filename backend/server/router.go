@@ -40,6 +40,7 @@ type RouteDeps struct {
 	SelfImprove       *handler.SelfImproveHandler
 	RolePolicy        *handler.RolePolicyHandler
 	Golden            *handler.GoldenHandler
+	AdminRag          *handler.AdminRagHandler
 	ConsensusPolicy   *handler.ConsensusPolicyHandler
 	FSMBlueprint      *handler.FSMBlueprintHandler
 	TaskTree          *handler.TaskTreeHandler
@@ -146,6 +147,9 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		v1.GET("/admin/golden", RequireAnyRole("admin", "operator"), amw, deps.Golden.List)
 		v1.DELETE("/admin/golden/:id", RequireAnyRole("admin", "operator"), amw, deps.Golden.Delete)
 		v1.POST("/admin/golden/sync", RequireAnyRole("admin", "operator"), amw, deps.Golden.Sync)
+	}
+	if deps.AdminRag != nil {
+		v1.POST("/admin/rag/reindex", RequireRole("admin"), amw, deps.AdminRag.Reindex)
 	}
 	if deps.ConsensusPolicy != nil {
 		v1.GET("/admin/consensus-policy", RequireAnyRole("admin", "operator"), amw, deps.ConsensusPolicy.Get)

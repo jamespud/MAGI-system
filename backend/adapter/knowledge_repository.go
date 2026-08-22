@@ -63,6 +63,18 @@ func (r *knowledgeRepo) Update(ctx context.Context, doc *entity.KnowledgeDoc) er
 	return r.db.WithContext(ctx).Save(knowledgeDocToModel(doc)).Error
 }
 
+func (r *knowledgeRepo) ListAll(ctx context.Context) ([]*entity.KnowledgeDoc, error) {
+	var models []KnowledgeDocModel
+	if err := r.db.WithContext(ctx).Order("created_at ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.KnowledgeDoc, len(models))
+	for i := range models {
+		out[i] = knowledgeDocFromModel(&models[i])
+	}
+	return out, nil
+}
+
 func (r *knowledgeRepo) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&KnowledgeDocModel{}).Error
 }
