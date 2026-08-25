@@ -157,6 +157,35 @@ func (o *Orchestrator) confirmCurrentStatus(ctx context.Context, case_ *entity.D
 	return nil
 }
 
+// commitTerminal writes the terminal artifacts behind one production
+// transaction fence. Test/in-memory repositories retain the historical
+// conditional-status fallback so their narrow fakes need no DB transaction.
+func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.DecisionCase, status entity.CaseStatus, resolution *entity.Resolution, event entity.MagiEvent) error {
+	if committer, ok := o.repo.(port.TerminalCommitter); ok {
+		committed, err := committer.CommitTerminal(ctx, case_.ID, status, resolution, &event)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return port.ErrLeaseLost
+		}
+		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
+			_ = live.PublishLive(ctx, event)
+		}
+		return nil
+	}
+	if err := o.confirmCurrentStatus(ctx, case_, status); err != nil {
+		return err
+	}
+	if resolution != nil && o.repo != nil {
+		if err := o.repo.ResolutionRepo().Create(ctx, resolution); err != nil {
+			return fmt.Errorf("persist resolution: %w", err)
+		}
+	}
+	o.publish(ctx, case_, event.Type, event.Payload)
+	return nil
+}
+
 // advanceStatus persists the FSM transition before exposing it in memory or
 // events. Database-backed repositories compare against the expected source
 // state, so a remote cancellation or other owner transition fences late work.

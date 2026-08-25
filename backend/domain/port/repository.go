@@ -87,6 +87,13 @@ type ConditionalCaseStatusWriter interface {
 	UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error)
 }
 
+// TerminalCommitter atomically fences a terminal case transition together with
+// its durable artifacts. A false result means another transaction changed the
+// case status before this worker could commit anything.
+type TerminalCommitter interface {
+	CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error)
+}
+
 // PauseStatusWriter is an optional CaseRepository capability that persists
 // the pre-pause status together with the PAUSED status in one update, so a
 // later wake can restore the FSM position. Repositories that do not implement

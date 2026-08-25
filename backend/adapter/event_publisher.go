@@ -57,6 +57,20 @@ func (p *EventPublisherAdapter) Publish(ctx context.Context, e entity.MagiEvent)
 			return storeErr
 		}
 	}
+	_ = p.publishLive(ctx, e)
+	return storeErr
+}
+
+// PublishLive forwards an event that was persisted by a separate transaction.
+// TerminalCommitter uses this to preserve atomic DB ownership fencing.
+func (p *EventPublisherAdapter) PublishLive(ctx context.Context, e entity.MagiEvent) error {
+	if p.redactor != nil {
+		e.Payload = p.redactor.JSON(e.Payload)
+	}
+	return p.publishLive(ctx, e)
+}
+
+func (p *EventPublisherAdapter) publishLive(ctx context.Context, e entity.MagiEvent) error {
 	if p.live != nil {
 		_ = p.live.Publish(ctx, e)
 	}
@@ -64,10 +78,11 @@ func (p *EventPublisherAdapter) Publish(ctx context.Context, e entity.MagiEvent)
 		data, _ := json.Marshal(e)
 		_ = p.sender.Send(ctx, p.stream, &hertzsse.Event{Event: string(e.Type), Data: data})
 	}
-	return storeErr
+	return nil
 }
 
 var _ port.EventPublisher = (*EventPublisherAdapter)(nil)
+var _ port.LiveEventPublisher = (*EventPublisherAdapter)(nil)
 
 // InMemoryEventRepo is a test/in-memory EventRepository.
 type InMemoryEventRepo struct {

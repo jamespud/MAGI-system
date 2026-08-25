@@ -89,3 +89,38 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.TerminalCommitter)
+	if !ok {
+		t.Fatal("production repository must provide terminal commit fencing")
+	}
+	caseID := "case-terminal-cancelled"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusCancelled}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err := committer.CommitTerminal(context.Background(), caseID, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "res-terminal-cancelled", CaseID: caseID, FinalDecision: entity.VoteDecisionApprove}, &event)
+	if err != nil {
+		t.Fatalf("commit terminal: %v", err)
+	}
+	if committed {
+		t.Fatal("terminal commit must lose to a prior cancellation")
+	}
+	if _, err := repo.ResolutionRepo().Get(context.Background(), caseID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("resolution after rejected terminal commit: %v", err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), caseID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events after rejected terminal commit: %+v err=%v", events, err)
+	}
+}

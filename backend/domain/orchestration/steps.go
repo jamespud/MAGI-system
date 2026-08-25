@@ -260,29 +260,21 @@ func (o *Orchestrator) stepEvaluate(ctx context.Context, case_ *entity.DecisionC
 }
 
 func (o *Orchestrator) stepComplete(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
-	if err := o.confirmCurrentStatus(ctx, case_, entity.CaseStatusResolved); err != nil {
+	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	if err := o.commitTerminal(ctx, case_, entity.CaseStatusResolved, st.Resolution, event); err != nil {
 		return "", false, err
 	}
-	// Persist the resolution here, after FinalReport (GeneratingReport) and
-	// Evaluation (Evaluating) are set. Persisting earlier would snapshot an
-	// empty FinalReport.
-	if o.repo != nil && st.Resolution != nil {
-		if err := o.repo.ResolutionRepo().Create(ctx, st.Resolution); err != nil {
-			return "", false, fmt.Errorf("persist resolution: %w", err)
-		}
-	}
-	o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
 	case_.Status = entity.CaseStatusResolved
 	return entity.CaseStatusResolved, true, nil
 }
 
 func (o *Orchestrator) stepDeadlock(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
-	if err := o.confirmCurrentStatus(ctx, case_, entity.CaseStatusDeadlocked); err != nil {
+	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusDeadlocked), "outcome": "deadlocked", "round": st.Round})
+	if err := o.commitTerminal(ctx, case_, entity.CaseStatusDeadlocked, nil, event); err != nil {
 		return "", false, err
 	}
 	// Deadlock is a legitimate terminal outcome, not a retryable failure:
 	// finish the run without an error so the durable worker marks it done.
-	o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusDeadlocked), "outcome": "deadlocked", "round": st.Round})
 	case_.Status = entity.CaseStatusDeadlocked
 	return entity.CaseStatusDeadlocked, true, nil
 }

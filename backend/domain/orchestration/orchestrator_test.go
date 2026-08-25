@@ -899,6 +899,18 @@ type terminalRaceCaseStatusWriter struct {
 	status entity.CaseStatus
 }
 
+type terminalCommitRaceRepo struct {
+	port.Repository
+	called bool
+}
+
+func (r *terminalCommitRaceRepo) CommitTerminal(context.Context, string, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
+	r.called = true
+	// Simulates a cancel transaction that wins after an earlier read/CAS but
+	// before terminal artifacts would be written.
+	return false, nil
+}
+
 func (r *terminalRaceCaseStatusWriter) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
 	for _, status := range from {
 		if r.status != status {
@@ -984,6 +996,49 @@ func TestOrchestrate_TerminalConfirmationFencesLateResolutionAndCompletionEvent(
 	for _, event := range events {
 		if event.Type == entity.EventCaseCompleted {
 			t.Fatalf("late terminal path published completion event: %+v", event)
+		}
+	}
+}
+
+func TestOrchestrate_AtomicTerminalCommitFencesCancellationAfterConfirmation(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	terminalRepo := &terminalCommitRaceRepo{Repository: baseRepo}
+	broker := server.NewEventBroker()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      terminalRepo,
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-atomic-terminal-race", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("error = %v, want ErrLeaseLost", err)
+	}
+	if !terminalRepo.called {
+		t.Fatal("orchestrator did not use the terminal transaction capability")
+	}
+	baseRepo.mu.Lock()
+	resolutions := len(baseRepo.resolutions)
+	baseRepo.mu.Unlock()
+	if resolutions != 0 {
+		t.Fatalf("race fallback persisted %d resolutions", resolutions)
+	}
+	events, err := broker.ListByCase(context.Background(), case_.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, event := range events {
+		if event.Type == entity.EventCaseCompleted {
+			t.Fatalf("race fallback published completion event: %+v", event)
 		}
 	}
 }

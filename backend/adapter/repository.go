@@ -3,6 +3,7 @@ package magi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -85,7 +86,41 @@ func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &me
 func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
 func (r *magiRepository) PromptRepo() port.PromptRepository         { return NewPromptRepository(r.db) }
 
+func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("terminal commit: event is required")
+	}
+	committed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&CaseModel{}).
+			Where("id = ? AND status = ?", caseID, string(expectedStatus)).
+			Updates(map[string]any{"status": string(expectedStatus), "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		if resolution != nil {
+			model := resolutionModel(resolution)
+			if err := tx.Create(&model).Error; err != nil {
+				return err
+			}
+		}
+		if err := createEventInTx(tx, event); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return committed, nil
+}
+
 var _ port.Repository = (*magiRepository)(nil)
+var _ port.TerminalCommitter = (*magiRepository)(nil)
 
 // --- CaseRepository ---
 
@@ -481,12 +516,16 @@ func (r *voteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vot
 type resolutionRepo struct{ db *gorm.DB }
 
 func (r *resolutionRepo) Create(ctx context.Context, res *entity.Resolution) error {
-	m := ResolutionModel{
+	m := resolutionModel(res)
+	return r.db.WithContext(ctx).Create(&m).Error
+}
+
+func resolutionModel(res *entity.Resolution) ResolutionModel {
+	return ResolutionModel{
 		ID: res.ID, CaseID: res.CaseID, ConsensusJSON: toJSON(res.Consensus), FinalDecision: string(res.FinalDecision),
 		FinalReport: res.FinalReport, KeyEvidenceIDsJSON: toJSON(res.KeyEvidenceIDs), KeyClaimIDsJSON: toJSON(res.KeyClaimIDs),
 		VoteIDsJSON: toJSON(res.VoteIDs), EvaluationJSON: toJSON(res.Evaluation), CreatedAt: res.CreatedAt,
 	}
-	return r.db.WithContext(ctx).Create(&m).Error
 }
 func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) {
 	var m ResolutionModel
@@ -508,29 +547,7 @@ type eventRepo struct{ db *gorm.DB }
 func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			cursor := EventCursorModel{CaseID: e.CaseID, NextSeq: 1}
-			if err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "case_id"}},
-				DoUpdates: clause.Assignments(map[string]any{"case_id": gorm.Expr("case_id")}),
-			}).Create(&cursor).Error; err != nil {
-				return err
-			}
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cursor, "case_id = ?", e.CaseID).Error; err != nil {
-				return err
-			}
-			e.Seq = cursor.NextSeq
-			if err := tx.Model(&EventCursorModel{}).Where("case_id = ?", e.CaseID).
-				Update("next_seq", cursor.NextSeq+1).Error; err != nil {
-				return err
-			}
-			m := EventModel{
-				ID: e.ID, CaseID: e.CaseID, Seq: e.Seq, RunID: e.RunID, AgentCode: "", Type: string(e.Type),
-				PayloadJSON: string(e.Payload), Timestamp: e.Timestamp,
-			}
-			if e.AgentCode != nil {
-				m.AgentCode = string(*e.AgentCode)
-			}
-			return tx.Create(&m).Error
+			return createEventInTx(tx, e)
 		})
 		if err == nil {
 			return nil
@@ -541,6 +558,32 @@ func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
 	return nil
+}
+
+func createEventInTx(tx *gorm.DB, e *entity.MagiEvent) error {
+	cursor := EventCursorModel{CaseID: e.CaseID, NextSeq: 1}
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "case_id"}},
+		DoUpdates: clause.Assignments(map[string]any{"case_id": gorm.Expr("case_id")}),
+	}).Create(&cursor).Error; err != nil {
+		return err
+	}
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cursor, "case_id = ?", e.CaseID).Error; err != nil {
+		return err
+	}
+	e.Seq = cursor.NextSeq
+	if err := tx.Model(&EventCursorModel{}).Where("case_id = ?", e.CaseID).
+		Update("next_seq", cursor.NextSeq+1).Error; err != nil {
+		return err
+	}
+	m := EventModel{
+		ID: e.ID, CaseID: e.CaseID, Seq: e.Seq, RunID: e.RunID, AgentCode: "", Type: string(e.Type),
+		PayloadJSON: string(e.Payload), Timestamp: e.Timestamp,
+	}
+	if e.AgentCode != nil {
+		m.AgentCode = string(*e.AgentCode)
+	}
+	return tx.Create(&m).Error
 }
 func eventsFromModels(models []EventModel) []*entity.MagiEvent {
 	out := make([]*entity.MagiEvent, len(models))
