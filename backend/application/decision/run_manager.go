@@ -287,12 +287,11 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 		c.ExecutionAttempt = claimed.Attempt
 		if claimed.Attempt > 1 && c.Status != entity.CaseStatusResolved {
+			if !m.resetCaseForRetry(ctx, c) {
+				return
+			}
 			if m.cleaner != nil {
 				_ = m.cleaner.CleanupCaseArtifacts(context.Background(), c.ID)
-			}
-			c.Status = entity.CaseStatusDraft
-			if m.caseRepo != nil {
-				_ = m.caseRepo.UpdateStatus(context.Background(), c.ID, entity.CaseStatusDraft)
 			}
 		}
 		attemptCtx, attemptCancel := context.WithCancelCause(ctx)
@@ -308,9 +307,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 
 		if runErr == nil {
 			if err := m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID); err != nil {
-				if errors.Is(err, port.ErrLeaseLost) {
-					attemptCancel(port.ErrLeaseLost)
-				}
+				attemptCancel(port.ErrLeaseLost)
 			}
 			return
 		}
@@ -348,6 +345,47 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 	}
 }
 
+func (m *RunManager) resetCaseForRetry(ctx context.Context, c *entity.DecisionCase) bool {
+	if m.caseRepo == nil {
+		c.Status = entity.CaseStatusDraft
+		return true
+	}
+	if writer, ok := m.caseRepo.(port.ConditionalCaseStatusWriter); ok {
+		updated, err := writer.UpdateStatusIfCurrent(ctx, c.ID, retryableCaseStatuses(), entity.CaseStatusDraft)
+		if err != nil || !updated {
+			return false
+		}
+	} else if err := m.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusDraft); err != nil {
+		return false
+	}
+	c.Status = entity.CaseStatusDraft
+	return true
+}
+
+func retryableCaseStatuses() []entity.CaseStatus {
+	return []entity.CaseStatus{
+		"",
+		entity.CaseStatusDraft,
+		entity.CaseStatusNormalizing,
+		entity.CaseStatusContextBuilding,
+		entity.CaseStatusRetrievingMemory,
+		entity.CaseStatusInvestigating,
+		entity.CaseStatusEvidenceGating,
+		entity.CaseStatusCollectingVotes,
+		entity.CaseStatusConsensusCheck,
+		entity.CaseStatusResolving,
+		entity.CaseStatusGeneratingReport,
+		entity.CaseStatusSavingMemory,
+		entity.CaseStatusEvaluating,
+		entity.CaseStatusDebating,
+		entity.CaseStatusReflecting,
+		entity.CaseStatusRevoting,
+		entity.CaseStatusMemoryIndexed,
+		entity.CaseStatusInsufficientEv,
+		entity.CaseStatusPaused,
+	}
+}
+
 func (m *RunManager) retryDelay(attempt int) time.Duration {
 	delay := m.retryBase
 	for i := 1; i < attempt; i++ {
@@ -373,22 +411,50 @@ func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.C
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		defer close(done)
+		leaseTimer := time.NewTimer(time.Until(leaseUntil))
+		defer leaseTimer.Stop()
+		resetLeaseTimer := func(next time.Time) {
+			if !leaseTimer.Stop() {
+				select {
+				case <-leaseTimer.C:
+				default:
+				}
+			}
+			leaseTimer.Reset(time.Until(next))
+		}
 		for {
 			select {
+			case <-leaseTimer.C:
+				attemptCancel(port.ErrLeaseLost)
+				return
 			case <-ticker.C:
-				now := time.Now()
-				if !now.Before(leaseUntil) {
+				heartbeatCtx, heartbeatCancel := context.WithDeadline(ctx, leaseUntil)
+				nextLeaseUntil := time.Now().Add(m.lease)
+				result := make(chan error, 1)
+				go func() {
+					result <- m.jobRepo.Heartbeat(heartbeatCtx, jobID, m.workerID, nextLeaseUntil)
+				}()
+				select {
+				case err := <-result:
+					heartbeatCancel()
+					if err == nil && time.Now().Before(leaseUntil) {
+						leaseUntil = nextLeaseUntil
+						resetLeaseTimer(leaseUntil)
+						continue
+					}
+					if errors.Is(err, port.ErrLeaseLost) || !time.Now().Before(leaseUntil) {
+						attemptCancel(port.ErrLeaseLost)
+						return
+					}
+				case <-leaseTimer.C:
+					heartbeatCancel()
 					attemptCancel(port.ErrLeaseLost)
 					return
-				}
-				nextLeaseUntil := now.Add(m.lease)
-				err := m.jobRepo.Heartbeat(context.Background(), jobID, m.workerID, nextLeaseUntil)
-				if err == nil {
-					leaseUntil = nextLeaseUntil
-					continue
-				}
-				if errors.Is(err, port.ErrLeaseLost) || !time.Now().Before(leaseUntil) {
-					attemptCancel(port.ErrLeaseLost)
+				case <-stop:
+					heartbeatCancel()
+					return
+				case <-ctx.Done():
+					heartbeatCancel()
 					return
 				}
 			case <-stop:

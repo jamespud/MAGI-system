@@ -2,6 +2,7 @@ package decision_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,26 @@ func openMultiDB(t *testing.T) *gorm.DB {
 type remoteCancelOrchestrator struct {
 	started   chan struct{}
 	cancelled chan struct{}
+}
+
+type retryClaimCancellingRepo struct {
+	port.DecisionJobRepository
+	cancelAfterClaim func()
+}
+
+func (r *retryClaimCancellingRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
+	job, ok, err := r.DecisionJobRepository.Claim(ctx, jobID, workerID, leaseUntil)
+	if err == nil && ok && job.Attempt > 1 {
+		r.cancelAfterClaim()
+	}
+	return job, ok, err
+}
+
+type retryResetOrchestrator struct{ calls atomic.Int32 }
+
+func (o *retryResetOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
+	o.calls.Add(1)
+	return &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil
 }
 
 func (o *remoteCancelOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
@@ -95,6 +116,64 @@ func TestRunManager_RemoteCancelStopsWorkerAndFencesLateTerminalWrite(t *testing
 	jobAfter, err := jobs.GetByCase(context.Background(), caseID)
 	if err != nil || jobAfter.Status != entity.DecisionJobCancelled {
 		t.Fatalf("job after late write = %+v err=%v", jobAfter, err)
+	}
+}
+
+func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
+	db := openMultiDB(t)
+	repo := magi.NewRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	caseID := "case-retry-reset-fenced"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	job, err := jobs.Enqueue(context.Background(), caseID, 2)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
+	}
+	retryAt := time.Now().Add(-time.Millisecond)
+	if err := jobs.MarkFailed(context.Background(), job.ID, "previous-worker", "retry", &retryAt); err != nil {
+		t.Fatalf("seed retry: %v", err)
+	}
+
+	decoratedJobs := &retryClaimCancellingRepo{
+		DecisionJobRepository: jobs,
+		cancelAfterClaim: func() {
+			if err := jobs.Cancel(context.Background(), job.ID); err != nil {
+				t.Errorf("remote cancel job: %v", err)
+			}
+			if err := repo.CaseRepo().UpdateStatus(context.Background(), caseID, entity.CaseStatusCancelled); err != nil {
+				t.Errorf("remote cancel case: %v", err)
+			}
+		},
+	}
+	orch := &retryResetOrchestrator{}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: decoratedJobs, CaseRepo: repo.CaseRepo(), WorkerID: "late-worker", MaxAttempts: 2,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("start retry: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for rm.IsRunning(caseID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if rm.IsRunning(caseID) {
+		t.Fatal("retry worker did not stop after remote cancellation")
+	}
+	if calls := orch.calls.Load(); calls != 0 {
+		t.Fatalf("orchestrator calls = %d, want 0 after reset fence", calls)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status != entity.CaseStatusCancelled {
+		t.Fatalf("case after retry reset = %+v err=%v", caseAfter, err)
+	}
+	jobAfter, err := jobs.GetByCase(context.Background(), caseID)
+	if err != nil || jobAfter.Status != entity.DecisionJobCancelled {
+		t.Fatalf("job after retry reset = %+v err=%v", jobAfter, err)
 	}
 }
 

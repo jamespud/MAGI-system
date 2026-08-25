@@ -11,6 +11,7 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -18,6 +19,52 @@ import (
 
 type durableRetryOrchestrator struct {
 	calls int32
+}
+
+type blockingHeartbeatRepo struct {
+	port.DecisionJobRepository
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingHeartbeatRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.release:
+		return nil
+	}
+}
+
+type markSucceededErrorRepo struct {
+	port.DecisionJobRepository
+	err         error
+	markFaileds atomic.Int32
+}
+
+func (r *markSucceededErrorRepo) MarkSucceeded(context.Context, string, string) error { return r.err }
+
+func (r *markSucceededErrorRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error {
+	r.markFaileds.Add(1)
+	return r.DecisionJobRepository.MarkFailed(ctx, jobID, workerID, lastError, retryAt)
+}
+
+type successThenObserveCancellationOrchestrator struct {
+	observed chan struct{}
+	release  chan struct{}
+}
+
+func (o *successThenObserveCancellationOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	go func() {
+		select {
+		case <-ctx.Done():
+			close(o.observed)
+		case <-o.release:
+		}
+	}()
+	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
 }
 
 func (o *durableRetryOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
@@ -71,6 +118,59 @@ func TestRunManager_DurableRetry(t *testing.T) {
 	job := waitJobStatus(t, jobs, "case-retry", entity.DecisionJobSucceeded)
 	if job.Attempt != 2 || atomic.LoadInt32(&orch.calls) != 2 {
 		t.Fatalf("retry result: job=%+v calls=%d", job, orch.calls)
+	}
+}
+
+func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
+	db := openJobDB(t)
+	baseJobs := magi.NewDecisionJobRepository(db)
+	jobs := &blockingHeartbeatRepo{
+		DecisionJobRepository: baseJobs,
+		started:               make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	defer close(jobs.release)
+	lease := 30 * time.Millisecond
+	orch := &remoteCancelOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "heartbeat-blocked", LeaseDuration: lease, MaxAttempts: 1,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-heartbeat-blocked"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer rm.Cancel("case-heartbeat-blocked")
+	<-orch.started
+	<-jobs.started
+	select {
+	case <-orch.cancelled:
+	case <-time.After(5 * lease):
+		t.Fatal("blocked heartbeat did not cancel the attempt at lease expiry")
+	}
+}
+
+func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
+	db := openJobDB(t)
+	baseJobs := magi.NewDecisionJobRepository(db)
+	jobs := &markSucceededErrorRepo{DecisionJobRepository: baseJobs, err: errors.New("storage unavailable")}
+	orch := &successThenObserveCancellationOrchestrator{observed: make(chan struct{}), release: make(chan struct{})}
+	defer close(orch.release)
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "success-error", MaxAttempts: 2,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-success-error"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	select {
+	case <-orch.observed:
+	case <-time.After(time.Second):
+		t.Fatal("MarkSucceeded error did not cancel the completed attempt context")
+	}
+	if calls := jobs.markFaileds.Load(); calls != 0 {
+		t.Fatalf("MarkSucceeded error retried as failure %d times", calls)
+	}
+	job, err := baseJobs.GetByCase(context.Background(), "case-success-error")
+	if err != nil || job.Status != entity.DecisionJobRunning {
+		t.Fatalf("job after MarkSucceeded error = %+v err=%v", job, err)
 	}
 }
 
