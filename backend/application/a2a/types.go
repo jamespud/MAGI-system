@@ -102,6 +102,7 @@ type SubmissionRepository interface {
 	MarkRejected(context.Context, string, string) error
 	ListPrepared(context.Context, int) ([]*PreparedSubmission, error)
 	GetByTask(context.Context, int64, string) (*Submission, error)
+	GetTaskRecord(context.Context, int64, string) (*TaskRecord, error)
 	ListTasks(context.Context, TaskListFilter) (*TaskPage, error)
 	CancelTask(context.Context, int64, string) (*TaskRecord, CancelOutcome, error)
 }

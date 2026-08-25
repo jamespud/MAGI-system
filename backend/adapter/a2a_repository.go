@@ -288,6 +288,14 @@ func (r *a2aSubmissionRepo) GetByTask(ctx context.Context, userID int64, taskID 
 	return &result, nil
 }
 
+func (r *a2aSubmissionRepo) GetTaskRecord(ctx context.Context, userID int64, taskID string) (*a2aapp.TaskRecord, error) {
+	var model A2ASubmissionModel
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND task_id = ?", userID, taskID).First(&model).Error; err != nil {
+		return nil, err
+	}
+	return loadTaskRecord(r.db.WithContext(ctx), model, true)
+}
+
 func (r *a2aSubmissionRepo) ListTasks(ctx context.Context, filter a2aapp.TaskListFilter) (*a2aapp.TaskPage, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 100 {

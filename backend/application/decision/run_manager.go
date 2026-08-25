@@ -29,6 +29,10 @@ var ErrRateLimited = errors.New("rate limit exceeded")
 // per-user token or cost budget.
 var ErrBudgetExceeded = errors.New("budget exceeded")
 
+// ErrJobTerminated means the durable job already reached an authority-terminal
+// state (failed/cancelled/paused) that a fresh start must not override.
+var ErrJobTerminated = errors.New("case job is terminated")
+
 // BudgetExceededInfo describes which budget dimension blocked the run.
 type BudgetExceededInfo struct {
 	TokensExceeded bool
@@ -210,6 +214,44 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 		return ErrAlreadyRunning
 	}
 	return nil
+}
+
+// EnsureStarted starts c idempotently. It returns nil when the case already has
+// a queued/running/succeeded durable job or the case is already a valid
+// terminal result; it never resets a completed case or enqueues a second job.
+// A fresh start still runs the authority budget/concurrency checks.
+func (m *RunManager) EnsureStarted(ctx context.Context, c *entity.DecisionCase) error {
+	if c == nil || c.ID == "" {
+		return fmt.Errorf("run manager: case is required")
+	}
+	if isTerminalCaseStatus(c.Status) {
+		return nil
+	}
+	if m.jobRepo != nil {
+		if err := m.jobRepo.RequeueExpired(ctx, time.Now()); err != nil {
+			return fmt.Errorf("run manager: recover expired job: %w", err)
+		}
+		if existing, err := m.jobRepo.GetByCase(ctx, c.ID); err == nil && existing != nil {
+			switch existing.Status {
+			case entity.DecisionJobQueued, entity.DecisionJobRunning, entity.DecisionJobSucceeded:
+				return nil
+			case entity.DecisionJobFailed, entity.DecisionJobCancelled, entity.DecisionJobPaused:
+				return fmt.Errorf("%w: %s", ErrJobTerminated, existing.Status)
+			}
+		}
+	}
+	return m.Start(ctx, c)
+}
+
+func isTerminalCaseStatus(status entity.CaseStatus) bool {
+	switch status {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusCancelled, entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv,
+		entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 func budgetDetail(info *BudgetExceededInfo) string {
