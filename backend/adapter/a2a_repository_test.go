@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -236,6 +237,155 @@ func TestA2ASubmissionPrepare_ConcurrentMessagesShareOneNewContext(t *testing.T)
 		}
 	}
 	assertA2ASubmissionCounts(t, db, callers, callers, 1, callers*2)
+}
+
+func seedA2AListTask(t *testing.T, db *gorm.DB, repo a2a.SubmissionRepository, userID int64, messageID, taskID, contextID string, createdAt time.Time) {
+	t.Helper()
+	if _, _, err := repo.Prepare(context.Background(), a2aPrepareCommand(userID, messageID, "hash", taskID, contextID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).Where("task_id = ?", taskID).
+		Updates(map[string]any{"created_at": createdAt, "updated_at": createdAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestA2ASubmissionListTasks_KeysetPagesAcrossOwners(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	at := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	// Tied timestamps across two owners: keyset must be deterministic and
+	// never leak another owner's rows.
+	for i, taskID := range []string{"case-1", "case-2", "case-3"} {
+		seedA2AListTask(t, db, repo, 7, fmt.Sprintf("m-%d", i), taskID, "ctx-1", at)
+	}
+	seedA2AListTask(t, db, repo, 8, "m-other", "case-other", "ctx-other", at)
+
+	var all []string
+	var cursor *a2a.TaskCursor
+	for page := 0; page < 3; page++ {
+		pageResult, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 2, After: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pageResult.Total != 3 {
+			t.Fatalf("total = %d, want 3", pageResult.Total)
+		}
+		for _, rec := range pageResult.Records {
+			if rec.Submission.UserID != 7 {
+				t.Fatalf("cross-owner record leaked: %+v", rec.Submission)
+			}
+			all = append(all, rec.Submission.TaskID)
+		}
+		cursor = pageResult.Next
+		if cursor == nil {
+			break
+		}
+	}
+	if !reflect.DeepEqual(all, []string{"case-3", "case-2", "case-1"}) {
+		t.Fatalf("paged order = %v", all)
+	}
+}
+
+func TestA2ASubmissionListTasks_StatusFilterMatchesProjector(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	seedA2AListTask(t, db, repo, 7, "m-1", "case-1", "ctx-1", time.Now().Add(-3*time.Hour))
+	seedA2AListTask(t, db, repo, 7, "m-2", "case-2", "ctx-1", time.Now().Add(-2*time.Hour))
+	seedA2AListTask(t, db, repo, 7, "m-3", "case-3", "ctx-1", time.Now().Add(-1*time.Hour))
+
+	// case-1 working (INVESTIGATING + running job), case-2 completed, case-3 canceled.
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusInvestigating)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.DecisionJobModel{ID: "job-1", CaseID: "case-1", Status: string(entity.DecisionJobRunning), AvailableAt: time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-2").Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-3").Update("status", string(entity.CaseStatusCancelled)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	working, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, Status: "TASK_STATE_WORKING", IncludeArtifacts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(working.Records) != 1 || working.Records[0].Submission.TaskID != "case-1" {
+		t.Fatalf("working records = %+v", working.Records)
+	}
+	completed, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, Status: "TASK_STATE_COMPLETED"})
+	if err != nil || len(completed.Records) != 1 || completed.Records[0].Submission.TaskID != "case-2" {
+		t.Fatalf("completed records = %+v err=%v", completed.Records, err)
+	}
+	canceled, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, Status: "TASK_STATE_CANCELED"})
+	if err != nil || len(canceled.Records) != 1 || canceled.Records[0].Submission.TaskID != "case-3" {
+		t.Fatalf("canceled records = %+v err=%v", canceled.Records, err)
+	}
+}
+
+func TestA2ASubmissionListTasks_StatusTimestampAfter(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	seedA2AListTask(t, db, repo, 7, "m-1", "case-1", "ctx-1", time.Now().Add(-3*time.Hour))
+	seedA2AListTask(t, db, repo, 7, "m-2", "case-2", "ctx-1", time.Now().Add(-1*time.Hour))
+	cutoff := time.Now().Add(-2 * time.Hour)
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("updated_at", time.Now().Add(-3*time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-2").Update("updated_at", time.Now().Add(-30*time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	page, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, StatusTimestampAfter: &cutoff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Records) != 1 || page.Records[0].Submission.TaskID != "case-2" {
+		t.Fatalf("recent records = %+v err=%v", page.Records, err)
+	}
+}
+
+func TestA2ASubmissionListTasks_IncludeArtifactsFalseSkipsResultTables(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	seedA2AListTask(t, db, repo, 7, "m-1", "case-1", "ctx-1", time.Now().Add(-1*time.Hour))
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
+		t.Fatal(err)
+	}
+	consensus, _ := json.Marshal(entity.ConsensusResult{Outcome: entity.ConsensusStrongApproval, Round: 1})
+	if err := db.Create(&magi.ResolutionModel{ID: "res-1", CaseID: "case-1", FinalDecision: string(entity.VoteDecisionApprove), ConsensusJSON: string(consensus)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.VoteModel{ID: "vote-1", CaseID: "case-1", Decision: string(entity.VoteDecisionApprove), Confidence: 80}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.EvidenceModel{ID: "EV-1", CaseID: "case-1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.ClaimModel{ID: "CL-1", CaseID: "case-1"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	light, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, IncludeArtifacts: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(light.Records) != 1 {
+		t.Fatalf("light records = %d", len(light.Records))
+	}
+	rec := light.Records[0]
+	if rec.Resolution != nil || len(rec.Evidence) != 0 || len(rec.Claims) != 0 || len(rec.Votes) != 0 {
+		t.Fatalf("result tables loaded despite IncludeArtifacts=false: %+v", rec)
+	}
+	if rec.Case == nil || rec.Submission.TaskID != "case-1" {
+		t.Fatalf("core record missing: %+v", rec)
+	}
+
+	full, err := repo.ListTasks(context.Background(), a2a.TaskListFilter{UserID: 7, Limit: 10, IncludeArtifacts: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = full.Records[0]
+	if rec.Resolution == nil || len(rec.Evidence) != 1 || len(rec.Claims) != 1 || len(rec.Votes) != 1 {
+		t.Fatalf("result tables missing with IncludeArtifacts=true: %+v", rec)
+	}
 }
 
 func assertA2ASubmissionCounts(t *testing.T, db *gorm.DB, submissions, cases, conversations, messages int64) {

@@ -293,19 +293,42 @@ func (r *a2aSubmissionRepo) ListTasks(ctx context.Context, filter a2aapp.TaskLis
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	q := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).Where("user_id = ?", filter.UserID)
+	q := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).Where("a2a_submission.user_id = ?", filter.UserID)
+	needsJoins := filter.Status != "" || filter.StatusTimestampAfter != nil
+	if needsJoins {
+		q = q.Joins("JOIN decision_case ON decision_case.id = a2a_submission.task_id").
+			Joins("LEFT JOIN decision_job ON decision_job.case_id = a2a_submission.task_id")
+	}
 	if filter.ContextID != "" {
-		q = q.Where("context_id = ?", filter.ContextID)
+		q = q.Where("a2a_submission.context_id = ?", filter.ContextID)
+	}
+	if filter.Status != "" {
+		statusSQL, args := statusPredicateSQL(filter.Status)
+		q = q.Where(statusSQL, args...)
+	}
+	if filter.StatusTimestampAfter != nil {
+		// Portable GREATEST over the three authoritative update times. The
+		// plan's literal GREATEST() is avoided because LEFT JOIN rows make
+		// decision_job.updated_at NULL (NULL poisons GREATEST in both MySQL
+		// and SQLite) and SQLite lacks GREATEST for the test dialect.
+		q = q.Where(`
+			CASE
+				WHEN decision_case.updated_at >= COALESCE(decision_job.updated_at, decision_case.updated_at)
+				 AND decision_case.updated_at >= a2a_submission.updated_at THEN decision_case.updated_at
+				WHEN COALESCE(decision_job.updated_at, decision_case.updated_at) >= a2a_submission.updated_at
+				 THEN COALESCE(decision_job.updated_at, decision_case.updated_at)
+				ELSE a2a_submission.updated_at
+			END >= ?`, *filter.StatusTimestampAfter)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, err
 	}
 	if filter.After != nil {
-		q = q.Where("created_at < ? OR (created_at = ? AND task_id < ?)", filter.After.CreatedAt, filter.After.CreatedAt, filter.After.ID)
+		q = q.Where("a2a_submission.created_at < ? OR (a2a_submission.created_at = ? AND a2a_submission.task_id < ?)", filter.After.CreatedAt, filter.After.CreatedAt, filter.After.ID)
 	}
 	var models []A2ASubmissionModel
-	if err := q.Order("created_at DESC, task_id DESC").Limit(limit + 1).Find(&models).Error; err != nil {
+	if err := q.Order("a2a_submission.created_at DESC, a2a_submission.task_id DESC").Limit(limit + 1).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	page := &a2aapp.TaskPage{Total: int(total)}
@@ -315,13 +338,69 @@ func (r *a2aSubmissionRepo) ListTasks(ctx context.Context, filter a2aapp.TaskLis
 		page.Next = &a2aapp.TaskCursor{CreatedAt: last.CreatedAt, ID: last.TaskID}
 	}
 	for _, model := range models {
-		record, err := loadTaskRecord(r.db.WithContext(ctx), model)
+		record, err := loadTaskRecord(r.db.WithContext(ctx), model, filter.IncludeArtifacts)
 		if err != nil {
 			return nil, err
 		}
 		page.Records = append(page.Records, *record)
 	}
 	return page, nil
+}
+
+func statusPredicateSQL(state string) (string, []any) {
+	groups := a2aapp.StatusPredicate(state)
+	clauses := make([]string, 0, len(groups))
+	var args []any
+	for _, group := range groups {
+		var conds []string
+		if len(group.Bindings) > 0 {
+			conds = append(conds, "a2a_submission.state IN ("+inPlaceholders(len(group.Bindings))+")")
+			for _, b := range group.Bindings {
+				args = append(args, string(b))
+			}
+		}
+		if len(group.Cases) > 0 {
+			conds = append(conds, "decision_case.status IN ("+inPlaceholders(len(group.Cases))+")")
+			for _, c := range group.Cases {
+				args = append(args, string(c))
+			}
+		}
+		for _, excluded := range group.Exclude {
+			conds = append(conds, "decision_case.status <> ?")
+			args = append(args, string(excluded))
+		}
+		if group.Jobs != nil {
+			hasNone := false
+			var statuses []string
+			for _, job := range group.Jobs {
+				if job == a2aapp.JobNone {
+					hasNone = true
+				} else {
+					statuses = append(statuses, job)
+				}
+			}
+			switch {
+			case hasNone && len(statuses) == 0:
+				conds = append(conds, "decision_job.id IS NULL")
+			case hasNone:
+				conds = append(conds, "(decision_job.id IS NULL OR decision_job.status IN ("+inPlaceholders(len(statuses))+"))")
+				for _, s := range statuses {
+					args = append(args, s)
+				}
+			default:
+				conds = append(conds, "decision_job.status IN ("+inPlaceholders(len(statuses))+")")
+				for _, s := range statuses {
+					args = append(args, s)
+				}
+			}
+		}
+		clauses = append(clauses, "("+strings.Join(conds, " AND ")+")")
+	}
+	return strings.Join(clauses, " OR "), args
+}
+
+func inPlaceholders(n int) string {
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
 }
 
 func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID string) (*a2aapp.TaskRecord, a2aapp.CancelOutcome, error) {
@@ -355,7 +434,7 @@ func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID
 			outcome = a2aapp.CancelApplied
 		}
 		var loadErr error
-		record, loadErr = loadTaskRecord(tx, binding)
+		record, loadErr = loadTaskRecord(tx, binding, true)
 		return loadErr
 	})
 	return record, outcome, err
@@ -393,7 +472,7 @@ func loadPreparedSubmission(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.Pr
 	return result, nil
 }
 
-func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.TaskRecord, error) {
+func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel, includeArtifacts bool) (*a2aapp.TaskRecord, error) {
 	prepared, err := loadPreparedSubmission(db, binding)
 	if err != nil {
 		return nil, err
@@ -405,15 +484,37 @@ func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.TaskRecord
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	var resolution ResolutionModel
-	if err := db.Where("case_id = ?", binding.TaskID).First(&resolution).Error; err == nil {
-		resolutions, loadErr := loadConversationResolutions(db, []*entity.ConversationMessage{{CaseID: binding.TaskID}})
-		if loadErr != nil {
-			return nil, loadErr
+	if includeArtifacts {
+		var resolution ResolutionModel
+		if err := db.Where("case_id = ?", binding.TaskID).First(&resolution).Error; err == nil {
+			record.Resolution = resolutionFromModel(&resolution)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
-		record.Resolution = resolutions[binding.TaskID]
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
+		var evidenceModels []EvidenceModel
+		if err := db.Where("case_id = ?", binding.TaskID).Order("created_at ASC, id ASC").Find(&evidenceModels).Error; err != nil {
+			return nil, err
+		}
+		record.Evidence = make([]*entity.EvidenceRecord, len(evidenceModels))
+		for i := range evidenceModels {
+			record.Evidence[i] = evidenceFromModel(&evidenceModels[i])
+		}
+		var claimModels []ClaimModel
+		if err := db.Where("case_id = ?", binding.TaskID).Order("created_at ASC, id ASC").Find(&claimModels).Error; err != nil {
+			return nil, err
+		}
+		record.Claims = make([]*entity.Claim, len(claimModels))
+		for i := range claimModels {
+			record.Claims[i] = claimFromModel(&claimModels[i])
+		}
+		var voteModels []VoteModel
+		if err := db.Where("case_id = ?", binding.TaskID).Order("round ASC, created_at ASC, id ASC").Find(&voteModels).Error; err != nil {
+			return nil, err
+		}
+		record.Votes = make([]*entity.Vote, len(voteModels))
+		for i := range voteModels {
+			record.Votes[i] = voteFromModel(&voteModels[i])
+		}
 	}
 	var maxSeq uint64
 	if err := db.Model(&EventModel{}).Where("case_id = ?", binding.TaskID).Select("COALESCE(MAX(seq), 0)").Scan(&maxSeq).Error; err != nil {
@@ -421,6 +522,25 @@ func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.TaskRecord
 	}
 	record.MaxEventSeq = maxSeq
 	return record, nil
+}
+
+func resolutionFromModel(m *ResolutionModel) *entity.Resolution {
+	return &entity.Resolution{
+		ID: m.ID, CaseID: m.CaseID, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
+		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
+		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
+		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
+	}
+}
+
+func voteFromModel(m *VoteModel) *entity.Vote {
+	return &entity.Vote{
+		ID: m.ID, CaseID: m.CaseID, AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
+		Confidence: m.Confidence, UtilityScores: fromJSON[[]entity.UtilityDimensionScore](m.UtilityScoresJSON),
+		KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON), EvidenceIDs: fromJSON[[]string](m.EvidenceIDsJSON),
+		ReasoningSummary: m.ReasoningSummary, Conditions: fromJSON[[]entity.DecisionCondition](m.ConditionsJSON),
+		CreatedAt: m.CreatedAt,
+	}
 }
 
 func submissionFromModel(m A2ASubmissionModel) a2aapp.Submission {

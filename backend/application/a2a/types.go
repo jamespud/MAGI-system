@@ -77,6 +77,7 @@ type TaskRecord struct {
 	InputMessage *entity.ConversationMessage
 	Evidence     []*entity.EvidenceRecord
 	Claims       []*entity.Claim
+	Votes        []*entity.Vote
 	MaxEventSeq  uint64
 }
 
