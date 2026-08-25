@@ -97,6 +97,24 @@ func TestEventBroker_MixedCreateAndPublishUsesMaxSequence(t *testing.T) {
 	}
 }
 
+func TestEventBroker_CreateAfterPublishUsesMaxSequence(t *testing.T) {
+	b := server.NewEventBroker()
+	ctx := context.Background()
+	if err := b.Publish(ctx, entity.MagiEvent{ID: "c1-50", CaseID: "c1", Seq: 50}); err != nil {
+		t.Fatalf("publish explicit: %v", err)
+	}
+	if err := b.Create(ctx, &entity.MagiEvent{ID: "c1-51", CaseID: "c1"}); err != nil {
+		t.Fatalf("create inferred: %v", err)
+	}
+	events, err := b.ListByCase(ctx, "c1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 2 || events[1].Seq != 51 {
+		t.Fatalf("sequences: %+v", events)
+	}
+}
+
 func TestEventBroker_Unsubscribe(t *testing.T) {
 	b := server.NewEventBroker()
 	ch := b.Subscribe("c1")

@@ -83,7 +83,13 @@ func (r *InMemoryEventRepo) Create(ctx context.Context, e *entity.MagiEvent) err
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if e.Seq == 0 {
-		e.Seq = uint64(len(r.events[e.CaseID]) + 1)
+		var maxSeq uint64
+		for _, stored := range r.events[e.CaseID] {
+			if stored.Seq > maxSeq {
+				maxSeq = stored.Seq
+			}
+		}
+		e.Seq = maxSeq + 1
 	}
 	r.events[e.CaseID] = append(r.events[e.CaseID], e)
 	return nil

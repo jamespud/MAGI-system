@@ -60,6 +60,25 @@ func TestEventPublisher_PersistsSequenceBeforeFanout(t *testing.T) {
 	}
 }
 
+func TestInMemoryEventRepo_MixedPublishAndCreateUsesMaxSequence(t *testing.T) {
+	repo := magi.NewInMemoryEventRepo()
+	pub := magi.NewEventPublisherAdapter(repo)
+	ctx := context.Background()
+	if err := pub.Publish(ctx, entity.MagiEvent{ID: "e-50", CaseID: "case-mixed", Seq: 50}); err != nil {
+		t.Fatalf("publish explicit: %v", err)
+	}
+	if err := repo.Create(ctx, &entity.MagiEvent{ID: "e-51", CaseID: "case-mixed"}); err != nil {
+		t.Fatalf("create inferred: %v", err)
+	}
+	events, err := repo.ListByCase(ctx, "case-mixed")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 2 || events[1].Seq != 51 {
+		t.Fatalf("sequences: %+v", events)
+	}
+}
+
 func TestEventPublisher_NilStore(t *testing.T) {
 	pub := magi.NewEventPublisherAdapter(nil)
 	if err := pub.Publish(context.Background(), entity.MagiEvent{CaseID: "c1"}); err != nil {
