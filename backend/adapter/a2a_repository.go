@@ -89,11 +89,12 @@ func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareC
 			return err
 		}
 
+		now := time.Now().UTC()
 		binding := A2ASubmissionModel{
 			ID: cmd.SubmissionID, UserID: cmd.UserID, MessageID: cmd.MessageID,
 			RequestHash: cmd.RequestHash, TaskID: cmd.TaskID, ContextID: cmd.ContextID,
 			InputMessageID: cmd.InputMessageID, CaseMessageID: cmd.CaseMessageID,
-			State: string(a2aapp.SubmissionPrepared),
+			State: string(a2aapp.SubmissionPrepared), CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&binding).Error; err != nil {
 			return err
@@ -112,7 +113,6 @@ func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareC
 			background = assistant.BuildFollowUpBackground(history, resolutions, cmd.Background)
 		}
 
-		now := time.Now().UTC()
 		caseEntity := &entity.DecisionCase{
 			ID: cmd.TaskID, UserID: cmd.UserID, Question: cmd.Question, Context: background,
 			Constraints: cmd.Constraints, Status: entity.CaseStatusDraft,
@@ -291,6 +291,9 @@ func (r *a2aSubmissionRepo) GetByTask(ctx context.Context, userID int64, taskID 
 func (r *a2aSubmissionRepo) GetTaskRecord(ctx context.Context, userID int64, taskID string) (*a2aapp.TaskRecord, error) {
 	var model A2ASubmissionModel
 	if err := r.db.WithContext(ctx).Where("user_id = ? AND task_id = ?", userID, taskID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, a2aapp.ErrNotFound
+		}
 		return nil, err
 	}
 	return loadTaskRecord(r.db.WithContext(ctx), model, true)

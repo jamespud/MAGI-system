@@ -25,8 +25,8 @@ type cursorPayload struct {
 }
 
 func (c CursorCodec) Encode(cursor TaskCursor) (string, error) {
-	if cursor.ID == "" || cursor.CreatedAt.IsZero() || cursor.CreatedAt.Location() != time.UTC {
-		return "", fmt.Errorf("%w: cursor requires UTC timestamp and id", ErrInvalidCursor)
+	if cursor.ID == "" || cursor.CreatedAt.IsZero() {
+		return "", fmt.Errorf("%w: cursor requires timestamp and id", ErrInvalidCursor)
 	}
 	payload, err := json.Marshal(cursorPayload{
 		Version: 1, CreatedAt: cursor.CreatedAt.UTC().Format(time.RFC3339Nano), ID: cursor.ID,

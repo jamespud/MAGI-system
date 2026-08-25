@@ -16,6 +16,8 @@ var (
 	ErrIdempotencyConflict = errors.New("a2a idempotency conflict")
 	// ErrForbidden means a referenced A2A context belongs to another principal.
 	ErrForbidden = errors.New("a2a forbidden")
+	// ErrNotFound means an owner-scoped A2A task does not exist for the caller.
+	ErrNotFound = errors.New("a2a task not found")
 	// ErrContextContention means concurrent ContextID creation did not settle
 	// within the bounded transaction retry budget.
 	ErrContextContention = errors.New("a2a context creation contention")

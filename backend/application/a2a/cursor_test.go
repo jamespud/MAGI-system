@@ -25,6 +25,22 @@ func TestCursorCodecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCursorCodecEncodeNormalizesNonUTC(t *testing.T) {
+	c := CursorCodec{MaxPageSize: 100}
+	local := time.Date(2026, 8, 25, 9, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	encoded, err := c.Encode(TaskCursor{CreatedAt: local, ID: "case-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Decode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CreatedAt.Location() != time.UTC || !got.CreatedAt.Equal(time.Date(2026, 8, 25, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("normalized timestamp = %+v", got.CreatedAt)
+	}
+}
+
 func TestCursorCodecRejectsMalformedValues(t *testing.T) {
 	c := CursorCodec{MaxPageSize: 100}
 	valid, err := c.Encode(TaskCursor{CreatedAt: time.Now().UTC(), ID: "id"})
