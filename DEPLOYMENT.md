@@ -191,7 +191,9 @@ The chart provides:
 - A rendered example manifest at `deploy/k8s/magi.yaml`
 
 Keep `backend.replicaCount=1` for the first install while AutoMigrate initializes
-the schema. After a successful rollout, increase replicas or enable the backend
+the non-event schema. A fresh database creates the event sequence tables through
+the startup helper; for an existing database, apply the S16 Atlas migration
+before starting the new binary. After a successful rollout, increase replicas or enable the backend
 HPA. Shared DB scheduler locks, durable jobs, run counters, and SSE DB polling
 support multiple backend replicas. A production values file should use
 `secret.create=false` plus `secret.existingSecret`; see
@@ -205,12 +207,14 @@ applying it unchanged.
 
 ### Schema management
 
-**AutoMigrate is the source of truth for the database schema.** The server runs
-`db.AutoMigrate(AllModels()...)` at startup, so upgrading the binary is
-sufficient for additive changes. `docker/atlas/migrations/` contains baseline
-SQL snapshots (s6-s14); they are documentation, not the applied migration
-path, and can drift from the GORM models. When they do, regenerate them from
-`backend/adapter/model.go` rather than hand-editing.
+**GORM AutoMigrate is the source of truth for non-event tables only.** The
+server runs AutoMigrate on the safe model list at startup. Event sequence
+schema changes are owned by `docker/atlas/migrations/magi_s16_event_sequence.sql`:
+apply S16 before upgrading an existing database. Startup creates both event
+tables only when neither exists on a fresh database, and rejects a partial
+event schema so an incomplete expand/backfill/contract migration cannot be
+silently bypassed. Earlier migration files are baseline SQL snapshots and may
+drift from the GORM models.
 
 `backend/conf/magi.yaml` (or env overrides via `MAGI_*`):
 

@@ -939,7 +939,23 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 	if err := db.AutoMigrate(models...); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}
+	if err := ensureEventSequenceSchema(db); err != nil {
+		return nil, fmt.Errorf("failed to prepare event sequence schema: %w", err)
+	}
 	return db, nil
+}
+
+func ensureEventSequenceSchema(db *gorm.DB) error {
+	hasEvents := db.Migrator().HasTable(&magi.EventModel{})
+	hasCursor := db.Migrator().HasTable(&magi.EventCursorModel{})
+	switch {
+	case !hasEvents && !hasCursor:
+		return db.AutoMigrate(&magi.EventModel{}, &magi.EventCursorModel{})
+	case hasEvents && hasCursor:
+		return nil
+	default:
+		return fmt.Errorf("partial event sequence schema detected; apply the complete Atlas S16 migration before starting the service")
+	}
 }
 
 // slowThreshold returns the configured GORM slow-query threshold, defaulting

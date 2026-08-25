@@ -66,6 +66,37 @@ func TestEventBroker_PublishAssignsPerCaseSequence(t *testing.T) {
 	}
 }
 
+func TestEventBroker_MixedCreateAndPublishUsesMaxSequence(t *testing.T) {
+	b := server.NewEventBroker()
+	ctx := context.Background()
+	if err := b.Create(ctx, &entity.MagiEvent{ID: "c1-7", CaseID: "c1", Seq: 7}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := b.Publish(ctx, entity.MagiEvent{ID: "c1-8", CaseID: "c1"}); err != nil {
+		t.Fatalf("publish inferred: %v", err)
+	}
+	if err := b.Publish(ctx, entity.MagiEvent{ID: "c1-50", CaseID: "c1", Seq: 50}); err != nil {
+		t.Fatalf("publish explicit: %v", err)
+	}
+	if err := b.Publish(ctx, entity.MagiEvent{ID: "c1-51", CaseID: "c1"}); err != nil {
+		t.Fatalf("publish after explicit: %v", err)
+	}
+
+	events, err := b.ListByCase(ctx, "c1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events, got %d", len(events))
+	}
+	want := []uint64{7, 8, 50, 51}
+	for i, event := range events {
+		if event.Seq != want[i] {
+			t.Fatalf("event %d sequence: got %d, want %d", i, event.Seq, want[i])
+		}
+	}
+}
+
 func TestEventBroker_Unsubscribe(t *testing.T) {
 	b := server.NewEventBroker()
 	ch := b.Subscribe("c1")

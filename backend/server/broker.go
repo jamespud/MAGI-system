@@ -43,7 +43,13 @@ func (b *EventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if e.Seq == 0 {
-		e.Seq = uint64(len(b.stored[e.CaseID]) + 1)
+		var maxSeq uint64
+		for _, stored := range b.stored[e.CaseID] {
+			if stored.Seq > maxSeq {
+				maxSeq = stored.Seq
+			}
+		}
+		e.Seq = maxSeq + 1
 	}
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], &e)
 	for _, ch := range b.subscribers[e.CaseID] {
