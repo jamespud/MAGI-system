@@ -911,6 +911,23 @@ func (r *terminalCommitRaceRepo) CommitTerminal(context.Context, string, entity.
 	return false, nil
 }
 
+type terminalCommitSuccessRepo struct {
+	port.Repository
+	called bool
+}
+
+func (r *terminalCommitSuccessRepo) CommitTerminal(context.Context, string, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
+	r.called = true
+	return true, nil
+}
+
+type captureOnlyEventPublisher struct{ events []entity.MagiEvent }
+
+func (p *captureOnlyEventPublisher) Publish(_ context.Context, event entity.MagiEvent) error {
+	p.events = append(p.events, event)
+	return nil
+}
+
 func (r *terminalRaceCaseStatusWriter) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
 	for _, status := range from {
 		if r.status != status {
@@ -1041,6 +1058,40 @@ func TestOrchestrate_AtomicTerminalCommitFencesCancellationAfterConfirmation(t *
 			t.Fatalf("race fallback published completion event: %+v", event)
 		}
 	}
+}
+
+func TestOrchestrate_AtomicTerminalCommitFallsBackToEventPublisher(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	terminalRepo := &terminalCommitSuccessRepo{Repository: baseRepo}
+	events := &captureOnlyEventPublisher{}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      terminalRepo,
+		EventPub:  events,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-atomic-terminal-fanout", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if !terminalRepo.called {
+		t.Fatal("orchestrator did not use the terminal transaction capability")
+	}
+	for _, event := range events.events {
+		if event.Type == entity.EventCaseCompleted {
+			return
+		}
+	}
+	t.Fatalf("successful terminal transaction did not fan out completion: %+v", events.events)
 }
 
 // --- end-to-end async integration ---

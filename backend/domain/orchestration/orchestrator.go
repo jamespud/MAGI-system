@@ -171,6 +171,11 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
 			_ = live.PublishLive(ctx, event)
+		} else {
+			// Custom terminal committers may use an event publisher that lacks a
+			// durable-free fanout capability. Preserve the historical callback
+			// rather than silently dropping the completion notification.
+			o.publish(ctx, case_, event.Type, event.Payload)
 		}
 		return nil
 	}

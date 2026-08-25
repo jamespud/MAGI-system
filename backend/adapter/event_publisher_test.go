@@ -11,6 +11,7 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/server"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -20,6 +21,21 @@ type captureEventPublisher struct{ events []entity.MagiEvent }
 
 func (p *captureEventPublisher) Publish(ctx context.Context, e entity.MagiEvent) error {
 	p.events = append(p.events, e)
+	return nil
+}
+
+type liveCaptureEventPublisher struct {
+	published     []entity.MagiEvent
+	livePublished []entity.MagiEvent
+}
+
+func (p *liveCaptureEventPublisher) Publish(_ context.Context, e entity.MagiEvent) error {
+	p.published = append(p.published, e)
+	return nil
+}
+
+func (p *liveCaptureEventPublisher) PublishLive(_ context.Context, e entity.MagiEvent) error {
+	p.livePublished = append(p.livePublished, e)
 	return nil
 }
 
@@ -45,6 +61,27 @@ func TestEventPublisher_FanoutAfterPersist(t *testing.T) {
 	}
 	if len(live.events) != 1 || live.events[0].ID != "e2" {
 		t.Fatalf("live events: %+v", live.events)
+	}
+}
+
+func TestEventPublisher_UsesLiveFanoutForDurableEvents(t *testing.T) {
+	store := magi.NewInMemoryEventRepo()
+	live := &liveCaptureEventPublisher{}
+	pub := magi.NewEventPublisherAdapterWithFanout(store, live)
+	event := entity.MagiEvent{ID: "e-live", CaseID: "c-live"}
+
+	if err := pub.PublishLive(context.Background(), event); err != nil {
+		t.Fatalf("publish live: %v", err)
+	}
+	if len(live.livePublished) != 1 || live.livePublished[0].ID != event.ID {
+		t.Fatalf("live fanout: %+v", live.livePublished)
+	}
+	if len(live.published) != 0 {
+		t.Fatalf("durable event fell back to Publish: %+v", live.published)
+	}
+	stored, err := store.ListByCase(context.Background(), event.CaseID)
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("publish live persisted the terminal event: %+v err=%v", stored, err)
 	}
 }
 
@@ -263,5 +300,30 @@ func TestEventBroker_ListAfter(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "b2" {
 		t.Fatalf("expected [b2], got %+v", got)
+	}
+}
+
+func TestEventBroker_PublishLiveDoesNotStoreEvent(t *testing.T) {
+	broker := server.NewEventBroker()
+	live, ok := any(broker).(port.LiveEventPublisher)
+	if !ok {
+		t.Fatal("event broker must support fanout of already durable events")
+	}
+	subscriber := broker.Subscribe("case-live-only")
+	event := entity.MagiEvent{ID: "event-live-only", CaseID: "case-live-only", Seq: 7, Type: entity.EventCaseCompleted}
+	if err := live.PublishLive(context.Background(), event); err != nil {
+		t.Fatalf("publish live: %v", err)
+	}
+	select {
+	case got := <-subscriber:
+		if got.ID != event.ID || got.Seq != event.Seq {
+			t.Fatalf("subscriber got %+v, want %+v", got, event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("live-only event was not delivered")
+	}
+	stored, err := broker.ListByCase(context.Background(), event.CaseID)
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("live-only event was stored: %+v err=%v", stored, err)
 	}
 }

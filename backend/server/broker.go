@@ -53,6 +53,21 @@ func (b *EventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 		e.Seq = maxSeq + 1
 	}
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], &e)
+	b.publishLiveLocked(e)
+	return nil
+}
+
+// PublishLive fans out an event that another component has already persisted.
+// It intentionally does not append to stored: durable replay remains owned by
+// the transactional event repository.
+func (b *EventBroker) PublishLive(ctx context.Context, e entity.MagiEvent) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.publishLiveLocked(e)
+	return nil
+}
+
+func (b *EventBroker) publishLiveLocked(e entity.MagiEvent) {
 	for _, ch := range b.subscribers[e.CaseID] {
 		select {
 		case ch <- &e:
@@ -64,7 +79,6 @@ func (b *EventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 			log.Printf("event broker: dropped event %s for case %s (subscriber buffer full)", e.ID, e.CaseID)
 		}
 	}
-	return nil
 }
 
 // Dropped reports how many events were dropped for slow subscribers since
@@ -172,4 +186,5 @@ func (b *EventBroker) ListAfterSeq(ctx context.Context, caseID string, afterSeq 
 }
 
 var _ port.EventPublisher = (*EventBroker)(nil)
+var _ port.LiveEventPublisher = (*EventBroker)(nil)
 var _ port.EventRepository = (*EventBroker)(nil)

@@ -348,10 +348,46 @@ func (s *Service) ToolCalls(ctx context.Context, caseID string) ([]*entity.ToolC
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.
 func (s *Service) Cancel(ctx context.Context, id string) error {
-	if s.caseRepo != nil {
-		return s.caseRepo.UpdateStatus(ctx, id, entity.CaseStatusCancelled)
+	if s.caseRepo == nil {
+		return fmt.Errorf("case repository not configured")
 	}
-	return fmt.Errorf("case repository not configured")
+	if writer, ok := s.caseRepo.(port.ConditionalCaseStatusWriter); ok {
+		updated, err := writer.UpdateStatusIfCurrent(ctx, id, cancellableCaseStatuses(), entity.CaseStatusCancelled)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return fmt.Errorf("case is not cancellable")
+		}
+		return nil
+	}
+	return s.caseRepo.UpdateStatus(ctx, id, entity.CaseStatusCancelled)
+}
+
+// cancellableCaseStatuses contains every non-terminal FSM position. Terminal
+// states are deliberately absent so a delayed cancellation cannot overwrite a
+// committed resolution or its completion event.
+func cancellableCaseStatuses() []entity.CaseStatus {
+	return []entity.CaseStatus{
+		"",
+		entity.CaseStatusDraft,
+		entity.CaseStatusNormalizing,
+		entity.CaseStatusContextBuilding,
+		entity.CaseStatusRetrievingMemory,
+		entity.CaseStatusInvestigating,
+		entity.CaseStatusEvidenceGating,
+		entity.CaseStatusCollectingVotes,
+		entity.CaseStatusConsensusCheck,
+		entity.CaseStatusResolving,
+		entity.CaseStatusGeneratingReport,
+		entity.CaseStatusSavingMemory,
+		entity.CaseStatusEvaluating,
+		entity.CaseStatusDebating,
+		entity.CaseStatusReflecting,
+		entity.CaseStatusRevoting,
+		entity.CaseStatusMemoryIndexed,
+		entity.CaseStatusInsufficientEv,
+	}
 }
 
 // Pause parks a running case: the worker context is cancelled, the case

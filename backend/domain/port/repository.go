@@ -35,6 +35,9 @@ type Repository interface {
 type DecisionJobRepository interface {
 	Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error)
 	Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error)
+	// Heartbeat must return promptly when ctx is cancelled or reaches its
+	// deadline. The worker can bound an uncooperative implementation to one
+	// in-flight call, but Go cannot forcibly terminate blocked I/O.
 	Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error
 	MarkSucceeded(ctx context.Context, jobID, workerID string) error
 	MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error

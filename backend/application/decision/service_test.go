@@ -2,11 +2,15 @@ package decision_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type stubOrchestrator struct {
@@ -230,6 +234,69 @@ func TestService_Cancel(t *testing.T) {
 	}
 	if repo.cancelledID != "c1" {
 		t.Fatalf("expected cancel c1, got %s", repo.cancelledID)
+	}
+}
+
+func TestService_CancelFencesTerminalCommitAndRejectedTerminalWrite(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.TerminalCommitter)
+	if !ok {
+		t.Fatal("production repository must provide terminal commit fencing")
+	}
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{}, decision.WithCaseRepo(repo.CaseRepo()))
+	ctx := context.Background()
+
+	const resolvedID = "case-cancel-after-terminal-commit"
+	if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{ID: resolvedID, Status: entity.CaseStatusResolved}); err != nil {
+		t.Fatalf("create resolved case: %v", err)
+	}
+	completion := entity.NewEvent(resolvedID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err := committer.CommitTerminal(ctx, resolvedID, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "resolution-cancel-fence", CaseID: resolvedID, FinalDecision: entity.VoteDecisionApprove}, &completion)
+	if err != nil || !committed {
+		t.Fatalf("commit terminal: committed=%v err=%v", committed, err)
+	}
+	if err := svc.Cancel(ctx, resolvedID); err == nil {
+		t.Fatal("cancelling a terminal case must be rejected")
+	}
+	caseAfterCancel, err := repo.CaseRepo().Get(ctx, resolvedID)
+	if err != nil || caseAfterCancel.Status != entity.CaseStatusResolved {
+		t.Fatalf("terminal case after cancel = %+v err=%v", caseAfterCancel, err)
+	}
+	if _, err := repo.ResolutionRepo().Get(ctx, resolvedID); err != nil {
+		t.Fatalf("terminal resolution missing after rejected cancel: %v", err)
+	}
+	events, err := repo.EventRepo().ListByCase(ctx, resolvedID)
+	if err != nil || len(events) != 1 || events[0].Type != entity.EventCaseCompleted {
+		t.Fatalf("terminal events after rejected cancel: %+v err=%v", events, err)
+	}
+
+	const cancelledID = "case-cancel-before-terminal-commit"
+	if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{ID: cancelledID, Status: entity.CaseStatusNormalizing}); err != nil {
+		t.Fatalf("create active case: %v", err)
+	}
+	if err := svc.Cancel(ctx, cancelledID); err != nil {
+		t.Fatalf("cancel active case: %v", err)
+	}
+	lateCompletion := entity.NewEvent(cancelledID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err = committer.CommitTerminal(ctx, cancelledID, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "resolution-late-terminal", CaseID: cancelledID, FinalDecision: entity.VoteDecisionApprove}, &lateCompletion)
+	if err != nil || committed {
+		t.Fatalf("late terminal commit after cancel: committed=%v err=%v", committed, err)
+	}
+	if _, err := repo.ResolutionRepo().Get(ctx, cancelledID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("late terminal resolution was persisted: %v", err)
+	}
+	events, err = repo.EventRepo().ListByCase(ctx, cancelledID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("late terminal events were persisted: %+v err=%v", events, err)
 	}
 }
 
