@@ -767,6 +767,9 @@ func (stubEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.M
 func (stubEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
 	return nil, nil
 }
+func (stubEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	return nil, nil
+}
 
 type stubCpRepo struct{}
 

@@ -53,6 +53,9 @@ func (p *EventPublisherAdapter) Publish(ctx context.Context, e entity.MagiEvent)
 	var storeErr error
 	if p.store != nil {
 		storeErr = p.store.Create(ctx, &e)
+		if storeErr != nil {
+			return storeErr
+		}
 	}
 	if p.live != nil {
 		_ = p.live.Publish(ctx, e)
@@ -79,6 +82,9 @@ func NewInMemoryEventRepo() *InMemoryEventRepo {
 func (r *InMemoryEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if e.Seq == 0 {
+		e.Seq = uint64(len(r.events[e.CaseID]) + 1)
+	}
 	r.events[e.CaseID] = append(r.events[e.CaseID], e)
 	return nil
 }
@@ -96,6 +102,24 @@ func (r *InMemoryEventRepo) ListAfter(ctx context.Context, caseID string, after 
 	for _, e := range r.events[caseID] {
 		if !e.Timestamp.Before(after) {
 			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (r *InMemoryEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	var out []*entity.MagiEvent
+	for _, e := range r.events[caseID] {
+		if e.Seq > afterSeq {
+			out = append(out, e)
+			if len(out) == limit {
+				break
+			}
 		}
 	}
 	return out, nil

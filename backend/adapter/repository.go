@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -488,14 +489,41 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 type eventRepo struct{ db *gorm.DB }
 
 func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
-	m := EventModel{
-		ID: e.ID, CaseID: e.CaseID, RunID: e.RunID, AgentCode: "", Type: string(e.Type),
-		PayloadJSON: string(e.Payload), Timestamp: e.Timestamp,
+	for attempt := 0; attempt < 3; attempt++ {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			cursor := EventCursorModel{CaseID: e.CaseID, NextSeq: 1}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "case_id"}},
+				DoUpdates: clause.Assignments(map[string]any{"case_id": gorm.Expr("case_id")}),
+			}).Create(&cursor).Error; err != nil {
+				return err
+			}
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&cursor, "case_id = ?", e.CaseID).Error; err != nil {
+				return err
+			}
+			e.Seq = cursor.NextSeq
+			if err := tx.Model(&EventCursorModel{}).Where("case_id = ?", e.CaseID).
+				Update("next_seq", cursor.NextSeq+1).Error; err != nil {
+				return err
+			}
+			m := EventModel{
+				ID: e.ID, CaseID: e.CaseID, Seq: e.Seq, RunID: e.RunID, AgentCode: "", Type: string(e.Type),
+				PayloadJSON: string(e.Payload), Timestamp: e.Timestamp,
+			}
+			if e.AgentCode != nil {
+				m.AgentCode = string(*e.AgentCode)
+			}
+			return tx.Create(&m).Error
+		})
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "database is locked") || attempt == 2 {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
-	if e.AgentCode != nil {
-		m.AgentCode = string(*e.AgentCode)
-	}
-	return r.db.WithContext(ctx).Create(&m).Error
+	return nil
 }
 func eventsFromModels(models []EventModel) []*entity.MagiEvent {
 	out := make([]*entity.MagiEvent, len(models))
@@ -507,7 +535,7 @@ func eventsFromModels(models []EventModel) []*entity.MagiEvent {
 			code = &c
 		}
 		out[i] = &entity.MagiEvent{
-			ID: m.ID, CaseID: m.CaseID, RunID: m.RunID, AgentCode: code, Type: entity.EventType(m.Type),
+			ID: m.ID, CaseID: m.CaseID, RunID: m.RunID, AgentCode: code, Type: entity.EventType(m.Type), Seq: m.Seq,
 			Payload: json.RawMessage(m.PayloadJSON), Timestamp: m.Timestamp,
 		}
 	}
@@ -516,7 +544,7 @@ func eventsFromModels(models []EventModel) []*entity.MagiEvent {
 
 func (r *eventRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
 	var models []EventModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("timestamp ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("seq ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	return eventsFromModels(models), nil
@@ -530,6 +558,19 @@ func (r *eventRepo) ListAfter(ctx context.Context, caseID string, after time.Tim
 	if err := r.db.WithContext(ctx).
 		Where("case_id = ? AND timestamp >= ?", caseID, after).
 		Order("timestamp ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	return eventsFromModels(models), nil
+}
+
+func (r *eventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	var models []EventModel
+	if err := r.db.WithContext(ctx).
+		Where("case_id = ? AND seq > ?", caseID, afterSeq).
+		Order("seq ASC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	return eventsFromModels(models), nil

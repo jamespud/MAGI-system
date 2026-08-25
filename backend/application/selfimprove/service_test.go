@@ -109,6 +109,9 @@ func (s *stubSIEventRepo) ListByCase(ctx context.Context, caseID string) ([]*ent
 func (s *stubSIEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
 	return s.events, nil
 }
+func (s *stubSIEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	return s.events, nil
+}
 
 type stubSIAgentRunRepo struct {
 	runs []*entity.AgentRun

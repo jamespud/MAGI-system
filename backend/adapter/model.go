@@ -158,7 +158,8 @@ func (ResolutionModel) TableName() string { return "resolution" }
 
 type EventModel struct {
 	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index"`
+	CaseID      string `gorm:"index:idx_event_case_seq,priority:1"`
+	Seq         uint64 `gorm:"not null;uniqueIndex:idx_event_case_seq,priority:2"`
 	RunID       string
 	AgentCode   string
 	Type        string
@@ -167,6 +168,13 @@ type EventModel struct {
 }
 
 func (EventModel) TableName() string { return "magi_event" }
+
+type EventCursorModel struct {
+	CaseID  string `gorm:"primaryKey;size:64"`
+	NextSeq uint64 `gorm:"not null"`
+}
+
+func (EventCursorModel) TableName() string { return "magi_event_cursor" }
 
 type DebateRoundModel struct {
 	ID          string `gorm:"primaryKey"`
@@ -399,7 +407,7 @@ func (SelfImproveModel) TableName() string { return "self_improve_suggestion" }
 func AllModels() []any {
 	return []any{
 		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
-		&VoteModel{}, &ResolutionModel{}, &EventModel{},
+		&VoteModel{}, &ResolutionModel{}, &EventModel{}, &EventCursorModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
 		&ToolCallModel{}, &ApprovalModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
 		&PluginBindingModel{},

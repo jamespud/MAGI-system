@@ -30,6 +30,9 @@ func (s *stubEventRepo) ListAfter(ctx context.Context, caseID string, after time
 	}
 	return out, nil
 }
+func (s *stubEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	return s.events[caseID], nil
+}
 
 var _ port.EventRepository = (*stubEventRepo)(nil)
 

@@ -105,6 +105,9 @@ func (b *EventBroker) Unsubscribe(caseID string, ch chan *entity.MagiEvent) {
 func (b *EventBroker) Create(ctx context.Context, e *entity.MagiEvent) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if e.Seq == 0 {
+		e.Seq = uint64(len(b.stored[e.CaseID]) + 1)
+	}
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], e)
 	return nil
 }
@@ -125,6 +128,24 @@ func (b *EventBroker) ListAfter(ctx context.Context, caseID string, after time.T
 	for _, e := range b.stored[caseID] {
 		if !e.Timestamp.Before(after) {
 			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (b *EventBroker) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	var out []*entity.MagiEvent
+	for _, e := range b.stored[caseID] {
+		if e.Seq > afterSeq {
+			out = append(out, e)
+			if len(out) == limit {
+				break
+			}
 		}
 	}
 	return out, nil

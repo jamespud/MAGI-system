@@ -74,6 +74,21 @@ func (f *fakeEventRepo) ListAfter(ctx context.Context, caseID string, after time
 	}
 	return out, nil
 }
+func (f *fakeEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []*entity.MagiEvent
+	for _, e := range f.snapshot() {
+		if e.Seq > afterSeq {
+			out = append(out, e)
+			if limit > 0 && len(out) == limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
 
 func TestPollOnce_ForwardsCrossInstanceEvents(t *testing.T) {
 	repo := &fakeEventRepo{}

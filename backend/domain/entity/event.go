@@ -59,7 +59,8 @@ const (
 // NewEvent constructs a MagiEvent with a unique ID and JSON-serialized payload.
 // ID is "<caseID>-<unixNano>-<sequence>". UnixNano alone can collide when
 // events are created in the same clock tick; the process-wide sequence makes
-// IDs unique even under concurrent publication.
+// IDs unique even under concurrent publication. Seq is assigned by the event
+// repository when the event is persisted.
 // A nil payload yields a nil RawMessage (no empty `{}`).
 func NewEvent(caseID, runID string, agentCode *MagiCode, et EventType, payload any) MagiEvent {
 	now := time.Now()
@@ -70,7 +71,6 @@ func NewEvent(caseID, runID string, agentCode *MagiCode, et EventType, payload a
 		RunID:     runID,
 		AgentCode: agentCode,
 		Type:      et,
-		Seq:       sequence,
 		Timestamp: now,
 	}
 	if payload != nil {

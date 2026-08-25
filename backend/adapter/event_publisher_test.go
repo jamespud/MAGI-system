@@ -2,7 +2,9 @@ package magi_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +45,18 @@ func TestEventPublisher_FanoutAfterPersist(t *testing.T) {
 	}
 	if len(live.events) != 1 || live.events[0].ID != "e2" {
 		t.Fatalf("live events: %+v", live.events)
+	}
+}
+
+func TestEventPublisher_PersistsSequenceBeforeFanout(t *testing.T) {
+	store := magi.NewInMemoryEventRepo()
+	live := &captureEventPublisher{}
+	pub := magi.NewEventPublisherAdapterWithFanout(store, live)
+	if err := pub.Publish(context.Background(), entity.MagiEvent{ID: "e-seq", CaseID: "case-seq"}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(live.events) != 1 || live.events[0].Seq != 1 {
+		t.Fatalf("live event was not assigned sequence before fanout: %+v", live.events)
 	}
 }
 
@@ -109,7 +123,7 @@ func TestEventRepository_ListAfterFiltersAndOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.EventModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := magi.NewRepository(db).EventRepo()
@@ -155,6 +169,66 @@ func TestEventRepository_ListAfterFiltersAndOrders(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty, got %+v", got)
+	}
+}
+
+func TestEventRepository_ListAfterSeqConcurrent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(&magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db).EventRepo()
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			caseID := "case-a"
+			if i%2 == 1 {
+				caseID = "case-b"
+			}
+			e := &entity.MagiEvent{ID: fmt.Sprintf("event-%03d", i), CaseID: caseID, Timestamp: time.Now()}
+			if err := repo.Create(ctx, e); err != nil {
+				t.Errorf("create %s: %v", caseID, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	got, err := repo.ListAfterSeq(ctx, "case-a", 40, 100)
+	if err != nil {
+		t.Fatalf("list after seq: %v", err)
+	}
+	if len(got) != 60 {
+		t.Fatalf("expected 60 events after seq 40, got %d", len(got))
+	}
+	for i, e := range got {
+		want := uint64(i + 41)
+		if e.Seq != want {
+			t.Fatalf("event %d: got seq %d, want %d", i, e.Seq, want)
+		}
+	}
+	if got[len(got)-1].Seq != 100 {
+		t.Fatalf("last sequence: got %d, want 100", got[len(got)-1].Seq)
+	}
+
+	other, err := repo.ListByCase(ctx, "case-b")
+	if err != nil {
+		t.Fatalf("list other case: %v", err)
+	}
+	for i, e := range other {
+		if e.Seq != uint64(i+1) {
+			t.Fatalf("other case event %d: got seq %d, want %d", i, e.Seq, i+1)
+		}
 	}
 }
 

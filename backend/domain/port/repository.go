@@ -43,6 +43,7 @@ type DecisionJobRepository interface {
 	GetByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error)
 	CountActiveByUser(ctx context.Context, userID int64) (int, error)
 }
+
 // RagIndexJobRepository persists and leases asynchronous RAG index mutations
 // (store case memory / store knowledge doc / delete by source_ref). It is
 // separate from Repository so existing aggregate fakes remain valid.
@@ -138,6 +139,7 @@ type ResolutionRepository interface {
 type EventRepository interface {
 	Create(ctx context.Context, e *entity.MagiEvent) error
 	ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error)
+	ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error)
 	// ListAfter returns events for a case with Timestamp >= after, ordered by
 	// Timestamp ascending. Used by SSE subscribers to poll for events that
 	// other worker instances persisted (cross-instance live streaming).
