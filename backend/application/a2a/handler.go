@@ -2,14 +2,22 @@ package a2aapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"iter"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/metrics"
+	"github.com/jamespud/magi/backend/application/tracing"
+	"github.com/jamespud/magi/backend/domain/entity"
 )
 
 // StreamProjector yields ordered A2A events for an owner-scoped task. The
@@ -28,20 +36,44 @@ type Handler struct {
 	cursor      CursorCodec
 	runManager  *decision.RunManager
 	stream      StreamProjector
+	metrics     *metrics.Registry
+	audit       *audit.Service
 }
 
-func NewHandler(submissions *SubmissionService, repository SubmissionRepository, projector *TaskProjector, cursor CursorCodec, runManager *decision.RunManager, stream StreamProjector) *Handler {
-	return &Handler{submissions: submissions, repository: repository, projector: projector, cursor: cursor, runManager: runManager, stream: stream}
+// HandlerOption configures optional observability on a Handler.
+type HandlerOption func(*Handler)
+
+// WithHandlerMetrics enables bounded A2A request metrics.
+func WithHandlerMetrics(reg *metrics.Registry) HandlerOption {
+	return func(h *Handler) { h.metrics = reg }
+}
+
+// WithHandlerAudit records Send/Cancel audit events (message IDs are hashed).
+func WithHandlerAudit(auditSvc *audit.Service) HandlerOption {
+	return func(h *Handler) { h.audit = auditSvc }
+}
+
+func NewHandler(submissions *SubmissionService, repository SubmissionRepository, projector *TaskProjector, cursor CursorCodec, runManager *decision.RunManager, stream StreamProjector, opts ...HandlerOption) *Handler {
+	h := &Handler{submissions: submissions, repository: repository, projector: projector, cursor: cursor, runManager: runManager, stream: stream}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 var _ a2asrv.RequestHandler = (*Handler)(nil)
 
 // GetTask returns the owner-scoped Task snapshot.
-func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
+func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (_ *a2a.Task, err error) {
+	ctx, span := tracing.Start(ctx, "a2a.GetTask")
+	defer span.End()
+	defer h.finish(metrics.A2AOperationGetTask, &err)
 	if req == nil || req.ID == "" {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "task id is required")
 	}
-	record, err := h.repository.GetTaskRecord(ctx, userIDFrom(ctx), string(req.ID))
+	userID := userIDFrom(ctx)
+	span.SetAttributes(attribute.String("task.id", string(req.ID)), attribute.Int64("user.id", userID))
+	record, err := h.repository.GetTaskRecord(ctx, userID, string(req.ID))
 	if errors.Is(err, ErrNotFound) {
 		return nil, a2a.NewError(a2a.ErrTaskNotFound, "task not found")
 	}
@@ -52,16 +84,21 @@ func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Ta
 }
 
 // ListTasks lists owner-scoped tasks with keyset pagination.
-func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {
+func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (_ *a2a.ListTasksResponse, err error) {
+	ctx, span := tracing.Start(ctx, "a2a.ListTasks")
+	defer span.End()
+	defer h.finish(metrics.A2AOperationListTasks, &err)
 	if req == nil {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "list request is required")
 	}
+	userID := userIDFrom(ctx)
+	span.SetAttributes(attribute.Int64("user.id", userID))
 	pageSize, err := h.cursor.ValidatePageSize(req.PageSize)
 	if err != nil {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, err.Error())
 	}
 	filter := TaskListFilter{
-		UserID:               userIDFrom(ctx),
+		UserID:               userID,
 		ContextID:            req.ContextID,
 		Status:               string(req.Status),
 		Limit:                pageSize,
@@ -100,11 +137,16 @@ func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (*a2
 
 // CancelTask atomically cancels the durable job and conditionally marks the
 // Case CANCELLED, then cancels any local worker handle.
-func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*a2a.Task, error) {
+func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_ *a2a.Task, err error) {
+	ctx, span := tracing.Start(ctx, "a2a.CancelTask")
+	defer span.End()
+	defer h.finish(metrics.A2AOperationCancelTask, &err)
 	if req == nil || req.ID == "" {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "task id is required")
 	}
-	record, outcome, err := h.repository.CancelTask(ctx, userIDFrom(ctx), string(req.ID))
+	userID := userIDFrom(ctx)
+	span.SetAttributes(attribute.String("task.id", string(req.ID)), attribute.Int64("user.id", userID))
+	record, outcome, err := h.repository.CancelTask(ctx, userID, string(req.ID))
 	if err != nil {
 		return nil, h.internalError(err)
 	}
@@ -115,23 +157,34 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (*
 		return nil, a2a.NewError(a2a.ErrTaskNotCancelable, "task is in a terminal state")
 	case CancelApplied, CancelAlreadyCanceled:
 		h.runManager.CancelLocal(string(req.ID))
-		return h.projector.Project(record, 1), nil
+		task := h.projector.Project(record, 1)
+		h.auditCancel(ctx, req, task.Status.State == a2a.TaskStateCanceled)
+		return task, nil
 	default:
 		return nil, a2a.NewError(a2a.ErrInternalError, "unexpected cancel outcome")
 	}
 }
 
 // SendMessage durably submits a task and returns the current Task snapshot.
-func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
-	task, err := h.submissions.Submit(ctx, userIDFrom(ctx), req)
+func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (_ a2a.SendMessageResult, err error) {
+	ctx, span := tracing.Start(ctx, "a2a.SendMessage")
+	defer span.End()
+	defer h.finish(metrics.A2AOperationSendMessage, &err)
+	userID := userIDFrom(ctx)
+	span.SetAttributes(attribute.Int64("user.id", userID))
+	task, err := h.submissions.Submit(ctx, userID, req)
 	if err != nil {
 		return nil, h.mapSubmitError(err)
 	}
+	h.auditSend(ctx, task, userID)
 	return task, nil
 }
 
 // SendStreamingMessage durably submits then delegates to the stream projector.
 func (h *Handler) SendStreamingMessage(ctx context.Context, req *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
+	if h.metrics != nil {
+		h.metrics.IncA2ARequest(metrics.A2AOperationSendStreaming, metrics.A2AResultOK)
+	}
 	return func(yield func(a2a.Event, error) bool) {
 		if h.stream == nil {
 			yield(nil, a2a.ErrUnsupportedOperation)
@@ -152,6 +205,9 @@ func (h *Handler) SendStreamingMessage(ctx context.Context, req *a2a.SendMessage
 
 // SubscribeToTask delegates to the stream projector after owner validation.
 func (h *Handler) SubscribeToTask(ctx context.Context, req *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
+	if h.metrics != nil {
+		h.metrics.IncA2ARequest(metrics.A2AOperationSubscribeToTask, metrics.A2AResultOK)
+	}
 	return func(yield func(a2a.Event, error) bool) {
 		if h.stream == nil {
 			yield(nil, a2a.ErrUnsupportedOperation)
@@ -167,6 +223,62 @@ func (h *Handler) SubscribeToTask(ctx context.Context, req *a2a.SubscribeToTaskR
 			}
 		}
 	}
+}
+
+// finish records the bounded request metric from a named error return.
+func (h *Handler) finish(op metrics.A2AOperation, err *error) {
+	if h.metrics == nil {
+		return
+	}
+	res := metrics.A2AResultOK
+	if *err != nil {
+		res = metrics.A2AResultError
+	}
+	h.metrics.IncA2ARequest(op, res)
+}
+
+func (h *Handler) auditSend(ctx context.Context, task *a2a.Task, userID int64) {
+	if h.audit == nil || task == nil {
+		return
+	}
+	h.recordAudit(ctx, "a2a.send", string(task.ID), messageIDFromTask(task), userID, 200)
+}
+
+func (h *Handler) auditCancel(ctx context.Context, req *a2a.CancelTaskRequest, ok bool) {
+	if h.audit == nil || req == nil {
+		return
+	}
+	status := 200
+	if !ok {
+		status = 409
+	}
+	h.recordAudit(ctx, "a2a.cancel", string(req.ID), "", userIDFrom(ctx), status)
+}
+
+func (h *Handler) recordAudit(ctx context.Context, action, taskID, messageID string, userID int64, status int) {
+	p := auth.PrincipalFrom(ctx)
+	detail := "trace=" + uuid.NewString()
+	if messageID != "" {
+		detail += " message=" + hashID(messageID)
+	}
+	event := &entity.AuditEvent{UserID: userID, Action: action, Resource: taskID, Detail: detail, Status: status}
+	if p != nil {
+		event.Username = p.Name
+		event.Role = p.Role
+	}
+	_ = h.audit.Record(ctx, event)
+}
+
+func messageIDFromTask(task *a2a.Task) string {
+	if task == nil || len(task.History) == 0 {
+		return ""
+	}
+	return task.History[0].ID
+}
+
+func hashID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:8])
 }
 
 func (h *Handler) GetTaskPushConfig(ctx context.Context, req *a2a.GetTaskPushConfigRequest) (*a2a.PushConfig, error) {

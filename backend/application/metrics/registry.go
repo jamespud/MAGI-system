@@ -35,7 +35,131 @@ type Registry struct {
 	RunDurationBuckets [8]atomic.Int64 // 7 bounded buckets + +Inf
 	CostTotalMicro     atomic.Int64    // USD * 1e6
 
+	// A2A exposes a bounded-label surface for the A2A server.
+	A2AActiveStreams  atomic.Int64
+	A2AIdempotencyHits atomic.Int64
+	a2aRequests       [lenA2AOperations][lenA2AResults]atomic.Int64
+	a2aProjectionErr  [lenA2AProjectionKinds]atomic.Int64
+
 	perUser sync.Map // userID -> *userUsage
+}
+
+// A2AOperation is a fixed label value for A2A request metrics. User input can
+// never create new values: callers must pick one of the constants.
+type A2AOperation string
+
+const (
+	A2AOperationGetTask         A2AOperation = "GetTask"
+	A2AOperationListTasks       A2AOperation = "ListTasks"
+	A2AOperationCancelTask      A2AOperation = "CancelTask"
+	A2AOperationSendMessage     A2AOperation = "SendMessage"
+	A2AOperationSendStreaming   A2AOperation = "SendStreamingMessage"
+	A2AOperationSubscribeToTask A2AOperation = "SubscribeToTask"
+)
+
+const lenA2AOperations = 6
+
+var a2aOperations = [...]A2AOperation{
+	A2AOperationGetTask, A2AOperationListTasks, A2AOperationCancelTask,
+	A2AOperationSendMessage, A2AOperationSendStreaming, A2AOperationSubscribeToTask,
+}
+
+// A2AResult is a fixed label value for the outcome of an A2A request.
+type A2AResult string
+
+const (
+	A2AResultOK    A2AResult = "ok"
+	A2AResultError A2AResult = "error"
+)
+
+const lenA2AResults = 2
+
+var a2aResults = [...]A2AResult{A2AResultOK, A2AResultError}
+
+// A2AProjectionKind is a fixed label value for projection failures.
+type A2AProjectionKind string
+
+const (
+	A2AProjectionArtifact A2AProjectionKind = "artifact"
+	A2AProjectionStatus   A2AProjectionKind = "status"
+)
+
+const lenA2AProjectionKinds = 2
+
+var a2aProjectionKinds = [...]A2AProjectionKind{A2AProjectionArtifact, A2AProjectionStatus}
+
+// IncA2ARequest records one A2A protocol request by its fixed operation and
+// result labels.
+func (r *Registry) IncA2ARequest(op A2AOperation, res A2AResult) {
+	if r == nil {
+		return
+	}
+	oi := indexOfA2AOperation(op)
+	ri := indexOfA2AResult(res)
+	if oi < 0 || ri < 0 {
+		return
+	}
+	r.a2aRequests[oi][ri].Add(1)
+}
+
+// A2AStreamStart increments the active-stream gauge.
+func (r *Registry) A2AStreamStart() {
+	if r != nil {
+		r.A2AActiveStreams.Add(1)
+	}
+}
+
+// A2AStreamEnd decrements the active-stream gauge.
+func (r *Registry) A2AStreamEnd() {
+	if r != nil {
+		r.A2AActiveStreams.Add(-1)
+	}
+}
+
+// IncA2AIdempotencyHit records a replayed equal-hash submission.
+func (r *Registry) IncA2AIdempotencyHit() {
+	if r != nil {
+		r.A2AIdempotencyHits.Add(1)
+	}
+}
+
+// IncA2AProjectionError records a deterministic projection failure by kind.
+func (r *Registry) IncA2AProjectionError(kind A2AProjectionKind) {
+	if r == nil {
+		return
+	}
+	ki := indexOfA2AProjectionKind(kind)
+	if ki < 0 {
+		return
+	}
+	r.a2aProjectionErr[ki].Add(1)
+}
+
+func indexOfA2AOperation(op A2AOperation) int {
+	for i, v := range a2aOperations {
+		if v == op {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfA2AResult(res A2AResult) int {
+	for i, v := range a2aResults {
+		if v == res {
+			return i
+		}
+	}
+	return -1
+}
+
+func indexOfA2AProjectionKind(kind A2AProjectionKind) int {
+	for i, v := range a2aProjectionKinds {
+		if v == kind {
+			return i
+		}
+	}
+	return -1
 }
 
 type userUsage struct {
@@ -243,4 +367,23 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "magi_run_duration_ms_bucket{le=\"+Inf\"} %d\n", r.RunDurationBuckets[len(runDurationBounds)].Load())
 
 	fmt.Fprintf(w, "# TYPE magi_cost_usd_total counter\nmagi_cost_usd_total %.6f\n", float64(r.CostTotalMicro.Load())/1e6)
+
+	for oi, op := range a2aOperations {
+		for ri, res := range a2aResults {
+			if n := r.a2aRequests[oi][ri].Load(); n > 0 {
+				fmt.Fprintf(w, "# TYPE magi_a2a_requests_total counter\nmagi_a2a_requests_total{operation=%q,result=%q} %d\n", op, res, n)
+			}
+		}
+	}
+	if n := r.A2AActiveStreams.Load(); n != 0 {
+		fmt.Fprintf(w, "# TYPE magi_a2a_active_streams gauge\nmagi_a2a_active_streams %d\n", n)
+	}
+	if n := r.A2AIdempotencyHits.Load(); n > 0 {
+		fmt.Fprintf(w, "# TYPE magi_a2a_idempotency_hits_total counter\nmagi_a2a_idempotency_hits_total %d\n", n)
+	}
+	for ki, kind := range a2aProjectionKinds {
+		if n := r.a2aProjectionErr[ki].Load(); n > 0 {
+			fmt.Fprintf(w, "# TYPE magi_a2a_projection_errors_total counter\nmagi_a2a_projection_errors_total{kind=%q} %d\n", kind, n)
+		}
+	}
 }

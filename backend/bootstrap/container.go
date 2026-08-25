@@ -20,9 +20,11 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	magi "github.com/jamespud/magi/backend/adapter"
 	mcpadapter "github.com/jamespud/magi/backend/adapter/mcp"
 	rag "github.com/jamespud/magi/backend/adapter/rag"
+	a2aapp "github.com/jamespud/magi/backend/application/a2a"
 	"github.com/jamespud/magi/backend/application/admin"
 	"github.com/jamespud/magi/backend/application/approval"
 	"github.com/jamespud/magi/backend/application/assistant"
@@ -63,6 +65,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/domain/validation"
 	appserver "github.com/jamespud/magi/backend/server"
+	"github.com/jamespud/magi/backend/server/a2a"
 	"github.com/jamespud/magi/backend/server/handler"
 )
 
@@ -165,6 +168,7 @@ var Module = fx.Options(
 		provideRedactor,
 		provideTracingProvider,
 		provideHealthPinger,
+		ProvideA2A,
 
 		// Server
 		provideServer,
@@ -203,7 +207,12 @@ var Module = fx.Options(
 		ragH *handler.AdminRagHandler,
 		dbPing func(context.Context) error,
 		tp *trace.TracerProvider,
+		a2aOpt *A2A,
 	) {
+		var a2aMount *a2atransport.MountDeps
+		if a2aOpt != nil && a2aOpt.Enabled {
+			a2aMount = a2aOpt.MountDeps
+		}
 		appserver.RegisterRoutesWithDeps(h, appserver.RouteDeps{
 			Decision:          decSvc,
 			Approval:          apprSvc,
@@ -248,6 +257,12 @@ var Module = fx.Options(
 			MaxTokensPerUser:  cfg.Limits.MaxTokensPerUser,
 			MaxCostUSDPerUser: cfg.Limits.MaxCostUSDPerUser,
 			PromptRepo:        repo.PromptRepo(),
+			A2A:               a2aMount,
+			A2ARateLimit: appserver.RateLimitConfig{
+				Enabled:          cfg.A2A.Enabled && cfg.HTTPRateLimit.Enabled,
+				PerUserPerMinute: cfg.HTTPRateLimit.PerUserPerMinute,
+				PerIPPerMinute:   cfg.HTTPRateLimit.PerIPPerMinute,
+			},
 		})
 	}),
 	fx.Invoke(registerLifecycle),
@@ -840,12 +855,15 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config) {
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config, a2a *A2A) {
 	var autoCancel context.CancelFunc
 	var ragCancel context.CancelFunc
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
+				return err
+			}
+			if err := a2a.Recover(ctx); err != nil {
 				return err
 			}
 			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
@@ -1159,6 +1177,59 @@ func provideRedactor(cfg *Config) *redact.Redactor {
 		secrets = append(secrets, k.Key)
 	}
 	return redact.New(secrets...)
+}
+
+// A2A is an optional bundle of A2A server components. A disabled config still
+// yields a non-nil wrapper so Fx consumers never receive nil interfaces.
+type A2A struct {
+	Enabled         bool
+	SubmissionRepo  a2aapp.SubmissionRepository
+	SubmissionSvc   *a2aapp.SubmissionService
+	TaskProjector   *a2aapp.TaskProjector
+	StreamProjector a2aapp.StreamProjector
+	Handler         a2asrv.RequestHandler
+	MountDeps       *a2atransport.MountDeps
+}
+
+// Recover replays the A2A start classifier for PREPARED bindings. It is a
+// no-op when the feature is disabled.
+func (a *A2A) Recover(ctx context.Context) error {
+	if a == nil || !a.Enabled || a.SubmissionSvc == nil {
+		return nil
+	}
+	return a.SubmissionSvc.Recover(ctx)
+}
+
+// ProvideA2A wires the optional A2A server from config and existing
+// repositories. When a2a.enabled is false it returns a disabled wrapper that
+// registers no lifecycle work and no routes.
+func ProvideA2A(db *gorm.DB, cfg *Config, rm *decision.RunManager, broker *appserver.EventBroker, repo port.Repository, reg *metrics.Registry, red *redact.Redactor, auditSvc *audit.Service) *A2A {
+	if cfg == nil || !cfg.A2A.Enabled {
+		return &A2A{Enabled: false}
+	}
+	a2aRepo := magi.NewA2ASubmissionRepository(db)
+	parser := a2aapp.NewInputParser(cfg.A2A.MaxMessageBytes, cfg.A2A.MaxParts)
+	cursor := a2aapp.CursorCodec{MaxPageSize: cfg.A2A.MaxPageSize}
+	proj := a2aapp.NewTaskProjector(red)
+	svc := a2aapp.NewSubmissionService(parser, a2aRepo, rm, proj, cfg.Magi.MaxDebateRounds,
+		a2aapp.WithSubmissionMetrics(reg))
+	stream := a2aapp.NewDurableStreamProjector(a2aRepo, repo.EventRepo(), broker, proj,
+		cfg.A2A.MaxStreamsPerUser, cfg.A2A.CrossInstancePollInterval,
+		a2aapp.WithStreamMetrics(reg))
+	handler := a2aapp.NewHandler(svc, a2aRepo, proj, cursor, rm, stream,
+		a2aapp.WithHandlerMetrics(reg), a2aapp.WithHandlerAudit(auditSvc))
+	return &A2A{
+		Enabled:         true,
+		SubmissionRepo:  a2aRepo,
+		SubmissionSvc:   svc,
+		TaskProjector:   proj,
+		StreamProjector: stream,
+		Handler:         handler,
+		MountDeps: &a2atransport.MountDeps{
+			Handler: handler, PublicURL: cfg.A2A.PublicURL, BasePath: cfg.A2A.BasePath,
+			Name: "MAGI", Description: "Evidence-driven decision assistant",
+		},
+	}
 }
 
 func provideTracingProvider(cfg *Config) *trace.TracerProvider {

@@ -59,3 +59,39 @@ func TestRegistry_MemoryRetrievalFailures(t *testing.T) {
 		t.Fatalf("prometheus output missing retrieval failure counter:\n%s", buf.String())
 	}
 }
+
+func TestRegistry_A2AMetricsWithBoundedLabels(t *testing.T) {
+	reg := metrics.New()
+	reg.IncA2ARequest(metrics.A2AOperationGetTask, metrics.A2AResultOK)
+	reg.IncA2ARequest(metrics.A2AOperationGetTask, metrics.A2AResultError)
+	reg.A2AStreamStart()
+	reg.IncA2AIdempotencyHit()
+	reg.IncA2AProjectionError(metrics.A2AProjectionArtifact)
+
+	var buf strings.Builder
+	reg.WritePrometheus(&buf)
+	out := buf.String()
+	for _, want := range []string{
+		`magi_a2a_requests_total{operation="GetTask",result="ok"} 1`,
+		`magi_a2a_requests_total{operation="GetTask",result="error"} 1`,
+		"magi_a2a_active_streams 1",
+		"magi_a2a_idempotency_hits_total 1",
+		`magi_a2a_projection_errors_total{kind="artifact"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestRegistry_A2AMetricsIgnoreUnknownLabels(t *testing.T) {
+	reg := metrics.New()
+	reg.IncA2ARequest("user-injected-operation", metrics.A2AResultOK)
+	reg.IncA2ARequest(metrics.A2AOperationGetTask, "user-injected-result")
+	reg.IncA2AProjectionError("user-injected-kind")
+	var buf strings.Builder
+	reg.WritePrometheus(&buf)
+	if strings.Contains(buf.String(), "user-injected") {
+		t.Fatalf("unknown labels leaked into metrics output:\n%s", buf.String())
+	}
+}

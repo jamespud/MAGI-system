@@ -8,6 +8,7 @@ import (
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/google/uuid"
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/metrics"
 )
 
 // SubmissionService owns the durable A2A submit lifecycle: parse, prepare,
@@ -19,13 +20,26 @@ type SubmissionService struct {
 	projector       *TaskProjector
 	maxDebateRounds int
 	startTimeout    time.Duration
+	metrics         *metrics.Registry
 }
 
-func NewSubmissionService(parser InputParser, repo SubmissionRepository, runManager *decision.RunManager, projector *TaskProjector, maxDebateRounds int) *SubmissionService {
-	return &SubmissionService{
+// SubmissionOption configures optional observability on the submission service.
+type SubmissionOption func(*SubmissionService)
+
+// WithSubmissionMetrics enables the idempotency-hit counter.
+func WithSubmissionMetrics(reg *metrics.Registry) SubmissionOption {
+	return func(s *SubmissionService) { s.metrics = reg }
+}
+
+func NewSubmissionService(parser InputParser, repo SubmissionRepository, runManager *decision.RunManager, projector *TaskProjector, maxDebateRounds int, opts ...SubmissionOption) *SubmissionService {
+	svc := &SubmissionService{
 		parser: parser, repo: repo, runManager: runManager, projector: projector,
 		maxDebateRounds: maxDebateRounds, startTimeout: 30 * time.Second,
 	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
 }
 
 // Submit parses a request, durably prepares the binding, then idempotently
@@ -54,9 +68,12 @@ func (s *SubmissionService) Submit(ctx context.Context, userID int64, req *a2a.S
 		Constraints:     parsed.Constraints,
 		MaxDebateRounds: s.maxDebateRounds,
 	}
-	prepared, _, err := s.repo.Prepare(ctx, cmd)
+	prepared, created, err := s.repo.Prepare(ctx, cmd)
 	if err != nil {
 		return nil, err
+	}
+	if !created && s.metrics != nil {
+		s.metrics.IncA2AIdempotencyHit()
 	}
 	if _, err := s.settleStart(ctx, prepared); err != nil {
 		return nil, err

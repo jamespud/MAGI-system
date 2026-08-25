@@ -8,6 +8,7 @@ import (
 	"time"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -30,17 +31,30 @@ type DurableStreamProjector struct {
 	pollInterval      time.Duration
 	active            map[int64]int
 	mu                sync.Mutex
+	metrics           *metrics.Registry
 }
 
-func NewDurableStreamProjector(repo SubmissionRepository, events port.EventRepository, broker EventSubscriber, projector *TaskProjector, maxStreamsPerUser int, pollInterval time.Duration) *DurableStreamProjector {
+// StreamOption configures optional observability on the stream projector.
+type StreamOption func(*DurableStreamProjector)
+
+// WithStreamMetrics enables the active-stream gauge and projection errors.
+func WithStreamMetrics(reg *metrics.Registry) StreamOption {
+	return func(s *DurableStreamProjector) { s.metrics = reg }
+}
+
+func NewDurableStreamProjector(repo SubmissionRepository, events port.EventRepository, broker EventSubscriber, projector *TaskProjector, maxStreamsPerUser int, pollInterval time.Duration, opts ...StreamOption) *DurableStreamProjector {
 	if pollInterval <= 0 {
 		pollInterval = time.Second
 	}
-	return &DurableStreamProjector{
+	s := &DurableStreamProjector{
 		repo: repo, events: events, broker: broker, projector: projector,
 		maxStreamsPerUser: maxStreamsPerUser, pollInterval: pollInterval,
 		active: make(map[int64]int),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Events returns the ordered A2A event iterator for an owner-scoped task.
@@ -64,6 +78,9 @@ func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID s
 		return
 	}
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.IncA2AProjectionError(metrics.A2AProjectionStatus)
+		}
 		yield(nil, err)
 		return
 	}
@@ -162,6 +179,9 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 	}
 	record, err := s.repo.GetTaskRecord(ctx, userID, taskID)
 	if err != nil {
+		if s.metrics != nil {
+			s.metrics.IncA2AProjectionError(metrics.A2AProjectionStatus)
+		}
 		return false, err
 	}
 	task := s.projector.Project(record, 1)
@@ -207,10 +227,16 @@ func (s *DurableStreamProjector) acquire(userID int64) func() {
 		return nil
 	}
 	s.active[userID]++
+	if s.metrics != nil {
+		s.metrics.A2AStreamStart()
+	}
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.active[userID]--
+		if s.metrics != nil {
+			s.metrics.A2AStreamEnd()
+		}
 		if s.active[userID] == 0 {
 			delete(s.active, userID)
 		}
