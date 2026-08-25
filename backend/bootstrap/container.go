@@ -932,7 +932,10 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
-	models := append(magi.AllModels(), rag.AllModels()...)
+	// S16's event sequence schema must be applied by Atlas first; GORM
+	// AutoMigrate must not attempt to alter the existing event table before its
+	// nullable expand/backfill/contract sequence is complete.
+	models := append(magi.AllModelsWithoutEventSequence(), rag.AllModels()...)
 	if err := db.AutoMigrate(models...); err != nil {
 		return nil, fmt.Errorf("failed to migrate: %w", err)
 	}

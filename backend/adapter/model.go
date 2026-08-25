@@ -433,6 +433,24 @@ func AllModels() []any {
 	}
 }
 
+// AllModelsWithoutEventSequence returns the models safe for the production
+// startup AutoMigrate path. EventModel and EventCursorModel are excluded
+// because their S16 schema change requires the Atlas expand/backfill/contract
+// migration rather than GORM trying to alter an existing event table.
+func AllModelsWithoutEventSequence() []any {
+	all := AllModels()
+	models := make([]any, 0, len(all)-2)
+	for _, model := range all {
+		switch model.(type) {
+		case *EventModel, *EventCursorModel:
+			continue
+		default:
+			models = append(models, model)
+		}
+	}
+	return models
+}
+
 // KnowledgeDocModel persists a user-uploaded knowledge document.
 type KnowledgeDocModel struct {
 	ID         string `gorm:"primaryKey;size:64"`

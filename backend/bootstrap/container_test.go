@@ -39,6 +39,19 @@ func TestAllModels_IncludesToolCallModel(t *testing.T) {
 	}
 }
 
+func TestMigrationModels_ExcludeEventSequenceUntilAtlasMigration(t *testing.T) {
+	models := magi.AllModelsWithoutEventSequence()
+	if len(models) == 0 {
+		t.Fatal("migration model list must not be empty")
+	}
+	for _, model := range models {
+		switch model.(type) {
+		case *magi.EventModel, *magi.EventCursorModel:
+			t.Fatalf("production migration list must exclude event sequence models: %T", model)
+		}
+	}
+}
+
 func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
