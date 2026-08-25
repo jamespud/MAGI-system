@@ -41,6 +41,31 @@ func TestEventBroker_ListByCase(t *testing.T) {
 	}
 }
 
+func TestEventBroker_PublishAssignsPerCaseSequence(t *testing.T) {
+	b := server.NewEventBroker()
+	if err := b.Publish(context.Background(), entity.MagiEvent{ID: "c1-1", CaseID: "c1"}); err != nil {
+		t.Fatalf("publish first: %v", err)
+	}
+	if err := b.Publish(context.Background(), entity.MagiEvent{ID: "c1-2", CaseID: "c1"}); err != nil {
+		t.Fatalf("publish second: %v", err)
+	}
+
+	events, err := b.ListByCase(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(events) != 2 || events[0].Seq != 1 || events[1].Seq != 2 {
+		t.Fatalf("sequences: %+v", events)
+	}
+	after, err := b.ListAfterSeq(context.Background(), "c1", 1, 100)
+	if err != nil {
+		t.Fatalf("list after seq: %v", err)
+	}
+	if len(after) != 1 || after[0].Seq != 2 {
+		t.Fatalf("after sequence: %+v", after)
+	}
+}
+
 func TestEventBroker_Unsubscribe(t *testing.T) {
 	b := server.NewEventBroker()
 	ch := b.Subscribe("c1")
