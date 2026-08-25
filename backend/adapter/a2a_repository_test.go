@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -160,6 +161,55 @@ func TestA2ASubmissionPrepare_ConcurrentReplayCreatesOneAtomicSnapshot(t *testin
 		}
 	}
 	assertA2ASubmissionCounts(t, db, 1, 1, 1, 2)
+}
+
+func TestA2ASubmissionPrepare_RetriesConversationInsertConflictsUntilContextExists(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	var collisions atomic.Int32
+	if err := db.Callback().Create().Before("gorm:create").Register("a2a_test_conversation_insert_conflict", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Model.(*magi.ConversationModel); ok && collisions.Add(1) <= 3 {
+			tx.AddError(errors.New("UNIQUE constraint failed: magi_conversation.id"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove("a2a_test_conversation_insert_conflict") })
+
+	prepared, created, err := repo.Prepare(context.Background(), a2aPrepareCommand(7, "message-1", "hash", "task-1", "context-1"))
+	if err != nil || !created || prepared == nil || prepared.Conversation == nil {
+		t.Fatalf("prepare after conversation conflicts = (%+v, %v, %v)", prepared, created, err)
+	}
+	if got := collisions.Load(); got != 4 {
+		t.Fatalf("conversation insert attempts = %d, want 4", got)
+	}
+	assertA2ASubmissionCounts(t, db, 1, 1, 1, 2)
+}
+
+func TestA2ASubmissionPrepare_ConcurrentMessagesShareOneNewContext(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	const callers = 20
+	errCh := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, created, err := repo.Prepare(context.Background(), a2aPrepareCommand(7,
+				fmt.Sprintf("message-%d", i), "hash", fmt.Sprintf("task-%d", i), "context-1"))
+			if err == nil && !created {
+				err = fmt.Errorf("message-%d unexpectedly replayed", i)
+			}
+			errCh <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertA2ASubmissionCounts(t, db, callers, callers, 1, callers*2)
 }
 
 func assertA2ASubmissionCounts(t *testing.T, db *gorm.DB, submissions, cases, conversations, messages int64) {

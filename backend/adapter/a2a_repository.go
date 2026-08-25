@@ -19,15 +19,35 @@ import (
 // the binding transaction.
 type a2aSubmissionRepo struct{ db *gorm.DB }
 
+var errConcurrentConversationInsert = errors.New("concurrent conversation insert")
+
 func NewA2ASubmissionRepository(db *gorm.DB) a2aapp.SubmissionRepository {
 	return &a2aSubmissionRepo{db: db}
 }
 
 func (r *a2aSubmissionRepo) Prepare(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
-	return r.prepare(ctx, cmd, 0)
+	for {
+		prepared, created, err := r.prepareOnce(ctx, cmd)
+		if !errors.Is(err, errConcurrentConversationInsert) {
+			return prepared, created, err
+		}
+
+		// A competing transaction is creating this ContextID. The binding
+		// transaction rolled back, so retrying will lock the committed
+		// conversation instead. The caller's context is the retry bound.
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, false, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
-func (r *a2aSubmissionRepo) prepare(ctx context.Context, cmd a2aapp.PrepareCommand, retries int) (*a2aapp.PreparedSubmission, bool, error) {
+func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
 	var prepared *a2aapp.PreparedSubmission
 	created := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -110,6 +130,9 @@ func (r *a2aSubmissionRepo) prepare(ctx context.Context, cmd a2aapp.PrepareComma
 	if err == nil || errors.Is(err, a2aapp.ErrIdempotencyConflict) {
 		return prepared, created, err
 	}
+	if errors.Is(err, errConcurrentConversationInsert) {
+		return nil, false, err
+	}
 	if !isUniqueViolation(err) {
 		return nil, false, err
 	}
@@ -118,11 +141,6 @@ func (r *a2aSubmissionRepo) prepare(ctx context.Context, cmd a2aapp.PrepareComma
 	// unique key is now the serialization point for equal-message replays.
 	var existing A2ASubmissionModel
 	if getErr := r.db.WithContext(ctx).Where("user_id = ? AND message_id = ?", cmd.UserID, cmd.MessageID).First(&existing).Error; getErr != nil {
-		if errors.Is(getErr, gorm.ErrRecordNotFound) && retries < 2 {
-			// The collision can belong to a concurrently created Conversation,
-			// not this binding. Re-run so its row is locked and reused.
-			return r.prepare(ctx, cmd, retries+1)
-		}
 		return nil, false, err
 	}
 	if existing.RequestHash != cmd.RequestHash {
@@ -142,6 +160,9 @@ func prepareConversation(tx *gorm.DB, cmd a2aapp.PrepareCommand) (*entity.Conver
 		now := time.Now().UTC()
 		conv := &entity.Conversation{ID: cmd.ContextID, UserID: cmd.UserID, Title: a2aConversationTitle(cmd.Question), CreatedAt: now, UpdatedAt: now}
 		if err := tx.Create(conversationToModel(conv)).Error; err != nil {
+			if isUniqueViolation(err) {
+				return nil, nil, fmt.Errorf("%w: %v", errConcurrentConversationInsert, err)
+			}
 			return nil, nil, err
 		}
 		return conv, nil, nil
