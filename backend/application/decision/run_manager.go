@@ -309,6 +309,10 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 
 		if runErr == nil {
+			if errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
+				finishMetrics(false)
+				return
+			}
 			if err := m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID); err != nil {
 				attemptCancel(port.ErrLeaseLost)
 				finishMetrics(false)

@@ -50,6 +50,20 @@ func (r *markSucceededErrorRepo) MarkFailed(ctx context.Context, jobID, workerID
 	return r.DecisionJobRepository.MarkFailed(ctx, jobID, workerID, lastError, retryAt)
 }
 
+type leaseLossBeforeSuccessRepo struct {
+	port.DecisionJobRepository
+	markSucceededs atomic.Int32
+}
+
+func (r *leaseLossBeforeSuccessRepo) Heartbeat(context.Context, string, string, time.Time) error {
+	return port.ErrLeaseLost
+}
+
+func (r *leaseLossBeforeSuccessRepo) MarkSucceeded(ctx context.Context, jobID, workerID string) error {
+	r.markSucceededs.Add(1)
+	return r.DecisionJobRepository.MarkSucceeded(ctx, jobID, workerID)
+}
+
 type successThenObserveCancellationOrchestrator struct {
 	observed chan struct{}
 	release  chan struct{}
@@ -63,6 +77,18 @@ func (o *successThenObserveCancellationOrchestrator) Orchestrate(ctx context.Con
 		case <-o.release:
 		}
 	}()
+	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+type lateSuccessAfterLeaseLossOrchestrator struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (o *lateSuccessAfterLeaseLossOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	close(o.started)
+	<-ctx.Done()
+	close(o.cancelled)
 	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
 }
 
@@ -178,6 +204,13 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("MarkSucceeded error did not cancel the completed attempt context")
 	}
+	deadline := time.Now().Add(time.Second)
+	for rm.IsRunning("case-success-error") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if rm.IsRunning("case-success-error") {
+		t.Fatal("worker did not finish after MarkSucceeded error")
+	}
 	if calls := jobs.markFaileds.Load(); calls != 0 {
 		t.Fatalf("MarkSucceeded error retried as failure %d times", calls)
 	}
@@ -187,6 +220,40 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	job, err := baseJobs.GetByCase(context.Background(), "case-success-error")
 	if err != nil || job.Status != entity.DecisionJobRunning {
 		t.Fatalf("job after MarkSucceeded error = %+v err=%v", job, err)
+	}
+}
+
+func TestRunManager_LeaseLossBeforeLateSuccessDoesNotMarkSucceeded(t *testing.T) {
+	db := openJobDB(t)
+	baseJobs := magi.NewDecisionJobRepository(db)
+	jobs := &leaseLossBeforeSuccessRepo{DecisionJobRepository: baseJobs}
+	lease := 30 * time.Millisecond
+	orch := &lateSuccessAfterLeaseLossOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "lease-lost-before-success", LeaseDuration: lease, MaxAttempts: 1,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-lease-lost-before-success"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-orch.started
+	select {
+	case <-orch.cancelled:
+	case <-time.After(5 * lease):
+		t.Fatal("heartbeat lease loss did not cancel the attempt")
+	}
+	deadline := time.Now().Add(time.Second)
+	for rm.IsRunning("case-lease-lost-before-success") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if rm.IsRunning("case-lease-lost-before-success") {
+		t.Fatal("worker did not exit after late success")
+	}
+	if calls := jobs.markSucceededs.Load(); calls != 0 {
+		t.Fatalf("MarkSucceeded calls = %d, want 0 after lease loss", calls)
+	}
+	job, err := baseJobs.GetByCase(context.Background(), "case-lease-lost-before-success")
+	if err != nil || job.Status != entity.DecisionJobRunning {
+		t.Fatalf("lease-lost job = %+v err=%v, want old owner not to succeed it", job, err)
 	}
 }
 

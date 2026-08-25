@@ -44,6 +44,12 @@ func (f *fakeRunManager) IsRunning(caseID string) bool { return f.started[caseID
 // stubCaseLookup implements port.CaseRepository enough for the handler.
 type stubCaseLookup struct{ c *entity.DecisionCase }
 
+type cancelRejectedCaseLookup struct{ stubCaseLookup }
+
+func (cancelRejectedCaseLookup) UpdateStatusIfCurrent(context.Context, string, []entity.CaseStatus, entity.CaseStatus) (bool, error) {
+	return false, nil
+}
+
 func (s stubCaseLookup) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
 func (s stubCaseLookup) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
 	if s.c != nil && s.c.ID == id {
@@ -125,6 +131,24 @@ func TestDecisionHandler_Run_Returns404WhenCaseMissing(t *testing.T) {
 	w := ut.PerformRequest(r.Engine, "POST", "/cases/missing/run", nil)
 	if w.Result().StatusCode() != 404 {
 		t.Fatalf("expected 404, got %d", w.Result().StatusCode())
+	}
+}
+
+func TestDecisionHandler_CancelReturnsConflictWhenTerminalCommitWinsRace(t *testing.T) {
+	rm := newFakeRunManager()
+	rm.started["c1"] = true
+	c := &entity.DecisionCase{ID: "c1", Question: "q", Status: entity.CaseStatusResolving}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithRunManager(rm),
+		decision.WithCaseRepo(cancelRejectedCaseLookup{stubCaseLookup{c: c}}))
+	h := handler.NewDecisionHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.POST("/cases/:id/cancel", h.Cancel)
+
+	w := ut.PerformRequest(r.Engine, "POST", "/cases/c1/cancel", nil)
+	if got := w.Result().StatusCode(); got != 409 {
+		t.Fatalf("expected 409 when terminal commit wins cancellation race, got %d body=%s", got, string(w.Result().Body()))
 	}
 }
 

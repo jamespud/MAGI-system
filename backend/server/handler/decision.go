@@ -117,7 +117,10 @@ func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if h.svc.CancelRun(id) {
-		_ = h.svc.Cancel(ctx, id) // also persist CANCELLED status if repo configured
+		if err := h.svc.Cancel(ctx, id); err != nil {
+			c.JSON(consts.StatusConflict, dto.ErrorResponse{Error: err.Error()})
+			return
+		}
 		c.JSON(consts.StatusOK, dto.CaseResponse{ID: id, Status: "CANCELLED"})
 		return
 	}
