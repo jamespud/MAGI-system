@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	a2a "github.com/jamespud/magi/backend/application/a2a"
@@ -183,6 +184,31 @@ func TestA2ASubmissionPrepare_RetriesConversationInsertConflictsUntilContextExis
 		t.Fatalf("conversation insert attempts = %d, want 4", got)
 	}
 	assertA2ASubmissionCounts(t, db, 1, 1, 1, 2)
+}
+
+func TestA2ASubmissionPrepare_StopsAfterConversationContentionBudget(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	var collisions atomic.Int32
+	if err := db.Callback().Create().Before("gorm:create").Register("a2a_test_persistent_conversation_insert_conflict", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Model.(*magi.ConversationModel); ok {
+			collisions.Add(1)
+			tx.AddError(errors.New("UNIQUE constraint failed: magi_conversation.id"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove("a2a_test_persistent_conversation_insert_conflict") })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _, err := repo.Prepare(ctx, a2aPrepareCommand(7, "message-1", "hash", "task-1", "context-1"))
+	if !errors.Is(err, a2a.ErrContextContention) {
+		t.Fatalf("persistent conversation contention error = %v, want ErrContextContention", err)
+	}
+	if got := collisions.Load(); got < 2 {
+		t.Fatalf("conversation insert attempts = %d, want bounded retries", got)
+	}
+	assertA2ASubmissionCounts(t, db, 0, 0, 0, 0)
 }
 
 func TestA2ASubmissionPrepare_ConcurrentMessagesShareOneNewContext(t *testing.T) {

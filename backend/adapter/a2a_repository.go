@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -21,21 +22,30 @@ type a2aSubmissionRepo struct{ db *gorm.DB }
 
 var errConcurrentConversationInsert = errors.New("concurrent conversation insert")
 
+const (
+	contextContentionMaxAttempts    = 6
+	contextContentionInitialBackoff = time.Millisecond
+	contextContentionMaxBackoff     = 32 * time.Millisecond
+)
+
 func NewA2ASubmissionRepository(db *gorm.DB) a2aapp.SubmissionRepository {
 	return &a2aSubmissionRepo{db: db}
 }
 
 func (r *a2aSubmissionRepo) Prepare(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
-	for {
+	for attempt := 0; attempt < contextContentionMaxAttempts; attempt++ {
 		prepared, created, err := r.prepareOnce(ctx, cmd)
 		if !errors.Is(err, errConcurrentConversationInsert) {
 			return prepared, created, err
 		}
+		if attempt == contextContentionMaxAttempts-1 {
+			return nil, false, fmt.Errorf("%w after %d attempts: %v", a2aapp.ErrContextContention, contextContentionMaxAttempts, err)
+		}
 
 		// A competing transaction is creating this ContextID. The binding
 		// transaction rolled back, so retrying will lock the committed
-		// conversation instead. The caller's context is the retry bound.
-		timer := time.NewTimer(time.Millisecond)
+		// conversation instead. Back off so contention cannot spin the DB.
+		timer := time.NewTimer(contextContentionBackoff(attempt))
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -45,6 +55,19 @@ func (r *a2aSubmissionRepo) Prepare(ctx context.Context, cmd a2aapp.PrepareComma
 		case <-timer.C:
 		}
 	}
+	return nil, false, a2aapp.ErrContextContention
+}
+
+func contextContentionBackoff(attempt int) time.Duration {
+	delay := contextContentionInitialBackoff
+	for i := 0; i < attempt && delay < contextContentionMaxBackoff; i++ {
+		delay *= 2
+	}
+	if delay > contextContentionMaxBackoff {
+		delay = contextContentionMaxBackoff
+	}
+	// Decorrelate competing submitters that discover the ContextID at once.
+	return delay + time.Duration(rand.Int64N(int64(delay/4)+1))
 }
 
 func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {

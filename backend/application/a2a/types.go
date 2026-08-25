@@ -16,6 +16,9 @@ var (
 	ErrIdempotencyConflict = errors.New("a2a idempotency conflict")
 	// ErrForbidden means a referenced A2A context belongs to another principal.
 	ErrForbidden = errors.New("a2a forbidden")
+	// ErrContextContention means concurrent ContextID creation did not settle
+	// within the bounded transaction retry budget.
+	ErrContextContention = errors.New("a2a context creation contention")
 )
 
 type SubmissionState string
