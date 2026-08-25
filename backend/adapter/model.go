@@ -427,11 +427,32 @@ func AllModels() []any {
 		&AuditLogModel{},
 		&GoldenCaseModel{},
 		&TaskNodeModel{},
+		&A2ASubmissionModel{},
 		&ConversationModel{},
 		&SelfImproveModel{},
 		&ConversationMessageModel{},
 	}
 }
+
+// A2ASubmissionModel binds an external A2A message id to exactly one durable
+// MAGI task. It is deliberately independent of foreign-key cascades: Cases
+// remain audit records even when conversation records are later removed.
+type A2ASubmissionModel struct {
+	ID             string    `gorm:"primaryKey;size:64"`
+	UserID         int64     `gorm:"not null;uniqueIndex:uq_a2a_submission_user_message,priority:1;index"`
+	MessageID      string    `gorm:"not null;size:128;uniqueIndex:uq_a2a_submission_user_message,priority:2"`
+	RequestHash    string    `gorm:"not null;size:128"`
+	TaskID         string    `gorm:"not null;size:64;uniqueIndex:uq_a2a_submission_task"`
+	ContextID      string    `gorm:"size:64;index"`
+	InputMessageID string    `gorm:"size:64;index"`
+	CaseMessageID  string    `gorm:"size:64"`
+	State          string    `gorm:"not null;size:16;index:idx_a2a_submission_state,priority:1"`
+	ErrorCode      string    `gorm:"size:64"`
+	CreatedAt      time.Time `gorm:"index;index:idx_a2a_submission_state,priority:2"`
+	UpdatedAt      time.Time
+}
+
+func (A2ASubmissionModel) TableName() string { return "a2a_submission" }
 
 // AllModelsWithoutEventSequence returns the models safe for the production
 // startup AutoMigrate path. EventModel and EventCursorModel are excluded

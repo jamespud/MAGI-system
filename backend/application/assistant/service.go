@@ -141,38 +141,16 @@ func (s *Service) followUpBackground(ctx context.Context, conv *entity.Conversat
 	if err != nil {
 		return "", fmt.Errorf("assistant: load conversation history: %w", err)
 	}
-	if len(msgs) > 20 {
-		msgs = msgs[len(msgs)-20:]
-	}
-	var b strings.Builder
-	wrote := false
+	resolutions := make(map[string]*entity.Resolution)
 	for _, m := range msgs {
-		switch m.Role {
-		case entity.ConversationRoleUser:
-			b.WriteString("User: " + m.Content + "\n")
-			wrote = true
-		case entity.ConversationRoleAssistant:
-			if m.CaseID == "" {
-				continue
-			}
-			if res, _ := s.dec.Resolution(ctx, m.CaseID); res != nil {
-				fmt.Fprintf(&b, "Previous decision (%s): %s (consensus=%s, round=%d)\n",
-					m.CaseID, res.FinalDecision, res.Consensus.Outcome, res.Consensus.Round)
-				wrote = true
-			}
+		if m.CaseID == "" {
+			continue
+		}
+		if res, _ := s.dec.Resolution(ctx, m.CaseID); res != nil {
+			resolutions[m.CaseID] = res
 		}
 	}
-	if !wrote {
-		return extra, nil
-	}
-	var out strings.Builder
-	out.WriteString("[Conversation history]\n")
-	out.WriteString(b.String())
-	if strings.TrimSpace(extra) != "" {
-		out.WriteString("\n[Additional background]\n")
-		out.WriteString(extra)
-	}
-	return out.String(), nil
+	return BuildFollowUpBackground(msgs, resolutions, extra), nil
 }
 
 // conversationTitle derives a thread title from the first user message.
