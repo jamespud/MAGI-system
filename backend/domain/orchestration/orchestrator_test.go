@@ -894,6 +894,27 @@ func (rejectingCaseStatusWriter) UpdateStatusIfCurrent(context.Context, string, 
 	return false, nil
 }
 
+type terminalRaceCaseStatusWriter struct {
+	port.CaseRepository
+	status entity.CaseStatus
+}
+
+func (r *terminalRaceCaseStatusWriter) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
+	for _, status := range from {
+		if r.status != status {
+			continue
+		}
+		r.status = to
+		if to == entity.CaseStatusResolved {
+			// Another replica cancels after the terminal status transition and
+			// before the next terminal action dispatch.
+			r.status = entity.CaseStatusCancelled
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	repo := newStubRepo()
@@ -921,6 +942,49 @@ func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing
 	}
 	if len(events) != 0 {
 		t.Fatalf("rejected write published events: %+v", events)
+	}
+}
+
+func TestOrchestrate_TerminalConfirmationFencesLateResolutionAndCompletionEvent(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	repo := newStubRepo()
+	broker := server.NewEventBroker()
+	writer := &terminalRaceCaseStatusWriter{CaseRepository: repo.CaseRepo(), status: entity.CaseStatusDraft}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  writer,
+		Repo:      repo,
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-terminal-race", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("error = %v, want ErrLeaseLost", err)
+	}
+	if writer.status != entity.CaseStatusCancelled {
+		t.Fatalf("persisted status = %s, want CANCELLED", writer.status)
+	}
+	repo.mu.Lock()
+	resolutions := len(repo.resolutions)
+	repo.mu.Unlock()
+	if resolutions != 0 {
+		t.Fatalf("late terminal path persisted %d resolutions", resolutions)
+	}
+	events, err := broker.ListByCase(context.Background(), case_.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, event := range events {
+		if event.Type == entity.EventCaseCompleted {
+			t.Fatalf("late terminal path published completion event: %+v", event)
+		}
 	}
 }
 

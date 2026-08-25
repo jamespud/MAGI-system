@@ -288,6 +288,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		c.ExecutionAttempt = claimed.Attempt
 		if claimed.Attempt > 1 && c.Status != entity.CaseStatusResolved {
 			if !m.resetCaseForRetry(ctx, c) {
+				m.releaseRejectedRetryClaim(claimed)
 				return
 			}
 			if m.cleaner != nil {
@@ -300,17 +301,23 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		m.metrics.RunStart()
 		m.metrics.RunStartForUser(userIDString(c.UserID))
 		_, runErr := m.orch.Orchestrate(attemptCtx, c)
-		m.metrics.RunFinish(runErr == nil)
-		m.metrics.RunFinishForUser(userIDString(c.UserID))
-		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		stopHeartbeat()
+		finishMetrics := func(ok bool) {
+			m.metrics.RunFinish(ok)
+			m.metrics.RunFinishForUser(userIDString(c.UserID))
+			m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
+		}
 
 		if runErr == nil {
 			if err := m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID); err != nil {
 				attemptCancel(port.ErrLeaseLost)
+				finishMetrics(false)
+			} else {
+				finishMetrics(true)
 			}
 			return
 		}
+		finishMetrics(false)
 		if errors.Is(runErr, port.ErrLeaseLost) || errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
 			return
 		}
@@ -342,6 +349,16 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			attemptCancel(port.ErrLeaseLost)
 		}
 		return
+	}
+}
+
+func (m *RunManager) releaseRejectedRetryClaim(job *entity.DecisionJob) {
+	if job == nil {
+		return
+	}
+	err := m.jobRepo.MarkFailed(context.Background(), job.ID, m.workerID, "retry reset fenced", nil)
+	if err != nil && !errors.Is(err, port.ErrLeaseLost) {
+		_ = m.jobRepo.Cancel(context.Background(), job.ID)
 	}
 }
 
@@ -402,6 +419,16 @@ func (m *RunManager) retryDelay(attempt int) time.Duration {
 	return delay
 }
 
+type heartbeatRequest struct {
+	leaseUntil     time.Time
+	nextLeaseUntil time.Time
+}
+
+type heartbeatResult struct {
+	nextLeaseUntil time.Time
+	err            error
+}
+
 func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.CancelCauseFunc, jobID string, leaseUntil time.Time) func() {
 	interval := m.lease / 3
 	if interval < 10*time.Millisecond {
@@ -409,10 +436,36 @@ func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.C
 	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	requests := make(chan heartbeatRequest)
+	results := make(chan heartbeatResult, 1)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		for {
+			select {
+			case request := <-requests:
+				callCtx, callCancel := context.WithDeadline(workerCtx, request.leaseUntil)
+				err := m.jobRepo.Heartbeat(callCtx, jobID, m.workerID, request.nextLeaseUntil)
+				callCancel()
+				select {
+				case results <- heartbeatResult{nextLeaseUntil: request.nextLeaseUntil, err: err}:
+				case <-workerCtx.Done():
+					return
+				}
+			case <-workerCtx.Done():
+				return
+			}
+		}
+	}()
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		defer close(done)
+		defer workerCancel()
+		// Heartbeat implementations must honor ctx. Go cannot forcibly kill a
+		// blocked call, but this worker bounds an uncooperative repository to one
+		// in-flight call per attempt rather than one goroutine per ticker tick.
 		leaseTimer := time.NewTimer(time.Until(leaseUntil))
 		defer leaseTimer.Stop()
 		resetLeaseTimer := func(next time.Time) {
@@ -424,39 +477,37 @@ func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.C
 			}
 			leaseTimer.Reset(time.Until(next))
 		}
+		inFlight := false
 		for {
 			select {
 			case <-leaseTimer.C:
 				attemptCancel(port.ErrLeaseLost)
 				return
 			case <-ticker.C:
-				heartbeatCtx, heartbeatCancel := context.WithDeadline(ctx, leaseUntil)
-				nextLeaseUntil := time.Now().Add(m.lease)
-				result := make(chan error, 1)
-				go func() {
-					result <- m.jobRepo.Heartbeat(heartbeatCtx, jobID, m.workerID, nextLeaseUntil)
-				}()
+				if inFlight {
+					continue
+				}
+				request := heartbeatRequest{leaseUntil: leaseUntil, nextLeaseUntil: time.Now().Add(m.lease)}
 				select {
-				case err := <-result:
-					heartbeatCancel()
-					if err == nil && time.Now().Before(leaseUntil) {
-						leaseUntil = nextLeaseUntil
-						resetLeaseTimer(leaseUntil)
-						continue
-					}
-					if errors.Is(err, port.ErrLeaseLost) || !time.Now().Before(leaseUntil) {
-						attemptCancel(port.ErrLeaseLost)
-						return
-					}
-				case <-leaseTimer.C:
-					heartbeatCancel()
-					attemptCancel(port.ErrLeaseLost)
-					return
+				case requests <- request:
+					inFlight = true
 				case <-stop:
-					heartbeatCancel()
 					return
 				case <-ctx.Done():
-					heartbeatCancel()
+					return
+				default:
+					// The single I/O worker is still starting; a later ticker will
+					// submit the heartbeat while the lease timer remains authoritative.
+				}
+			case result := <-results:
+				inFlight = false
+				if result.err == nil && time.Now().Before(leaseUntil) {
+					leaseUntil = result.nextLeaseUntil
+					resetLeaseTimer(leaseUntil)
+					continue
+				}
+				if errors.Is(result.err, port.ErrLeaseLost) || !time.Now().Before(leaseUntil) {
+					attemptCancel(port.ErrLeaseLost)
 					return
 				}
 			case <-stop:

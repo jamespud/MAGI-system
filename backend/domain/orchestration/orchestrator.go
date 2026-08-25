@@ -115,6 +115,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			return st.Resolution, err
 		}
 		if err != nil {
+			if errors.Is(err, port.ErrLeaseLost) {
+				return nil, err
+			}
 			return o.fail(ctx, case_, err.Error())
 		}
 		prevStatus = status
@@ -131,6 +134,27 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		}
 		status = next
 	}
+}
+
+// confirmCurrentStatus fences terminal side effects after the preceding FSM
+// transition. A remote cancellation can win between advanceStatus and the
+// terminal action on the following dispatch iteration.
+func (o *Orchestrator) confirmCurrentStatus(ctx context.Context, case_ *entity.DecisionCase, status entity.CaseStatus) error {
+	if o.caseRepo == nil {
+		return nil
+	}
+	writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter)
+	if !ok {
+		return nil
+	}
+	updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, []entity.CaseStatus{status}, status)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return port.ErrLeaseLost
+	}
+	return nil
 }
 
 // advanceStatus persists the FSM transition before exposing it in memory or

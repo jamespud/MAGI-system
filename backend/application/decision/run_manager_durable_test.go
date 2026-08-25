@@ -10,6 +10,7 @@ import (
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/sqlite"
@@ -25,12 +26,14 @@ type blockingHeartbeatRepo struct {
 	port.DecisionJobRepository
 	started chan struct{}
 	release chan struct{}
+	done    chan struct{}
 	once    sync.Once
 }
 
 func (r *blockingHeartbeatRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
 	r.once.Do(func() { close(r.started) })
 	<-r.release
+	close(r.done)
 	return nil
 }
 
@@ -124,6 +127,7 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 		DecisionJobRepository: baseJobs,
 		started:               make(chan struct{}),
 		release:               make(chan struct{}),
+		done:                  make(chan struct{}),
 	}
 	defer func() {
 		select {
@@ -149,6 +153,11 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 		t.Fatal("blocked heartbeat did not cancel the attempt at lease expiry")
 	}
 	close(jobs.release)
+	select {
+	case <-jobs.done:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat I/O worker did not exit after release")
+	}
 }
 
 func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
@@ -156,9 +165,10 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &markSucceededErrorRepo{DecisionJobRepository: baseJobs, err: errors.New("storage unavailable")}
 	orch := &successThenObserveCancellationOrchestrator{observed: make(chan struct{}), release: make(chan struct{})}
+	reg := metrics.New()
 	defer close(orch.release)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, WorkerID: "success-error", MaxAttempts: 2,
+		JobRepo: jobs, WorkerID: "success-error", MaxAttempts: 2, Metrics: reg,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-success-error"}); err != nil {
 		t.Fatalf("start: %v", err)
@@ -170,6 +180,9 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	}
 	if calls := jobs.markFaileds.Load(); calls != 0 {
 		t.Fatalf("MarkSucceeded error retried as failure %d times", calls)
+	}
+	if completed, failed := reg.RunsCompleted.Load(), reg.RunsFailed.Load(); completed != 0 || failed != 1 {
+		t.Fatalf("MarkSucceeded error metrics completed=%d failed=%d, want 0/1", completed, failed)
 	}
 	job, err := baseJobs.GetByCase(context.Background(), "case-success-error")
 	if err != nil || job.Status != entity.DecisionJobRunning {

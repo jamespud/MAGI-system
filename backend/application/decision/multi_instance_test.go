@@ -60,6 +60,12 @@ type failThenSucceedCaseOrchestrator struct {
 	calls    atomic.Int32
 }
 
+type rejectingRetryResetCaseRepo struct{ port.CaseRepository }
+
+func (rejectingRetryResetCaseRepo) UpdateStatusIfCurrent(context.Context, string, []entity.CaseStatus, entity.CaseStatus) (bool, error) {
+	return false, nil
+}
+
 func (o *failThenSucceedCaseOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
 	if o.calls.Add(1) == 1 {
 		writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter)
@@ -274,6 +280,37 @@ func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 	jobAfter, err := jobs.GetByCase(context.Background(), caseID)
 	if err != nil || jobAfter.Status != entity.DecisionJobPaused {
 		t.Fatalf("job after retry reset = %+v err=%v", jobAfter, err)
+	}
+}
+
+func TestRunManager_RetryResetFenceDoesNotLeaveClaimRunning(t *testing.T) {
+	db := openMultiDB(t)
+	repo := magi.NewRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	caseID := "case-retry-reset-rejected"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	job, err := jobs.Enqueue(context.Background(), caseID, 2)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
+	}
+	retryAt := time.Now().Add(-time.Millisecond)
+	if err := jobs.MarkFailed(context.Background(), job.ID, "previous-worker", "retry", &retryAt); err != nil {
+		t.Fatalf("seed retry: %v", err)
+	}
+	rm := decision.NewRunManager(&retryResetOrchestrator{}, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: rejectingRetryResetCaseRepo{CaseRepository: repo.CaseRepo()}, WorkerID: "rejected-reset", MaxAttempts: 2,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("start retry: %v", err)
+	}
+	jobAfter := waitJobStatus(t, jobs, caseID, entity.DecisionJobFailed)
+	if jobAfter.Status == entity.DecisionJobRunning {
+		t.Fatalf("rejected reset left job running: %+v", jobAfter)
 	}
 }
 

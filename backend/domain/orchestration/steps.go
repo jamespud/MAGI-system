@@ -260,6 +260,9 @@ func (o *Orchestrator) stepEvaluate(ctx context.Context, case_ *entity.DecisionC
 }
 
 func (o *Orchestrator) stepComplete(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
+	if err := o.confirmCurrentStatus(ctx, case_, entity.CaseStatusResolved); err != nil {
+		return "", false, err
+	}
 	// Persist the resolution here, after FinalReport (GeneratingReport) and
 	// Evaluation (Evaluating) are set. Persisting earlier would snapshot an
 	// empty FinalReport.
@@ -274,6 +277,9 @@ func (o *Orchestrator) stepComplete(ctx context.Context, case_ *entity.DecisionC
 }
 
 func (o *Orchestrator) stepDeadlock(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
+	if err := o.confirmCurrentStatus(ctx, case_, entity.CaseStatusDeadlocked); err != nil {
+		return "", false, err
+	}
 	// Deadlock is a legitimate terminal outcome, not a retryable failure:
 	// finish the run without an error so the durable worker marks it done.
 	o.publish(ctx, case_, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusDeadlocked), "outcome": "deadlocked", "round": st.Round})
