@@ -14,6 +14,7 @@ import (
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"gorm.io/gorm"
+	"time"
 )
 
 var _ a2asrv.RequestHandler = (*a2aapp.Handler)(nil)
@@ -211,6 +212,42 @@ func TestHandler_UnsupportedMethods(t *testing.T) {
 	}
 	if _, err := h.handler.GetExtendedAgentCard(ctx, &a2a.GetExtendedAgentCardRequest{}); !errors.Is(err, a2a.ErrExtendedCardNotConfigured) {
 		t.Fatalf("extended card = %v", err)
+	}
+}
+
+func TestHandler_SubscribeToTaskDelegatesToStream(t *testing.T) {
+	db := openSubmissionDB(t)
+	repo := magi.NewA2ASubmissionRepository(db)
+	broker := newTestEventBroker()
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	stream := a2aapp.NewDurableStreamProjector(repo, broker, broker, proj, 8, 10*time.Millisecond)
+	rm := decision.NewRunManager(newBlockingOrch())
+	svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), repo, rm, proj, 3)
+	handler := a2aapp.NewHandler(svc, repo, proj, a2aapp.CursorCodec{MaxPageSize: 100}, rm, stream)
+
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusResolved, succeeded())
+	seedResolution(t, db, "case-1")
+
+	var events []a2a.Event
+	for ev, err := range handler.SubscribeToTask(principalCtx(7), &a2a.SubscribeToTaskRequest{ID: "case-1"}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, ev)
+	}
+	if len(events) != 1 {
+		t.Fatalf("subscribe events = %d, want 1", len(events))
+	}
+	task, ok := events[0].(*a2a.Task)
+	if !ok || task.Status.State != a2a.TaskStateCompleted || len(task.Artifacts) != 2 {
+		t.Fatalf("subscribed snapshot = %#v", events[0])
+	}
+
+	for _, err := range handler.SubscribeToTask(principalCtx(8), &a2a.SubscribeToTaskRequest{ID: "case-1"}) {
+		if !errors.Is(err, a2a.ErrTaskNotFound) {
+			t.Fatalf("foreign subscribe error = %v, want ErrTaskNotFound", err)
+		}
+		break
 	}
 }
 

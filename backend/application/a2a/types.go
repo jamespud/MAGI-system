@@ -21,6 +21,9 @@ var (
 	// ErrContextContention means concurrent ContextID creation did not settle
 	// within the bounded transaction retry budget.
 	ErrContextContention = errors.New("a2a context creation contention")
+	// ErrStreamLimitExceeded means the principal already holds the configured
+	// number of active A2A streams.
+	ErrStreamLimitExceeded = errors.New("a2a stream limit exceeded")
 )
 
 type SubmissionState string
