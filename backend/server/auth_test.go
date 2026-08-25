@@ -62,6 +62,35 @@ func TestAuthMiddleware_DisabledAllowsOpen(t *testing.T) {
 	}
 }
 
+func TestAuth_WellKnownA2APathIsPublic(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.Auth(svc))
+	h.GET("/.well-known/agent-card.json", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	w := ut.PerformRequest(h.Engine, "GET", "/.well-known/agent-card.json", nil)
+	if w.Code != 200 {
+		t.Fatalf("well-known path must be public, got %d", w.Code)
+	}
+}
+
+func TestAuth_A2ABasePathRequiresToken(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.Auth(svc))
+	h.GET("/a2a/tasks", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	if w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil); w.Code != 401 {
+		t.Fatalf("/a2a without token = %d, want 401", w.Code)
+	}
+	w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil, ut.Header{Key: "X-API-Key", Value: "tok-1"})
+	if w.Code != 200 {
+		t.Fatalf("/a2a with token = %d, want 200", w.Code)
+	}
+}
+
 func TestRequireAnyRole_GrantsListedRolesAndRejectsOthers(t *testing.T) {
 	svc := auth.NewService(true, []auth.KeySpec{
 		{Name: "admin", Key: "tok-admin", UserID: 1, Role: "admin"},

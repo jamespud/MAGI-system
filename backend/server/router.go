@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/cloudwego/hertz/pkg/app"
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"go.opentelemetry.io/otel/sdk/trace"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/jamespud/magi/backend/application/tool"
 	"github.com/jamespud/magi/backend/application/users"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/server/a2a"
 	"github.com/jamespud/magi/backend/server/handler"
 )
 
@@ -70,6 +72,10 @@ type RouteDeps struct {
 	MaxCostUSDPerUser float64
 	// PromptRepo backs the admin prompt registry (P2 D12).
 	PromptRepo port.PromptRepository
+	// A2A mounts the optional A2A server when non-nil.
+	A2A *a2atransport.MountDeps
+	// A2ARateLimit uses a separate bucket so streams do not consume /api/v1 quota.
+	A2ARateLimit RateLimitConfig
 }
 
 // RegisterRoutesWithDeps registers all HTTP routes with injected services.
@@ -266,5 +272,10 @@ func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
 		v1.GET("/cases/:id/export", amw, deps.Export.Case)
 		v1.GET("/memory/export", amw, deps.Export.Memory)
 		v1.GET("/evaluation/:id/export", deps.Export.Evaluation)
+	}
+
+	if deps.A2A != nil {
+		deps.A2A.Middlewares = []app.HandlerFunc{RateLimit(deps.A2ARateLimit)}
+		a2atransport.Mount(h, *deps.A2A)
 	}
 }

@@ -18,6 +18,9 @@ var publicPaths = map[string]bool{
 	"/health": true, "/ready": true, "/version": true,
 	"/openapi.json": true, "/metrics": true,
 	"/auth/oidc/login": true, "/auth/oidc/callback": true, "/auth/register": true,
+	// A2A discovery is public; the /a2a base path itself is intentionally NOT
+	// exempt so every protocol operation still requires authentication.
+	"/.well-known/agent-card.json": true,
 }
 
 func Auth(authSvc *auth.Service) app.HandlerFunc {
