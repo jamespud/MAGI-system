@@ -521,7 +521,7 @@ a2a:
 - `base_path` 必须与 Agent Card 声明一致；
 - 轮询间隔设下限，防止错误配置压垮数据库；
 - bootstrap 通过 Fx 装配 A2A repositories、services、handler 和 lifecycle recovery；
-- Hertz 使用现有 `adaptor.HertzHandler` 挂载官方 SDK 的 `net/http.Handler`；
+- Hertz 使用内置 `github.com/cloudwego/hertz/pkg/common/adaptor` 的 `adaptor.HertzHandler` 挂载官方 SDK 的 `net/http.Handler`；
 - nginx 对 `/a2a` SSE 关闭 buffering，并配置长读超时和禁用响应缓存。
 
 ## 16. 可观测性
