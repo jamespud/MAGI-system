@@ -184,6 +184,46 @@ docs/superpowers/      # specs + implementation plans
 | `GET`  | `/api/v1/cases/:id/events` | Event stream (for replay/audit) |
 | `GET`  | `/api/v1/cases/:id/stream` | SSE: live progress + historical catch-up |
 
+## A2A Agent Protocol (inbound)
+
+MAGI ships an inbound A2A v1.0 server that projects each DecisionCase as a
+tenant-scoped Task over HTTP+JSON and SSE. It is **disabled by default**; enable
+it deliberately after applying the migrations:
+
+```yaml
+a2a:
+  enabled: true
+  public_url: "https://magi.example"   # REQUIRED HTTPS URL in production
+  base_path: "/a2a"                    # configurable, defaults to /a2a
+```
+
+Enablement checklist:
+
+- Apply `magi_s16_event_sequence.sql` during an event-writer maintenance window
+  (nullable seq backfill, cursor init, NOT NULL + unique contract), then
+  `magi_s17_a2a_submission.sql` before enabling A2A.
+- Deploy with `a2a.enabled: false` first, then flip one canary replica.
+- The Agent Card is served at `https://magi.example/.well-known/agent-card.json`
+  and is public. Every `/a2a/*` protocol operation requires auth via the same
+  `Authorization: Bearer <token>` or `X-API-Key: <key>` headers as `/api/v1`.
+- `/a2a/*` uses a separate rate-limit bucket; nginx buffers are disabled for the
+  long-lived SSE streams.
+
+Official-client discovery example:
+
+```go
+resp, _ := http.Get("https://magi.example/.well-known/agent-card.json")
+card := new(a2a.AgentCard)
+json.NewDecoder(resp.Body).Decode(card)
+client, _ := a2aclient.NewFromCard(ctx, card,
+	a2aclient.WithCallInterceptors(&a2aclient.AuthInterceptor{Service: store}),
+)
+```
+
+Send/Get/List/Stream/Subscribe/Cancel all map to MAGI's durable submission and
+decision lifecycle; unsupported push and extended-card operations return the
+standard A2A errors.
+
 ## Commands
 
 All run from the repo root.
