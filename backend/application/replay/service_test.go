@@ -44,6 +44,21 @@ func TestReplayService_Replay(t *testing.T) {
 	}
 }
 
+func TestReplayService_ReplayUsesDurableSequence(t *testing.T) {
+	base := time.Now()
+	repo := &stubEventRepo{events: []*entity.MagiEvent{
+		{ID: "seq-2", CaseID: "c1", Seq: 2, Timestamp: base},
+		{ID: "seq-1", CaseID: "c1", Seq: 1, Timestamp: base.Add(time.Second)},
+	}}
+	events, err := replay.NewService(repo).Replay(context.Background(), "c1")
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if got := events[0].ID + "," + events[1].ID; got != "seq-1,seq-2" {
+		t.Fatalf("order = %q, want seq-1,seq-2", got)
+	}
+}
+
 func TestReplayService_Timeline(t *testing.T) {
 	repo := &stubEventRepo{events: []*entity.MagiEvent{}}
 	svc := replay.NewService(repo)

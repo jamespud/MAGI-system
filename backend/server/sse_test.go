@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,17 +21,28 @@ import (
 func TestSSEReplay_DedupsAndTracksWatermark(t *testing.T) {
 	base := time.Now()
 	r := newSSEReplay([]*entity.MagiEvent{
-		{ID: "e1", CaseID: "c1", Timestamp: base},
-		{ID: "e2", CaseID: "c1", Timestamp: base.Add(1 * time.Second)},
+		{ID: "e1", CaseID: "c1", Seq: 1, Timestamp: base},
+		{ID: "e2", CaseID: "c1", Seq: 2, Timestamp: base.Add(1 * time.Second)},
 	})
-	if !r.isNew(&entity.MagiEvent{ID: "e3"}) {
+	if !r.isNew(&entity.MagiEvent{ID: "e3", Seq: 3}) {
 		t.Fatal("e3 should be new")
 	}
 	if r.isNew(&entity.MagiEvent{ID: "e1"}) {
 		t.Fatal("e1 should be marked delivered")
 	}
-	if r.lastTS != base.Add(1*time.Second) {
-		t.Fatalf("watermark = %v, want %v", r.lastTS, base.Add(time.Second))
+	if r.lastSeq != 2 {
+		t.Fatalf("watermark = %d, want 2", r.lastSeq)
+	}
+}
+
+func TestParseLastEventID_RequiresUnsignedSequence(t *testing.T) {
+	if got, err := parseLastEventID("7"); err != nil || got != 7 {
+		t.Fatalf("parse 7 = (%d, %v), want (7, nil)", got, err)
+	}
+	for _, raw := range []string{"-1", "seven", "7.0"} {
+		if _, err := parseLastEventID(raw); err == nil {
+			t.Fatalf("parse %q should fail", raw)
+		}
 	}
 }
 
@@ -63,16 +75,7 @@ func (f *fakeEventRepo) ListByCase(ctx context.Context, caseID string) ([]*entit
 	return f.snapshot(), nil
 }
 func (f *fakeEventRepo) ListAfter(ctx context.Context, caseID string, after time.Time) ([]*entity.MagiEvent, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	var out []*entity.MagiEvent
-	for _, e := range f.snapshot() {
-		if !e.Timestamp.Before(after) {
-			out = append(out, e)
-		}
-	}
-	return out, nil
+	return nil, errors.New("timestamp-based event replay is unsupported")
 }
 func (f *fakeEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error) {
 	if f.listErr != nil {
@@ -90,14 +93,56 @@ func (f *fakeEventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSe
 	return out, nil
 }
 
+func TestPollOnce_UsesSequenceWatermark(t *testing.T) {
+	repo := &fakeEventRepo{}
+	base := time.Now()
+	repo.setEvents([]*entity.MagiEvent{
+		// Deliberately make timestamps disagree with durable sequence order.
+		{ID: "8", CaseID: "c1", Seq: 8, Timestamp: base.Add(2 * time.Second)},
+		{ID: "9", CaseID: "c1", Seq: 9, Timestamp: base},
+		{ID: "10", CaseID: "c1", Seq: 10, Timestamp: base.Add(time.Second)},
+	})
+	replay := newSSEReplay([]*entity.MagiEvent{{ID: "7", CaseID: "c1", Seq: 7}})
+
+	var emitted []string
+	if err := pollOnce(context.Background(), repo, "c1", replay, func(ev *entity.MagiEvent) error {
+		emitted = append(emitted, ev.ID)
+		return nil
+	}); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if got, want := strings.Join(emitted, ","), "8,9,10"; got != want {
+		t.Fatalf("emitted = %q, want %q", got, want)
+	}
+}
+
+func TestPollOnce_DedupsBrokerAndPersistedEvent(t *testing.T) {
+	repo := &fakeEventRepo{}
+	repo.setEvents([]*entity.MagiEvent{{ID: "8", CaseID: "c1", Seq: 8}})
+	replay := newSSEReplay([]*entity.MagiEvent{{ID: "7", CaseID: "c1", Seq: 7}})
+	var emitted []string
+	if err := pollOnce(context.Background(), repo, "c1", replay, func(ev *entity.MagiEvent) error {
+		emitted = append(emitted, ev.ID)
+		return nil
+	}); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if replay.isNew(&entity.MagiEvent{ID: "8", CaseID: "c1", Seq: 8}) {
+		t.Fatal("persisted event should be suppressed when it arrives from broker")
+	}
+	if got := strings.Join(emitted, ","); got != "8" {
+		t.Fatalf("emitted = %q, want 8", got)
+	}
+}
+
 func TestPollOnce_ForwardsCrossInstanceEvents(t *testing.T) {
 	repo := &fakeEventRepo{}
 	base := time.Now()
 	// Events that existed before the connection: history is replayed on
 	// connect, so the poller must not re-emit them.
 	repo.setEvents([]*entity.MagiEvent{
-		{ID: "old1", CaseID: "c1", Timestamp: base},
-		{ID: "old2", CaseID: "c1", Timestamp: base.Add(time.Second)},
+		{ID: "old1", CaseID: "c1", Seq: 1, Timestamp: base},
+		{ID: "old2", CaseID: "c1", Seq: 2, Timestamp: base.Add(time.Second)},
 	})
 	replay := newSSEReplay(repo.snapshot())
 
@@ -108,8 +153,8 @@ func TestPollOnce_ForwardsCrossInstanceEvents(t *testing.T) {
 	}
 
 	// A remote instance persists new events after the subscriber connected.
-	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)})
-	repo.addEvent(&entity.MagiEvent{ID: "remote2", CaseID: "c1", Timestamp: base.Add(3 * time.Second)})
+	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Seq: 3, Timestamp: base.Add(2 * time.Second)})
+	repo.addEvent(&entity.MagiEvent{ID: "remote2", CaseID: "c1", Seq: 4, Timestamp: base.Add(3 * time.Second)})
 
 	if err := pollOnce(context.Background(), repo, "c1", replay, emit); err != nil {
 		t.Fatalf("poll: %v", err)
@@ -177,7 +222,7 @@ func TestSSE_CrossInstancePollerDeliversRemoteEvents(t *testing.T) {
 	repo := &fakeEventRepo{}
 	base := time.Now()
 	repo.setEvents([]*entity.MagiEvent{
-		{ID: "hist1", CaseID: "c1", Timestamp: base},
+		{ID: "hist1", CaseID: "c1", Seq: 1, Timestamp: base},
 	})
 
 	baseURL := sseHTTPHarness(t, broker, repo)
@@ -229,19 +274,63 @@ func TestSSE_CrossInstancePollerDeliversRemoteEvents(t *testing.T) {
 		return false
 	}
 
-	if !waitID("hist1") {
+	if !waitID("1") {
 		t.Fatalf("history event not delivered; got %v", got)
 	}
 
 	// Now simulate another instance: publish a local event through the broker
 	// AND persist a remote event only visible via the DB poller.
-	broker.Publish(context.Background(), entity.MagiEvent{ID: "local1", CaseID: "c1", Timestamp: base.Add(time.Second)})
-	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Timestamp: base.Add(2 * time.Second)})
+	broker.Publish(context.Background(), entity.MagiEvent{ID: "local1", CaseID: "c1", Seq: 2, Timestamp: base.Add(time.Second)})
+	repo.addEvent(&entity.MagiEvent{ID: "remote1", CaseID: "c1", Seq: 3, Timestamp: base.Add(2 * time.Second)})
 
-	if !waitID("local1") {
+	if !waitID("2") {
 		t.Fatalf("local event not delivered; got %v", got)
 	}
-	if !waitID("remote1") {
+	if !waitID("3") {
 		t.Fatalf("remote (cross-instance) event not delivered via poller; got %v", got)
+	}
+}
+
+func TestSSE_LastEventIDResumesBySequence(t *testing.T) {
+	browser := NewEventBroker()
+	repo := &fakeEventRepo{}
+	base := time.Now()
+	var history []*entity.MagiEvent
+	for seq := uint64(1); seq <= 10; seq++ {
+		history = append(history, &entity.MagiEvent{
+			ID: strconv.FormatUint(seq, 10), CaseID: "c1", Seq: seq,
+			Timestamp: base.Add(time.Duration(10-seq) * time.Second),
+		})
+	}
+	repo.setEvents(history)
+	baseURL := sseHTTPHarness(t, browser, repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/cases/c1/stream", nil)
+	req.Header.Set("Last-Event-ID", "7")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	var got []string
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "id:") {
+			got = append(got, strings.TrimSpace(strings.TrimPrefix(line, "id:")))
+			if len(got) == 3 {
+				break
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan stream: %v", err)
+	}
+	if got := strings.Join(got, ","); got != "8,9,10" {
+		t.Fatalf("replayed IDs = %q, want %q", got, "8,9,10")
 	}
 }

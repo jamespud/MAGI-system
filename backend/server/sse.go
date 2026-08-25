@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -42,6 +45,11 @@ func SSEHandler(broker *EventBroker) func(ctx context.Context, c *app.RequestCon
 // in the local channel and in the polled history is delivered exactly once.
 func SSEHandlerWithHistory(broker *EventBroker, repo port.EventRepository, caseSvc handler.CaseGetter) func(ctx context.Context, c *app.RequestContext) {
 	return func(ctx context.Context, c *app.RequestContext) {
+		lastEventID, err := parseLastEventID(string(c.Request.Header.Peek("Last-Event-ID")))
+		if err != nil {
+			c.JSON(400, dto.ErrorResponse{Error: "invalid Last-Event-ID: " + err.Error()})
+			return
+		}
 		caseID := c.Param("id")
 		if caseSvc != nil {
 			case_, _ := caseSvc.Get(ctx, caseID)
@@ -55,18 +63,24 @@ func SSEHandlerWithHistory(broker *EventBroker, repo port.EventRepository, caseS
 		if repo == nil {
 			ch, history = broker.SubscribeWithReplay(caseID)
 		} else {
+			// Subscribe before reading durable history so events persisted between
+			// these operations are recovered by the sequence catch-up below.
 			ch = broker.Subscribe(caseID)
-			history, _ = repo.ListByCase(ctx, caseID)
 		}
 		defer broker.Unsubscribe(caseID, ch)
 
 		w := sse.NewStream(c)
-		replay := newSSEReplay(history)
-
-		for _, ev := range history {
-			if err := writeEvent(w, ev); err != nil {
-				return
+		replay := newSSEReplaySince(nil, lastEventID)
+		if repo == nil {
+			for _, ev := range history {
+				if !replay.forward(w, ev) {
+					return
+				}
 			}
+		} else if err := pollOnce(ctx, repo, caseID, replay, func(ev *entity.MagiEvent) error {
+			return writeEvent(w, ev)
+		}); err != nil {
+			return
 		}
 
 		// Cross-instance poller. A nil poll channel blocks forever in select,
@@ -85,7 +99,7 @@ func SSEHandlerWithHistory(broker *EventBroker, repo port.EventRepository, caseS
 				if !ok {
 					return
 				}
-				if !replay.forward(w, ev) {
+				if !forwardBrokerEvent(ctx, repo, caseID, replay, w, ev) {
 					return
 				}
 			case <-pollC:
@@ -105,19 +119,23 @@ func SSEHandlerWithHistory(broker *EventBroker, repo port.EventRepository, caseS
 // overlapping delivery sources (history, local channel, DB poller) never
 // send the same event twice, and tracks the watermark for ListAfter.
 type sseReplay struct {
-	sent   map[string]struct{}
-	lastTS time.Time
+	sent    map[string]struct{}
+	lastSeq uint64
 }
 
 func newSSEReplay(history []*entity.MagiEvent) *sseReplay {
-	r := &sseReplay{sent: make(map[string]struct{}, len(history))}
+	return newSSEReplaySince(history, 0)
+}
+
+func newSSEReplaySince(history []*entity.MagiEvent, lastSeq uint64) *sseReplay {
+	r := &sseReplay{sent: make(map[string]struct{}, len(history)), lastSeq: lastSeq}
 	for _, ev := range history {
 		r.record(ev)
 	}
 	return r
 }
 
-// record marks an event as delivered and advances the timestamp watermark.
+// record marks an event as delivered and advances the sequence watermark.
 func (r *sseReplay) record(ev *entity.MagiEvent) {
 	if ev == nil {
 		return
@@ -125,8 +143,8 @@ func (r *sseReplay) record(ev *entity.MagiEvent) {
 	if ev.ID != "" {
 		r.sent[ev.ID] = struct{}{}
 	}
-	if ev.Timestamp.After(r.lastTS) {
-		r.lastTS = ev.Timestamp
+	if ev.Seq > r.lastSeq {
+		r.lastSeq = ev.Seq
 	}
 }
 
@@ -136,7 +154,10 @@ func (r *sseReplay) isNew(ev *entity.MagiEvent) bool {
 		return false
 	}
 	if ev.ID == "" {
-		return true
+		return ev.Seq == 0 || ev.Seq > r.lastSeq
+	}
+	if ev.Seq > 0 && ev.Seq <= r.lastSeq {
+		return false
 	}
 	_, dup := r.sent[ev.ID]
 	return !dup
@@ -152,25 +173,59 @@ func (r *sseReplay) forward(w *sse.Stream, ev *entity.MagiEvent) bool {
 	return writeEvent(w, ev) == nil
 }
 
-// pollOnce fetches events persisted since the watermark and emits each new
-// one via emit. It advances the watermark as it goes. Transient store errors
-// are returned to the caller, which retries on the next poll tick.
+// pollOnce fetches all pages persisted after the sequence watermark and emits
+// each new one via emit. It advances the watermark as it goes.
 func pollOnce(ctx context.Context, repo port.EventRepository, caseID string, replay *sseReplay, emit func(*entity.MagiEvent) error) error {
-	polled, err := repo.ListAfter(ctx, caseID, replay.lastTS)
-	if err != nil {
-		return err
-	}
-	for _, ev := range polled {
-		if !replay.isNew(ev) {
-			replay.record(ev)
-			continue
-		}
-		replay.record(ev)
-		if err := emit(ev); err != nil {
+	for {
+		polled, err := repo.ListAfterSeq(ctx, caseID, replay.lastSeq, 500)
+		if err != nil {
 			return err
 		}
+		for _, ev := range polled {
+			if !replay.isNew(ev) {
+				replay.record(ev)
+				continue
+			}
+			if err := emit(ev); err != nil {
+				return err
+			}
+			replay.record(ev)
+		}
+		if len(polled) < 500 {
+			return nil
+		}
 	}
-	return nil
+}
+
+func forwardBrokerEvent(ctx context.Context, repo port.EventRepository, caseID string, replay *sseReplay, w *sse.Stream, ev *entity.MagiEvent) bool {
+	if ev == nil || !replay.isNew(ev) {
+		return true
+	}
+	if repo != nil && ev.Seq > replay.lastSeq+1 {
+		// A broker event arrived with a gap. Recover the missing durable range
+		// first; never emit the broker event out of sequence.
+		if err := pollOnce(ctx, repo, caseID, replay, func(missing *entity.MagiEvent) error {
+			return writeEvent(w, missing)
+		}); err != nil {
+			return true
+		}
+		if ev.Seq > replay.lastSeq+1 {
+			return true
+		}
+	}
+	return replay.forward(w, ev)
+}
+
+func parseLastEventID(raw string) (uint64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	seq, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("must be an unsigned sequence")
+	}
+	return seq, nil
 }
 
 func writeEvent(w *sse.Stream, ev *entity.MagiEvent) error {
@@ -184,7 +239,7 @@ func writeEvent(w *sse.Stream, ev *entity.MagiEvent) error {
 	// without `event:` dispatches "message", which is what the frontend
 	// subscribes to.
 	return w.Publish(&sse.Event{
-		ID:   ev.ID,
+		ID:   strconv.FormatUint(ev.Seq, 10),
 		Data: data,
 	})
 }

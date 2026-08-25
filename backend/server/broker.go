@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +96,7 @@ func (b *EventBroker) SubscribeWithReplay(caseID string) (chan *entity.MagiEvent
 	stored := b.stored[caseID]
 	history := make([]*entity.MagiEvent, len(stored))
 	copy(history, stored)
+	sort.SliceStable(history, func(i, j int) bool { return history[i].Seq < history[j].Seq })
 	return ch, history
 }
 
@@ -133,6 +135,7 @@ func (b *EventBroker) ListByCase(ctx context.Context, caseID string) ([]*entity.
 	events := b.stored[caseID]
 	out := make([]*entity.MagiEvent, len(events))
 	copy(out, events)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
 	return out, nil
 }
 
@@ -145,6 +148,7 @@ func (b *EventBroker) ListAfter(ctx context.Context, caseID string, after time.T
 			out = append(out, e)
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp.Before(out[j].Timestamp) })
 	return out, nil
 }
 
@@ -158,10 +162,11 @@ func (b *EventBroker) ListAfterSeq(ctx context.Context, caseID string, afterSeq 
 	for _, e := range b.stored[caseID] {
 		if e.Seq > afterSeq {
 			out = append(out, e)
-			if len(out) == limit {
-				break
-			}
 		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

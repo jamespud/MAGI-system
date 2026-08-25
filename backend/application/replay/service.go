@@ -18,7 +18,7 @@ func NewService(repo port.EventRepository) *Service {
 	return &Service{repo: repo}
 }
 
-// Replay returns all events for a case, sorted by timestamp (delegates to domain).
+// Replay returns all events for a case in durable sequence order (delegates to domain).
 func (s *Service) Replay(ctx context.Context, caseID string) ([]*entity.MagiEvent, error) {
 	return domainservice.Replay(ctx, caseID, s.repo)
 }

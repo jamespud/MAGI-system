@@ -55,3 +55,19 @@ func TestReplay_SortedByTimestamp(t *testing.T) {
 		t.Fatalf("order: %s %s %s", events[0].ID, events[1].ID, events[2].ID)
 	}
 }
+
+func TestReplay_SortedByDurableSequence(t *testing.T) {
+	repo := &stubEventRepo{events: make(map[string][]*entity.MagiEvent)}
+	base := time.Now()
+	repo.events["c1"] = []*entity.MagiEvent{
+		{ID: "seq-2", CaseID: "c1", Seq: 2, Timestamp: base},
+		{ID: "seq-1", CaseID: "c1", Seq: 1, Timestamp: base.Add(time.Second)},
+	}
+	events, err := service.Replay(context.Background(), "c1", repo)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if got := events[0].ID + "," + events[1].ID; got != "seq-1,seq-2" {
+		t.Fatalf("order = %q, want seq-1,seq-2", got)
+	}
+}
