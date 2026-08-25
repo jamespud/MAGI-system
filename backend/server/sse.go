@@ -197,6 +197,34 @@ func pollOnce(ctx context.Context, repo port.EventRepository, caseID string, rep
 	}
 }
 
+// pollBeforeSeq catches up only the durable events before upperSeq. A broker
+// event currently being handled must remain the next candidate for emission;
+// otherwise a DB page containing later events can move the watermark past it.
+func pollBeforeSeq(ctx context.Context, repo port.EventRepository, caseID string, replay *sseReplay, upperSeq uint64, emit func(*entity.MagiEvent) error) error {
+	for {
+		polled, err := repo.ListAfterSeq(ctx, caseID, replay.lastSeq, 500)
+		if err != nil {
+			return err
+		}
+		for _, ev := range polled {
+			if ev.Seq >= upperSeq {
+				return nil
+			}
+			if !replay.isNew(ev) {
+				replay.record(ev)
+				continue
+			}
+			if err := emit(ev); err != nil {
+				return err
+			}
+			replay.record(ev)
+		}
+		if len(polled) < 500 {
+			return nil
+		}
+	}
+}
+
 func forwardBrokerEvent(ctx context.Context, repo port.EventRepository, caseID string, replay *sseReplay, w *sse.Stream, ev *entity.MagiEvent) bool {
 	if ev == nil || !replay.isNew(ev) {
 		return true
@@ -204,13 +232,13 @@ func forwardBrokerEvent(ctx context.Context, repo port.EventRepository, caseID s
 	if repo != nil && ev.Seq > replay.lastSeq+1 {
 		// A broker event arrived with a gap. Recover the missing durable range
 		// first; never emit the broker event out of sequence.
-		if err := pollOnce(ctx, repo, caseID, replay, func(missing *entity.MagiEvent) error {
+		if err := pollBeforeSeq(ctx, repo, caseID, replay, ev.Seq, func(missing *entity.MagiEvent) error {
 			return writeEvent(w, missing)
 		}); err != nil {
-			return true
+			return false
 		}
 		if ev.Seq > replay.lastSeq+1 {
-			return true
+			return false
 		}
 	}
 	return replay.forward(w, ev)

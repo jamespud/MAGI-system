@@ -139,6 +139,8 @@ type ResolutionRepository interface {
 type EventRepository interface {
 	Create(ctx context.Context, e *entity.MagiEvent) error
 	ListByCase(ctx context.Context, caseID string) ([]*entity.MagiEvent, error)
+	// ListAfterSeq returns events with Seq > afterSeq in ascending Seq order,
+	// bounded by limit.
 	ListAfterSeq(ctx context.Context, caseID string, afterSeq uint64, limit int) ([]*entity.MagiEvent, error)
 	// ListAfter is retained for compatibility with non-SSE callers. SSE replay
 	// uses ListAfterSeq so durable sequence order is authoritative.

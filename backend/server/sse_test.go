@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/hertz-contrib/sse"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -51,6 +54,11 @@ type fakeEventRepo struct {
 	events  []*entity.MagiEvent
 	listErr error
 }
+
+type captureExtWriter struct{ bytes.Buffer }
+
+func (w *captureExtWriter) Flush() error    { return nil }
+func (w *captureExtWriter) Finalize() error { return nil }
 
 func (f *fakeEventRepo) setEvents(events []*entity.MagiEvent) {
 	f.mu.Lock()
@@ -132,6 +140,38 @@ func TestPollOnce_DedupsBrokerAndPersistedEvent(t *testing.T) {
 	}
 	if got := strings.Join(emitted, ","); got != "8" {
 		t.Fatalf("emitted = %q, want 8", got)
+	}
+}
+
+func TestForwardBrokerEvent_DoesNotCatchUpPastBrokerEvent(t *testing.T) {
+	repo := &fakeEventRepo{}
+	repo.setEvents([]*entity.MagiEvent{
+		{ID: "8", CaseID: "c1", Seq: 8},
+		{ID: "9", CaseID: "c1", Seq: 9},
+		{ID: "11", CaseID: "c1", Seq: 11},
+	})
+	replay := newSSEReplay([]*entity.MagiEvent{{ID: "7", CaseID: "c1", Seq: 7}})
+	writer := &captureExtWriter{}
+	stream := sse.NewStreamWithWriter(app.NewContext(0), writer)
+	if !forwardBrokerEvent(context.Background(), repo, "c1", replay, stream, &entity.MagiEvent{ID: "10", CaseID: "c1", Seq: 10}) {
+		t.Fatal("forward should remain open")
+	}
+	var got []string
+	for _, line := range strings.Split(writer.String(), "\n") {
+		if strings.HasPrefix(line, "id:") {
+			got = append(got, strings.TrimSpace(strings.TrimPrefix(line, "id:")))
+		}
+	}
+	if got := strings.Join(got, ","); got != "8,9,10" {
+		t.Fatalf("emitted IDs = %q, want 8,9,10", got)
+	}
+}
+
+func TestForwardBrokerEvent_ClosesOnCatchUpError(t *testing.T) {
+	repo := &fakeEventRepo{listErr: errors.New("store unavailable")}
+	replay := newSSEReplay([]*entity.MagiEvent{{ID: "7", CaseID: "c1", Seq: 7}})
+	if forwardBrokerEvent(context.Background(), repo, "c1", replay, nil, &entity.MagiEvent{ID: "10", CaseID: "c1", Seq: 10}) {
+		t.Fatal("catch-up error must not consume the broker event")
 	}
 }
 
