@@ -5,10 +5,74 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jamespud/magi/backend/bootstrap"
 	"github.com/jamespud/magi/backend/domain/entity"
 )
+
+func loadA2ATestConfig(t *testing.T, body string) (*bootstrap.Config, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "a2a.yaml")
+	base := "model:\n  api_key: k\n  model_name: m\nmagi:\n  max_debate_rounds: 1\n  max_steps: 1\n  timeout_seconds: 1\n  call_timeout_seconds: 1\n"
+	if err := os.WriteFile(path, []byte(base+body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return bootstrap.LoadConfig(path)
+}
+
+func TestLoadConfig_A2ADefaults(t *testing.T) {
+	cfg, err := loadA2ATestConfig(t, "a2a: {}\n")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.A2A.Enabled {
+		t.Fatal("A2A should be disabled by default")
+	}
+	if cfg.A2A.BasePath != "/a2a" {
+		t.Errorf("BasePath = %q, want /a2a", cfg.A2A.BasePath)
+	}
+	if cfg.A2A.MaxMessageBytes != 65536 {
+		t.Errorf("MaxMessageBytes = %d, want 65536", cfg.A2A.MaxMessageBytes)
+	}
+	if cfg.A2A.MaxParts != 16 {
+		t.Errorf("MaxParts = %d, want 16", cfg.A2A.MaxParts)
+	}
+	if cfg.A2A.MaxPageSize != 100 {
+		t.Errorf("MaxPageSize = %d, want 100", cfg.A2A.MaxPageSize)
+	}
+	if cfg.A2A.MaxStreamsPerUser != 8 {
+		t.Errorf("MaxStreamsPerUser = %d, want 8", cfg.A2A.MaxStreamsPerUser)
+	}
+	if cfg.A2A.CrossInstancePollInterval != 2*time.Second {
+		t.Errorf("CrossInstancePollInterval = %s, want 2s", cfg.A2A.CrossInstancePollInterval)
+	}
+}
+
+func TestLoadConfig_A2AProductionRequiresHTTPSPublicURL(t *testing.T) {
+	t.Setenv("MAGI_ENV", "production")
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "missing public URL"},
+		{name: "non HTTPS public URL", url: "http://a2a.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "a2a:\n  enabled: true\n"
+			if tc.url != "" {
+				body += "  public_url: " + tc.url + "\n"
+			}
+			cfg, err := loadA2ATestConfig(t, body)
+			if err != nil {
+				t.Fatalf("load config: %v", err)
+			}
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected production A2A public URL validation error")
+			}
+		})
+	}
+}
 
 func TestConfigValidate_ExamplePasses(t *testing.T) {
 	cfg, err := bootstrap.LoadConfig("../conf/magi.yaml.example")

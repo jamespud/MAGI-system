@@ -5,12 +5,14 @@ go 1.25.0
 replace github.com/apache/thrift => github.com/apache/thrift v0.13.0
 
 require (
+	github.com/a2aproject/a2a-go/v2 v2.5.0
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.4.8
 
 	// coze-studio 依赖 (adapter 层引用 crossdomain/bizpkg/infra)
 	github.com/coze-dev/coze-studio/backend v0.0.0-20260420092041-22275b1c2661
 	github.com/eino-contrib/jsonschema v1.0.0
+	github.com/hertz-contrib/adaptor v0.1.0
 	github.com/hertz-contrib/sse v0.1.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	gorm.io/driver/sqlite v1.4.3

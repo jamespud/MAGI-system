@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 // Config is the root YAML configuration for MAGI server.
 type Config struct {
 	Model ModelSpec `yaml:"model"`
+	A2A   A2AConfig `yaml:"a2a"`
 	Magi  struct {
 		MaxDebateRounds        int      `yaml:"max_debate_rounds"`
 		MaxSteps               int      `yaml:"max_steps"`
@@ -101,6 +104,54 @@ type Config struct {
 	ToolQuota     ToolQuotaConfig `yaml:"tool_quota"`
 	Commander     CommanderSpec   `yaml:"commander"`
 	Judge         JudgeSpec       `yaml:"judge"`
+}
+
+// A2AConfig configures the optional A2A server surface.
+type A2AConfig struct {
+	Enabled                   bool          `yaml:"enabled"`
+	PublicURL                 string        `yaml:"public_url"`
+	BasePath                  string        `yaml:"base_path"`
+	MaxMessageBytes           int           `yaml:"max_message_bytes"`
+	MaxParts                  int           `yaml:"max_parts"`
+	MaxPageSize               int           `yaml:"max_page_size"`
+	MaxStreamsPerUser         int           `yaml:"max_streams_per_user"`
+	CrossInstancePollInterval time.Duration `yaml:"cross_instance_poll_interval"`
+}
+
+// UnmarshalYAML accepts Go duration strings for the polling interval.
+func (c *A2AConfig) UnmarshalYAML(value *yaml.Node) error {
+	var aux struct {
+		Enabled                   bool   `yaml:"enabled"`
+		PublicURL                 string `yaml:"public_url"`
+		BasePath                  string `yaml:"base_path"`
+		MaxMessageBytes           int    `yaml:"max_message_bytes"`
+		MaxParts                  int    `yaml:"max_parts"`
+		MaxPageSize               int    `yaml:"max_page_size"`
+		MaxStreamsPerUser         int    `yaml:"max_streams_per_user"`
+		CrossInstancePollInterval string `yaml:"cross_instance_poll_interval"`
+	}
+	if err := value.Decode(&aux); err != nil {
+		return err
+	}
+	pollInterval := time.Duration(0)
+	if strings.TrimSpace(aux.CrossInstancePollInterval) != "" {
+		var err error
+		pollInterval, err = time.ParseDuration(strings.TrimSpace(aux.CrossInstancePollInterval))
+		if err != nil {
+			return fmt.Errorf("a2a.cross_instance_poll_interval: %w", err)
+		}
+	}
+	*c = A2AConfig{
+		Enabled:                   aux.Enabled,
+		PublicURL:                 aux.PublicURL,
+		BasePath:                  aux.BasePath,
+		MaxMessageBytes:           aux.MaxMessageBytes,
+		MaxParts:                  aux.MaxParts,
+		MaxPageSize:               aux.MaxPageSize,
+		MaxStreamsPerUser:         aux.MaxStreamsPerUser,
+		CrossInstancePollInterval: pollInterval,
+	}
+	return nil
 }
 
 // DockerCodeRunnerConfig enables the optional Docker sandbox runtime as an
@@ -411,6 +462,24 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Model.PricePerMOutputUSD == 0 {
 		cfg.Model.PricePerMOutputUSD = 10
+	}
+	if cfg.A2A.BasePath == "" {
+		cfg.A2A.BasePath = "/a2a"
+	}
+	if cfg.A2A.MaxMessageBytes == 0 {
+		cfg.A2A.MaxMessageBytes = 65536
+	}
+	if cfg.A2A.MaxParts == 0 {
+		cfg.A2A.MaxParts = 16
+	}
+	if cfg.A2A.MaxPageSize == 0 {
+		cfg.A2A.MaxPageSize = 100
+	}
+	if cfg.A2A.MaxStreamsPerUser == 0 {
+		cfg.A2A.MaxStreamsPerUser = 8
+	}
+	if cfg.A2A.CrossInstancePollInterval == 0 {
+		cfg.A2A.CrossInstancePollInterval = 2 * time.Second
 	}
 
 	if cfg.RAG.TopK == 0 {
@@ -791,6 +860,36 @@ func validateModelOverride(scope string, m *ModelSpec) error {
 	return validateModelProviders(scope+".model", m.Providers)
 }
 
+func validateA2A(cfg *A2AConfig) error {
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+
+	rawPath := strings.TrimSpace(cfg.BasePath)
+	cleanPath := path.Clean(rawPath)
+	if rawPath == "" || cleanPath == "." || cleanPath == "/" {
+		return fmt.Errorf("a2a.base_path: must be a non-root absolute path")
+	}
+	if !strings.HasPrefix(cleanPath, "/") {
+		return fmt.Errorf("a2a.base_path: must be an absolute path")
+	}
+	if rawPath != cleanPath {
+		return fmt.Errorf("a2a.base_path: must not have a trailing slash or non-clean path")
+	}
+	if cfg.CrossInstancePollInterval < 250*time.Millisecond {
+		return fmt.Errorf("a2a.cross_instance_poll_interval: must be at least 250ms")
+	}
+
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("MAGI_ENV")), "production") {
+		publicURL := strings.TrimSpace(cfg.PublicURL)
+		u, err := url.Parse(publicURL)
+		if err != nil || !u.IsAbs() || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+			return fmt.Errorf("a2a.public_url: absolute HTTPS URL is required in production")
+		}
+	}
+	return nil
+}
+
 // ToConfig converts a MagiSpec to an entity.MagiConfig.
 func (s *MagiSpec) ToConfig(code string, cfg *Config) *entity.MagiConfig {
 	dims := make([]entity.UtilityDimension, len(s.Dimensions))
@@ -901,6 +1000,9 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 // Validate returns a descriptive error for invalid or incomplete
 // configurations, so the server fails fast instead of booting broken.
 func (c *Config) Validate() error {
+	if err := validateA2A(&c.A2A); err != nil {
+		return err
+	}
 	if c.Model.APIKey == "" && c.Model.ModelID == 0 {
 		return fmt.Errorf("model: set api_key+model_name (direct) or model_id (coze)")
 	}
