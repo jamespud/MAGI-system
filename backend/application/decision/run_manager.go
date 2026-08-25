@@ -382,7 +382,9 @@ func retryableCaseStatuses() []entity.CaseStatus {
 		entity.CaseStatusRevoting,
 		entity.CaseStatusMemoryIndexed,
 		entity.CaseStatusInsufficientEv,
-		entity.CaseStatusPaused,
+		// A retryable orchestration failure persists FAILED before the durable
+		// job is re-queued, so the next owner must CAS it back to DRAFT.
+		entity.CaseStatusFailed,
 	}
 }
 

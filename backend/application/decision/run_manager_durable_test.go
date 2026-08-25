@@ -30,12 +30,8 @@ type blockingHeartbeatRepo struct {
 
 func (r *blockingHeartbeatRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
 	r.once.Do(func() { close(r.started) })
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-r.release:
-		return nil
-	}
+	<-r.release
+	return nil
 }
 
 type markSucceededErrorRepo struct {
@@ -129,7 +125,13 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 		started:               make(chan struct{}),
 		release:               make(chan struct{}),
 	}
-	defer close(jobs.release)
+	defer func() {
+		select {
+		case <-jobs.release:
+		default:
+			close(jobs.release)
+		}
+	}()
 	lease := 30 * time.Millisecond
 	orch := &remoteCancelOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -146,6 +148,7 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 	case <-time.After(5 * lease):
 		t.Fatal("blocked heartbeat did not cancel the attempt at lease expiry")
 	}
+	close(jobs.release)
 }
 
 func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
