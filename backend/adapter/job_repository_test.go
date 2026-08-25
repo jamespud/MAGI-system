@@ -2,11 +2,13 @@ package magi_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -50,5 +52,40 @@ func TestDecisionJobRepository_LifecycleAndRetry(t *testing.T) {
 	final, err := repo.GetByCase(context.Background(), "case-1")
 	if err != nil || final.Status != entity.DecisionJobSucceeded {
 		t.Fatalf("final: job=%+v err=%v", final, err)
+	}
+}
+
+func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewDecisionJobRepository(db)
+	job, err := repo.Enqueue(context.Background(), "case-lease-loss", 1)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, ok, err := repo.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	if err := repo.Cancel(context.Background(), job.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	for name, mutate := range map[string]func() error{
+		"heartbeat": func() error {
+			return repo.Heartbeat(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute))
+		},
+		"succeeded": func() error { return repo.MarkSucceeded(context.Background(), job.ID, "worker-a") },
+		"failed":    func() error { return repo.MarkFailed(context.Background(), job.ID, "worker-a", "late", nil) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := mutate(); !errors.Is(err, port.ErrLeaseLost) {
+				t.Fatalf("error = %v, want ErrLeaseLost", err)
+			}
+		})
 	}
 }

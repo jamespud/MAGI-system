@@ -8,6 +8,7 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -25,6 +26,76 @@ func openMultiDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+type remoteCancelOrchestrator struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (o *remoteCancelOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	close(o.started)
+	<-ctx.Done()
+	close(o.cancelled)
+	return nil, context.Cause(ctx)
+}
+
+func TestRunManager_RemoteCancelStopsWorkerAndFencesLateTerminalWrite(t *testing.T) {
+	db := openMultiDB(t)
+	repo := magi.NewRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	caseID := "case-remote-cancel"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	lease := 30 * time.Millisecond
+	orch := &remoteCancelOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
+	rmB := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-b", LeaseDuration: lease, MaxAttempts: 1,
+	})
+	if err := rmB.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("start replica B: %v", err)
+	}
+	defer rmB.Cancel(caseID)
+	<-orch.started
+
+	job, err := jobs.GetByCase(context.Background(), caseID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if err := jobs.Cancel(context.Background(), job.ID); err != nil {
+		t.Fatalf("replica A cancel job: %v", err)
+	}
+	if err := repo.CaseRepo().UpdateStatus(context.Background(), caseID, entity.CaseStatusCancelled); err != nil {
+		t.Fatalf("replica A cancel case: %v", err)
+	}
+
+	select {
+	case <-orch.cancelled:
+	case <-time.After(5 * lease):
+		t.Fatal("remote worker did not stop after lease/status loss")
+	}
+
+	writer, ok := repo.CaseRepo().(port.ConditionalCaseStatusWriter)
+	if !ok {
+		t.Fatal("production case repository must provide conditional status writes")
+	}
+	updated, err := writer.UpdateStatusIfCurrent(context.Background(), caseID,
+		[]entity.CaseStatus{entity.CaseStatusEvaluating}, entity.CaseStatusResolved)
+	if err != nil {
+		t.Fatalf("late terminal write: %v", err)
+	}
+	if updated {
+		t.Fatal("late terminal write must not overwrite CANCELLED")
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status != entity.CaseStatusCancelled {
+		t.Fatalf("case after late write = %+v err=%v", caseAfter, err)
+	}
+	jobAfter, err := jobs.GetByCase(context.Background(), caseID)
+	if err != nil || jobAfter.Status != entity.DecisionJobCancelled {
+		t.Fatalf("job after late write = %+v err=%v", jobAfter, err)
+	}
 }
 
 func TestRunManager_DBLimitAcrossInstances(t *testing.T) {

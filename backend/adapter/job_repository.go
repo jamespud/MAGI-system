@@ -115,7 +115,7 @@ func (r *decisionJobRepo) Heartbeat(ctx context.Context, jobID, workerID string,
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("decision job: lease lost")
+		return fmt.Errorf("decision job: heartbeat: %w", port.ErrLeaseLost)
 	}
 	return nil
 }
@@ -128,7 +128,7 @@ func (r *decisionJobRepo) MarkSucceeded(ctx context.Context, jobID, workerID str
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("decision job: cannot mark succeeded")
+		return fmt.Errorf("decision job: mark succeeded: %w", port.ErrLeaseLost)
 	}
 	return nil
 }
@@ -148,7 +148,7 @@ func (r *decisionJobRepo) MarkFailed(ctx context.Context, jobID, workerID, lastE
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("decision job: cannot mark failed")
+		return fmt.Errorf("decision job: mark failed: %w", port.ErrLeaseLost)
 	}
 	return nil
 }

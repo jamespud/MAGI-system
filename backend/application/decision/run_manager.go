@@ -295,18 +295,26 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				_ = m.caseRepo.UpdateStatus(context.Background(), c.ID, entity.CaseStatusDraft)
 			}
 		}
-		stopHeartbeat := m.startHeartbeat(ctx, claimed.ID)
+		attemptCtx, attemptCancel := context.WithCancelCause(ctx)
+		stopHeartbeat := m.startHeartbeat(attemptCtx, attemptCancel, claimed.ID, leaseUntil)
 		runStart := time.Now()
 		m.metrics.RunStart()
 		m.metrics.RunStartForUser(userIDString(c.UserID))
-		_, runErr := m.orch.Orchestrate(ctx, c)
+		_, runErr := m.orch.Orchestrate(attemptCtx, c)
 		m.metrics.RunFinish(runErr == nil)
 		m.metrics.RunFinishForUser(userIDString(c.UserID))
 		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
 		stopHeartbeat()
 
 		if runErr == nil {
-			_ = m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID)
+			if err := m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID); err != nil {
+				if errors.Is(err, port.ErrLeaseLost) {
+					attemptCancel(port.ErrLeaseLost)
+				}
+			}
+			return
+		}
+		if errors.Is(runErr, port.ErrLeaseLost) || errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
 			return
 		}
 		if ctx.Err() != nil {
@@ -315,7 +323,12 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 		if claimed.Attempt < claimed.MaxAttempts {
 			retryAt := time.Now().Add(m.retryDelay(claimed.Attempt))
-			_ = m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), &retryAt)
+			if err := m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), &retryAt); err != nil {
+				if errors.Is(err, port.ErrLeaseLost) {
+					attemptCancel(port.ErrLeaseLost)
+				}
+				return
+			}
 			timer := time.NewTimer(time.Until(retryAt))
 			select {
 			case <-ctx.Done():
@@ -328,7 +341,9 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			}
 			continue
 		}
-		_ = m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), nil)
+		if err := m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), nil); errors.Is(err, port.ErrLeaseLost) {
+			attemptCancel(port.ErrLeaseLost)
+		}
 		return
 	}
 }
@@ -347,7 +362,7 @@ func (m *RunManager) retryDelay(attempt int) time.Duration {
 	return delay
 }
 
-func (m *RunManager) startHeartbeat(ctx context.Context, jobID string) func() {
+func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.CancelCauseFunc, jobID string, leaseUntil time.Time) func() {
 	interval := m.lease / 3
 	if interval < 10*time.Millisecond {
 		interval = 10 * time.Millisecond
@@ -361,7 +376,21 @@ func (m *RunManager) startHeartbeat(ctx context.Context, jobID string) func() {
 		for {
 			select {
 			case <-ticker.C:
-				_ = m.jobRepo.Heartbeat(context.Background(), jobID, m.workerID, time.Now().Add(m.lease))
+				now := time.Now()
+				if !now.Before(leaseUntil) {
+					attemptCancel(port.ErrLeaseLost)
+					return
+				}
+				nextLeaseUntil := now.Add(m.lease)
+				err := m.jobRepo.Heartbeat(context.Background(), jobID, m.workerID, nextLeaseUntil)
+				if err == nil {
+					leaseUntil = nextLeaseUntil
+					continue
+				}
+				if errors.Is(err, port.ErrLeaseLost) || !time.Now().Before(leaseUntil) {
+					attemptCancel(port.ErrLeaseLost)
+					return
+				}
 			case <-stop:
 				return
 			case <-ctx.Done():
@@ -403,14 +432,22 @@ func (m *RunManager) Recover(ctx context.Context) error {
 	return nil
 }
 
-// Cancel cancels a local worker or a durable queued/running job.
-func (m *RunManager) Cancel(caseID string) bool {
+// CancelLocal only signals an in-process worker. Distributed callers that
+// already committed their own transaction use this to avoid a second status
+// mutation; the legacy Cancel method retains the API-v1 durable behavior.
+func (m *RunManager) CancelLocal(caseID string) bool {
 	m.mu.Lock()
 	h, local := m.runs[caseID]
 	m.mu.Unlock()
 	if local {
 		h.cancel()
 	}
+	return local
+}
+
+// Cancel cancels a local worker or a durable queued/running job.
+func (m *RunManager) Cancel(caseID string) bool {
+	local := m.CancelLocal(caseID)
 	if m.jobRepo != nil {
 		job, err := m.jobRepo.GetByCase(context.Background(), caseID)
 		if err == nil && job != nil &&

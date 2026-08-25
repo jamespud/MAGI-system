@@ -2,10 +2,15 @@ package port
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 )
+
+// ErrLeaseLost means a durable worker no longer owns its decision job. Callers
+// must stop the current attempt and must not publish or persist late results.
+var ErrLeaseLost = errors.New("decision job lease lost")
 
 // Repository is the aggregate persistence port (S6 DB-backed impl; S1-S5 in-memory/test stubs).
 type Repository interface {
@@ -73,6 +78,13 @@ type CaseRepository interface {
 	UpdateFlags(ctx context.Context, id string, pinned, archived *bool) error
 	// Delete removes a case and its artifacts (P2 D16).
 	Delete(ctx context.Context, id string) error
+}
+
+// ConditionalCaseStatusWriter is an optional production capability for
+// fencing late worker status changes. Keeping it separate avoids requiring
+// every in-memory CaseRepository fake to implement database compare-and-set.
+type ConditionalCaseStatusWriter interface {
+	UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error)
 }
 
 // PauseStatusWriter is an optional CaseRepository capability that persists

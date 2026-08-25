@@ -2,6 +2,7 @@ package orchestration_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -882,6 +883,44 @@ func TestOrchestrate_PersistsArtifacts(t *testing.T) {
 		if tc.ToolName != "calc" {
 			t.Fatalf("tool call ToolName: %s", tc.ToolName)
 		}
+	}
+}
+
+type rejectingCaseStatusWriter struct {
+	port.CaseRepository
+}
+
+func (rejectingCaseStatusWriter) UpdateStatusIfCurrent(context.Context, string, []entity.CaseStatus, entity.CaseStatus) (bool, error) {
+	return false, nil
+}
+
+func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	repo := newStubRepo()
+	broker := server.NewEventBroker()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  rejectingCaseStatusWriter{CaseRepository: repo.CaseRepo()},
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-fenced", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("error = %v, want ErrLeaseLost", err)
+	}
+	if case_.Status != entity.CaseStatusDraft {
+		t.Fatalf("case status = %s, must remain DRAFT after rejected write", case_.Status)
+	}
+	events, err := broker.ListByCase(context.Background(), case_.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("rejected write published events: %+v", events)
 	}
 }
 

@@ -105,6 +105,23 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("status", string(status)).Error
 }
+
+func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
+	if len(from) == 0 {
+		return false, nil
+	}
+	statuses := make([]string, len(from))
+	for i, status := range from {
+		statuses[i] = string(status)
+	}
+	result := r.db.WithContext(ctx).Model(&CaseModel{}).
+		Where("id = ? AND status IN ?", id, statuses).
+		Updates(map[string]any{"status": string(to), "updated_at": time.Now()})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
 func (r *caseRepo) UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).
 		Updates(map[string]any{
@@ -819,6 +836,7 @@ func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 }
 
 var _ port.CaseRepository = (*caseRepo)(nil)
+var _ port.ConditionalCaseStatusWriter = (*caseRepo)(nil)
 var _ port.CaseListFilter = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
 var _ port.ToolCallRepository = (*toolCallRepo)(nil)

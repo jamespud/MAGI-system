@@ -98,11 +98,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		}
 	}
 	if status == entity.CaseStatusFailed || status == entity.CaseStatusCancelled || status == entity.CaseStatusTimedOut {
-		status = entity.CaseStatusDraft
-		case_.Status = status
-		if o.caseRepo != nil {
-			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
-		}
+		return nil, port.ErrLeaseLost
 	}
 	var prevStatus entity.CaseStatus
 
@@ -123,15 +119,58 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		}
 		prevStatus = status
 		if done {
+			if next != status {
+				if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round); err != nil {
+					return nil, err
+				}
+			}
 			return st.Resolution, nil
 		}
-		status = next
-		case_.Status = status
-		if o.caseRepo != nil {
-			_ = o.caseRepo.UpdateStatus(ctx, case_.ID, status)
+		if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round); err != nil {
+			return nil, err
 		}
-		o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(status), "round": st.Round})
+		status = next
 	}
+}
+
+// advanceStatus persists the FSM transition before exposing it in memory or
+// events. Database-backed repositories compare against the expected source
+// state, so a remote cancellation or other owner transition fences late work.
+func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.DecisionCase, from []entity.CaseStatus, to entity.CaseStatus, round int) error {
+	allowed := make([]entity.CaseStatus, 0, len(from))
+	for _, status := range from {
+		switch status {
+		case entity.CaseStatusCancelled, entity.CaseStatusFailed, entity.CaseStatusTimedOut:
+			continue
+		default:
+			allowed = append(allowed, status)
+			// Historical rows persist the zero-value status even though the
+			// orchestrator interprets it as DRAFT. Keep that representation in
+			// the compare-and-set set during the rollout.
+			if status == entity.CaseStatusDraft {
+				allowed = append(allowed, "")
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return port.ErrLeaseLost
+	}
+	if o.caseRepo != nil {
+		if writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter); ok {
+			updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, allowed, to)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return port.ErrLeaseLost
+			}
+		} else if err := o.caseRepo.UpdateStatus(ctx, case_.ID, to); err != nil {
+			return err
+		}
+	}
+	case_.Status = to
+	o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(to), "round": round})
+	return nil
 }
 
 func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vote {
@@ -489,11 +528,10 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 }
 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
-	o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"error": msg})
-	case_.Status = entity.CaseStatusFailed
-	if o.caseRepo != nil {
-		_ = o.caseRepo.UpdateStatus(ctx, case_.ID, entity.CaseStatusFailed)
+	if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{case_.Status}, entity.CaseStatusFailed, 0); err != nil {
+		return nil, err
 	}
+	o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"error": msg})
 	return nil, fmt.Errorf("%s", msg)
 }
 
