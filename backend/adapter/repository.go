@@ -309,7 +309,7 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	}
 	tables := []any{
 		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
-		&ResolutionModel{}, &EventModel{}, &DebateRoundModel{},
+		&ResolutionModel{}, &EventModel{}, &EventCursorModel{}, &DebateRoundModel{},
 		&MemoryProjectionModel{}, &DecisionJobModel{}, &ApprovalModel{}, &JudgeModel{},
 		&InvestigationPlanModel{}, &TaskNodeModel{},
 	}
@@ -318,6 +318,12 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 			_ = tx.Rollback()
 			return err
 		}
+	}
+	// A2A submissions bind by task_id rather than case_id; remove them so a
+	// binding can never dangle on a deleted task.
+	if err := tx.Where("task_id = ?", id).Delete(&A2ASubmissionModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
 	}
 	if err := tx.Where("agent_run_id IN (?)",
 		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),

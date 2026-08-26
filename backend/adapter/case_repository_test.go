@@ -108,3 +108,59 @@ func TestAgentRunRepo_CountByUser(t *testing.T) {
 		t.Fatalf("expected 3 runs for user 5, got %d", n)
 	}
 }
+
+// TestCaseRepository_DeleteRemovesCursorAndA2ABinding guards that deleting a
+// Case also removes its event cursor and A2A submission binding, so a stale
+// cursor can never block startup and a binding cannot dangle on a deleted task.
+func TestCaseRepository_DeleteRemovesCursorAndA2ABinding(t *testing.T) {
+	db := openCaseDB(t)
+	repo := magi.NewRepository(db)
+	cr := repo.CaseRepo()
+	ctx := context.Background()
+
+	victimID := "case-victim"
+	keepID := "case-keep"
+	for _, id := range []string{victimID, keepID} {
+		if err := cr.Create(ctx, &entity.DecisionCase{ID: id, UserID: 9, Question: "q", CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	if err := db.Create(&magi.EventModel{ID: "ev-victim", CaseID: victimID, Seq: 1, Type: string(entity.EventCaseStatusChanged), Timestamp: time.Now()}).Error; err != nil {
+		t.Fatalf("seed victim event: %v", err)
+	}
+	if err := db.Create(&magi.EventCursorModel{CaseID: victimID, NextSeq: 2}).Error; err != nil {
+		t.Fatalf("seed victim cursor: %v", err)
+	}
+	if err := db.Create(&magi.A2ASubmissionModel{ID: "sub-victim", UserID: 9, MessageID: "msg-victim", RequestHash: "h", TaskID: victimID, ContextID: "ctx-v", State: "STARTED"}).Error; err != nil {
+		t.Fatalf("seed victim submission: %v", err)
+	}
+	if err := db.Create(&magi.EventModel{ID: "ev-keep", CaseID: keepID, Seq: 1, Type: string(entity.EventCaseStatusChanged), Timestamp: time.Now()}).Error; err != nil {
+		t.Fatalf("seed keep event: %v", err)
+	}
+	if err := db.Create(&magi.EventCursorModel{CaseID: keepID, NextSeq: 2}).Error; err != nil {
+		t.Fatalf("seed keep cursor: %v", err)
+	}
+	if err := db.Create(&magi.A2ASubmissionModel{ID: "sub-keep", UserID: 9, MessageID: "msg-keep", RequestHash: "h2", TaskID: keepID, ContextID: "ctx-k", State: "STARTED"}).Error; err != nil {
+		t.Fatalf("seed keep submission: %v", err)
+	}
+
+	if err := cr.Delete(ctx, victimID); err != nil {
+		t.Fatalf("delete victim: %v", err)
+	}
+
+	var victimEvent, victimCursor, victimSub int64
+	db.Model(&magi.EventModel{}).Where("case_id = ?", victimID).Count(&victimEvent)
+	db.Model(&magi.EventCursorModel{}).Where("case_id = ?", victimID).Count(&victimCursor)
+	db.Model(&magi.A2ASubmissionModel{}).Where("task_id = ?", victimID).Count(&victimSub)
+	if victimEvent != 0 || victimCursor != 0 || victimSub != 0 {
+		t.Fatalf("victim left rows: event=%d cursor=%d submission=%d", victimEvent, victimCursor, victimSub)
+	}
+
+	var keepEvent, keepCursor, keepSub int64
+	db.Model(&magi.EventModel{}).Where("case_id = ?", keepID).Count(&keepEvent)
+	db.Model(&magi.EventCursorModel{}).Where("case_id = ?", keepID).Count(&keepCursor)
+	db.Model(&magi.A2ASubmissionModel{}).Where("task_id = ?", keepID).Count(&keepSub)
+	if keepEvent != 1 || keepCursor != 1 || keepSub != 1 {
+		t.Fatalf("keep rows lost: event=%d cursor=%d submission=%d", keepEvent, keepCursor, keepSub)
+	}
+}
