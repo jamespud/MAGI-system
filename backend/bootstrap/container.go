@@ -709,9 +709,11 @@ func provideBudgetChecker(adminSvc *admin.Service, cfg *Config) decision.BudgetC
 	return &usageBudgetChecker{admin: adminSvc, maxTok: cfg.Limits.MaxTokensPerUser, maxCost: cfg.Limits.MaxCostUSDPerUser}
 }
 
-func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, reg *metrics.Registry, cfg *Config, counter port.RunCounter, budget decision.BudgetChecker) *decision.RunManager {
+func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, eventPub port.EventPublisher, reg *metrics.Registry, cfg *Config, counter port.RunCounter, budget decision.BudgetChecker) *decision.RunManager {
+	live, _ := eventPub.(port.LiveEventPublisher)
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
+		LiveEvents:               live,
 		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
 		RunCounter:               counter,
 		BudgetChecker:            budget,

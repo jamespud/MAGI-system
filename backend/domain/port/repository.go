@@ -41,6 +41,10 @@ type DecisionJobRepository interface {
 	Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error
 	MarkSucceeded(ctx context.Context, jobID, workerID string) error
 	MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error
+	// CommitFinalFailure atomically fences the final worker attempt while
+	// transitioning the job and case and appending the durable failure event.
+	// A false result means the job or case ownership/status fence was lost.
+	CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error)
 	Cancel(ctx context.Context, jobID string) error
 	// MarkPaused parks a durable job so it is neither runnable nor counted as
 	// active; a later ResumeQueued returns it to the runnable set.

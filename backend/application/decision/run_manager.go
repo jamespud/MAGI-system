@@ -64,6 +64,7 @@ type RunManagerDeps struct {
 	MaxConcurrentRunsPerUser int
 	RunCounter               port.RunCounter
 	BudgetChecker            BudgetChecker
+	LiveEvents               port.LiveEventPublisher
 }
 
 // RunManager owns async case execution. With a JobRepo it uses a durable
@@ -82,6 +83,7 @@ type RunManager struct {
 	maxConcurrentPerUser int
 	runCounter           port.RunCounter
 	budgetChecker        BudgetChecker
+	liveEvents           port.LiveEventPublisher
 	userRuns             map[int64]int
 	mu                   sync.Mutex
 	runs                 map[string]*runHandle
@@ -111,6 +113,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
 		runCounter:    d.RunCounter,
 		budgetChecker: d.BudgetChecker,
+		liveEvents:    d.LiveEvents,
 		userRuns:      make(map[int64]int), runs: make(map[string]*runHandle),
 		paused: make(map[string]bool),
 	}
@@ -391,8 +394,24 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			}
 			continue
 		}
-		if err := m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), nil); errors.Is(err, port.ErrLeaseLost) {
+		event := entity.NewEvent(c.ID, "", nil, entity.EventCaseFailed, map[string]any{
+			"status": string(entity.CaseStatusFailed),
+		})
+		statuses := []entity.CaseStatus{c.Status}
+		if c.Status == entity.CaseStatusDraft {
+			statuses = append(statuses, "")
+		}
+		committed, err := m.jobRepo.CommitFinalFailure(context.Background(), claimed.ID, m.workerID, c.ID, statuses, runErr.Error(), &event)
+		if err != nil {
+			return
+		}
+		if !committed {
 			attemptCancel(port.ErrLeaseLost)
+			return
+		}
+		c.Status = entity.CaseStatusFailed
+		if m.liveEvents != nil {
+			_ = m.liveEvents.PublishLive(context.Background(), event)
 		}
 		return
 	}
@@ -445,9 +464,6 @@ func retryableCaseStatuses() []entity.CaseStatus {
 		entity.CaseStatusRevoting,
 		entity.CaseStatusMemoryIndexed,
 		entity.CaseStatusInsufficientEv,
-		// A retryable orchestration failure persists FAILED before the durable
-		// job is re-queued, so the next owner must CAS it back to DRAFT.
-		entity.CaseStatusFailed,
 	}
 }
 

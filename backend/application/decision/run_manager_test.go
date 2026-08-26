@@ -156,6 +156,20 @@ func (f *fakeJobRepo) MarkSucceeded(ctx context.Context, jobID, workerID string)
 func (f *fakeJobRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error {
 	return nil
 }
+func (f *fakeJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expected []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, job := range f.jobs {
+		if job.ID == jobID && job.Status == entity.DecisionJobRunning && job.WorkerID == workerID {
+			job.Status, job.WorkerID, job.LastError = entity.DecisionJobFailed, "", lastError
+			if event != nil {
+				event.Seq = 1
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (f *fakeJobRepo) Cancel(ctx context.Context, jobID string) error { return nil }
 func (f *fakeJobRepo) MarkPaused(ctx context.Context, jobID string) error {
 	f.mu.Lock()

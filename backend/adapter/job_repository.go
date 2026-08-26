@@ -258,3 +258,62 @@ func (r *decisionJobRepo) CountActiveByUser(ctx context.Context, userID int64) (
 }
 
 var _ port.DecisionJobRepository = (*decisionJobRepo)(nil)
+
+var errFinalFailureFence = errors.New("decision job: final failure fence lost")
+
+// CommitFinalFailure is the durable terminal write for an exhausted worker
+// attempt. The job lease, case status, event cursor, and CASE_FAILED event all
+// commit or roll back together.
+func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("decision job: final failure event is required")
+	}
+	originalSeq := event.Seq
+	committed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		jobResult := tx.Model(&DecisionJobModel{}).
+			Where("id = ? AND case_id = ? AND status = ? AND worker_id = ?", jobID, caseID, string(entity.DecisionJobRunning), workerID).
+			Updates(map[string]any{
+				"status": string(entity.DecisionJobFailed), "worker_id": "", "lease_until": nil,
+				"last_error": lastError, "updated_at": now,
+			})
+		if jobResult.Error != nil {
+			return jobResult.Error
+		}
+		if jobResult.RowsAffected != 1 {
+			return errFinalFailureFence
+		}
+		allowed := make([]string, 0, len(expectedCaseStatuses))
+		for _, status := range expectedCaseStatuses {
+			allowed = append(allowed, string(status))
+		}
+		caseResult := tx.Model(&CaseModel{}).
+			Where("id = ? AND status IN ?", caseID, allowed).
+			Updates(map[string]any{"status": string(entity.CaseStatusFailed), "updated_at": now})
+		if caseResult.Error != nil {
+			return caseResult.Error
+		}
+		if caseResult.RowsAffected != 1 {
+			return errFinalFailureFence
+		}
+		if err := createEventInTx(tx, event); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	})
+	if err != nil {
+		// createEventInTx assigns Seq before the event INSERT. Never leave an
+		// uncommitted sequence on the caller's event pointer.
+		event.Seq = originalSeq
+		if errors.Is(err, errFinalFailureFence) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !committed {
+		event.Seq = originalSeq
+	}
+	return committed, nil
+}

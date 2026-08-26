@@ -56,8 +56,7 @@ func (o *retryResetOrchestrator) Orchestrate(context.Context, *entity.DecisionCa
 }
 
 type failThenSucceedCaseOrchestrator struct {
-	caseRepo port.CaseRepository
-	calls    atomic.Int32
+	calls atomic.Int32
 }
 
 type rejectingRetryResetCaseRepo struct{ port.CaseRepository }
@@ -68,15 +67,6 @@ func (rejectingRetryResetCaseRepo) UpdateStatusIfCurrent(context.Context, string
 
 func (o *failThenSucceedCaseOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
 	if o.calls.Add(1) == 1 {
-		writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter)
-		if !ok {
-			return nil, errors.New("case repository lacks conditional writer")
-		}
-		updated, err := writer.UpdateStatusIfCurrent(ctx, c.ID, []entity.CaseStatus{entity.CaseStatusDraft}, entity.CaseStatusFailed)
-		if err != nil || !updated {
-			return nil, errors.New("failed to persist failed case state")
-		}
-		c.Status = entity.CaseStatusFailed
 		return nil, errors.New("transient orchestration failure")
 	}
 	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
@@ -205,7 +195,7 @@ func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 	}
 }
 
-func TestRunManager_RetryResetsFailedCaseWithConditionalWriter(t *testing.T) {
+func TestRunManager_RetryKeepsTransientCaseNonterminalWithConditionalWriter(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
 	jobs := magi.NewDecisionJobRepository(db)
@@ -213,7 +203,7 @@ func TestRunManager_RetryResetsFailedCaseWithConditionalWriter(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	orch := &failThenSucceedCaseOrchestrator{caseRepo: repo.CaseRepo()}
+	orch := &failThenSucceedCaseOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "retry-failed", MaxAttempts: 2, RetryBase: time.Millisecond,
 	})
@@ -223,6 +213,10 @@ func TestRunManager_RetryResetsFailedCaseWithConditionalWriter(t *testing.T) {
 	job := waitJobStatus(t, jobs, caseID, entity.DecisionJobSucceeded)
 	if job.Attempt != 2 || orch.calls.Load() != 2 {
 		t.Fatalf("retry result: job=%+v calls=%d", job, orch.calls.Load())
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status == entity.CaseStatusFailed {
+		t.Fatalf("transient retry made case terminal: case=%+v err=%v", caseAfter, err)
 	}
 }
 

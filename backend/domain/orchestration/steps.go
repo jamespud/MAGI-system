@@ -71,7 +71,6 @@ func (o *Orchestrator) dispatch(ctx context.Context, case_ *entity.DecisionCase,
 	action := entity.ActionForStatus(string(status))
 	if action == "" {
 		// Unrecognized status: preserve the legacy "default" branch behavior.
-		o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"status": string(status)})
 		case_.Status = status
 		return status, false, fmt.Errorf("%w: %s", errCaseEnded, status)
 	}

@@ -114,11 +114,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			}
 		}
 		next, done, err := o.dispatch(ctx, case_, prevStatus, status, st)
-		if errors.Is(err, errCaseEnded) {
-			// Legacy "default" branch: unrecognized terminal status surfaces as
-			// an error (dispatch already set case_.Status and published).
-			return st.Resolution, err
-		}
 		if err != nil {
 			if errors.Is(err, port.ErrLeaseLost) {
 				return nil, err
@@ -621,11 +616,17 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 }
 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
-	if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{case_.Status}, entity.CaseStatusFailed, 0); err != nil {
+	runErr := fmt.Errorf("%s", msg)
+	if case_.ExecutionAttempt > 0 {
+		return nil, runErr
+	}
+	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseFailed,
+		map[string]any{"status": string(entity.CaseStatusFailed)})
+	if err := o.commitTerminal(ctx, case_, case_.Status, entity.CaseStatusFailed, nil, event); err != nil {
 		return nil, err
 	}
-	o.publish(ctx, case_, entity.EventCaseFailed, map[string]any{"error": msg})
-	return nil, fmt.Errorf("%s", msg)
+	case_.Status = entity.CaseStatusFailed
+	return nil, runErr
 }
 
 // failedAgentReasons collects the failure reasons carried by ABSTAIN votes

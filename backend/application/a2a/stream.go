@@ -191,6 +191,23 @@ func (s *DurableStreamProjector) drainEvents(ctx context.Context, userID int64, 
 			return false, err
 		}
 		if len(batch) == 0 {
+			// The Case/Job snapshot is authoritative. This closes streams for
+			// legacy rows where a terminal status committed without its event.
+			record, err := s.repo.GetTaskRecord(ctx, userID, taskID)
+			if err != nil {
+				return false, err
+			}
+			task := s.projector.Project(record, 1, true)
+			// A completed Case can briefly precede its Resolution in legacy
+			// split-writer rows. Wait for the artifact authority before closing;
+			// failure/cancellation snapshots do not require artifacts.
+			completedReady := task.Status.State != a2a.TaskStateCompleted || record.Resolution != nil
+			if task.Status.State.Terminal() && completedReady && !state.lastState.Terminal() {
+				state.task = task
+				state.lastState = task.Status.State
+				state.lastPaused = pausedOf(task)
+				return s.emitTerminal(task, yield), nil
+			}
 			return false, nil
 		}
 		for _, ev := range batch {
@@ -230,22 +247,7 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 	state.lastState = task.Status.State
 	state.lastPaused = pausedOf(task)
 	if task.Status.State.Terminal() {
-		if task.Status.State == a2a.TaskStateCompleted {
-			for _, artifact := range task.Artifacts {
-				if !yield(&a2a.TaskArtifactUpdateEvent{
-					Append: false, LastChunk: true, Artifact: artifact,
-					ContextID: task.ContextID, TaskID: task.ID,
-				}, nil) {
-					return true, nil
-				}
-			}
-		}
-		if !yield(&a2a.TaskStatusUpdateEvent{
-			ContextID: task.ContextID, TaskID: task.ID, Status: task.Status,
-		}, nil) {
-			return true, nil
-		}
-		return true, nil
+		return s.emitTerminal(task, yield), nil
 	}
 	if !yield(&a2a.TaskStatusUpdateEvent{
 		ContextID: task.ContextID, TaskID: task.ID, Status: task.Status,
@@ -253,6 +255,25 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 		return true, nil
 	}
 	return false, nil
+}
+
+func (s *DurableStreamProjector) emitTerminal(task *a2a.Task, yield func(a2a.Event, error) bool) bool {
+	if task.Status.State == a2a.TaskStateCompleted {
+		for _, artifact := range task.Artifacts {
+			if !yield(&a2a.TaskArtifactUpdateEvent{
+				Append: false, LastChunk: true, Artifact: artifact,
+				ContextID: task.ContextID, TaskID: task.ID,
+			}, nil) {
+				return true
+			}
+		}
+	}
+	if !yield(&a2a.TaskStatusUpdateEvent{
+		ContextID: task.ContextID, TaskID: task.ID, Status: task.Status,
+	}, nil) {
+		return true
+	}
+	return true
 }
 
 // yieldInternalError records the original error under the active tracing span
