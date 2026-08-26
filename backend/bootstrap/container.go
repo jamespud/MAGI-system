@@ -1030,55 +1030,88 @@ func verifyEventSequenceContract(db *gorm.DB) error {
 	return verifyEventCursor(db)
 }
 
-// hasCaseSeqUniqueIndex reports whether a UNIQUE index on (case_id, seq)
-// exists. Both the Atlas S16 name (uq_magi_event_case_seq) and the GORM
-// AutoMigrate name (idx_event_case_seq) satisfy the same contract.
+// hasCaseSeqUniqueIndex reports whether a UNIQUE index exists whose ordered
+// columns are exactly [case_id, seq]. We do not trust names alone: a
+// misleading same-name index on the wrong columns must not satisfy the
+// contract.
 func hasCaseSeqUniqueIndex(db *gorm.DB, table string) (bool, error) {
-	indexes, err := uniqueIndexNames(db, table)
+	indexes, err := uniqueIndexColumns(db, table)
 	if err != nil {
 		return false, err
 	}
-	for _, name := range []string{"uq_magi_event_case_seq", "idx_event_case_seq"} {
-		if indexes[name] {
+	for _, columns := range indexes {
+		if len(columns) == 2 && columns[0] == "case_id" && columns[1] == "seq" {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// uniqueIndexNames returns the set of UNIQUE index names on a table.
-func uniqueIndexNames(db *gorm.DB, table string) (map[string]bool, error) {
-	out := map[string]bool{}
+// uniqueIndexColumns returns UNIQUE index names mapped to their ordered column
+// names on the given table.
+func uniqueIndexColumns(db *gorm.DB, table string) (map[string][]string, error) {
+	out := map[string][]string{}
 	if db.Dialector.Name() == "mysql" {
 		type row struct {
-			IndexName string `gorm:"column:index_name"`
-			NonUnique int    `gorm:"column:non_unique"`
+			IndexName  string `gorm:"column:index_name"`
+			NonUnique  int    `gorm:"column:non_unique"`
+			SeqInIdx   int    `gorm:"column:seq_in_index"`
+			ColumnName string `gorm:"column:column_name"`
 		}
 		var rows []row
-		if err := db.Raw("SELECT INDEX_NAME AS index_name, NON_UNIQUE AS non_unique FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", table).Scan(&rows).Error; err != nil {
+		if err := db.Raw(`SELECT INDEX_NAME AS index_name, NON_UNIQUE AS non_unique,
+			SEQ_IN_INDEX AS seq_in_index, COLUMN_NAME AS column_name
+			FROM INFORMATION_SCHEMA.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, table).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
 			if r.NonUnique == 0 {
-				out[r.IndexName] = true
+				out[r.IndexName] = append(out[r.IndexName], r.ColumnName)
 			}
 		}
 		return out, nil
 	}
+	// SQLite: index_list gives the unique-flag names; index_info gives the
+	// ordered columns for a named index.
 	rows, err := db.Raw("PRAGMA index_list(" + table + ")").Rows()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	type indexMeta struct {
+		name string
+		seq  int
+	}
+	var names []indexMeta
 	for rows.Next() {
 		var seq, unique int
 		var name, origin, partial string
 		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		if unique != 0 {
-			out[name] = true
+			names = append(names, indexMeta{name: name, seq: seq})
 		}
+	}
+	rows.Close()
+	for _, meta := range names {
+		colRows, err := db.Raw("PRAGMA index_info(" + meta.name + ")").Rows()
+		if err != nil {
+			return nil, err
+		}
+		var cols []string
+		for colRows.Next() {
+			var seqno, cid int
+			var cname string
+			if err := colRows.Scan(&seqno, &cid, &cname); err != nil {
+				colRows.Close()
+				return nil, err
+			}
+			cols = append(cols, cname)
+		}
+		colRows.Close()
+		out[meta.name] = cols
 	}
 	return out, nil
 }

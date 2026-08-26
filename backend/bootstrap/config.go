@@ -524,7 +524,9 @@ func LoadConfig(path string) (*Config, error) {
 	if len(cfg.RAG.Levels) == 0 {
 		cfg.RAG.Levels = []int{1800, 900, 300}
 	}
-	applyEnvOverrides(&cfg)
+	if err := applyEnvOverrides(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -532,7 +534,7 @@ func LoadConfig(path string) (*Config, error) {
 // The containerized deployment injects DSN and secrets this way (12-factor)
 // instead of baking them into the image. Empty vars leave the YAML value intact,
 // so local `make dev` (which sets none of these) behaves unchanged.
-func applyEnvOverrides(cfg *Config) {
+func applyEnvOverrides(cfg *Config) error {
 	if v := os.Getenv("MAGI_DB_DSN"); v != "" {
 		cfg.Database.DSN = v
 	}
@@ -590,35 +592,66 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.A2A.BasePath = v
 	}
 	if v := os.Getenv("MAGI_A2A_MAX_MESSAGE_BYTES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxMessageBytes = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_MAX_MESSAGE_BYTES: invalid integer %q: %w", v, err)
 		}
+		if n <= 0 {
+			return fmt.Errorf("MAGI_A2A_MAX_MESSAGE_BYTES: must be positive, got %d", n)
+		}
+		cfg.A2A.MaxMessageBytes = n
 	}
 	if v := os.Getenv("MAGI_A2A_MAX_REQUEST_BYTES"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxRequestBytes = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_MAX_REQUEST_BYTES: invalid integer %q: %w", v, err)
 		}
+		if n <= 0 {
+			return fmt.Errorf("MAGI_A2A_MAX_REQUEST_BYTES: must be positive, got %d", n)
+		}
+		cfg.A2A.MaxRequestBytes = n
 	}
 	if v := os.Getenv("MAGI_A2A_MAX_PARTS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxParts = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_MAX_PARTS: invalid integer %q: %w", v, err)
 		}
+		if n <= 0 {
+			return fmt.Errorf("MAGI_A2A_MAX_PARTS: must be positive, got %d", n)
+		}
+		cfg.A2A.MaxParts = n
 	}
 	if v := os.Getenv("MAGI_A2A_MAX_PAGE_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxPageSize = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_MAX_PAGE_SIZE: invalid integer %q: %w", v, err)
 		}
+		if n <= 0 {
+			return fmt.Errorf("MAGI_A2A_MAX_PAGE_SIZE: must be positive, got %d", n)
+		}
+		cfg.A2A.MaxPageSize = n
 	}
 	if v := os.Getenv("MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxStreamsPerUserPerReplica = n
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: invalid integer %q: %w", v, err)
 		}
+		if n <= 0 {
+			return fmt.Errorf("MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: must be positive, got %d", n)
+		}
+		cfg.A2A.MaxStreamsPerUserPerReplica = n
 	}
 	if v := os.Getenv("MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.A2A.CrossInstancePollInterval = d
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: invalid duration %q: %w", v, err)
 		}
+		if d <= 0 {
+			return fmt.Errorf("MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: must be positive, got %s", d)
+		}
+		cfg.A2A.CrossInstancePollInterval = d
 	}
+	return nil
 }
 
 // parseAPIKeys parses MAGI_AUTH_API_KEYS entries separated by ';', each in the

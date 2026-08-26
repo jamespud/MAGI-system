@@ -126,6 +126,32 @@ func TestLoadConfig_A2AValidSecureConfigPasses(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsInvalidA2AEnvironmentOverrides(t *testing.T) {
+	valid := secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "8")
+	cases := []struct {
+		name string
+		env  string
+		val  string
+	}{
+		{"max message bytes", "MAGI_A2A_MAX_MESSAGE_BYTES", "not-an-int"},
+		{"max request bytes negative", "MAGI_A2A_MAX_REQUEST_BYTES", "-1"},
+		{"max parts float", "MAGI_A2A_MAX_PARTS", "1.5"},
+		{"max page size", "MAGI_A2A_MAX_PAGE_SIZE", "lots"},
+		{"max streams", "MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA", "zero"},
+		{"poll interval", "MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL", "tomorrow"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.env, tc.val)
+			if _, err := loadA2ATestConfig(t, valid); err == nil {
+				t.Fatalf("expected error for %s=%q", tc.env, tc.val)
+			} else if !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("error does not name variable %s: %v", tc.env, err)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_A2AStreamLimitUsesPerReplicaName(t *testing.T) {
 	cfg, err := loadA2ATestConfig(t, secureA2AAuthBody("true")+a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "11"))
 	if err != nil {
