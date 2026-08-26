@@ -204,13 +204,6 @@ type retryTerminalOrchestrator struct {
 
 func (o *retryTerminalOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
 	if o.calls.Add(1) == 1 {
-		if err := o.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusFailed); err != nil {
-			return nil, err
-		}
-		failed := entity.NewEvent(c.ID, "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
-		if err := o.events.Create(ctx, &failed); err != nil {
-			return nil, err
-		}
 		return nil, errors.New("transient")
 	}
 	if err := o.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusResolved); err != nil {
