@@ -76,6 +76,7 @@ func Mount(h *hzserver.Hertz, deps MountDeps) {
 	h.GET(WellKnownAgentCardPath, adaptor.HertzHandler(cardHandler))
 
 	restHandler := a2asrv.NewRESTHandler(deps.Handler)
+	restHandler = normalizeListTasksQuery(restHandler)
 	if deps.MaxRequestBytes > 0 {
 		restHandler = http.MaxBytesHandler(restHandler, deps.MaxRequestBytes)
 	}
@@ -91,6 +92,32 @@ func Mount(h *hzserver.Hertz, deps MountDeps) {
 	handlers = append(handlers, adaptor.HertzHandler(rest))
 	h.Any(deps.BasePath, handlers...)
 	h.Any(deps.BasePath+"/*a2a", handlers...)
+}
+
+// normalizeListTasksQuery accepts the A2A v2.5.0 official REST client, which
+// sends the compatibility spelling `lastUpdatedAfter`, and copies it onto the
+// canonical `statusTimestampAfter` before the SDK handler parses it. When both
+// are present, the canonical value wins (it is copied only when absent).
+func normalizeListTasksQuery(inner http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("statusTimestampAfter") == "" && q.Get("lastUpdatedAfter") != "" {
+			// Clone the request/URL so we never mutate the caller's request.
+			req := r.Clone(r.Context())
+			urlCopy := *r.URL
+			query := urlCopy.Query()
+			query.Set("statusTimestampAfter", query.Get("lastUpdatedAfter"))
+			urlCopy.RawQuery = query.Encode()
+			req.URL = &urlCopy
+			inner.ServeHTTP(w, req)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
 }
 
 func requestBodyLimit(limit int64) app.HandlerFunc {
