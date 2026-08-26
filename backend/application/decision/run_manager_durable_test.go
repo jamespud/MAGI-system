@@ -454,3 +454,148 @@ func TestRunManager_EnforcesPerUserConcurrencyLimit(t *testing.T) {
 	rm.Cancel("c1")
 	rm.Cancel("c3")
 }
+
+type countingRecoveryOrchestrator struct{ calls atomic.Int32 }
+
+func (o *countingRecoveryOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
+	o.calls.Add(1)
+	return &entity.Resolution{ID: "res", FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+func TestRunManager_RunRecoversLeaseExpiredAfterStartup(t *testing.T) {
+	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-takeover", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	job, admitted, err := jobs.Admit(ctx, "case-takeover", 2, 0)
+	if err != nil || !admitted {
+		t.Fatalf("admit = admitted=%v err=%v", admitted, err)
+	}
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+		t.Fatalf("claim A = ok=%v err=%v", ok, err)
+	}
+
+	orch := &countingRecoveryOrchestrator{}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(),
+		WorkerID: "worker-b", MaxAttempts: 2, RecoveryInterval: 10 * time.Millisecond,
+	})
+	recoveryCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go rm.RunRecovery(recoveryCtx)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			got, err := jobs.GetByCase(ctx, "case-takeover")
+			if err == nil && got.Status == entity.DecisionJobSucceeded {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("recovery did not take over and complete the expired job")
+	}
+	if orch.calls.Load() == 0 {
+		t.Fatal("recovery never ran the orchestrator for the taken-over job")
+	}
+}
+
+func TestRunManager_RunStopsWhenContextCanceled(t *testing.T) {
+	db := openJobDB(t)
+	jobs := magi.NewDecisionJobRepository(db)
+	rm := decision.NewRunManager(&countingRecoveryOrchestrator{}, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(), RecoveryInterval: 10 * time.Millisecond,
+	})
+	recoveryCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = rm.RunRecovery(recoveryCtx)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunRecovery did not return when its context was canceled")
+	}
+}
+
+// TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset guards
+// the DEADLOCKED crash window: a worker that re-claims a job after the Case
+// reached DEADLOCKED must mark the job succeeded without retry-reset or a
+// duplicate CASE_FAILED event.
+func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *testing.T) {
+	db := openJobDB(t)
+	repo := magi.NewRepository(db)
+	seedDecisionCase(t, db, "case-deadlocked", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	job, _, err := jobs.Admit(ctx, "case-deadlocked", 3, 0)
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+		t.Fatalf("seed claim: %v", err)
+	}
+	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	if err := repo.CaseRepo().UpdateStatus(ctx, "case-deadlocked", entity.CaseStatusDeadlocked); err != nil {
+		t.Fatalf("mark deadlocked: %v", err)
+	}
+	orch := &countingRecoveryOrchestrator{}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-b", MaxAttempts: 3, RetryBase: time.Millisecond,
+	})
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitJobStatus(t, jobs, "case-deadlocked", entity.DecisionJobSucceeded)
+	if events, _ := repo.EventRepo().ListByCase(ctx, "case-deadlocked"); len(events) != 0 {
+		t.Fatalf("unexpected events for deadlocked settlement: %+v", events)
+	}
+	if at := orch.calls.Load(); at != 0 {
+		t.Fatalf("orchestrator invoked %d times for a terminal case", at)
+	}
+}
+
+// TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator guards the same
+// invariant for a resolved terminal case.
+func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
+	db := openJobDB(t)
+	repo := magi.NewRepository(db)
+	seedDecisionCase(t, db, "case-resolved-terminal", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	job, _, err := jobs.Admit(ctx, "case-resolved-terminal", 3, 0)
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+		t.Fatalf("seed claim: %v", err)
+	}
+	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	if err := repo.CaseRepo().UpdateStatus(ctx, "case-resolved-terminal", entity.CaseStatusResolved); err != nil {
+		t.Fatalf("mark resolved: %v", err)
+	}
+	orch := &countingRecoveryOrchestrator{}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-b", MaxAttempts: 3,
+	})
+	if err := rm.Recover(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	waitJobStatus(t, jobs, "case-resolved-terminal", entity.DecisionJobSucceeded)
+	if at := orch.calls.Load(); at != 0 {
+		t.Fatalf("orchestrator invoked %d times for a resolved case", at)
+	}
+}

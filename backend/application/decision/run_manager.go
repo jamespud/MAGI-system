@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -47,8 +48,8 @@ type BudgetChecker interface {
 }
 
 type runHandle struct {
-	cancel    context.CancelFunc
-	done      chan struct{}
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type RunManagerDeps struct {
@@ -58,6 +59,7 @@ type RunManagerDeps struct {
 	LeaseDuration            time.Duration
 	MaxAttempts              int
 	RetryBase                time.Duration
+	RecoveryInterval         time.Duration
 	Metrics                  *metrics.Registry
 	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
@@ -79,6 +81,7 @@ type RunManager struct {
 	metrics              *metrics.Registry
 	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
+	recoveryInterval     time.Duration
 	budgetChecker        BudgetChecker
 	liveEvents           port.LiveEventPublisher
 	userRuns             map[int64]int
@@ -104,13 +107,17 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 	if d.RetryBase <= 0 {
 		d.RetryBase = time.Second
 	}
+	if d.RecoveryInterval <= 0 {
+		d.RecoveryInterval = 2 * time.Second
+	}
 	return &RunManager{
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
-		budgetChecker: d.BudgetChecker,
-		liveEvents:    d.LiveEvents,
-		userRuns:      make(map[int64]int), runs: make(map[string]*runHandle),
+		recoveryInterval: d.RecoveryInterval,
+		budgetChecker:    d.BudgetChecker,
+		liveEvents:       d.LiveEvents,
+		userRuns:         make(map[int64]int), runs: make(map[string]*runHandle),
 		paused: make(map[string]bool),
 	}
 }
@@ -293,6 +300,12 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		c.ExecutionAttempt = claimed.Attempt
+		// A Case that already reached an authoritative terminal state (for
+		// example a replica committed DEADLOCKED while this worker was down)
+		// must settle the durable Job without retry-reset or orchestration.
+		if m.settleClaimedCaseIfTerminal(c, claimed) {
+			return
+		}
 		if claimed.Attempt > 1 && c.Status != entity.CaseStatusResolved {
 			if !m.resetCaseForRetry(ctx, c) {
 				m.releaseRejectedRetryClaim(claimed)
@@ -399,6 +412,28 @@ func (m *RunManager) settleTerminalCaseJob(job *entity.DecisionJob, c *entity.De
 	}
 	if errors.Is(err, port.ErrLeaseLost) {
 		onLeaseLost(port.ErrLeaseLost)
+	}
+}
+
+// settleClaimedCaseIfTerminal settles a Job that a worker just claimed when the
+// Case has already reached an authoritative terminal state. It returns true so
+// the caller stops without retry-reset or orchestration. CANCELLED uses the
+// job cancellation path; every other terminal uses the shared settlement.
+func (m *RunManager) settleClaimedCaseIfTerminal(c *entity.DecisionCase, claimed *entity.DecisionJob) bool {
+	switch c.Status {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked,
+		entity.CaseStatusFailed, entity.CaseStatusTimedOut:
+		// The job is currently running under this worker fence, so the shared
+		// settlement can close it.
+		m.settleTerminalCaseJob(claimed, c, "terminal case settlement", func(error) {})
+		return true
+	case entity.CaseStatusCancelled:
+		if err := m.jobRepo.Cancel(context.Background(), claimed.ID); err != nil && !errors.Is(err, port.ErrLeaseLost) {
+			log.Printf("run manager: settle cancelled job %s: %v", claimed.ID, err)
+		}
+		return true
+	default:
+		return false
 	}
 }
 
@@ -570,8 +605,15 @@ func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.C
 	}
 }
 
-// Recover requeues expired leases and resumes queued work after process start.
+// Recover is the startup compatibility entry: it performs one sweep and stops.
 func (m *RunManager) Recover(ctx context.Context) error {
+	return m.RecoverOnce(ctx)
+}
+
+// RecoverOnce performs a single recovery sweep: requeue expired leases and
+// relaunch runnable work. Per-job Case load failures (e.g. a deleted Case) are
+// logged and skipped so one bad row cannot stall the rest of the sweep.
+func (m *RunManager) RecoverOnce(ctx context.Context) error {
 	if m.jobRepo == nil {
 		return nil
 	}
@@ -590,12 +632,36 @@ func (m *RunManager) Recover(ctx context.Context) error {
 			continue
 		}
 		c, err := m.caseRepo.Get(ctx, job.CaseID)
-		if err != nil || c == nil {
+		if err != nil {
+			log.Printf("run manager: recovery: load case %s: %v", job.CaseID, err)
+			continue
+		}
+		if c == nil {
+			log.Printf("run manager: recovery: case %s is missing; skipping job %s", job.CaseID, job.ID)
 			continue
 		}
 		m.launch(c, job)
 	}
 	return nil
+}
+
+// RunRecovery continuously replays recovery sweeps until ctx is canceled. It
+// runs an immediate sweep, then every RecoveryInterval. A repository-wide
+// failure is logged and retried on the next tick rather than exiting forever.
+func (m *RunManager) RunRecovery(ctx context.Context) error {
+	if m.jobRepo == nil {
+		return nil
+	}
+	for {
+		if err := m.RecoverOnce(ctx); err != nil {
+			log.Printf("run manager: recovery sweep: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(m.recoveryInterval):
+		}
+	}
 }
 
 // CancelLocal only signals an in-process worker. Distributed callers that

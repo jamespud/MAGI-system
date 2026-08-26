@@ -859,11 +859,24 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 	var autoCancel context.CancelFunc
 	var ragCancel context.CancelFunc
 	var a2aRecoveryCancel context.CancelFunc
+	var decisionRecoveryCancel context.CancelFunc
+	var decisionRecoveryDone chan struct{}
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
 				return err
 			}
+			// Run continuous cross-replica recovery for expired decision-job
+			// leases, owned by the lifecycle context so it stops on shutdown.
+			decisionCtx, cancel := context.WithCancel(context.Background())
+			decisionRecoveryCancel = cancel
+			decisionRecoveryDone = make(chan struct{})
+			go func() {
+				defer close(decisionRecoveryDone)
+				if err := rm.RunRecovery(decisionCtx); err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("decision recovery stopped: %v", err)
+				}
+			}()
 			if err := a2a.Recover(ctx); err != nil {
 				return err
 			}
@@ -921,6 +934,12 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 			}
 			if a2aRecoveryCancel != nil {
 				a2aRecoveryCancel()
+			}
+			if decisionRecoveryCancel != nil {
+				decisionRecoveryCancel()
+				if decisionRecoveryDone != nil {
+					<-decisionRecoveryDone
+				}
 			}
 			return nil
 		},
