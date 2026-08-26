@@ -1034,11 +1034,11 @@ func uniqueIndexNames(db *gorm.DB, table string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if db.Dialector.Name() == "mysql" {
 		type row struct {
-			IndexName string
-			NonUnique int
+			IndexName string `gorm:"column:index_name"`
+			NonUnique int    `gorm:"column:non_unique"`
 		}
 		var rows []row
-		if err := db.Raw("SELECT INDEX_NAME, NON_UNIQUE FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", table).Scan(&rows).Error; err != nil {
+		if err := db.Raw("SELECT INDEX_NAME AS index_name, NON_UNIQUE AS non_unique FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", table).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
