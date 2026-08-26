@@ -67,17 +67,18 @@ type StatusGroup struct {
 // the given public A2A state. The adapter translates these groups into WHERE
 // clauses; the parity test proves they agree with ClassifyState.
 func StatusPredicate(state string) []StatusGroup {
-	startedOrPrepared := []SubmissionState{SubmissionPrepared, SubmissionStarted}
+	preparedOrStarting := []SubmissionState{SubmissionPrepared, SubmissionStarting}
+	startedOrPrepared := []SubmissionState{SubmissionPrepared, SubmissionStarting, SubmissionStarted}
 	switch a2a.TaskState(state) {
 	case a2a.TaskStateSubmitted:
 		return []StatusGroup{
-			{Bindings: []SubmissionState{SubmissionPrepared}, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{JobNone, string(entity.DecisionJobQueued)}},
+			{Bindings: preparedOrStarting, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{JobNone, string(entity.DecisionJobQueued)}},
 			{Bindings: []SubmissionState{SubmissionStarted}, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{JobNone}},
 		}
 	case a2a.TaskStateWorking:
 		return []StatusGroup{
 			{Bindings: startedOrPrepared, Cases: processingCaseStatuses(), Jobs: []string{JobNone, string(entity.DecisionJobQueued), string(entity.DecisionJobRunning), string(entity.DecisionJobPaused)}},
-			{Bindings: []SubmissionState{SubmissionPrepared}, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{string(entity.DecisionJobRunning), string(entity.DecisionJobPaused)}},
+			{Bindings: preparedOrStarting, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{string(entity.DecisionJobRunning), string(entity.DecisionJobPaused)}},
 			{Bindings: []SubmissionState{SubmissionStarted}, Cases: []entity.CaseStatus{entity.CaseStatusDraft}, Jobs: []string{string(entity.DecisionJobQueued), string(entity.DecisionJobRunning), string(entity.DecisionJobPaused)}},
 		}
 	case a2a.TaskStateCompleted:

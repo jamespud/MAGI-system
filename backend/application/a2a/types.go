@@ -24,12 +24,17 @@ var (
 	// ErrStreamLimitExceeded means the principal already holds the configured
 	// number of active A2A streams.
 	ErrStreamLimitExceeded = errors.New("a2a stream limit exceeded")
+	// ErrClaimLost means a settlement attempted to finalize a STARTING
+	// submission whose claim token no longer matches (another replica stole
+	// the claim or the lease expired and was reclaimed).
+	ErrClaimLost = errors.New("a2a start claim lost")
 )
 
 type SubmissionState string
 
 const (
 	SubmissionPrepared SubmissionState = "PREPARED"
+	SubmissionStarting SubmissionState = "STARTING"
 	SubmissionStarted  SubmissionState = "STARTED"
 	SubmissionRejected SubmissionState = "REJECTED"
 )
@@ -113,9 +118,20 @@ type CancelResult struct {
 
 type SubmissionRepository interface {
 	Prepare(context.Context, PrepareCommand) (*PreparedSubmission, bool, error)
-	MarkStarted(context.Context, string) error
-	MarkRejected(context.Context, string, string) error
-	ListPrepared(context.Context, int) ([]*PreparedSubmission, error)
+	// ClaimStart atomically claims a PREPARED or expired-STARTING binding with
+	// a fresh token and lease and returns the locked prepared snapshot. A false
+	// result means the binding is already STARTED/REJECTED or another replica
+	// holds a live claim.
+	ClaimStart(context.Context, string, string, time.Time) (*PreparedSubmission, bool, error)
+	// SettleStarted finalizes a STARTING binding to STARTED. It only succeeds
+	// while the caller still owns the claim token.
+	SettleStarted(context.Context, string, string) error
+	// SettleRejected finalizes a STARTING binding to REJECTED with a stable
+	// code. It only succeeds while the caller still owns the claim token.
+	SettleRejected(context.Context, string, string, string) error
+	// ListClaimable returns PREPARED and expired-STARTING bindings ordered by
+	// id, starting strictly after afterID for keyset paging.
+	ListClaimable(context.Context, int, string) ([]*PreparedSubmission, error)
 	GetByTask(context.Context, int64, string) (*Submission, error)
 	GetTaskRecord(context.Context, int64, string) (*TaskRecord, error)
 	ListTasks(context.Context, TaskListFilter) (*TaskPage, error)

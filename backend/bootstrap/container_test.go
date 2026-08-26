@@ -176,6 +176,23 @@ func TestProvideA2A_EnabledResolvesAndRecoversPrepared(t *testing.T) {
 	}
 }
 
+// TestA2A_StartRecoveryWorkerStartsAndStops guards the lifecycle wiring: the
+// recovery worker starts for an enabled bundle and stops cleanly on cancel,
+// while a disabled bundle returns a no-op cancel.
+func TestA2A_StartRecoveryWorkerStartsAndStops(t *testing.T) {
+	db := sqliteDB(t)
+	cfg := a2aTestConfig(true)
+	enabled := bootstrap.ProvideA2A(db, cfg, decision.NewRunManager(blockingOrch{}),
+		appserver.NewEventBroker(), magi.NewRepository(db), metrics.New(), redact.New(), audit.NewService(nil))
+	cancel := enabled.StartRecoveryWorker(context.Background())
+	cancel()
+
+	disabled := bootstrap.ProvideA2A(db, a2aTestConfig(false), decision.NewRunManager(blockingOrch{}),
+		appserver.NewEventBroker(), magi.NewRepository(db), metrics.New(), redact.New(), audit.NewService(nil))
+	noop := disabled.StartRecoveryWorker(context.Background())
+	noop()
+}
+
 func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

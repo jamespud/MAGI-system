@@ -150,7 +150,11 @@ func TestA2ASubmissionCancel_RejectedBindingIsNotCancelable(t *testing.T) {
 	if _, _, err := repo.Prepare(ctx, a2aPrepareCommand(7, "message-1", "hash", "task-1", "context-1")); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkRejected(ctx, "sub-task-1", "budget_exceeded"); err != nil {
+	token := "reject-token"
+	if _, claimed, err := repo.ClaimStart(ctx, "sub-task-1", token, time.Now().Add(time.Minute)); err != nil || !claimed {
+		t.Fatalf("claim for rejection = claimed %v err %v", claimed, err)
+	}
+	if err := repo.SettleRejected(ctx, "sub-task-1", token, "budget_exceeded"); err != nil {
 		t.Fatal(err)
 	}
 	result, err := repo.CancelTask(ctx, 7, "task-1")

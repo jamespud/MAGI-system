@@ -250,22 +250,106 @@ func loadConversationResolutions(tx *gorm.DB, messages []*entity.ConversationMes
 	return out, nil
 }
 
-func (r *a2aSubmissionRepo) MarkStarted(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).Where("id = ?", id).
-		Update("state", string(a2aapp.SubmissionStarted)).Error
+// ClaimStart atomically claims a PREPARED or expired-STARTING binding. The row
+// lock serializes concurrent replicas, so exactly one claimant wins; a live
+// claim held by another replica is not stealable until it expires.
+func (r *a2aSubmissionRepo) ClaimStart(ctx context.Context, id, token string, leaseUntil time.Time) (*a2aapp.PreparedSubmission, bool, error) {
+	var claimed *a2aapp.PreparedSubmission
+	ok := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var binding A2ASubmissionModel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&binding).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		switch a2aapp.SubmissionState(binding.State) {
+		case a2aapp.SubmissionPrepared:
+			// Always claimable.
+		case a2aapp.SubmissionStarting:
+			if binding.StartClaimUntil != nil && binding.StartClaimUntil.After(now) {
+				return nil // another replica holds a live claim
+			}
+		default:
+			return nil // STARTED / REJECTED are already settled
+		}
+		if err := tx.Model(&A2ASubmissionModel{}).Where("id = ?", id).Updates(map[string]any{
+			"state": string(a2aapp.SubmissionStarting),
+			"start_claim_token": token, "start_claim_until": leaseUntil,
+			"updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		prepared, err := loadPreparedSubmission(tx, binding)
+		if err != nil {
+			return err
+		}
+		claimed, ok = prepared, true
+		return nil
+	})
+	return claimed, ok, err
 }
 
-func (r *a2aSubmissionRepo) MarkRejected(ctx context.Context, id, code string) error {
-	return r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).Where("id = ?", id).
-		Updates(map[string]any{"state": string(a2aapp.SubmissionRejected), "error_code": code}).Error
+// SettleStarted finalizes a claimed STARTING binding to STARTED. It is a
+// conditional write: only the current claim owner may settle, so a loser
+// replica can never overwrite the winner's settlement.
+func (r *a2aSubmissionRepo) SettleStarted(ctx context.Context, id, token string) error {
+	res := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).
+		Where("id = ? AND state = ? AND start_claim_token = ?", id, string(a2aapp.SubmissionStarting), token).
+		Updates(map[string]any{
+			"state": string(a2aapp.SubmissionStarted),
+			"start_claim_token": "", "start_claim_until": nil,
+			"updated_at": time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return a2aapp.ErrClaimLost
+	}
+	return nil
 }
 
-func (r *a2aSubmissionRepo) ListPrepared(ctx context.Context, limit int) ([]*a2aapp.PreparedSubmission, error) {
+// SettleRejected finalizes a claimed STARTING binding to REJECTED with a
+// stable code. Only the current claim owner may settle.
+func (r *a2aSubmissionRepo) SettleRejected(ctx context.Context, id, token, code string) error {
+	res := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).
+		Where("id = ? AND state = ? AND start_claim_token = ?", id, string(a2aapp.SubmissionStarting), token).
+		Updates(map[string]any{
+			"state": string(a2aapp.SubmissionRejected), "error_code": code,
+			"start_claim_token": "", "start_claim_until": nil,
+			"updated_at": time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return a2aapp.ErrClaimLost
+	}
+	return nil
+}
+
+// ListClaimable pages over PREPARED and STARTING bindings in stable id order
+// so a recovery sweep can advance past a first page that only makes transient
+// progress and never starve later rows. Live-lease expiry is decided by
+// ClaimStart in Go (time comparisons are not portable across SQL dialects for
+// DATETIME string formats), so STARTING rows that still hold a live claim are
+// simply skipped there.
+func (r *a2aSubmissionRepo) ListClaimable(ctx context.Context, limit int, afterID string) ([]*a2aapp.PreparedSubmission, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
+	q := r.db.WithContext(ctx).
+		Where("state = ? OR state = ?",
+			string(a2aapp.SubmissionPrepared), string(a2aapp.SubmissionStarting))
+	if afterID != "" {
+		q = q.Where("id > ?", afterID)
+	}
 	var models []A2ASubmissionModel
-	if err := r.db.WithContext(ctx).Where("state = ?", string(a2aapp.SubmissionPrepared)).Order("created_at ASC, id ASC").Limit(limit).Find(&models).Error; err != nil {
+	if err := q.Order("id ASC").Limit(limit).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	prepared := make([]*a2aapp.PreparedSubmission, 0, len(models))

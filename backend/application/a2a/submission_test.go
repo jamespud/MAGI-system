@@ -162,30 +162,6 @@ func (f *fakeJobRepo) enqueueCount() int {
 	return f.enqueues
 }
 
-// barrierSettlementRepo wraps a SubmissionRepository so the test can prove a
-// loser replica cannot overwrite a winner's STARTED settlement: the loser is
-// held in MarkRejected until the winner's MarkStarted has committed.
-type barrierSettlementRepo struct {
-	a2aapp.SubmissionRepository
-	markRejectedReached chan struct{}
-	markRejectedRelease chan struct{}
-	markStarted         chan struct{}
-	startedOnce         sync.Once
-	rejectedOnce        sync.Once
-}
-
-func (w *barrierSettlementRepo) MarkStarted(ctx context.Context, id string) error {
-	err := w.SubmissionRepository.MarkStarted(ctx, id)
-	w.startedOnce.Do(func() { close(w.markStarted) })
-	return err
-}
-
-func (w *barrierSettlementRepo) MarkRejected(ctx context.Context, id, code string) error {
-	w.rejectedOnce.Do(func() { close(w.markRejectedReached) })
-	<-w.markRejectedRelease
-	return w.SubmissionRepository.MarkRejected(ctx, id, code)
-}
-
 var _ port.DecisionJobRepository = (*fakeJobRepo)(nil)
 
 type fakeBudgetChecker struct{ exceeded bool }
@@ -349,7 +325,7 @@ func TestSubmissionService_SubmitRateLimitRejects(t *testing.T) {
 	}
 }
 
-func TestSubmissionService_SubmitTransientStartFailureStaysPrepared(t *testing.T) {
+func TestSubmissionService_SubmitTransientStartFailureLeavesClaim(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	jobs.enqueueErr = errors.New("database unavailable")
@@ -363,8 +339,8 @@ func TestSubmissionService_SubmitTransientStartFailureStaysPrepared(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sub.State != a2aapp.SubmissionPrepared {
-		t.Fatalf("binding state = %s, want PREPARED for transient failure", sub.State)
+	if sub.State != a2aapp.SubmissionStarting {
+		t.Fatalf("binding state = %s, want STARTING lease for transient failure", sub.State)
 	}
 }
 
@@ -396,7 +372,7 @@ func TestSubmissionService_RecoverStartsPreparedBindings(t *testing.T) {
 	}
 }
 
-func TestSubmissionService_RecoverStopsOnPersistentTransientFailure(t *testing.T) {
+func TestSubmissionService_RecoverLeavesClaimForRecovery(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	jobs.enqueueErr = errors.New("database unavailable")
@@ -417,8 +393,8 @@ func TestSubmissionService_RecoverStopsOnPersistentTransientFailure(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sub.State != a2aapp.SubmissionPrepared {
-		t.Fatalf("binding state = %s, want PREPARED when start keeps failing", sub.State)
+	if sub.State != a2aapp.SubmissionStarting {
+		t.Fatalf("binding state = %s, want STARTING lease when start keeps failing", sub.State)
 	}
 }
 
@@ -429,15 +405,7 @@ func TestSubmissionService_RecoverStopsOnPersistentTransientFailure(t *testing.T
 func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
-	jobs.enqueueStarted = make(chan struct{})
-	jobs.enqueueRelease = make(chan struct{})
 	baseRepo := magi.NewA2ASubmissionRepository(db)
-	barrier := &barrierSettlementRepo{
-		SubmissionRepository: baseRepo,
-		markRejectedReached:  make(chan struct{}),
-		markRejectedRelease:  make(chan struct{}),
-		markStarted:          make(chan struct{}),
-	}
 	orch := newBlockingOrch()
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	parser := a2aapp.NewInputParser(65536, 16)
@@ -449,8 +417,8 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 	rmB := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, MaxConcurrentRunsPerUser: 1, RunCounter: counter,
 	})
-	svcA := a2aapp.NewSubmissionService(parser, barrier, rmA, proj, 3)
-	svcB := a2aapp.NewSubmissionService(parser, barrier, rmB, proj, 3)
+	svcA := a2aapp.NewSubmissionService(parser, baseRepo, rmA, proj, 3)
+	svcB := a2aapp.NewSubmissionService(parser, baseRepo, rmB, proj, 3)
 
 	parsed, err := parser.Parse(submissionReq("msg-1"))
 	if err != nil {
@@ -461,7 +429,7 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 		ContextID: "conv-1", InputMessageID: "input-1", CaseMessageID: "case-msg-1",
 		UserID: 7, Question: "q", MaxDebateRounds: 3,
 	}
-	if _, _, err := barrier.Prepare(context.Background(), cmd); err != nil {
+	if _, _, err := baseRepo.Prepare(context.Background(), cmd); err != nil {
 		t.Fatal(err)
 	}
 
@@ -475,27 +443,6 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 		}(svc)
 	}
 
-	// The slot winner is blocked in Enqueue (job not created yet); the slot
-	// loser has already passed GetByCase and is blocked in MarkRejected.
-	<-jobs.enqueueStarted
-	select {
-	case <-barrier.markRejectedReached:
-	case <-time.After(2 * time.Second):
-		select {
-		case err := <-errs:
-			t.Fatalf("loser recover exited before MarkRejected: %v", err)
-		default:
-			t.Fatal("loser never reached MarkRejected within 2s")
-		}
-	}
-	close(jobs.enqueueRelease)
-	select {
-	case <-barrier.markStarted:
-	case <-time.After(2 * time.Second):
-		t.Fatal("slot winner did not mark the binding started")
-	}
-	close(barrier.markRejectedRelease)
-
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -504,7 +451,7 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 		}
 	}
 
-	sub, err := barrier.GetByTask(context.Background(), 7, "case-1")
+	sub, err := baseRepo.GetByTask(context.Background(), 7, "case-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,5 +461,91 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 	job, err := jobs.GetByCase(context.Background(), "case-1")
 	if err != nil || job.Status != entity.DecisionJobRunning {
 		t.Fatalf("job = %+v err=%v, want running", job, err)
+	}
+	if jobs.enqueueCount() != 1 {
+		t.Fatalf("enqueues = %d, want exactly 1", jobs.enqueueCount())
+	}
+}
+
+// TestSubmissionService_ClaimFencingLosesWrongToken guards the conditional
+// settlement: only the claim owner's token may finalize a STARTING binding, so
+// a losing replica can never overwrite the winner's settlement.
+func TestSubmissionService_ClaimFencingLosesWrongToken(t *testing.T) {
+	db := openSubmissionDB(t)
+	repo := magi.NewA2ASubmissionRepository(db)
+	ctx := context.Background()
+	if _, _, err := repo.Prepare(ctx, a2aapp.PrepareCommand{
+		SubmissionID: "sub-1", MessageID: "msg-1", RequestHash: "hash", TaskID: "case-1",
+		ContextID: "conv-1", InputMessageID: "input-1", CaseMessageID: "case-msg-1",
+		UserID: 7, Question: "q", MaxDebateRounds: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := repo.ClaimStart(ctx, "sub-1", "winner-token", time.Now().Add(time.Minute)); err != nil || !claimed {
+		t.Fatalf("claim = claimed %v err %v", claimed, err)
+	}
+	// A losing replica's token must not settle the winner's claim.
+	if err := repo.SettleRejected(ctx, "sub-1", "loser-token", "rate_limited"); !errors.Is(err, a2aapp.ErrClaimLost) {
+		t.Fatalf("loser settle error = %v, want ErrClaimLost", err)
+	}
+	if err := repo.SettleStarted(ctx, "sub-1", "winner-token"); err != nil {
+		t.Fatalf("winner settle: %v", err)
+	}
+	sub, err := repo.GetByTask(ctx, 7, "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.State != a2aapp.SubmissionStarted {
+		t.Fatalf("binding = %+v, want STARTED", sub)
+	}
+}
+
+// TestSubmissionService_RunRecoveryReclaimsExpiredClaim guards the continuous
+// recovery worker: an expired STARTING lease is claimable again and settles to
+// STARTED without manual intervention.
+func TestSubmissionService_RunRecoveryReclaimsExpiredClaim(t *testing.T) {
+	db := openSubmissionDB(t)
+	jobs := newFakeJobRepo()
+	orch := newBlockingOrch()
+	repo := magi.NewA2ASubmissionRepository(db)
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	parser := a2aapp.NewInputParser(65536, 16)
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3,
+		a2aapp.WithRecoveryInterval(10*time.Millisecond), a2aapp.WithStartTimeout(time.Second))
+	ctx := context.Background()
+	if _, _, err := repo.Prepare(ctx, a2aapp.PrepareCommand{
+		SubmissionID: "sub-1", MessageID: "msg-1", RequestHash: "hash", TaskID: "case-1",
+		ContextID: "conv-1", InputMessageID: "input-1", CaseMessageID: "case-msg-1",
+		UserID: 7, Question: "q", MaxDebateRounds: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crashed claimant whose lease already expired.
+	if _, claimed, err := repo.ClaimStart(ctx, "sub-1", "stale-token", time.Now().Add(-time.Minute)); err != nil || !claimed {
+		t.Fatalf("stale claim = claimed %v err %v", claimed, err)
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- svc.RunRecovery(runCtx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitFor(t, 2*time.Second, func() bool {
+		sub, err := repo.GetByTask(ctx, 7, "case-1")
+		return err == nil && sub.State == a2aapp.SubmissionStarted
+	})
+	sub, err := repo.GetByTask(ctx, 7, "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.State != a2aapp.SubmissionStarted {
+		t.Fatalf("binding = %+v, want STARTED after recovery reclaimed the lease", sub)
+	}
+	if jobs.enqueueCount() != 1 {
+		t.Fatalf("enqueues = %d, want 1", jobs.enqueueCount())
 	}
 }

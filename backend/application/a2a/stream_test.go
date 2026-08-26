@@ -143,7 +143,11 @@ func seedStreamTask(t *testing.T, db *gorm.DB, repo a2aapp.SubmissionRepository,
 	if _, _, err := repo.Prepare(context.Background(), cmd); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkStarted(context.Background(), "sub-"+taskID); err != nil {
+	token := "seed-" + taskID
+	if _, claimed, err := repo.ClaimStart(context.Background(), "sub-"+taskID, token, time.Now().Add(time.Minute)); err != nil || !claimed {
+		t.Fatalf("claim seed binding = claimed %v err %v", claimed, err)
+	}
+	if err := repo.SettleStarted(context.Background(), "sub-"+taskID, token); err != nil {
 		t.Fatal(err)
 	}
 	if jobStatus != nil {

@@ -858,6 +858,7 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config, a2a *A2A) {
 	var autoCancel context.CancelFunc
 	var ragCancel context.CancelFunc
+	var a2aRecoveryCancel context.CancelFunc
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
@@ -865,6 +866,11 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 			}
 			if err := a2a.Recover(ctx); err != nil {
 				return err
+			}
+			if a2a.Enabled && a2a.SubmissionSvc != nil {
+				// Continuous recovery for transiently failed A2A startup
+				// leases, driven by the lifecycle context.
+				a2aRecoveryCancel = a2a.StartRecoveryWorker(context.Background())
 			}
 			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
 				return err
@@ -912,6 +918,9 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 			}
 			if ragCancel != nil {
 				ragCancel()
+			}
+			if a2aRecoveryCancel != nil {
+				a2aRecoveryCancel()
 			}
 			return nil
 		},
@@ -1198,6 +1207,21 @@ func (a *A2A) Recover(ctx context.Context) error {
 		return nil
 	}
 	return a.SubmissionSvc.Recover(ctx)
+}
+
+// StartRecoveryWorker launches the continuous recovery loop and returns a
+// cancel function that stops it. It is a no-op when the feature is disabled.
+func (a *A2A) StartRecoveryWorker(parent context.Context) context.CancelFunc {
+	if a == nil || !a.Enabled || a.SubmissionSvc == nil {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		if err := a.SubmissionSvc.RunRecovery(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("a2a recovery worker stopped: %v", err)
+		}
+	}()
+	return cancel
 }
 
 // ProvideA2A wires the optional A2A server from config and existing

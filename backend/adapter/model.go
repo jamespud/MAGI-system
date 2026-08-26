@@ -446,10 +446,12 @@ type A2ASubmissionModel struct {
 	ContextID      string    `gorm:"size:64;index"`
 	InputMessageID string    `gorm:"size:64;index"`
 	CaseMessageID  string    `gorm:"size:64"`
-	State          string    `gorm:"not null;size:16;index:idx_a2a_submission_state,priority:1"`
-	ErrorCode      string    `gorm:"size:64"`
-	CreatedAt      time.Time `gorm:"index;index:idx_a2a_submission_state,priority:2"`
-	UpdatedAt      time.Time
+	State           string     `gorm:"not null;size:16;index:idx_a2a_submission_state,priority:1"`
+	ErrorCode       string     `gorm:"size:64"`
+	StartClaimToken string     `gorm:"not null;size:64;default:''"`
+	StartClaimUntil *time.Time `gorm:"index:idx_a2a_submission_start_claim,priority:2"`
+	CreatedAt       time.Time  `gorm:"index;index:idx_a2a_submission_state,priority:2"`
+	UpdatedAt       time.Time
 }
 
 func (A2ASubmissionModel) TableName() string { return "a2a_submission" }
