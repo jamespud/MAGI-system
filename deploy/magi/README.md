@@ -74,7 +74,9 @@ The external secret must contain these keys (or the matching configured `secret.
 - `auth-api-keys` (must be non-empty when A2A is enabled; DB-issued keys may be used after bootstrap)
 
 Keep `configuration.a2a.enabled` set to `false` unless the deployment has a
-stable HTTPS public URL and authentication enabled. When A2A is enabled,
+stable HTTPS public URL and authentication enabled. Global API authentication
+is enabled by default; keep `configuration.authEnabled: "true"` unless an
+explicitly unauthenticated deployment is intended. When A2A is enabled,
 `configuration.authEnabled` must be `"true"`, and `auth-api-keys` must contain
 at least one bootstrap API-key specification. This requirement also applies to
 an externally managed Secret: the chart cannot inspect its contents, so the
