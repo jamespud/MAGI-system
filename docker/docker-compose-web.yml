@@ -62,12 +62,14 @@ services:
       # container, where localhost refers to the magi-server container itself.
       MAGI_MILVUS_ADDRESS: "milvus-standalone:19530"
       MAGI_ES_ADDRESSES: "http://elasticsearch:9200"
-      # A2A stays disabled by default. Enabling it requires an HTTPS-terminating
-      # proxy in front of web nginx plus auth (MAGI_AUTH_ENABLED=true and
-      # MAGI_AUTH_API_KEYS) because the server refuses to expose A2A without
-      # authentication.
-      MAGI_A2A_ENABLED: "false"
-      MAGI_A2A_PUBLIC_URL: ${MAGI_A2A_PUBLIC_URL:-https://magi.example.com}
+      # A2A stays disabled by default. Enabling it requires HTTPS
+      # termination in front of web nginx, MAGI_AUTH_ENABLED=true and a
+      # MAGI_AUTH_API_KEYS bootstrap spec; the server fails validation
+      # when A2A is enabled without authentication or a public URL.
+      MAGI_AUTH_ENABLED: ${MAGI_AUTH_ENABLED:-false}
+      MAGI_AUTH_API_KEYS: ${MAGI_AUTH_API_KEYS:-}
+      MAGI_A2A_ENABLED: ${MAGI_A2A_ENABLED:-false}
+      MAGI_A2A_PUBLIC_URL: ${MAGI_A2A_PUBLIC_URL:-}
       MAGI_A2A_BASE_PATH: /a2a
       MAGI_A2A_MAX_MESSAGE_BYTES: "65536"
       MAGI_A2A_MAX_REQUEST_BYTES: "98304"

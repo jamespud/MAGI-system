@@ -227,10 +227,18 @@ Enablement checklist:
 - `/a2a/*` uses a separate rate-limit bucket; nginx buffers are disabled for the
   long-lived SSE streams.
 
-For Compose and Helm, set `MAGI_A2A_ENABLED=true` (or
-`configuration.a2a.enabled=true` in `deploy/magi/values.yaml`) together with
-`MAGI_A2A_PUBLIC_URL`/`configuration.a2a.publicURL`, and set
-`MAGI_ENV=production` (already injected by both deployment manifests).
+For Compose, export all four switches so the rendered container passes
+backend validation and fails closed when a required value is missing:
+
+```bash
+export MAGI_AUTH_ENABLED=true
+export MAGI_AUTH_API_KEYS='1:admin:a2a:<generated-random-secret>'
+export MAGI_A2A_ENABLED=true
+export MAGI_A2A_PUBLIC_URL='https://magi.example.com'
+docker compose -f docker/docker-compose-web.yml up -d
+```
+
+`MAGI_ENV=production` is already injected by the Compose and Helm manifests.
 
 Official-client discovery example:
 

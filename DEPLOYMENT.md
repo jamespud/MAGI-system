@@ -230,9 +230,12 @@ the rollout forward-only.
   this automatically, but run it explicitly during the window):
 
   ```sql
-  -- no NULL sequences, no duplicates, cursor consistent
+  -- no NULL sequences, no duplicates, no missing cursors, cursor consistent
   SELECT COUNT(*) FROM magi_event WHERE seq IS NULL;
   SELECT case_id, seq, COUNT(*) FROM magi_event GROUP BY case_id, seq HAVING COUNT(*) > 1;
+  SELECT DISTINCT e.case_id FROM magi_event e
+  LEFT JOIN magi_event_cursor c ON c.case_id = e.case_id
+  WHERE c.case_id IS NULL;
   SELECT c.case_id FROM magi_event_cursor c
   WHERE c.next_seq != COALESCE((SELECT MAX(e.seq)+1 FROM magi_event e WHERE e.case_id = c.case_id), 1);
   ```
@@ -252,6 +255,25 @@ the rollout forward-only.
 `magi_s18_a2a_start_claim.sql` adds two additive columns and an index to
 `a2a_submission`. Apply it **before** deploying the new binary; an old writer
 that never populates the columns runs safely during the rolling window.
+
+#### A2A protocol surface and verification
+
+- **Stream limit is per replica.** The server key is
+  `a2a.max_streams_per_user_per_replica` (env `MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA`;
+  Helm `configuration.a2a.maxStreamsPerUserPerReplica`). It is a process-local counter,
+  so the effective per-user ceiling is `backend replicas x per-replica limit`. A stricter
+  global connection budget must be enforced at the ingress (e.g. nginx/ingress connection
+  limits); this project does not add a distributed semaphore.
+- **Request body limits are layered.** nginx (Compose and Helm) rejects A2A bodies at the
+  edge with `client_max_body_size` matching `a2a.max_request_bytes` before any backend
+  buffering. The backend additionally keeps an explicit 4 MiB server-wide ceiling
+  (Hertz `WithMaxRequestBodySize`) so unrelated JSON endpoints are not silently reduced to
+  the A2A 96 KiB default; the A2A transport applies its own `max_request_bytes` cap and a
+  chunked-read `MaxBytesHandler` as defense in depth.
+- **Rendering verification.** `scripts/verify-a2a-deployment.sh` renders Compose and Helm
+  with safe render-only secrets, asserts the A2A/auth/stream env and nginx `client_max_body_size`,
+  asserts unsafe Helm enablement (auth disabled or empty chart-created secret) fails, and runs
+  the bootstrap example-credential test. Run it before merging deployment changes.
 
 `backend/conf/magi.yaml` (or env overrides via `MAGI_*`):
 

@@ -134,3 +134,64 @@ backend:
 Multiple backend replicas are supported by shared database state, durable jobs, DB-backed scheduler locks, shared user quotas, and SSE DB polling. Ensure MySQL and RAG services are sized for the additional load. The frontend is stateless and defaults to two replicas, a PDB, and optional CPU autoscaling.
 
 Ingress annotations disable proxy buffering and extend read/send timeouts for SSE streaming. For TLS, configure `ingress.tls` and certificates with your ingress controller.
+
+## A2A rollout
+
+A2A is disabled by default and its database schema is gated by migration
+scripts that must be applied in order. The following phases assume you are
+upgrading an existing deployment. Never enable A2A before every phase below
+completes, and never roll back the binary to a pre-S16 writer once S16 has run.
+
+### Migration order
+
+1. **Drain pre-S16 event writers.** Stop the old binary or scale its Deployment
+   to zero so no process still writes `event_sequence` rows under the legacy
+   contract. Back up MySQL (mysqldump/xtrabackup) and record the backup name.
+2. **Apply `magi_s16_event_sequence.sql`.** Run the S16 schema change, then
+   validate that no Case with events has a NULL, duplicate, missing, or stale
+   event cursor. The backend refuses to start (S16 startup check) when such a
+   row exists, so fix forward: repair cursors or re-insert the missing durable
+   event before proceeding. Do not roll back to a pre-S16 writer after this
+   step; a downgrade is only a coordinated restore of the pre-S16 backup.
+3. **Apply `magi_s17_a2a_submission.sql`**, then the additive
+   `magi_s18_a2a_start_claim.sql` **before** the A2A-capable binary starts.
+   Both scripts are additive and safe to run while the old binary is still
+   running, but S18 must be present before A2A admission begins.
+
+### Enablement sequence
+
+4. **Deploy with A2A disabled.** Set `configuration.a2a.enabled=false` and
+   verify the rollout is healthy (`/ready`) before changing anything else.
+5. **Configure prerequisites.** Set `configuration.authEnabled=true`, provide a
+   non-empty chart-created or external `auth-api-keys` Secret, configure an
+   HTTPS `configuration.a2a.publicURL` (origin only, no path/query/fragment),
+   terminate TLS at the ingress with `ingress.tls`, and keep the nginx
+   streaming annotations (proxy buffering off, long read/send timeouts) in
+   place. Rendering with A2A enabled but auth disabled, or with an empty
+   chart-created `auth-api-keys`, fails by design.
+6. **Enable one canary replica.** Set `configuration.a2a.enabled=true` with
+   `backend.replicaCount=1`. Fetch the public Agent Card and verify its
+   `url` is exactly `https://<host>/a2a` and the security schemes are bearer
+   and `X-API-Key`.
+7. **Smoke test.** Send one task with `message:send`, subscribe to its stream,
+   and verify the event sequence is ordered, exactly one terminal state is
+   emitted, and the audit trail (`a2a.send`) plus `magi_a2a_*` metrics record
+   the run. Confirm the optional `/metrics` scrape parses cleanly.
+8. **Widen the rollout.** Scale the backend to the desired replica count. The
+   stream limit is **per replica** (`configuration.a2a.maxStreamsPerUserPerReplica`),
+   so the effective per-user ceiling is `replicas x per-replica limit`. A
+   stricter global connection budget must be enforced at the ingress; this
+   chart does not add a distributed semaphore.
+
+### Failure recovery
+
+- If the S16 cursor validation fails, fix the data forward (repair cursors or
+  missing events) and restart. Do not continue with a partially migrated
+  writer.
+- If A2A misbehaves after rollout, disable it by setting
+  `configuration.a2a.enabled=false` and re-running `helm upgrade`; keep the
+  A2A-capable binary in place. Do not downgrade the binary while S16/S17/S18
+  are applied.
+- A full rollback means restoring the pre-S16 backup and then redeploying the
+  matching older binary, as one coordinated operation, not an in-place
+  downgrade.
