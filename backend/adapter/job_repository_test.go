@@ -136,6 +136,7 @@ func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Reposit
 		t.Fatalf("sql db: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

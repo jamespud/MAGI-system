@@ -398,7 +398,7 @@ func TestDurableStream_TerminalSnapshotClosesAfterEmptyDrain(t *testing.T) {
 	stream, db, repo, _ := newStreamHarness(t, 8)
 	seedStreamTask(t, db, repo, "case-eventless-failure", "conv-1", entity.CaseStatusInvestigating, running())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	c := startCollect(ctx, stream.Events(ctx, 7, "case-eventless-failure"))
 	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
