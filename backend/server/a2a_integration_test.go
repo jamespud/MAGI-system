@@ -377,8 +377,8 @@ func TestA2AIntegration_DisconnectLeavesJobRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.State != a2a.TaskStateWorking {
-		t.Fatalf("task after disconnect = %s, want working", got.Status.State)
+	if got.Status.State.Terminal() {
+		t.Fatalf("task after disconnect = %s, must stay non-terminal while the job runs", got.Status.State)
 	}
 	close(env.orch.release)
 }
@@ -531,7 +531,8 @@ func TestA2AIntegration_SecondHandlerCancelsAndStreamObserves(t *testing.T) {
 	// A second replica handler cancels through the shared durable repository.
 	secondRM := decision.NewRunManager(env.orch, decision.RunManagerDeps{Metrics: metrics.New()})
 	secondSvc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), env.repo, secondRM, a2aapp.NewTaskProjector(redact.New("k7")), 3)
-	secondHandler := a2aapp.NewHandler(secondSvc, env.repo, a2aapp.NewTaskProjector(redact.New("k7")), a2aapp.CursorCodec{MaxPageSize: 100}, secondRM, nil)
+	secondHandler := a2aapp.NewHandler(secondSvc, env.repo, a2aapp.NewTaskProjector(redact.New("k7")), a2aapp.CursorCodec{MaxPageSize: 100}, secondRM, nil,
+		a2aapp.WithHandlerLivePublisher(env.broker))
 	ctxWithPrincipal := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 7, Name: "owner"})
 
 	if _, err := secondHandler.CancelTask(ctxWithPrincipal, &a2a.CancelTaskRequest{ID: taskID}); err != nil {
