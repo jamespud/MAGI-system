@@ -154,10 +154,10 @@ tavily:
 # API-key authentication. Set enabled: true and define at least one key.
 auth:
   enabled: false
-  api_keys:
-    - { name: "admin", key: "change-me", user_id: 1, role: "admin" }
-    # Prefer key_hash (sha256 hex of the API key) over plaintext key:
-    # - { name: "ops", key_hash: "<sha256-hex>", user_id: 2, role: "admin" }
+  api_keys: []
+  # Supply bootstrap keys through MAGI_AUTH_API_KEYS using:
+  # userID:role:name:<generated-random-secret>
+  # Prefer DB-issued keys after bootstrap; plaintext is shown only once.
   # Public self-registration (creates a user-role account + one-time key).
   self_registration: false
   # OpenID Connect authorization-code login (SSO). When enabled, sign in with

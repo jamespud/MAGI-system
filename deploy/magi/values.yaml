@@ -79,7 +79,7 @@ configuration:
   embeddingModelName: ""
   milvusAddress: milvus:19530
   esAddresses: http://elasticsearch:9200
-  authEnabled: "true"
+  authEnabled: "false"
   a2a:
     enabled: "false"
     publicURL: ""

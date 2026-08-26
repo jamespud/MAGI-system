@@ -9,7 +9,28 @@ import (
 
 	"github.com/jamespud/magi/backend/bootstrap"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"gopkg.in/yaml.v3"
 )
+
+func TestExampleConfigContainsNoActiveBootstrapCredential(t *testing.T) {
+	data, err := os.ReadFile("../conf/magi.yaml.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Auth struct {
+			APIKeys []bootstrap.APIKeySpec `yaml:"api_keys"`
+		} `yaml:"auth"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range doc.Auth.APIKeys {
+		if strings.TrimSpace(key.Key) != "" || strings.TrimSpace(key.KeyHash) != "" {
+			t.Fatalf("example config contains an active bootstrap credential: name=%q", key.Name)
+		}
+	}
+}
 
 func loadA2ATestConfig(t *testing.T, body string) (*bootstrap.Config, error) {
 	t.Helper()
