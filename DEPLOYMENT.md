@@ -240,10 +240,23 @@ the rollout forward-only.
   WHERE c.next_seq != COALESCE((SELECT MAX(e.seq)+1 FROM magi_event e WHERE e.case_id = c.case_id), 1);
   ```
 
-- **Failed rollout recovery**: fix forward with the new binary (re-run the S16
-  validation/backfill against the current data) or restore from the pre-S16
-  backup. Never "fix" a failed S16 rollout by downgrading the application while
-  the NOT NULL contract is in place.
+- **Failed rollout recovery**: the published S16 is forward-only and is not
+  edited. If it was interrupted mid-way (for example the binary was rolled back
+  after `ADD COLUMN seq`, or the migration returned before the unique key),
+  re-running the published file fails on its first `ADD COLUMN seq`. Use the
+  resumer instead, still with writers drained:
+
+  1. keep all event writers drained (pause the backend);
+  2. take/retain a backup;
+  3. run `docker/atlas/repair/magi_s16_event_sequence_resume.sql`;
+  4. execute the four validation queries above; every count must be zero;
+  5. deploy only an S16-capable binary (one that always writes `seq`);
+  6. restore the pre-S16 backup if any validation query returns a violation.
+
+  The resumer rebuilds `magi_event.seq` from `(timestamp, id)` order, so it is
+  forbidden once any consumer has resumed against a partially migrated schema.
+  Never "fix" a failed S16 rollout by downgrading the application while the
+  NOT NULL contract is in place.
 - **Canary**: keep `a2a.enabled: false` on the canary, flip one replica, and
   run the stream smoke test below before widening the rollout.
 - **Stream smoke test** after the canary starts: subscribe to a live task and
@@ -255,6 +268,19 @@ the rollout forward-only.
 `magi_s18_a2a_start_claim.sql` adds two additive columns and an index to
 `a2a_submission`. Apply it **before** deploying the new binary; an old writer
 that never populates the columns runs safely during the rolling window.
+
+#### Additive A2A admission lock and output modes (S19/S20)
+
+- `magi_s19_run_admission_lock.sql` adds a per-user transaction mutex for run
+  admission. Apply it **before** the new binary. The behavior cutover is
+  coordinated, not a normal mixed-version rolling deployment: drain or gate new
+  submissions, replace every replica still using the old RunCounter-based
+  admission, and only then reopen admission. An old replica never acquires the
+  S19 lock, so old and new admission algorithms do not share a mutex during
+  overlap.
+- `magi_s20_a2a_output_modes.sql` adds the additive
+  `accepted_output_modes_json` column. Apply it **before** the new binary; it is
+  old-writer compatible because an old binary ignores the defaulted column.
 
 #### A2A protocol surface and verification
 

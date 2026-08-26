@@ -157,6 +157,12 @@ completes, and never roll back the binary to a pre-S16 writer once S16 has run.
    `magi_s18_a2a_start_claim.sql` **before** the A2A-capable binary starts.
    Both scripts are additive and safe to run while the old binary is still
    running, but S18 must be present before A2A admission begins.
+4. **Apply `magi_s19_run_admission_lock.sql`** (additive per-user mutex) and
+   `magi_s20_a2a_output_modes.sql` (additive output-modes column) **before** the
+   new binary. S19 is a coordinated behavior cutover, not a normal mixed-version
+   rollout: drain or gate new submissions until every RunCounter-based replica
+   is gone, then reopen admission. S20 is old-writer compatible because old
+   binaries ignore its defaulted column.
 
 ### Enablement sequence
 
@@ -185,9 +191,12 @@ completes, and never roll back the binary to a pre-S16 writer once S16 has run.
 
 ### Failure recovery
 
-- If the S16 cursor validation fails, fix the data forward (repair cursors or
-  missing events) and restart. Do not continue with a partially migrated
-  writer.
+- If the S16 migration is interrupted after `ADD COLUMN seq` but before the
+  unique key, re-running the published file fails. Keep writers drained and run
+  the resumer `docker/atlas/repair/magi_s16_event_sequence_resume.sql`, then
+  re-run the four validation queries (all must be zero). The resumer rebuilds
+  `magi_event.seq`, so never run it after consumers resume against a partially
+  migrated schema. Do not continue with a partially migrated writer.
 - If A2A misbehaves after rollout, disable it by setting
   `configuration.a2a.enabled=false` and re-running `helm upgrade`; keep the
   A2A-capable binary in place. Do not downgrade the binary while S16/S17/S18

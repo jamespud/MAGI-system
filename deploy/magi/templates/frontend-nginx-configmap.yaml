@@ -29,6 +29,15 @@ data:
         proxy_pass http://{{ include "magi.fullname" . }}-backend:{{ .Values.backend.service.port }};
       }
 
+      # Prometheus scrape endpoint. Restrict this to Prometheus source networks.
+      location = /metrics {
+        proxy_pass http://{{ include "magi.fullname" . }}-backend:{{ .Values.backend.service.port }};
+        proxy_set_header Host {{ print "$" }}host;
+        proxy_set_header X-Real-IP {{ print "$" }}remote_addr;
+        proxy_set_header X-Forwarded-For {{ print "$" }}proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto {{ print "$" }}scheme;
+      }
+
       # A2A protocol + Agent Card discovery: long-lived streams must not be
       # buffered, and the discovery JSON must reach the backend (not the SPA).
       location = /.well-known/agent-card.json {
