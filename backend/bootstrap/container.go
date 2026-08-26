@@ -840,7 +840,11 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	if addr == "" {
 		addr = ":8080"
 	}
-	h := hzserver.Default(hzserver.WithHostPorts(addr), hzserver.WithMaxRequestBodySize(serverMaxRequestBodyBytes))
+	h := hzserver.Default(
+		hzserver.WithHostPorts(addr),
+		hzserver.WithMaxRequestBodySize(serverMaxRequestBodyBytes),
+		hzserver.WithSenseClientDisconnection(true),
+	)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go h.Spin()

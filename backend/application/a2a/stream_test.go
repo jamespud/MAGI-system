@@ -59,6 +59,12 @@ func (b *testEventBroker) Unsubscribe(caseID string, ch chan *entity.MagiEvent) 
 	}
 }
 
+func (b *testEventBroker) SubscriberCount(caseID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subs[caseID])
+}
+
 func (b *testEventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 	b.mu.Lock()
 	b.nextSeq++
@@ -734,6 +740,34 @@ func TestStreamProjector_FailsFastOnStreamLimit(t *testing.T) {
 	}
 	cancel()
 	<-first.done
+}
+
+// TestStreamProjector_DisconnectReleasesPerReplicaSlot guards that a canceled
+// request context (the effect Hertz SenseClientDisconnection has on the peer
+// disconnect) releases the per-replica stream slot and broker subscription, so
+// the next stream for the same user can acquire the limit-1 slot.
+func TestStreamProjector_DisconnectReleasesPerReplicaSlot(t *testing.T) {
+	stream, db, repo, broker := newStreamHarness(t, 1)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
+	waitFor(t, time.Second, func() bool { return len(first.snapshot()) >= 1 })
+	if n := broker.SubscriberCount("case-1"); n != 1 {
+		t.Fatalf("subscriber count before disconnect = %d, want 1", n)
+	}
+
+	// Simulate client disconnect: cancel the request context and wait for the
+	// stream run loop to unwind, releasing the slot and unsubscribing.
+	cancel()
+	<-first.done
+	waitFor(t, time.Second, func() bool { return broker.SubscriberCount("case-1") == 0 })
+
+	// A new stream for the same user must now be admitted.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	second := startCollect(ctx2, stream.Events(ctx2, 7, "case-1"))
+	waitFor(t, time.Second, func() bool { return len(second.snapshot()) >= 1 })
 }
 
 func collectAll(t *testing.T, ctx context.Context, seq iter.Seq2[a2a.Event, error]) []a2a.Event {
