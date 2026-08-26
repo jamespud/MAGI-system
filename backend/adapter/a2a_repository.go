@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
+
 	a2aapp "github.com/jamespud/magi/backend/application/a2a"
 	"github.com/jamespud/magi/backend/application/assistant"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -35,16 +37,21 @@ func NewA2ASubmissionRepository(db *gorm.DB) a2aapp.SubmissionRepository {
 func (r *a2aSubmissionRepo) Prepare(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
 	for attempt := 0; attempt < contextContentionMaxAttempts; attempt++ {
 		prepared, created, err := r.prepareOnce(ctx, cmd)
-		if !errors.Is(err, errConcurrentConversationInsert) {
+		retryable := errors.Is(err, errConcurrentConversationInsert) || isMySQLDeadlock(err)
+		if !retryable {
 			return prepared, created, err
 		}
 		if attempt == contextContentionMaxAttempts-1 {
+			if isMySQLDeadlock(err) {
+				return nil, false, fmt.Errorf("a2a prepare deadlock after %d attempts: %v", contextContentionMaxAttempts, err)
+			}
 			return nil, false, fmt.Errorf("%w after %d attempts: %v", a2aapp.ErrContextContention, contextContentionMaxAttempts, err)
 		}
 
-		// A competing transaction is creating this ContextID. The binding
-		// transaction rolled back, so retrying will lock the committed
-		// conversation instead. Back off so contention cannot spin the DB.
+		// A competing transaction is creating this ContextID or a deadlock was
+		// detected under concurrent same-message submission. The binding
+		// transaction rolled back, so retrying will lock the committed row
+		// instead. Back off so contention cannot spin the DB.
 		timer := time.NewTimer(contextContentionBackoff(attempt))
 		select {
 		case <-ctx.Done():
@@ -56,6 +63,13 @@ func (r *a2aSubmissionRepo) Prepare(ctx context.Context, cmd a2aapp.PrepareComma
 		}
 	}
 	return nil, false, a2aapp.ErrContextContention
+}
+
+// isMySQLDeadlock reports whether err is MySQL error 1213 (lock deadlock),
+// which is retryable under concurrent same-message submission.
+func isMySQLDeadlock(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1213
 }
 
 func contextContentionBackoff(attempt int) time.Duration {
@@ -73,22 +87,7 @@ func contextContentionBackoff(attempt int) time.Duration {
 func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
 	var prepared *a2aapp.PreparedSubmission
 	created := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existing A2ASubmissionModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND message_id = ?", cmd.UserID, cmd.MessageID).First(&existing).Error
-		if err == nil {
-			if existing.RequestHash != cmd.RequestHash {
-				return a2aapp.ErrIdempotencyConflict
-			}
-			var loadErr error
-			prepared, loadErr = loadPreparedSubmission(tx, existing)
-			return loadErr
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		binding := A2ASubmissionModel{
 			ID: cmd.SubmissionID, UserID: cmd.UserID, MessageID: cmd.MessageID,
@@ -96,9 +95,28 @@ func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareC
 			InputMessageID: cmd.InputMessageID, CaseMessageID: cmd.CaseMessageID,
 			State: string(a2aapp.SubmissionPrepared), CreatedAt: now, UpdatedAt: now,
 		}
-		if err := tx.Create(&binding).Error; err != nil {
-			return err
+		// Atomic upsert on the (user_id, message_id) unique key: a single
+		// INSERT ... ON DUPLICATE KEY UPDATE avoids the SELECT-then-INSERT
+		// gap-lock deadlock that concurrent same-message submission triggers on
+		// MySQL. RowsAffected==1 means we created it; 0 means a competing
+		// transaction won and we replay its committed row.
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&binding)
+		if res.Error != nil {
+			return res.Error
 		}
+		if res.RowsAffected == 0 {
+			var existing A2ASubmissionModel
+			if err := tx.Where("user_id = ? AND message_id = ?", cmd.UserID, cmd.MessageID).First(&existing).Error; err != nil {
+				return err
+			}
+			if existing.RequestHash != cmd.RequestHash {
+				return a2aapp.ErrIdempotencyConflict
+			}
+			var loadErr error
+			prepared, loadErr = loadPreparedSubmission(tx, existing)
+			return loadErr
+		}
+		created = true
 
 		conv, history, err := prepareConversation(tx, cmd)
 		if err != nil {
@@ -177,20 +195,25 @@ func prepareConversation(tx *gorm.DB, cmd a2aapp.PrepareCommand) (*entity.Conver
 	if cmd.ContextID == "" {
 		return nil, nil, nil
 	}
-	var model ConversationModel
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", cmd.ContextID).First(&model).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		now := time.Now().UTC()
-		conv := &entity.Conversation{ID: cmd.ContextID, UserID: cmd.UserID, Title: a2aConversationTitle(cmd.Question), CreatedAt: now, UpdatedAt: now}
-		if err := tx.Create(conversationToModel(conv)).Error; err != nil {
-			if isUniqueViolation(err) {
-				return nil, nil, fmt.Errorf("%w: %v", errConcurrentConversationInsert, err)
-			}
-			return nil, nil, err
+	now := time.Now().UTC()
+	conv := &entity.Conversation{ID: cmd.ContextID, UserID: cmd.UserID, Title: a2aConversationTitle(cmd.Question), CreatedAt: now, UpdatedAt: now}
+	// Atomic upsert: a single INSERT ... ON DUPLICATE KEY UPDATE avoids the
+	// SELECT-then-INSERT gap-lock deadlock when concurrent submitters share one
+	// new ContextID. RowsAffected==1 means we created it.
+	res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(conversationToModel(conv))
+	if res.Error != nil {
+		if isUniqueViolation(res.Error) {
+			return nil, nil, fmt.Errorf("%w: %v", errConcurrentConversationInsert, res.Error)
 		}
+		return nil, nil, res.Error
+	}
+	if res.RowsAffected == 1 {
 		return conv, nil, nil
 	}
-	if err != nil {
+
+	// A competing transaction created this ContextID first; lock and hydrate it.
+	var model ConversationModel
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", cmd.ContextID).First(&model).Error; err != nil {
 		return nil, nil, err
 	}
 	if model.UserID != 0 && model.UserID != cmd.UserID {

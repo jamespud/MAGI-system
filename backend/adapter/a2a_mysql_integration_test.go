@@ -45,6 +45,8 @@ func TestA2ASubmission_ConcurrentSameMessageOnMySQL(t *testing.T) {
 	}
 	repo := magi.NewA2ASubmissionRepository(db)
 	messageID := fmt.Sprintf("mysql-concurrent-%d", os.Getpid())
+	_ = db.Exec("DELETE FROM a2a_submission WHERE message_id = ?", messageID)
+	_ = db.Exec("DELETE FROM magi_conversation WHERE id = ?", "conv-"+messageID)
 	cmd := a2a.PrepareCommand{
 		SubmissionID: "sub-" + messageID, MessageID: messageID, RequestHash: "hash",
 		TaskID: "case-" + messageID, ContextID: "conv-" + messageID,
@@ -73,10 +75,10 @@ func TestA2ASubmission_ConcurrentSameMessageOnMySQL(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertMySQLCounts(t, db, &magi.A2ASubmissionModel{}, 1)
-	assertMySQLCounts(t, db, &magi.CaseModel{}, 1)
-	assertMySQLCounts(t, db, &magi.ConversationModel{}, 1)
-	assertMySQLCounts(t, db, &magi.ConversationMessageModel{}, 2)
+	assertMySQLCountWhere(t, db, &magi.A2ASubmissionModel{}, "message_id = ?", []any{cmd.MessageID}, 1)
+	assertMySQLCountWhere(t, db, &magi.CaseModel{}, "id = ?", []any{cmd.TaskID}, 1)
+	assertMySQLCountWhere(t, db, &magi.ConversationModel{}, "id = ?", []any{cmd.ContextID}, 1)
+	assertMySQLCountWhere(t, db, &magi.ConversationMessageModel{}, "conversation_id = ?", []any{cmd.ContextID}, 2)
 
 	// The durable job's case_id unique key also collapses concurrent enqueues.
 	jobs := magi.NewDecisionJobRepository(db)
@@ -99,7 +101,7 @@ func TestA2ASubmission_ConcurrentSameMessageOnMySQL(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertMySQLCounts(t, db, &magi.DecisionJobModel{}, 1)
+	assertMySQLCountWhere(t, db, &magi.DecisionJobModel{}, "case_id = ?", []any{cmd.TaskID}, 1)
 }
 
 // TestA2AEventSequence_StrictlyIncreasingOnMySQL proves every persisted event
@@ -121,10 +123,10 @@ func TestA2AEventSequence_StrictlyIncreasingOnMySQL(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_ = events.Create(context.Background(), &entity.MagiEvent{
-				ID: fmt.Sprintf("%s-%d", caseID, i), CaseID: caseID,
-				Type: entity.EventCaseStatusChanged, Seq: 0,
-			})
+		_ = events.Create(context.Background(), &entity.MagiEvent{
+			ID: fmt.Sprintf("%s-%d", caseID, i), CaseID: caseID,
+			Type: entity.EventCaseStatusChanged, Seq: 0, Timestamp: time.Now(),
+		})
 		}(i)
 	}
 	wg.Wait()
@@ -155,10 +157,10 @@ func TestA2AEventSequence_StrictlyIncreasingOnMySQL(t *testing.T) {
 	}
 }
 
-func assertMySQLCounts(t *testing.T, db *gorm.DB, model any, want int64) {
+func assertMySQLCountWhere(t *testing.T, db *gorm.DB, model any, query string, args []any, want int64) {
 	t.Helper()
 	var got int64
-	if err := db.Model(model).Count(&got).Error; err != nil {
+	if err := db.Model(model).Where(query, args...).Count(&got).Error; err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
@@ -192,6 +194,8 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 	if err := db.AutoMigrate(
 		&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.ConversationModel{},
 		&magi.ConversationMessageModel{}, &magi.DecisionJobModel{}, &magi.RunCounterModel{},
+		&magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{},
+		&magi.EvidenceModel{}, &magi.ClaimModel{}, &magi.VoteModel{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -234,12 +238,6 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertMySQLCounts(t, db, &magi.A2ASubmissionModel{}, 1)
-	assertMySQLCounts(t, db, &magi.CaseModel{}, 1)
-	assertMySQLCounts(t, db, &magi.ConversationModel{}, 1)
-	assertMySQLCounts(t, db, &magi.ConversationMessageModel{}, 2)
-	assertMySQLCounts(t, db, &magi.DecisionJobModel{}, 1)
-
 	var sub magi.A2ASubmissionModel
 	if err := db.Where("message_id = ?", messageID).First(&sub).Error; err != nil {
 		t.Fatal(err)
@@ -247,6 +245,13 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 	if sub.State != string(a2a.SubmissionStarted) {
 		t.Fatalf("binding state = %s, want STARTED", sub.State)
 	}
+	// The internal IDs are per-call UUIDs, so scope the row counts to the
+	// single durable task the concurrent submissions converged on.
+	assertMySQLCountWhere(t, db, &magi.A2ASubmissionModel{}, "task_id = ?", []any{sub.TaskID}, 1)
+	assertMySQLCountWhere(t, db, &magi.CaseModel{}, "id = ?", []any{sub.TaskID}, 1)
+	assertMySQLCountWhere(t, db, &magi.DecisionJobModel{}, "case_id = ?", []any{sub.TaskID}, 1)
+	assertMySQLCountWhere(t, db, &magi.ConversationModel{}, "id = ?", []any{sub.ContextID}, 1)
+	assertMySQLCountWhere(t, db, &magi.ConversationMessageModel{}, "conversation_id = ?", []any{sub.ContextID}, 2)
 }
 
 // TestA2ASubmission_ConcurrentClaimStartOnMySQL proves the row-lock claim
@@ -298,7 +303,7 @@ func TestA2ASubmission_ConcurrentClaimStartOnMySQL(t *testing.T) {
 // MaxEventSeq.
 func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
 	db := openA2AMySQL(t)
-	if err := db.AutoMigrate(&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}, &magi.EvidenceModel{}, &magi.ClaimModel{}, &magi.VoteModel{}); err != nil {
 		t.Fatal(err)
 	}
 	repo := magi.NewA2ASubmissionRepository(db)

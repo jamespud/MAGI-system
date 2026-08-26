@@ -9,7 +9,7 @@ type CaseModel struct {
 	Question         string `gorm:"type:text"`
 	Context          string `gorm:"type:text"`
 	ConstraintsJSON  string `gorm:"type:text"`
-	ParentCaseID     string `gorm:"index"`
+	ParentCaseID     string `gorm:"index;size:64"`
 	Status           string
 	CurrentPhase     string
 	PausedFromStatus string
@@ -45,8 +45,8 @@ func (AgentRunModel) TableName() string { return "magi_agent_run" }
 // DecisionJobModel is the durable worker envelope for one case.
 type DecisionJobModel struct {
 	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"uniqueIndex"`
-	Status      string `gorm:"index"`
+	CaseID      string `gorm:"uniqueIndex;size:64"`
+	Status      string `gorm:"index;size:32"`
 	Attempt     int
 	MaxAttempts int
 	WorkerID    string
@@ -143,7 +143,7 @@ func (VoteModel) TableName() string { return "magi_vote" }
 
 type ResolutionModel struct {
 	ID                 string `gorm:"primaryKey"`
-	CaseID             string `gorm:"uniqueIndex"`
+	CaseID             string `gorm:"uniqueIndex;size:64"`
 	ConsensusJSON      string `gorm:"type:text"`
 	FinalDecision      string
 	FinalReport        string `gorm:"type:text"`
@@ -158,7 +158,7 @@ func (ResolutionModel) TableName() string { return "resolution" }
 
 type EventModel struct {
 	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index:idx_event_case_seq,priority:1"`
+	CaseID      string `gorm:"index:idx_event_case_seq,priority:1;size:64"`
 	Seq         uint64 `gorm:"not null;uniqueIndex:idx_event_case_seq,priority:2"`
 	RunID       string
 	AgentCode   string
