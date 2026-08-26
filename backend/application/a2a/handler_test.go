@@ -439,3 +439,64 @@ func msgID(i int) string {
 }
 
 func intPtr(v int) *int { return &v }
+
+// TestHandler_SendStreamingMessageUnsupportedStreamingAudits400 guards the
+// streaming audit mapping: an unconfigured stream must be recorded as a
+// client-side 400 (unsupported operation), not a 500.
+func TestHandler_SendStreamingMessageUnsupportedStreamingAudits400(t *testing.T) {
+	h, auditRepo, ctx := newAuditHarness(t)
+
+	var gotErr error
+	for _, err := range h.handler.SendStreamingMessage(ctx, submissionReq("msg-unsupported")) {
+		gotErr = err
+		break
+	}
+	var ae *a2a.Error
+	if !errors.As(gotErr, &ae) || ae.Err != a2a.ErrUnsupportedOperation {
+		t.Fatalf("streaming error = %v, want ErrUnsupportedOperation", gotErr)
+	}
+	events := auditRepo.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].Action != "a2a.send" || events[0].Status != 400 {
+		t.Fatalf("unsupported streaming audit = %+v", events[0])
+	}
+}
+
+// TestHandler_SendStreamingMessageInvalidInputAudits400 guards the streaming
+// audit mapping: submit-side invalid input must be recorded as a client-side
+// 400 (invalid params), not the raw application error that would map to 500.
+func TestHandler_SendStreamingMessageInvalidInputAudits400(t *testing.T) {
+	db := openSubmissionDB(t)
+	repo := magi.NewA2ASubmissionRepository(db)
+	broker := newTestEventBroker()
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	stream := a2aapp.NewDurableStreamProjector(repo, broker, broker, proj, 8, time.Hour)
+	jobs := newFakeJobRepo()
+	rm := decision.NewRunManager(newBlockingOrch(), decision.RunManagerDeps{JobRepo: jobs})
+	svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), repo, rm, proj, 3)
+	auditRepo := &memAuditRepo{}
+	handler := a2aapp.NewHandler(svc, repo, proj, a2aapp.CursorCodec{MaxPageSize: 100}, rm, stream,
+		a2aapp.WithHandlerAudit(audit.NewService(auditRepo)))
+
+	req := &a2a.SendMessageRequest{Message: &a2a.Message{
+		ID: "msg-invalid", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("  ")},
+	}}
+	var gotErr error
+	for _, err := range handler.SendStreamingMessage(principalCtx(7), req) {
+		gotErr = err
+		break
+	}
+	var ae *a2a.Error
+	if !errors.As(gotErr, &ae) || ae.Err != a2a.ErrInvalidParams {
+		t.Fatalf("streaming error = %v, want ErrInvalidParams", gotErr)
+	}
+	events := auditRepo.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	if events[0].Action != "a2a.send" || events[0].Status != 400 {
+		t.Fatalf("invalid input streaming audit = %+v", events[0])
+	}
+}

@@ -455,11 +455,14 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 
 	fmt.Fprintf(w, "# TYPE magi_cost_usd_total counter\nmagi_cost_usd_total %.6f\n", float64(r.CostTotalMicro.Load())/1e6)
 
+	// Prometheus allows at most one TYPE declaration per metric family, so
+	// emit it once before the fixed operation x result series.
+	fmt.Fprintln(w, "# TYPE magi_a2a_requests_total counter")
 	for oi, op := range a2aOperations {
 		for ri, res := range a2aResults {
 			// Always expose the fixed series (zero-value) so canaries and SLO
 			// dashboards can rely on every operation x result label existing.
-			fmt.Fprintf(w, "# TYPE magi_a2a_requests_total counter\nmagi_a2a_requests_total{operation=%q,result=%q} %d\n", op, res, r.a2aRequests[oi][ri].Load())
+			fmt.Fprintf(w, "magi_a2a_requests_total{operation=%q,result=%q} %d\n", op, res, r.a2aRequests[oi][ri].Load())
 		}
 	}
 	if n := r.A2AActiveStreams.Load(); n != 0 {

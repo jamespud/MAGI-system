@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -78,6 +79,40 @@ func AuditMiddleware(svc *audit.Service) app.HandlerFunc {
 		}
 		// Use a fresh context: the request context may be canceled by the time
 		// the response is flushed, and audit writes must not fail requests.
+		_ = svc.Record(context.Background(), event)
+	}
+}
+
+// A2ATransportRejectionAudit records protocol-level A2A rejections that happen
+// before the A2A handler runs: failed authentication (401) and rate-limit
+// overflow (429). It must be mounted before Auth so it can observe the
+// principal that Auth places on the request context. It never reads request
+// bodies, Authorization/X-API-Key headers, query strings, or message IDs, and
+// it uses a fresh context so a canceled request cannot drop the audit write.
+func A2ATransportRejectionAudit(svc *audit.Service) app.HandlerFunc {
+	return func(ctx context.Context, c *app.RequestContext) {
+		c.Next(ctx)
+		if svc == nil {
+			return
+		}
+		path := string(c.Request.URI().Path())
+		if path != "/a2a" && !strings.HasPrefix(path, "/a2a/") {
+			return
+		}
+		status := c.Response.StatusCode()
+		if status != consts.StatusUnauthorized && status != consts.StatusTooManyRequests {
+			return
+		}
+		event := &entity.AuditEvent{
+			Action:   "a2a.transport.reject",
+			Resource: path,
+			Status:   status,
+		}
+		if value, ok := c.Get("auth_principal"); ok {
+			if p, ok := value.(*auth.Principal); ok && p != nil {
+				event.UserID, event.Username, event.Role = p.UserID, p.Name, p.Role
+			}
+		}
 		_ = svc.Record(context.Background(), event)
 	}
 }

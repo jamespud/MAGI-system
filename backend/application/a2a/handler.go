@@ -220,14 +220,15 @@ func (h *Handler) SendStreamingMessage(ctx context.Context, req *a2a.SendMessage
 			h.auditSend(ctx, taskID, messageIDFrom(req), userIDFrom(ctx), finalErr)
 		}()
 		if h.stream == nil {
-			finalErr = a2a.ErrUnsupportedOperation
+			finalErr = a2a.NewError(a2a.ErrUnsupportedOperation, "streaming is not supported")
 			yield(nil, finalErr)
 			return
 		}
 		task, err := h.submissions.Submit(ctx, userIDFrom(ctx), req)
 		if err != nil {
-			finalErr = err
-			yield(nil, h.mapSubmitError(err))
+			mapped := h.mapSubmitError(err)
+			finalErr = mapped
+			yield(nil, mapped)
 			return
 		}
 		taskID = string(task.ID)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/application/metrics"
+	"github.com/prometheus/common/expfmt"
 )
 
 func TestRegistry_CountersAndPrometheus(t *testing.T) {
@@ -126,5 +127,27 @@ func TestRegistry_A2ADurationsRecoveryAndZeroValueSeries(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
+	}
+}
+
+// TestRegistry_PrometheusExpositionParses guards the text exposition contract:
+// the complete output must parse as valid Prometheus text format. Before the
+// fix the A2A request family emitted one TYPE line per sample, which the
+// parser rejects as a duplicate family declaration.
+func TestRegistry_PrometheusExpositionParses(t *testing.T) {
+	reg := metrics.New()
+	reg.IncA2ARequest(metrics.A2AOperationSendMessage, metrics.A2AResultOK)
+	reg.IncA2ARequest(metrics.A2AOperationCancelTask, metrics.A2AResultError)
+	reg.IncA2ARequest(metrics.A2AOperationGetTask, metrics.A2AResultOK)
+
+	var buf bytes.Buffer
+	reg.WritePrometheus(&buf)
+	families, err := (&expfmt.TextParser{}).TextToMetricFamilies(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("invalid Prometheus exposition: %v\n%s", err, buf.String())
+	}
+	got := len(families["magi_a2a_requests_total"].Metric)
+	if want := 6 * 2; got != want {
+		t.Fatalf("A2A request series=%d, want %d", got, want)
 	}
 }

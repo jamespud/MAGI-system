@@ -80,7 +80,7 @@ type RouteDeps struct {
 
 // RegisterRoutesWithDeps registers all HTTP routes with injected services.
 func RegisterRoutesWithDeps(h *hzserver.Hertz, deps RouteDeps) {
-	h.Use(RequestID(), Tracing(deps.Tracing), Logger(), Recovery(), Metrics(deps.Metrics), Auth(deps.Auth))
+	h.Use(RequestID(), Tracing(deps.Tracing), Logger(), Recovery(), Metrics(deps.Metrics), A2ATransportRejectionAudit(deps.Audit), Auth(deps.Auth))
 	if deps.MetricsAuth {
 		// /metrics normally sits in publicPaths; drop it so Auth runs first,
 		// then gate the handler on the admin role (open mode still passes).

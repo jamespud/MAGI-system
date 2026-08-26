@@ -9,8 +9,22 @@ import (
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 
+	"bytes"
 	"github.com/jamespud/magi/backend/application/auth"
+	"io"
+	"iter"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+
+	"github.com/jamespud/magi/backend/application/audit"
+	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/server"
+	"github.com/jamespud/magi/backend/server/a2a"
 )
 
 func whoamiRoute(h *hzserver.Hertz) {
@@ -115,5 +129,204 @@ func TestRequireAnyRole_GrantsListedRolesAndRejectsOthers(t *testing.T) {
 		if w.Code != tc.want {
 			t.Fatalf("token %s: expected %d, got %d", tc.token, tc.want, w.Code)
 		}
+	}
+}
+
+// serverMemAuditRepo is an in-memory port.AuditRepository for route-level
+// tests, mirroring the pattern from application/audit/service_test.go.
+type serverMemAuditRepo struct {
+	mu     sync.Mutex
+	events []*entity.AuditEvent
+}
+
+func (m *serverMemAuditRepo) Record(_ context.Context, e *entity.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, e)
+	return nil
+}
+
+func (m *serverMemAuditRepo) List(_ context.Context, _, _ int) ([]*entity.AuditEvent, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := append([]*entity.AuditEvent(nil), m.events...)
+	return out, int64(len(out)), nil
+}
+
+func (m *serverMemAuditRepo) snapshot() []*entity.AuditEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*entity.AuditEvent(nil), m.events...)
+}
+
+// fakeA2AHandler implements a2asrv.RequestHandler and records the last
+// submitted request so tests can assert principal propagation.
+type fakeA2AHandler struct {
+	principal *auth.Principal
+	sent      *a2a.SendMessageRequest
+}
+
+func (f *fakeA2AHandler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+	f.principal = auth.PrincipalFrom(ctx)
+	f.sent = req
+	return &a2a.Task{ID: "case-1", ContextID: "conv-1", Status: a2a.TaskStatus{State: a2a.TaskStateSubmitted}}, nil
+}
+func (f *fakeA2AHandler) GetTask(context.Context, *a2a.GetTaskRequest) (*a2a.Task, error) {
+	return nil, a2a.ErrTaskNotFound
+}
+func (f *fakeA2AHandler) ListTasks(context.Context, *a2a.ListTasksRequest) (*a2a.ListTasksResponse, error) {
+	return &a2a.ListTasksResponse{}, nil
+}
+func (f *fakeA2AHandler) CancelTask(context.Context, *a2a.CancelTaskRequest) (*a2a.Task, error) {
+	return nil, a2a.ErrTaskNotCancelable
+}
+func (f *fakeA2AHandler) SubscribeToTask(context.Context, *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {}
+}
+func (f *fakeA2AHandler) SendStreamingMessage(context.Context, *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {}
+}
+func (f *fakeA2AHandler) GetTaskPushConfig(context.Context, *a2a.GetTaskPushConfigRequest) (*a2a.PushConfig, error) {
+	return nil, a2a.ErrPushNotificationNotSupported
+}
+func (f *fakeA2AHandler) ListTaskPushConfigs(context.Context, *a2a.ListTaskPushConfigRequest) (*a2a.ListTaskPushConfigResponse, error) {
+	return nil, a2a.ErrPushNotificationNotSupported
+}
+func (f *fakeA2AHandler) CreateTaskPushConfig(context.Context, *a2a.PushConfig) (*a2a.PushConfig, error) {
+	return nil, a2a.ErrPushNotificationNotSupported
+}
+func (f *fakeA2AHandler) DeleteTaskPushConfig(context.Context, *a2a.DeleteTaskPushConfigRequest) error {
+	return a2a.ErrPushNotificationNotSupported
+}
+func (f *fakeA2AHandler) GetExtendedAgentCard(context.Context, *a2a.GetExtendedAgentCardRequest) (*a2a.AgentCard, error) {
+	return nil, a2a.ErrExtendedCardNotConfigured
+}
+
+var _ a2asrv.RequestHandler = (*fakeA2AHandler)(nil)
+
+// startA2AAuditServer mirrors the production global chain
+// (A2ATransportRejectionAudit before Auth) plus the mounted A2A transport,
+// served over a real loopback listener so the net/http adapter used by the
+// A2A transport can write responses (ut.PerformRequest cannot drive it).
+func startA2AAuditServer(t *testing.T, authSvc *auth.Service, rateCfg server.RateLimitConfig) (string, *serverMemAuditRepo, *fakeA2AHandler) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	auditRepo := &serverMemAuditRepo{}
+	auditSvc := audit.NewService(auditRepo)
+	h := hzserver.Default(hzserver.WithHostPorts(addr))
+	h.Use(server.RequestID(), server.Logger(), server.Recovery(), server.A2ATransportRejectionAudit(auditSvc), server.Auth(authSvc))
+	fake := &fakeA2AHandler{}
+	mws := []app.HandlerFunc{}
+	if rateCfg.Enabled {
+		mws = append(mws, server.RateLimit(rateCfg))
+	}
+	a2atransport.Mount(h, a2atransport.MountDeps{
+		Handler: fake, PublicURL: "https://magi.example.com", BasePath: "/a2a",
+		Name: "MAGI", Description: "d", MaxRequestBytes: 98304, Middlewares: mws,
+	})
+	go func() { h.Spin() }()
+	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
+
+	base := "http://" + addr
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return base, auditRepo, fake
+}
+
+func a2aSendPost(t *testing.T, url, token string) *http.Response {
+	t.Helper()
+	body := []byte(`{"message":{"messageId":"m-1","role":"ROLE_USER","parts":[{"text":"hello"}]}}`)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("X-API-Key", token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func drainClose(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+}
+
+// TestA2ATransportRejectionAudit_Unauthenticated401 asserts that a rejected
+// A2A request without credentials records exactly one a2a.transport.reject
+// row with status 401 and no principal.
+func TestA2ATransportRejectionAudit_Unauthenticated401(t *testing.T) {
+	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	base, auditRepo, _ := startA2AAuditServer(t, authSvc, server.RateLimitConfig{})
+	resp := a2aSendPost(t, base+"/a2a/message:send", "")
+	defer drainClose(resp)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	events := auditRepo.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	ev := events[0]
+	if ev.Action != "a2a.transport.reject" || ev.Status != 401 || ev.Resource != "/a2a/message:send" || ev.UserID != 0 {
+		t.Fatalf("rejection audit = %+v", ev)
+	}
+}
+
+// TestA2ATransportRejectionAudit_WellKnownNotRejected asserts discovery is
+// public and produces no rejection audit row.
+func TestA2ATransportRejectionAudit_WellKnownNotRejected(t *testing.T) {
+	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	base, auditRepo, _ := startA2AAuditServer(t, authSvc, server.RateLimitConfig{})
+	resp, err := http.Get(base + a2atransport.WellKnownAgentCardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drainClose(resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("well-known status = %d, want 200", resp.StatusCode)
+	}
+	if events := auditRepo.snapshot(); len(events) != 0 {
+		t.Fatalf("well-known must not produce rejection audit, got %d events", len(events))
+	}
+}
+
+// TestA2ATransportRejectionAudit_SuccessNoRejectRow asserts a successful A2A
+// handler response does not create a transport rejection audit row; the
+// Handler owns the normal send audit instead.
+func TestA2ATransportRejectionAudit_SuccessNoRejectRow(t *testing.T) {
+	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	base, auditRepo, fake := startA2AAuditServer(t, authSvc, server.RateLimitConfig{})
+	resp := a2aSendPost(t, base+"/a2a/message:send", "tok-1")
+	defer drainClose(resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if fake.sent == nil || fake.principal == nil || fake.principal.UserID != 7 {
+		t.Fatalf("principal propagation failed: sent=%+v principal=%+v", fake.sent, fake.principal)
+	}
+	if events := auditRepo.snapshot(); len(events) != 0 {
+		t.Fatalf("successful request must not produce rejection audit, got %d events", len(events))
 	}
 }

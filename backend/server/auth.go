@@ -45,6 +45,7 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 			c.Abort()
 			return
 		}
+		c.Set("auth_principal", p)
 		c.Next(auth.WithPrincipal(ctx, p))
 	}
 }

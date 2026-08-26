@@ -3,6 +3,9 @@ package server_test
 import (
 	"testing"
 
+	"net/http"
+
+	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/server"
 )
 
@@ -46,5 +49,39 @@ func TestRateLimiter_DisabledIsAlwaysAllowed(t *testing.T) {
 		if ok, _ := lim.Allow(1, "1.1.1.1"); !ok {
 			t.Fatal("disabled limiter must always allow")
 		}
+	}
+}
+
+// TestA2ATransportRejectionAudit_RateLimited429 asserts that an authenticated
+// request over the A2A rate budget records one a2a.transport.reject row with
+// status 429 while retaining the authenticated principal.
+func TestA2ATransportRejectionAudit_RateLimited429(t *testing.T) {
+	authSvc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	base, auditRepo, _ := startA2AAuditServer(t, authSvc, server.RateLimitConfig{Enabled: true, PerUserPerMinute: 1})
+
+	first := a2aSendPost(t, base+"/a2a/message:send", "tok-1")
+	if first.StatusCode != http.StatusOK {
+		drainClose(first)
+		t.Fatalf("first request = %d, want 200", first.StatusCode)
+	}
+	drainClose(first)
+
+	second := a2aSendPost(t, base+"/a2a/message:send", "tok-1")
+	if second.StatusCode != http.StatusTooManyRequests {
+		drainClose(second)
+		t.Fatalf("second request = %d, want 429", second.StatusCode)
+	}
+	drainClose(second)
+
+	events := auditRepo.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(events))
+	}
+	ev := events[0]
+	if ev.Action != "a2a.transport.reject" || ev.Status != http.StatusTooManyRequests || ev.Resource != "/a2a/message:send" {
+		t.Fatalf("rate-limited rejection audit = %+v", ev)
+	}
+	if ev.UserID != 7 || ev.Username == "" || ev.Role == "" {
+		t.Fatalf("rate-limited rejection audit must retain principal: %+v", ev)
 	}
 }
