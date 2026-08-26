@@ -214,6 +214,10 @@ Enablement checklist:
   `magi_s17_a2a_submission.sql` before enabling A2A.
 - Apply `magi_s18_a2a_start_claim.sql` (additive) before running the new binary
   so rolling deployments can briefly run the old writer safely.
+- S16 is forward-only once applied: a binary that does not write `seq` must not
+  be restarted afterwards. See the "Forward-only event sequence rollout (S16)"
+  runbook in `DEPLOYMENT.md` for validation SQL, canary steps, and stream smoke
+  tests.
 - Deploy with `a2a.enabled: false` first, then flip one canary replica.
 - The Agent Card is served at `https://magi.example/.well-known/agent-card.json`
   and is public. Every `/a2a/*` protocol operation requires auth via the same

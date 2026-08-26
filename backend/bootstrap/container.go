@@ -979,10 +979,129 @@ func ensureEventSequenceSchema(db *gorm.DB) error {
 	case !hasEvents && !hasCursor:
 		return db.AutoMigrate(&magi.EventModel{}, &magi.EventCursorModel{})
 	case hasEvents && hasCursor:
-		return nil
+		return verifyEventSequenceContract(db)
 	default:
 		return fmt.Errorf("partial event sequence schema detected; apply the complete Atlas S16 migration before starting the service")
 	}
+}
+
+// verifyEventSequenceContract fails startup when both event tables exist but
+// the S16 contract is only partially applied: a nullable seq, a missing unique
+// (case_id, seq) index, or a stale cursor would let new writers persist broken
+// sequences, so the service refuses to start with a migration-specific error.
+func verifyEventSequenceContract(db *gorm.DB) error {
+	notNull, err := columnNotNull(db, "magi_event", "seq")
+	if err != nil {
+		return fmt.Errorf("event sequence schema check failed: %w", err)
+	}
+	if !notNull {
+		return fmt.Errorf("event sequence schema incomplete: magi_event.seq is nullable; complete S16 (backfill + NOT NULL) before starting and do not restart a pre-S16 writer")
+	}
+	unique, err := hasCaseSeqUniqueIndex(db, "magi_event")
+	if err != nil {
+		return fmt.Errorf("event sequence schema check failed: %w", err)
+	}
+	if !unique {
+		return fmt.Errorf("event sequence schema incomplete: unique index (case_id, seq) is missing; apply the complete Atlas S16 migration")
+	}
+	return verifyEventCursor(db)
+}
+
+// hasCaseSeqUniqueIndex reports whether a UNIQUE index on (case_id, seq)
+// exists. Both the Atlas S16 name (uq_magi_event_case_seq) and the GORM
+// AutoMigrate name (idx_event_case_seq) satisfy the same contract.
+func hasCaseSeqUniqueIndex(db *gorm.DB, table string) (bool, error) {
+	indexes, err := uniqueIndexNames(db, table)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range []string{"uq_magi_event_case_seq", "idx_event_case_seq"} {
+		if indexes[name] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// uniqueIndexNames returns the set of UNIQUE index names on a table.
+func uniqueIndexNames(db *gorm.DB, table string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if db.Dialector.Name() == "mysql" {
+		type row struct {
+			IndexName string
+			NonUnique int
+		}
+		var rows []row
+		if err := db.Raw("SELECT INDEX_NAME, NON_UNIQUE FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", table).Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if r.NonUnique == 0 {
+				out[r.IndexName] = true
+			}
+		}
+		return out, nil
+	}
+	rows, err := db.Raw("PRAGMA index_list(" + table + ")").Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq, unique int
+		var name, origin, partial string
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			return nil, err
+		}
+		if unique != 0 {
+			out[name] = true
+		}
+	}
+	return out, nil
+}
+
+// columnNotNull reports whether a column is declared NOT NULL.
+func columnNotNull(db *gorm.DB, table, column string) (bool, error) {
+	if db.Dialector.Name() == "mysql" {
+		var isNullable string
+		if err := db.Raw("SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?", table, column).Row().Scan(&isNullable); err != nil {
+			return false, err
+		}
+		return !strings.EqualFold(strings.TrimSpace(isNullable), "YES"), nil
+	}
+	rows, err := db.Raw("PRAGMA table_info(" + table + ")").Rows()
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return notNull != 0, nil
+		}
+	}
+	return false, fmt.Errorf("column %s.%s not found", table, column)
+}
+
+// verifyEventCursor fails startup when any cursor row is stale relative to the
+// events it tracks (next_seq must equal MAX(seq)+1).
+func verifyEventCursor(db *gorm.DB) error {
+	var stale int64
+	if err := db.Raw(`
+		SELECT COUNT(*) FROM magi_event_cursor c
+		WHERE c.next_seq != COALESCE((SELECT MAX(e.seq) + 1 FROM magi_event e WHERE e.case_id = c.case_id), 1)`).
+		Scan(&stale).Error; err != nil {
+		return fmt.Errorf("event sequence schema check failed: %w", err)
+	}
+	if stale > 0 {
+		return fmt.Errorf("event sequence schema incomplete: %d cursor rows are stale (next_seq != MAX(seq)+1); re-run the S16 backfill", stale)
+	}
+	return nil
 }
 
 // slowThreshold returns the configured GORM slow-query threshold, defaulting

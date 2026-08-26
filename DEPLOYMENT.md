@@ -216,6 +216,43 @@ event schema so an incomplete expand/backfill/contract migration cannot be
 silently bypassed. Earlier migration files are baseline SQL snapshots and may
 drift from the GORM models.
 
+#### Forward-only event sequence rollout (S16)
+
+S16 makes `magi_event.seq` NOT NULL and adds `uq_magi_event_case_seq`. After it
+is applied, **a binary that does not write `seq` must never start again**: its
+INSERT would violate NOT NULL and break decision-event persistence. This makes
+the rollout forward-only.
+
+- **Order**: apply `magi_s16_event_sequence.sql` during a maintenance window
+  while event writers are drained, then deploy the new binary. Do not roll the
+  binary back once S16 is committed.
+- **Validate before starting the new binary** (the startup schema check enforces
+  this automatically, but run it explicitly during the window):
+
+  ```sql
+  -- no NULL sequences, no duplicates, cursor consistent
+  SELECT COUNT(*) FROM magi_event WHERE seq IS NULL;
+  SELECT case_id, seq, COUNT(*) FROM magi_event GROUP BY case_id, seq HAVING COUNT(*) > 1;
+  SELECT c.case_id FROM magi_event_cursor c
+  WHERE c.next_seq != COALESCE((SELECT MAX(e.seq)+1 FROM magi_event e WHERE e.case_id = c.case_id), 1);
+  ```
+
+- **Failed rollout recovery**: fix forward with the new binary (re-run the S16
+  validation/backfill against the current data) or restore from the pre-S16
+  backup. Never "fix" a failed S16 rollout by downgrading the application while
+  the NOT NULL contract is in place.
+- **Canary**: keep `a2a.enabled: false` on the canary, flip one replica, and
+  run the stream smoke test below before widening the rollout.
+- **Stream smoke test** after the canary starts: subscribe to a live task and
+  verify the SSE stream carries ordered `seq` values and terminates with the
+  terminal status; confirm `magi_a2a_event_lag_ms` stays near zero.
+
+#### Additive A2A startup claims (S18)
+
+`magi_s18_a2a_start_claim.sql` adds two additive columns and an index to
+`a2a_submission`. Apply it **before** deploying the new binary; an old writer
+that never populates the columns runs safely during the rolling window.
+
 `backend/conf/magi.yaml` (or env overrides via `MAGI_*`):
 
 | Section | Purpose |
