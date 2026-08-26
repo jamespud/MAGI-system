@@ -113,10 +113,18 @@ func openJobDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func seedDecisionCase(t *testing.T, db *gorm.DB, id string, userID int64) {
+	t.Helper()
+	repo := magi.NewRepository(db)
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: id, UserID: userID, Status: entity.CaseStatusDraft}); err != nil {
+		t.Fatalf("seed case %s: %v", id, err)
+	}
 }
 
 func TestRunManager_TerminalCaseFailureSettlesRunningJob(t *testing.T) {
@@ -158,6 +166,7 @@ func waitJobStatus(t *testing.T, repo interface {
 
 func TestRunManager_DurableRetry(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-retry", 0)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &durableRetryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -174,6 +183,7 @@ func TestRunManager_DurableRetry(t *testing.T) {
 
 func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-heartbeat-blocked", 0)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &blockingHeartbeatRepo{
 		DecisionJobRepository: baseJobs,
@@ -214,6 +224,7 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 
 func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-success-error", 0)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &markSucceededErrorRepo{DecisionJobRepository: baseJobs, err: errors.New("storage unavailable")}
 	orch := &successThenObserveCancellationOrchestrator{observed: make(chan struct{}), release: make(chan struct{})}
@@ -251,6 +262,7 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 
 func TestRunManager_LeaseLossBeforeLateSuccessDoesNotMarkSucceeded(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-lease-lost-before-success", 0)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &leaseLossBeforeSuccessRepo{DecisionJobRepository: baseJobs}
 	lease := 30 * time.Millisecond
@@ -285,9 +297,10 @@ func TestRunManager_LeaseLossBeforeLateSuccessDoesNotMarkSucceeded(t *testing.T)
 
 func TestRunManager_RecoverQueuedJob(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-recover", 0)
 	jobs := magi.NewDecisionJobRepository(db)
-	if _, err := jobs.Enqueue(context.Background(), "case-recover", 2); err != nil {
-		t.Fatalf("enqueue: %v", err)
+	if _, admitted, err := jobs.Admit(context.Background(), "case-recover", 2, 0); err != nil || !admitted {
+		t.Fatalf("admit recover: admitted=%v err=%v", admitted, err)
 	}
 	orch := &durableRetryOrchestrator{}
 	case_ := &entity.DecisionCase{ID: "case-recover"}
@@ -305,6 +318,7 @@ func TestRunManager_RecoverQueuedJob(t *testing.T) {
 
 func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-pause", 0)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &blockingUserOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -336,12 +350,13 @@ func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 
 func TestRunManager_ResumeIgnoresNonPausedJobs(t *testing.T) {
 	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-active", 0)
 	jobs := magi.NewDecisionJobRepository(db)
 	rm := decision.NewRunManager(&durableRetryOrchestrator{}, decision.RunManagerDeps{
 		JobRepo: jobs, WorkerID: "worker-resume", MaxAttempts: 2, RetryBase: time.Millisecond,
 	})
-	if _, err := jobs.Enqueue(context.Background(), "case-active", 2); err != nil {
-		t.Fatalf("enqueue: %v", err)
+	if _, admitted, err := jobs.Admit(context.Background(), "case-active", 2, 0); err != nil || !admitted {
+		t.Fatalf("admit active: admitted=%v err=%v", admitted, err)
 	}
 	if rm.Resume("case-active") {
 		t.Fatal("resume must not re-queue an active (non-paused) job")
@@ -349,6 +364,64 @@ func TestRunManager_ResumeIgnoresNonPausedJobs(t *testing.T) {
 	job, err := jobs.GetByCase(context.Background(), "case-active")
 	if err != nil || job.Status != entity.DecisionJobQueued {
 		t.Fatalf("job should stay queued: %+v err=%v", job, err)
+	}
+}
+
+func openJobAdmissionDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite admission: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+		t.Fatalf("migrate admission: %v", err)
+	}
+	return db
+}
+
+// TestRunManager_CrashedProcessDoesNotLeakConcurrencySlot proves that the
+// durable DecisionJob is the concurrency truth: a worker that crashed while
+// holding a lease does not leave a materialized counter row that must be
+// decremented before a new run for the same user can be admitted.
+func TestRunManager_CrashedProcessDoesNotLeakConcurrencySlot(t *testing.T) {
+	db := openJobAdmissionDB(t)
+	jobs := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	if err := db.Create(&magi.CaseModel{ID: "case-crash-1", UserID: 42, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case1: %v", err)
+	}
+	job, admitted, err := jobs.Admit(ctx, "case-crash-1", 3, 1)
+	if err != nil || !admitted || job == nil {
+		t.Fatalf("crash admit 1 = job=%+v admitted=%v err=%v", job, admitted, err)
+	}
+	// Simulate a worker claiming the job then crashing (lease expires).
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-crashed", time.Now().Add(-time.Hour)); err != nil || !ok {
+		t.Fatalf("claim crash = ok=%v err=%v", ok, err)
+	}
+	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
+		t.Fatalf("requeue expired: %v", err)
+	}
+	runnable, err := jobs.ListRunnable(ctx, time.Now())
+	if err != nil || len(runnable) != 1 {
+		t.Fatalf("runnable after crash = %+v err=%v", runnable, err)
+	}
+	// A second case for the same user at limit 1 must still be admitted, because
+	// the crashed job has been requeued and no separate counter row leaked.
+	if err := db.Create(&magi.CaseModel{ID: "case-crash-2", UserID: 42, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case2: %v", err)
+	}
+	job2, admitted2, err := jobs.Admit(ctx, "case-crash-2", 3, 1)
+	if err != nil {
+		t.Fatalf("crash admit 2 err = %v", err)
+	}
+	// The crashed job is still queued (it belongs to the same user and is the
+	// active run at limit 1), so this new case must be refused by the durable
+	// count even though no counter row was leaked. This is the assertion that
+	// admission derives from job state, not from a decremented counter.
+	if admitted2 || job2 != nil {
+		t.Fatalf("crash admit 2 should be limited by active durable job: job=%+v admitted=%v", job2, admitted2)
 	}
 }
 

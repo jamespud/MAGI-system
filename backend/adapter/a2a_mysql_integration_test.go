@@ -15,6 +15,7 @@ import (
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -87,9 +88,12 @@ func TestA2ASubmission_ConcurrentSameMessageOnMySQL(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			job, err := jobs.Enqueue(context.Background(), cmd.TaskID, 3)
+			job, admitted, err := jobs.Admit(context.Background(), cmd.TaskID, 3, 0)
 			if err == nil && job == nil {
-				err = fmt.Errorf("enqueue returned nil job")
+				err = fmt.Errorf("admit returned nil job")
+			}
+			if err == nil && !admitted {
+				err = fmt.Errorf("admit was rejected for an existing job")
 			}
 			jobErrCh <- err
 		}()
@@ -193,7 +197,7 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 	db := openA2AMySQL(t)
 	if err := db.AutoMigrate(
 		&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.ConversationModel{},
-		&magi.ConversationMessageModel{}, &magi.DecisionJobModel{}, &magi.RunCounterModel{},
+		&magi.ConversationMessageModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{},
 		&magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{},
 		&magi.EvidenceModel{}, &magi.ClaimModel{}, &magi.VoteModel{},
 	); err != nil {
@@ -205,9 +209,8 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 
 	repo := magi.NewA2ASubmissionRepository(db)
 	jobs := magi.NewDecisionJobRepository(db)
-	counter := magi.NewRunCounterRepository(db)
 	rm := decision.NewRunManager(instantOrch{}, decision.RunManagerDeps{
-		JobRepo: jobs, RunCounter: counter, MaxConcurrentRunsPerUser: 100,
+		JobRepo: jobs, MaxConcurrentRunsPerUser: 100,
 	})
 	parser := a2a.NewInputParser(65536, 16)
 	proj := a2a.NewTaskProjector(redact.New("sk-secret"))
@@ -371,5 +374,71 @@ func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
 	close(stop)
 	if err := <-readsDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMySQLDecisionJobAdmissionAcrossReplicas proves the durable DecisionJob
+// is the concurrency truth across two DB handles at per-user limit 1: exactly
+// one replica may admit a new queued job, and the other must be rate-limited.
+func TestMySQLDecisionJobAdmissionAcrossReplicas(t *testing.T) {
+	db := openA2AMySQL(t)
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	ctx := context.Background()
+	userID := int64(7)
+	for _, id := range []string{"case-admit-a", "case-admit-b"} {
+		if err := db.Create(&magi.CaseModel{ID: id, UserID: userID, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+
+	// Two independent GORM handles share the same MySQL schema.
+	handleA := magi.NewDecisionJobRepository(db)
+	handleB := magi.NewDecisionJobRepository(db)
+	start := make(chan struct{})
+	result := make(chan struct {
+		id       string
+		admitted bool
+		err      error
+	}, 2)
+	admit := func(handle port.DecisionJobRepository, id string) {
+		<-start
+		_, admitted, err := handle.Admit(ctx, id, 3, 1)
+		result <- struct {
+			id       string
+			admitted bool
+			err      error
+		}{id: id, admitted: admitted, err: err}
+	}
+	go admit(handleA, "case-admit-a")
+	go admit(handleB, "case-admit-b")
+	close(start)
+
+	var admittedCount, deniedCount int
+	for i := 0; i < 2; i++ {
+		r := <-result
+		if r.err != nil {
+			t.Fatalf("admit %s err: %v", r.id, r.err)
+		}
+		if r.admitted {
+			admittedCount++
+		} else {
+			deniedCount++
+		}
+	}
+	if admittedCount != 1 || deniedCount != 1 {
+		t.Fatalf("admitted=%d denied=%d, want exactly one admitted at limit 1", admittedCount, deniedCount)
+	}
+
+	var active int64
+	if err := db.Model(&magi.DecisionJobModel{}).Joins("JOIN decision_case ON decision_case.id = decision_job.case_id").
+		Where("decision_case.user_id = ? AND decision_job.status IN ?", userID,
+			[]string{string(entity.DecisionJobQueued), string(entity.DecisionJobRunning)}).
+		Count(&active).Error; err != nil {
+		t.Fatalf("count active: %v", err)
+	}
+	if active != 1 {
+		t.Fatalf("active durable jobs = %d, want exactly 1", active)
 	}
 }

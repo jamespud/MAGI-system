@@ -122,25 +122,25 @@ func newFakeJobRepo() *fakeJobRepo {
 	return &fakeJobRepo{jobs: make(map[string]*entity.DecisionJob), cases: make(map[string]*entity.DecisionCase), events: make(map[string][]*entity.MagiEvent), cursors: make(map[string]uint64)}
 }
 
-func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+func (f *fakeJobRepo) Admit(ctx context.Context, caseID string, maxAttempts, perUserLimit int) (*entity.DecisionJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enqueues++
 	if f.enqueueErr != nil {
-		return nil, f.enqueueErr
+		return nil, false, f.enqueueErr
 	}
 	if existing, ok := f.jobs[caseID]; ok {
 		if _, present := f.cases[caseID]; !present {
 			f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
 		}
-		return existing, nil
+		return existing, true, nil
 	}
 	now := time.Now()
 	job := &entity.DecisionJob{ID: "job-" + caseID, CaseID: caseID, Status: entity.DecisionJobQueued,
 		MaxAttempts: maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now}
 	f.jobs[caseID] = job
 	f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
-	return job, nil
+	return job, true, nil
 }
 
 func (f *fakeJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {

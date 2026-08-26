@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -23,23 +24,83 @@ func NewDecisionJobRepository(db *gorm.DB) port.DecisionJobRepository {
 	return &decisionJobRepo{db: db}
 }
 
-func (r *decisionJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+// Admit atomically enqueues or requeues a decision job under a per-user limit.
+// It takes a per-user database row lock so two replicas cannot both pass the
+// limit, then derives the authority concurrency truth from queued/running
+// DecisionJob rows (not from a materialized counter that leaks on crash).
+func (r *decisionJobRepo) Admit(ctx context.Context, caseID string, maxAttempts, perUserLimit int) (*entity.DecisionJob, bool, error) {
 	if caseID == "" {
-		return nil, fmt.Errorf("decision job: case ID is required")
+		return nil, false, fmt.Errorf("decision job: case ID is required")
 	}
 	if maxAttempts <= 0 {
 		maxAttempts = defaultJobAttempts
 	}
-	var model DecisionJobModel
-	err := r.db.WithContext(ctx).Where("case_id = ?", caseID).First(&model).Error
-	if err == nil {
-		switch entity.DecisionJobStatus(model.Status) {
-		case entity.DecisionJobSucceeded:
-			return jobFromModel(&model), nil
-		case entity.DecisionJobQueued, entity.DecisionJobRunning:
-			return jobFromModel(&model), nil
-		default:
-			now := time.Now()
+	var jobEntity *entity.DecisionJob
+	admitted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Read the authoritative owner for the case.
+		var caseModel CaseModel
+		if err := tx.Where("id = ?", caseID).First(&caseModel).Error; err != nil {
+			return err
+		}
+		userID := caseModel.UserID
+		enforceLimit := userID != 0 && perUserLimit > 0
+
+		// Serialize admission per user. In MySQL we hold a row lock on the
+		// admission mutex; SQLite's single-writer transaction provides the
+		// equivalent serialization for tests.
+		if enforceLimit {
+			lock := RunAdmissionLockModel{UserID: userID, UpdatedAt: time.Now()}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "user_id"}},
+				DoUpdates: clause.Assignments(map[string]any{"updated_at": gorm.Expr("updated_at")}),
+			}).Create(&lock).Error; err != nil {
+				return err
+			}
+			if tx.Dialector.Name() == "mysql" {
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+					Where("user_id = ?", userID).
+					First(&RunAdmissionLockModel{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// Idempotent: an already-active/queued/succeeded job for this case wins
+		// without consuming a new capacity decision.
+		var model DecisionJobModel
+		findErr := tx.Where("case_id = ?", caseID).First(&model).Error
+		if findErr == nil {
+			switch entity.DecisionJobStatus(model.Status) {
+			case entity.DecisionJobQueued, entity.DecisionJobRunning, entity.DecisionJobSucceeded:
+				jobEntity = jobFromModel(&model)
+				admitted = true
+				return nil
+			}
+			// Terminal retryable (failed/cancelled/paused) falls through so
+			// capacity can be re-checked before resetting to queued.
+		} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
+		}
+
+		// Count this user's queued/running jobs under the same transaction.
+		if enforceLimit {
+			var count int64
+			if err := tx.Model(&DecisionJobModel{}).
+				Joins("JOIN decision_case ON decision_case.id = decision_job.case_id").
+				Where("decision_case.user_id = ? AND decision_job.status IN ?", userID,
+					[]string{string(entity.DecisionJobQueued), string(entity.DecisionJobRunning)}).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if int(count) >= perUserLimit {
+				return nil
+			}
+		}
+
+		now := time.Now()
+		if findErr == nil {
+			// Reset a terminal retryable job to queued.
 			updates := map[string]any{
 				"status":       string(entity.DecisionJobQueued),
 				"attempt":      0,
@@ -50,28 +111,43 @@ func (r *decisionJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempt
 				"last_error":   "",
 				"updated_at":   now,
 			}
-			if err := r.db.WithContext(ctx).Model(&DecisionJobModel{}).Where("id = ?", model.ID).Updates(updates).Error; err != nil {
-				return nil, err
+			if err := tx.Model(&DecisionJobModel{}).Where("id = ?", model.ID).Updates(updates).Error; err != nil {
+				return err
 			}
-			return r.get(ctx, model.ID)
+			jobEntity = jobFromModel(&model)
+			jobEntity.Status = entity.DecisionJobQueued
+			jobEntity.Attempt = 0
+			jobEntity.WorkerID = ""
+			jobEntity.LeaseUntil = nil
+			jobEntity.AvailableAt = now
+			jobEntity.LastError = ""
+			jobEntity.UpdatedAt = now
+			admitted = true
+			return nil
 		}
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	now := time.Now()
-	model = DecisionJobModel{
-		ID: "job-" + uuid.NewString(), CaseID: caseID, Status: string(entity.DecisionJobQueued),
-		MaxAttempts: maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
-		// A concurrent enqueue may have won the unique case_id race.
-		if existing, getErr := r.getByCase(ctx, caseID); getErr == nil {
-			return existing, nil
+
+		// Create a new queued job.
+		newModel := DecisionJobModel{
+			ID: "job-" + uuid.NewString(), CaseID: caseID, Status: string(entity.DecisionJobQueued),
+			MaxAttempts: maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
 		}
-		return nil, err
+		if err := tx.Create(&newModel).Error; err != nil {
+			// A concurrent admit may have won the unique case_id race.
+			if existing, getErr := r.getByCase(tx, caseID); getErr == nil {
+				jobEntity = existing
+				admitted = true
+				return nil
+			}
+			return err
+		}
+		jobEntity = jobFromModel(&newModel)
+		admitted = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
 	}
-	return jobFromModel(&model), nil
+	return jobEntity, admitted, nil
 }
 
 func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
@@ -219,20 +295,12 @@ func (r *decisionJobRepo) ListRunnable(ctx context.Context, now time.Time) ([]*e
 }
 
 func (r *decisionJobRepo) GetByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error) {
-	return r.getByCase(ctx, caseID)
+	return r.getByCase(r.db.WithContext(ctx), caseID)
 }
 
-func (r *decisionJobRepo) get(ctx context.Context, id string) (*entity.DecisionJob, error) {
+func (r *decisionJobRepo) getByCase(db *gorm.DB, caseID string) (*entity.DecisionJob, error) {
 	var model DecisionJobModel
-	if err := r.db.WithContext(ctx).First(&model, "id = ?", id).Error; err != nil {
-		return nil, err
-	}
-	return jobFromModel(&model), nil
-}
-
-func (r *decisionJobRepo) getByCase(ctx context.Context, caseID string) (*entity.DecisionJob, error) {
-	var model DecisionJobModel
-	if err := r.db.WithContext(ctx).First(&model, "case_id = ?", caseID).Error; err != nil {
+	if err := db.First(&model, "case_id = ?", caseID).Error; err != nil {
 		return nil, err
 	}
 	return jobFromModel(&model), nil

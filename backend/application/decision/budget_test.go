@@ -14,6 +14,14 @@ type fakeBudgetChecker struct {
 	err  error
 }
 
+// countingOrchestrator records a simple synchronous execution for budget
+// tests that must not persist a durable job (no JobRepo is injected).
+type countingOrchestrator struct{}
+
+func (countingOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
+	return &entity.Resolution{CaseID: "res", FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
 func (f *fakeBudgetChecker) CheckBudget(ctx context.Context, userID int64) (*decision.BudgetExceededInfo, error) {
 	return f.info, f.err
 }

@@ -24,7 +24,7 @@ func openMultiDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -145,9 +145,9 @@ func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	job, err := jobs.Enqueue(context.Background(), caseID, 2)
+	job, _, err := jobs.Admit(context.Background(), caseID, 2, 0)
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatalf("admit: %v", err)
 	}
 	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
@@ -228,9 +228,9 @@ func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	job, err := jobs.Enqueue(context.Background(), caseID, 2)
+	job, _, err := jobs.Admit(context.Background(), caseID, 2, 0)
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatalf("admit: %v", err)
 	}
 	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
@@ -285,9 +285,9 @@ func TestRunManager_RetryResetFenceDoesNotLeaveClaimRunning(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	job, err := jobs.Enqueue(context.Background(), caseID, 2)
+	job, _, err := jobs.Admit(context.Background(), caseID, 2, 0)
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatalf("admit: %v", err)
 	}
 	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)

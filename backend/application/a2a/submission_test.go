@@ -76,7 +76,7 @@ func newFakeJobRepo() *fakeJobRepo {
 	return &fakeJobRepo{jobs: make(map[string]*entity.DecisionJob), cases: make(map[string]*entity.DecisionCase), events: make(map[string][]*entity.MagiEvent), cursors: make(map[string]uint64)}
 }
 
-func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+func (f *fakeJobRepo) Admit(ctx context.Context, caseID string, maxAttempts, perUserLimit int) (*entity.DecisionJob, bool, error) {
 	if f.enqueueStarted != nil {
 		select {
 		case <-f.enqueueStarted:
@@ -89,26 +89,29 @@ func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts in
 	defer f.mu.Unlock()
 	f.enqueues++
 	if f.enqueueErr != nil {
-		return nil, f.enqueueErr
+		return nil, false, f.enqueueErr
+	}
+	if perUserLimit > 0 && f.activeCount >= perUserLimit {
+		return nil, false, nil
 	}
 	if f.runningAll {
 		job := &entity.DecisionJob{ID: "job-" + caseID, CaseID: caseID, Status: entity.DecisionJobRunning}
 		f.jobs[caseID] = job
 		f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
-		return job, nil
+		return job, true, nil
 	}
 	if existing, ok := f.jobs[caseID]; ok {
 		if _, present := f.cases[caseID]; !present {
 			f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
 		}
-		return existing, nil
+		return existing, true, nil
 	}
 	now := time.Now()
 	job := &entity.DecisionJob{ID: "job-" + caseID, CaseID: caseID, Status: entity.DecisionJobQueued,
 		MaxAttempts: maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now}
 	f.jobs[caseID] = job
 	f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
-	return job, nil
+	return job, true, nil
 }
 
 func (f *fakeJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
@@ -259,9 +262,9 @@ type countingDecisionJobRepo struct {
 	enqueueCount int
 }
 
-func (r *countingDecisionJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+func (r *countingDecisionJobRepo) Admit(ctx context.Context, caseID string, maxAttempts, perUserLimit int) (*entity.DecisionJob, bool, error) {
 	r.enqueueCount++
-	return r.DecisionJobRepository.Enqueue(ctx, caseID, maxAttempts)
+	return r.DecisionJobRepository.Admit(ctx, caseID, maxAttempts, perUserLimit)
 }
 
 func (r *countingSubmissionRepo) ClaimStart(ctx context.Context, id, token string, leaseUntil time.Time) (*a2aapp.PreparedSubmission, bool, error) {
@@ -600,13 +603,12 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 	orch := newBlockingOrch()
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	parser := a2aapp.NewInputParser(65536, 16)
-	counter := magi.NewRunCounterRepository(db)
 
 	rmA := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, MaxConcurrentRunsPerUser: 1, RunCounter: counter,
+		JobRepo: jobs, MaxConcurrentRunsPerUser: 1,
 	})
 	rmB := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, MaxConcurrentRunsPerUser: 1, RunCounter: counter,
+		JobRepo: jobs, MaxConcurrentRunsPerUser: 1,
 	})
 	svcA := a2aapp.NewSubmissionService(parser, baseRepo, rmA, proj, 3)
 	svcB := a2aapp.NewSubmissionService(parser, baseRepo, rmB, proj, 3)

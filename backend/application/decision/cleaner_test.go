@@ -25,6 +25,10 @@ func (c *recordingCleaner) CleanupCaseArtifacts(_ context.Context, caseID string
 
 func TestRunManager_RetryCleansPreviousAttemptArtifacts(t *testing.T) {
 	db := openJobDB(t)
+	repo := magi.NewRepository(db)
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: "case-clean"}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &durableRetryOrchestrator{}
 	cleaner := &recordingCleaner{}

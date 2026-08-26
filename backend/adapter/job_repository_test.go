@@ -18,13 +18,19 @@ func TestDecisionJobRepository_LifecycleAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := magi.NewDecisionJobRepository(db)
-	job, err := repo.Enqueue(context.Background(), "case-1", 2)
+	if err := db.Create(&magi.CaseModel{ID: "case-1"}).Error; err != nil {
+		t.Fatalf("seed case: %v", err)
+	}
+	job, admitted, err := repo.Admit(context.Background(), "case-1", 2, 0)
 	if err != nil || job.Status != entity.DecisionJobQueued {
-		t.Fatalf("enqueue: job=%+v err=%v", job, err)
+		t.Fatalf("admit: job=%+v admitted=%v err=%v", job, admitted, err)
+	}
+	if !admitted {
+		t.Fatal("first admit should be admitted")
 	}
 	lease := time.Now().Add(time.Minute)
 	claimed, ok, err := repo.Claim(context.Background(), job.ID, "worker-1", lease)
@@ -60,13 +66,16 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := magi.NewDecisionJobRepository(db)
-	job, err := repo.Enqueue(context.Background(), "case-lease-loss", 1)
+	if err := db.Create(&magi.CaseModel{ID: "case-lease-loss"}).Error; err != nil {
+		t.Fatalf("seed case: %v", err)
+	}
+	job, _, err := repo.Admit(context.Background(), "case-lease-loss", 1, 0)
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatalf("admit: %v", err)
 	}
 	if _, ok, err := repo.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute)); err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
@@ -87,6 +96,95 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 				t.Fatalf("error = %v, want ErrLeaseLost", err)
 			}
 		})
+	}
+}
+
+func openAdmissionDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite admission: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+		t.Fatalf("migrate admission: %v", err)
+	}
+	return db
+}
+
+func TestDecisionJobRepo_AdmitWithinLimitIsAtomic(t *testing.T) {
+	db := openAdmissionDB(t)
+	repo := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	if err := db.Create(&magi.CaseModel{ID: "case-admit-1", UserID: 7, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case1: %v", err)
+	}
+	job, admitted, err := repo.Admit(ctx, "case-admit-1", 3, 1)
+	if err != nil || !admitted {
+		t.Fatalf("first admit = job=%+v admitted=%v err=%v", job, admitted, err)
+	}
+	if job.Status != entity.DecisionJobQueued {
+		t.Fatalf("first admit status = %s, want queued", job.Status)
+	}
+	if err := db.Create(&magi.CaseModel{ID: "case-admit-2", UserID: 7, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case2: %v", err)
+	}
+	job2, admitted2, err := repo.Admit(ctx, "case-admit-2", 3, 1)
+	if err != nil {
+		t.Fatalf("second admit err = %v", err)
+	}
+	if admitted2 || job2 != nil {
+		t.Fatalf("second admit should be limited: job=%+v admitted=%v", job2, admitted2)
+	}
+}
+
+func TestDecisionJobRepo_AdmitExistingActiveJobIsIdempotent(t *testing.T) {
+	db := openAdmissionDB(t)
+	repo := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	if err := db.Create(&magi.CaseModel{ID: "case-existing", UserID: 9, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case: %v", err)
+	}
+	first, admitted, err := repo.Admit(ctx, "case-existing", 3, 8)
+	if err != nil || !admitted {
+		t.Fatalf("first admit = job=%+v admitted=%v err=%v", first, admitted, err)
+	}
+	second, admitted2, err := repo.Admit(ctx, "case-existing", 5, 8)
+	if err != nil || !admitted2 {
+		t.Fatalf("idempotent admit = job=%+v admitted=%v err=%v", second, admitted2, err)
+	}
+	if second == nil || second.ID != first.ID {
+		t.Fatalf("idempotent admit returned a different job: first=%+v second=%+v", first, second)
+	}
+	if second.Status != entity.DecisionJobQueued {
+		t.Fatalf("idempotent admit status = %s, want queued", second.Status)
+	}
+}
+
+func TestDecisionJobRepo_TerminalJobDoesNotConsumeCapacity(t *testing.T) {
+	db := openAdmissionDB(t)
+	repo := magi.NewDecisionJobRepository(db)
+	ctx := context.Background()
+	if err := db.Create(&magi.CaseModel{ID: "case-term-1", UserID: 11, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case1: %v", err)
+	}
+	job, _, err := repo.Admit(ctx, "case-term-1", 3, 1)
+	if err != nil {
+		t.Fatalf("admit case1: %v", err)
+	}
+	// Directly transition the job to a terminal state without claiming it.
+	if err := db.Model(&magi.DecisionJobModel{}).Where("id = ?", job.ID).
+		Updates(map[string]any{"status": string(entity.DecisionJobFailed)}).Error; err != nil {
+		t.Fatalf("force-fail job: %v", err)
+	}
+	if err := db.Create(&magi.CaseModel{ID: "case-term-2", UserID: 11, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
+		t.Fatalf("seed case2: %v", err)
+	}
+	job2, admitted2, err := repo.Admit(ctx, "case-term-2", 3, 1)
+	if err != nil || !admitted2 {
+		t.Fatalf("terminal job must not consume capacity: job=%+v admitted=%v err=%v", job2, admitted2, err)
+	}
+	if job2.Status != entity.DecisionJobQueued {
+		t.Fatalf("terminal-ignoring admit status = %s, want queued", job2.Status)
 	}
 }
 
@@ -269,9 +367,9 @@ func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Reposit
 		t.Fatalf("create case: %v", err)
 	}
 	jobs := magi.NewDecisionJobRepository(db)
-	job, err := jobs.Enqueue(context.Background(), caseID, 1)
+	job, _, err := jobs.Admit(context.Background(), caseID, 1, 0)
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatalf("admit: %v", err)
 	}
 	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute))
 	if err != nil || !ok {

@@ -415,7 +415,7 @@ func AllModels() []any {
 		&JudgeModel{},
 		&SchedulerLockModel{},
 		&ToolQuotaCounterModel{},
-		&RunCounterModel{},
+		&RunAdmissionLockModel{},
 		&KnowledgeDocModel{},
 		&UserModel{},
 		&ApiKeyModel{},
@@ -433,6 +433,18 @@ func AllModels() []any {
 		&ConversationMessageModel{},
 	}
 }
+
+// RunAdmissionLockModel is a per-user transaction mutex used to serialize run
+// admission across replicas. It intentionally stores no materialized active
+// count: the concurrency truth is derived from queued/running DecisionJob rows,
+// so a crashed worker never leaks a slot. The row is only ever locked with
+// SELECT ... FOR UPDATE (MySQL) inside the same transaction that counts jobs.
+type RunAdmissionLockModel struct {
+	UserID    int64 `gorm:"primaryKey"`
+	UpdatedAt time.Time
+}
+
+func (RunAdmissionLockModel) TableName() string { return "magi_user_run_admission_lock" }
 
 // A2ASubmissionModel binds an external A2A message id to exactly one durable
 // MAGI task. It is deliberately independent of foreign-key cascades: Cases

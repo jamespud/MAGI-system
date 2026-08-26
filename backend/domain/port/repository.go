@@ -33,7 +33,15 @@ type Repository interface {
 // DecisionJobRepository persists and leases asynchronous case execution.
 // It is separate from Repository so existing aggregate fakes remain valid.
 type DecisionJobRepository interface {
-	Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error)
+	// Admit atomically enqueues or requeues a decision job under a per-user
+	// concurrency limit. It takes a per-user database row lock so two replicas
+	// cannot both pass the limit. It returns admitted=false when the user's
+	// queued/running jobs already meet the limit (no job is written). An
+	// existing queued/running/succeeded job for the same case is idempotent and
+	// returns admitted=true; a terminal retryable job (failed/cancelled/paused)
+	// is reset to queued when capacity is available. It replaces the old
+	// materialized RunCounter, which leaked slots across process crashes.
+	Admit(ctx context.Context, caseID string, maxAttempts, perUserLimit int) (*entity.DecisionJob, bool, error)
 	Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error)
 	// Heartbeat must return promptly when ctx is cancelled or reaches its
 	// deadline. The worker can bound an uncooperative implementation to one

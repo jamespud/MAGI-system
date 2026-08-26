@@ -49,7 +49,6 @@ type BudgetChecker interface {
 type runHandle struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
-	slotTaken bool
 }
 
 type RunManagerDeps struct {
@@ -62,7 +61,6 @@ type RunManagerDeps struct {
 	Metrics                  *metrics.Registry
 	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
-	RunCounter               port.RunCounter
 	BudgetChecker            BudgetChecker
 	LiveEvents               port.LiveEventPublisher
 }
@@ -81,7 +79,6 @@ type RunManager struct {
 	metrics              *metrics.Registry
 	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
-	runCounter           port.RunCounter
 	budgetChecker        BudgetChecker
 	liveEvents           port.LiveEventPublisher
 	userRuns             map[int64]int
@@ -111,7 +108,6 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
-		runCounter:    d.RunCounter,
 		budgetChecker: d.BudgetChecker,
 		liveEvents:    d.LiveEvents,
 		userRuns:      make(map[int64]int), runs: make(map[string]*runHandle),
@@ -137,7 +133,6 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 	if c == nil || c.ID == "" {
 		return fmt.Errorf("run manager: case is required")
 	}
-	slotHeld := false
 	m.mu.Lock()
 	_, local := m.runs[c.ID]
 	m.mu.Unlock()
@@ -153,67 +148,34 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 			return fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetDetail(info))
 		}
 	}
-	if m.maxConcurrentPerUser > 0 && c.UserID != 0 {
-		if m.runCounter != nil {
-			// Atomic cross-instance slot: the counter increments and checks the
-			// limit in one statement, closing the check-then-act race between
-			// replicas. The slot is released when the run finishes.
-			ok, err := m.runCounter.Acquire(ctx, c.UserID, m.maxConcurrentPerUser)
-			if err != nil {
-				return fmt.Errorf("run manager: acquire run slot: %w", err)
-			}
-			if !ok {
-				return ErrRateLimited
-			}
-			slotHeld = true
-		} else if m.jobRepo != nil {
-			active, err := m.jobRepo.CountActiveByUser(ctx, c.UserID)
-			if err != nil {
-				return fmt.Errorf("run manager: count active runs: %w", err)
-			}
-			if active >= m.maxConcurrentPerUser {
-				return ErrRateLimited
-			}
-		} else {
-			m.mu.Lock()
-			active := m.userRuns[c.UserID]
-			m.mu.Unlock()
-			if active >= m.maxConcurrentPerUser {
-				return ErrRateLimited
-			}
-		}
-	}
-
 	var job *entity.DecisionJob
 	if m.jobRepo != nil {
-		if err := m.jobRepo.RequeueExpired(ctx, time.Now()); err != nil {
-			return fmt.Errorf("run manager: recover expired job: %w", err)
-		}
+		var admitted bool
 		var err error
-		job, err = m.jobRepo.Enqueue(ctx, c.ID, m.maxAttempts)
+		job, admitted, err = m.jobRepo.Admit(ctx, c.ID, m.maxAttempts, m.maxConcurrentPerUser)
 		if err != nil {
-			if slotHeld {
-				_ = m.runCounter.Release(context.Background(), c.UserID)
-			}
-			return fmt.Errorf("run manager: enqueue: %w", err)
+			return fmt.Errorf("run manager: admit: %w", err)
+		}
+		if !admitted {
+			return ErrRateLimited
 		}
 		switch job.Status {
 		case entity.DecisionJobSucceeded:
-			if slotHeld {
-				_ = m.runCounter.Release(context.Background(), c.UserID)
-			}
 			return ErrAlreadyCompleted
 		case entity.DecisionJobRunning:
-			if slotHeld {
-				_ = m.runCounter.Release(context.Background(), c.UserID)
-			}
 			return ErrAlreadyRunning
 		}
-	}
-	if !m.launch(c, job, slotHeld) {
-		if slotHeld {
-			_ = m.runCounter.Release(context.Background(), c.UserID)
+	} else if m.maxConcurrentPerUser > 0 && c.UserID != 0 {
+		// No durable job repo: preserve the in-memory per-user limit used by
+		// unit tests and lightweight local callers.
+		m.mu.Lock()
+		active := m.userRuns[c.UserID]
+		m.mu.Unlock()
+		if active >= m.maxConcurrentPerUser {
+			return ErrRateLimited
 		}
+	}
+	if !m.launch(c, job) {
 		return ErrAlreadyRunning
 	}
 	return nil
@@ -270,9 +232,9 @@ func budgetDetail(info *BudgetExceededInfo) string {
 	}
 }
 
-func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob, slotHeld bool) bool {
+func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) bool {
 	runCtx, cancel := context.WithCancel(context.Background())
-	h := &runHandle{cancel: cancel, done: make(chan struct{}), slotTaken: slotHeld}
+	h := &runHandle{cancel: cancel, done: make(chan struct{})}
 	m.mu.Lock()
 	if _, exists := m.runs[c.ID]; exists {
 		m.mu.Unlock()
@@ -288,9 +250,6 @@ func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob, slo
 	go func() {
 		defer close(h.done)
 		defer func() {
-			if h.slotTaken && m.runCounter != nil && c.UserID != 0 {
-				_ = m.runCounter.Release(context.Background(), c.UserID)
-			}
 			m.mu.Lock()
 			delete(m.runs, c.ID)
 			m.mu.Unlock()
@@ -316,6 +275,9 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		m.metrics.RunFinish(err == nil)
 		m.metrics.RunFinishForUser(userIDString(c.UserID))
 		m.metrics.RecordRunDuration(time.Since(runStart).Milliseconds())
+		return
+	}
+	if job == nil {
 		return
 	}
 	for {
@@ -631,7 +593,7 @@ func (m *RunManager) Recover(ctx context.Context) error {
 		if err != nil || c == nil {
 			continue
 		}
-		m.launch(c, job, false)
+		m.launch(c, job)
 	}
 	return nil
 }
@@ -724,7 +686,7 @@ func (m *RunManager) Resume(caseID string) bool {
 	if err != nil || c == nil {
 		return true
 	}
-	m.launch(c, job, false)
+	m.launch(c, job)
 	return true
 }
 

@@ -130,7 +130,6 @@ var Module = fx.Options(
 		provideSchedulerLock,
 		provideToolQuotaRepository,
 		provideToolQuotaService,
-		provideRunCounter,
 		provideBudgetChecker,
 
 		// Agent runtime
@@ -679,10 +678,6 @@ func provideToolQuotaService(cfg *Config, repo port.ToolQuotaRepository) *toolqu
 	return toolquota.NewService(repo, cfg.ToolQuota.DefaultPerMinute, cfg.ToolQuota.Tools)
 }
 
-func provideRunCounter(db *gorm.DB) port.RunCounter {
-	return magi.NewRunCounterRepository(db)
-}
-
 // usageBudgetChecker adapts admin usage aggregates to decision.BudgetChecker.
 type usageBudgetChecker struct {
 	admin   *admin.Service
@@ -709,13 +704,12 @@ func provideBudgetChecker(adminSvc *admin.Service, cfg *Config) decision.BudgetC
 	return &usageBudgetChecker{admin: adminSvc, maxTok: cfg.Limits.MaxTokensPerUser, maxCost: cfg.Limits.MaxCostUSDPerUser}
 }
 
-func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, eventPub port.EventPublisher, reg *metrics.Registry, cfg *Config, counter port.RunCounter, budget decision.BudgetChecker) *decision.RunManager {
+func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, eventPub port.EventPublisher, reg *metrics.Registry, cfg *Config, budget decision.BudgetChecker) *decision.RunManager {
 	live, _ := eventPub.(port.LiveEventPublisher)
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
 		LiveEvents:               live,
 		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
-		RunCounter:               counter,
 		BudgetChecker:            budget,
 	})
 }
