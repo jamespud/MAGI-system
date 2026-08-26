@@ -45,9 +45,9 @@ secret:
     modelApiKey: "sk-your-model-key"
     tavilyApiKey: "tvly-your-tavily-key"
     embeddingApiKey: ""
-    # REQUIRED: replace this bootstrap spec with a newly generated secret
-    # before deployment; this placeholder must never be used in production.
-    authAPIKeys: "1:admin:bootstrap:replace-with-a-random-secret"
+    # REQUIRED: replace this non-parseable placeholder before deployment with
+    # userID:role:name:<newly-generated-random-secret>; never use this value.
+    authAPIKeys: "REPLACE_WITH_GENERATED_BOOTSTRAP_SPEC"
 
 ingress:
   enabled: true
