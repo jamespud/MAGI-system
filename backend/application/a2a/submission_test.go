@@ -25,6 +25,14 @@ func openSubmissionDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A single connection keeps the in-memory SQLite database shared across
+	// goroutines; without it each pooled connection gets its own empty
+	// :memory: database and concurrent tests see "no such table".
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +61,11 @@ type fakeJobRepo struct {
 	enqueueErr  error
 	activeCount int
 	runningAll  bool
+	// Optional cross-instance settlement barrier: the first Enqueue signals
+	// enqueueStarted and then waits for enqueueRelease before persisting the
+	// job, so a second replica can pass its GetByCase while no job exists yet.
+	enqueueStarted chan struct{}
+	enqueueRelease chan struct{}
 }
 
 func newFakeJobRepo() *fakeJobRepo {
@@ -60,6 +73,14 @@ func newFakeJobRepo() *fakeJobRepo {
 }
 
 func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+	if f.enqueueStarted != nil {
+		select {
+		case <-f.enqueueStarted:
+		default:
+			close(f.enqueueStarted)
+		}
+		<-f.enqueueRelease
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enqueues++
@@ -139,6 +160,30 @@ func (f *fakeJobRepo) enqueueCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.enqueues
+}
+
+// barrierSettlementRepo wraps a SubmissionRepository so the test can prove a
+// loser replica cannot overwrite a winner's STARTED settlement: the loser is
+// held in MarkRejected until the winner's MarkStarted has committed.
+type barrierSettlementRepo struct {
+	a2aapp.SubmissionRepository
+	markRejectedReached chan struct{}
+	markRejectedRelease chan struct{}
+	markStarted         chan struct{}
+	startedOnce         sync.Once
+	rejectedOnce        sync.Once
+}
+
+func (w *barrierSettlementRepo) MarkStarted(ctx context.Context, id string) error {
+	err := w.SubmissionRepository.MarkStarted(ctx, id)
+	w.startedOnce.Do(func() { close(w.markStarted) })
+	return err
+}
+
+func (w *barrierSettlementRepo) MarkRejected(ctx context.Context, id, code string) error {
+	w.rejectedOnce.Do(func() { close(w.markRejectedReached) })
+	<-w.markRejectedRelease
+	return w.SubmissionRepository.MarkRejected(ctx, id, code)
 }
 
 var _ port.DecisionJobRepository = (*fakeJobRepo)(nil)
@@ -374,5 +419,100 @@ func TestSubmissionService_RecoverStopsOnPersistentTransientFailure(t *testing.T
 	}
 	if sub.State != a2aapp.SubmissionPrepared {
 		t.Fatalf("binding state = %s, want PREPARED when start keeps failing", sub.State)
+	}
+}
+
+// TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding guards the
+// cross-instance settlement invariant: when two replicas recover the same
+// PREPARED binding and only one can acquire the run slot, the loser's
+// rate-limit rejection must never overwrite the winner's STARTED settlement.
+func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testing.T) {
+	db := openSubmissionDB(t)
+	jobs := newFakeJobRepo()
+	jobs.enqueueStarted = make(chan struct{})
+	jobs.enqueueRelease = make(chan struct{})
+	baseRepo := magi.NewA2ASubmissionRepository(db)
+	barrier := &barrierSettlementRepo{
+		SubmissionRepository: baseRepo,
+		markRejectedReached:  make(chan struct{}),
+		markRejectedRelease:  make(chan struct{}),
+		markStarted:          make(chan struct{}),
+	}
+	orch := newBlockingOrch()
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	parser := a2aapp.NewInputParser(65536, 16)
+	counter := magi.NewRunCounterRepository(db)
+
+	rmA := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, MaxConcurrentRunsPerUser: 1, RunCounter: counter,
+	})
+	rmB := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, MaxConcurrentRunsPerUser: 1, RunCounter: counter,
+	})
+	svcA := a2aapp.NewSubmissionService(parser, barrier, rmA, proj, 3)
+	svcB := a2aapp.NewSubmissionService(parser, barrier, rmB, proj, 3)
+
+	parsed, err := parser.Parse(submissionReq("msg-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := a2aapp.PrepareCommand{
+		SubmissionID: "sub-1", MessageID: "msg-1", RequestHash: parsed.RequestHash, TaskID: "case-1",
+		ContextID: "conv-1", InputMessageID: "input-1", CaseMessageID: "case-msg-1",
+		UserID: 7, Question: "q", MaxDebateRounds: 3,
+	}
+	if _, _, err := barrier.Prepare(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, svc := range []*a2aapp.SubmissionService{svcA, svcB} {
+		wg.Add(1)
+		go func(svc *a2aapp.SubmissionService) {
+			defer wg.Done()
+			errs <- svc.Recover(context.Background())
+		}(svc)
+	}
+
+	// The slot winner is blocked in Enqueue (job not created yet); the slot
+	// loser has already passed GetByCase and is blocked in MarkRejected.
+	<-jobs.enqueueStarted
+	select {
+	case <-barrier.markRejectedReached:
+	case <-time.After(2 * time.Second):
+		select {
+		case err := <-errs:
+			t.Fatalf("loser recover exited before MarkRejected: %v", err)
+		default:
+			t.Fatal("loser never reached MarkRejected within 2s")
+		}
+	}
+	close(jobs.enqueueRelease)
+	select {
+	case <-barrier.markStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slot winner did not mark the binding started")
+	}
+	close(barrier.markRejectedRelease)
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sub, err := barrier.GetByTask(context.Background(), 7, "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.State != a2aapp.SubmissionStarted {
+		t.Fatalf("binding = %+v, want STARTED (a started task must never become REJECTED)", sub)
+	}
+	job, err := jobs.GetByCase(context.Background(), "case-1")
+	if err != nil || job.Status != entity.DecisionJobRunning {
+		t.Fatalf("job = %+v err=%v, want running", job, err)
 	}
 }

@@ -415,6 +415,158 @@ func TestStreamProjector_RemoteEventAppearsViaPolling(t *testing.T) {
 	<-c.done
 }
 
+// TestStreamProjector_CatchUpTerminalClosesStream guards the catch-up path: a
+// terminal event that lands while the stream is between the snapshot and its
+// broker subscription must terminate the iterator. The stream must close
+// itself after emitting the final status, not keep polling forever.
+func TestStreamProjector_CatchUpTerminalClosesStream(t *testing.T) {
+	stream, db, repo, broker := newStreamHarness(t, 8)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
+	broker.blockSubscribe = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
+	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
+
+	// A remote replica completes the case while the stream is blocked in
+	// Subscribe (snapshot already loaded, terminal event only durable).
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedResolution(t, db, "case-1")
+	if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "case-1").Update("status", string(entity.DecisionJobSucceeded)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.PublishRemote(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})); err != nil {
+		t.Fatal(err)
+	}
+	close(broker.blockSubscribe)
+
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not terminate after the catch-up terminal event")
+	}
+	terminal := false
+	for _, ev := range c.snapshot() {
+		if s, ok := ev.(*a2a.TaskStatusUpdateEvent); ok && s.Status.State == a2a.TaskStateCompleted {
+			terminal = true
+		}
+	}
+	if !terminal {
+		t.Fatalf("catch-up stream never emitted the terminal status: %#v", c.snapshot())
+	}
+}
+
+// TestStreamProjector_LiveGapDoesNotSkipDurableEvent guards ordered delivery:
+// when a live broker event with a sequence gap arrives while the durable
+// intermediate event has not been drained, the stream must not jump the
+// watermark past the gap. The durable event must be emitted in order.
+func TestStreamProjector_LiveGapDoesNotSkipDurableEvent(t *testing.T) {
+	_, db, repo, broker := newStreamHarness(t, 8)
+	// A long poll interval keeps the live broker path deterministic: without
+	// the gap guard the durable N+1 would never be drained before N+2 lands.
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	stream := a2aapp.NewDurableStreamProjector(repo, broker, broker, proj, 8, time.Hour)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
+	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
+
+	// Durable N+1 from a remote replica: Working -> Paused.
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusPaused)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "case-1").Update("status", string(entity.DecisionJobPaused)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.PublishRemote(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseStatusChanged, map[string]any{"status": string(entity.CaseStatusPaused)})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live N+2 arrives before N+1 was drained.
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedResolution(t, db, "case-1")
+	if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "case-1").Update("status", string(entity.DecisionJobSucceeded)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Publish(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not terminate after the live terminal event")
+	}
+	var states []a2a.TaskState
+	for _, ev := range c.snapshot() {
+		if s, ok := ev.(*a2a.TaskStatusUpdateEvent); ok {
+			states = append(states, s.Status.State)
+		}
+	}
+	if len(states) != 2 || states[0] != a2a.TaskStateWorking || states[1] != a2a.TaskStateCompleted {
+		t.Fatalf("ordered status sequence = %v, want [working completed] (durable N+1 was skipped)", states)
+	}
+}
+
+// TestStreamProjector_RemoteCancelClosesStream guards cross-replica
+// cancellation: a CancelTask issued on another replica must surface to an
+// established Subscribe as a canceled status and terminate the stream. A
+// cancel that only mutates Case/Job without a durable event is invisible.
+func TestStreamProjector_RemoteCancelClosesStream(t *testing.T) {
+	stream, db, repo, _ := newStreamHarness(t, 8)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
+	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
+
+	if _, outcome, err := repo.CancelTask(ctx, 7, "case-1"); err != nil || outcome != a2aapp.CancelApplied {
+		t.Fatalf("cancel = %q err=%v, want applied", outcome, err)
+	}
+
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not observe the remote cancellation")
+	}
+	terminal := false
+	for _, ev := range c.snapshot() {
+		if s, ok := ev.(*a2a.TaskStatusUpdateEvent); ok && s.Status.State == a2a.TaskStateCanceled {
+			terminal = true
+		}
+	}
+	if !terminal {
+		t.Fatalf("cancel stream never emitted the canceled status: %#v", c.snapshot())
+	}
+}
+
+// TestProjector_TerminalVisibilityRequiresResolution guards the projection
+// invariant that a completed Task is never visible without its terminal
+// Resolution: projecting a completed record with a nil Resolution must not
+// fabricate fallback artifacts and claim success.
+func TestProjector_TerminalVisibilityRequiresResolution(t *testing.T) {
+	_, db, repo, _ := newStreamHarness(t, 8)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusResolved, succeeded())
+	// Deliberately no seedResolution: the terminal result row is missing.
+
+	record, err := repo.GetTaskRecord(context.Background(), 7, "case-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := a2aapp.NewTaskProjector(redact.New("sk-secret")).Project(record, 1)
+	if task.Status.State == a2a.TaskStateCompleted && record.Resolution == nil {
+		t.Fatal("completed task became visible before terminal result was committed")
+	}
+}
+
 func TestStreamProjector_ConsumerCancellationLeavesJobRunning(t *testing.T) {
 	stream, db, repo, _ := newStreamHarness(t, 8)
 	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())

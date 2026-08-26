@@ -2,6 +2,7 @@ package orchestration_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1092,6 +1093,146 @@ func TestOrchestrate_AtomicTerminalCommitFallsBackToEventPublisher(t *testing.T)
 		}
 	}
 	t.Fatalf("successful terminal transaction did not fan out completion: %+v", events.events)
+}
+
+type blockingTerminalCommitter struct {
+	port.Repository
+	commitStarted chan struct{}
+	release       chan struct{}
+}
+
+func eventPayloadStatus(t *testing.T, ev *entity.MagiEvent) string {
+	t.Helper()
+	if len(ev.Payload) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal event payload: %v", err)
+	}
+	status, _ := payload["status"].(string)
+	return status
+}
+
+func (r *blockingTerminalCommitter) CommitTerminal(_ context.Context, _ string, _ entity.CaseStatus, _ *entity.Resolution, _ *entity.MagiEvent) (bool, error) {
+	close(r.commitStarted)
+	<-r.release
+	return true, nil
+}
+
+// TestOrchestrate_TerminalVisibility_NoResolvedStatusBeforeCommit guards the
+// A2A terminal-visibility invariant: the FSM must never make RESOLVED visible
+// (status write + CASE_STATUS_CHANGED) before the terminal result and its
+// completion event are committed in one transaction. A stream subscriber that
+// projects a Task during the gap would otherwise see a completed Task with
+// fabricated artifacts and permanently miss the real resolution.
+func TestOrchestrate_TerminalVisibility_NoResolvedStatusBeforeCommit(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	terminalRepo := &blockingTerminalCommitter{
+		Repository:    baseRepo,
+		commitStarted: make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	broker := server.NewEventBroker()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      terminalRepo,
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-terminal-visibility", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	done := make(chan error, 1)
+	go func() {
+		_, err := orch.Orchestrate(context.Background(), case_)
+		done <- err
+	}()
+
+	<-terminalRepo.commitStarted
+	events, err := broker.ListByCase(context.Background(), case_.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, ev := range events {
+		if ev.Type != entity.EventCaseStatusChanged {
+			continue
+		}
+		if eventPayloadStatus(t, ev) == string(entity.CaseStatusResolved) {
+			t.Fatalf("RESOLVED status event published before the terminal commit: %+v", ev)
+		}
+	}
+
+	close(terminalRepo.release)
+	if err := <-done; err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if case_.Status != entity.CaseStatusResolved {
+		t.Fatalf("case status = %s, want RESOLVED", case_.Status)
+	}
+}
+
+// TestOrchestrate_TerminalVisibility_NoDeadlockedStatusBeforeCommit is the
+// DEADLOCKED twin: deadlock is also a terminal outcome with one committed
+// completion event, so it must not become visible before the terminal commit.
+func TestOrchestrate_TerminalVisibility_NoDeadlockedStatusBeforeCommit(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{reject()}
+	mrt.votes["casper"] = []*entity.Vote{{Decision: entity.VoteDecisionAbstain, Confidence: 0}}
+	baseRepo := newStubRepo()
+	terminalRepo := &blockingTerminalCommitter{
+		Repository:    baseRepo,
+		commitStarted: make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	broker := server.NewEventBroker()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      terminalRepo,
+		EventPub:  broker,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-deadlock-visibility", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	done := make(chan error, 1)
+	go func() {
+		_, err := orch.Orchestrate(context.Background(), case_)
+		done <- err
+	}()
+
+	<-terminalRepo.commitStarted
+	events, err := broker.ListByCase(context.Background(), case_.ID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, ev := range events {
+		if ev.Type != entity.EventCaseStatusChanged {
+			continue
+		}
+		if eventPayloadStatus(t, ev) == string(entity.CaseStatusDeadlocked) {
+			t.Fatalf("DEADLOCKED status event published before the terminal commit: %+v", ev)
+		}
+	}
+
+	close(terminalRepo.release)
+	if err := <-done; err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if case_.Status != entity.CaseStatusDeadlocked {
+		t.Fatalf("case status = %s, want DEADLOCKED", case_.Status)
+	}
 }
 
 // --- end-to-end async integration ---

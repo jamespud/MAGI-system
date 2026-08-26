@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -15,7 +16,9 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	a2a "github.com/jamespud/magi/backend/application/a2a"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func newA2ASubmissionRepo(t *testing.T) (*gorm.DB, a2a.SubmissionRepository) {
@@ -385,6 +388,113 @@ func TestA2ASubmissionListTasks_IncludeArtifactsFalseSkipsResultTables(t *testin
 	rec = full.Records[0]
 	if rec.Resolution == nil || len(rec.Evidence) != 1 || len(rec.Claims) != 1 || len(rec.Votes) != 1 {
 		t.Fatalf("result tables missing with IncludeArtifacts=true: %+v", rec)
+	}
+}
+
+func a2aTerminalCaseStatus(s entity.CaseStatus) bool {
+	switch s {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+// TestA2ASnapshot_ConsistentCaseAndEventSeq guards the snapshot invariant that
+// GetTaskRecord must not combine a pre-terminal Case with a terminal
+// MaxEventSeq. The read is paused after the Case query while a terminal
+// transaction commits; resuming must never yield a working Case paired with a
+// terminal event watermark, because the stream uses that watermark to skip
+// catch-up and would permanently miss the terminal event.
+func TestA2ASnapshot_ConsistentCaseAndEventSeq(t *testing.T) {
+	dsn := "file:" + filepath.Join(t.TempDir(), "a2a_snapshot.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+	dbA, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlA, _ := dbA.DB()
+	sqlA.SetMaxOpenConns(1)
+	if err := dbA.AutoMigrate(magi.AllModels()...); err != nil {
+		t.Fatal(err)
+	}
+	repo := magi.NewA2ASubmissionRepository(dbA)
+	if _, _, err := repo.Prepare(context.Background(), a2aPrepareCommand(7, "message-1", "hash", "task-1", "context-1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbA.Model(&magi.CaseModel{}).Where("id = ?", "task-1").Update("status", string(entity.CaseStatusInvestigating)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := dbA.Create(&magi.DecisionJobModel{ID: "job-1", CaseID: "task-1", Status: string(entity.DecisionJobRunning), AvailableAt: time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	resolutionQueried := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	if err := dbA.Callback().Query().After("gorm:query").Register("a2a_test_snapshot_barrier", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*magi.ResolutionModel); ok {
+			once.Do(func() { close(resolutionQueried) })
+			<-release
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dbA.Callback().Query().Remove("a2a_test_snapshot_barrier") })
+
+	type readResult struct {
+		rec *a2a.TaskRecord
+		err error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		rec, err := repo.GetTaskRecord(context.Background(), 7, "task-1")
+		done <- readResult{rec: rec, err: err}
+	}()
+	<-resolutionQueried
+
+	// A terminal transaction commits while the snapshot read is paused after
+	// the Case query: the case status, job, resolution, and terminal event all
+	// land together on the other connection.
+	dbB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlB, _ := dbB.DB()
+	sqlB.SetMaxOpenConns(1)
+	defer sqlB.Close()
+
+	consensus, err := json.Marshal(entity.ConsensusResult{Outcome: entity.ConsensusStrongApproval, Round: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txErr := dbB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&magi.CaseModel{}).Where("id = ?", "task-1").
+			Updates(map[string]any{"status": string(entity.CaseStatusResolved), "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "task-1").Update("status", string(entity.DecisionJobSucceeded)).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&magi.ResolutionModel{ID: "res-1", CaseID: "task-1", FinalDecision: string(entity.VoteDecisionApprove), ConsensusJSON: string(consensus)}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&magi.EventModel{ID: "ev-1", CaseID: "task-1", Seq: 1, Type: string(entity.EventCaseCompleted), Timestamp: time.Now().UTC()}).Error
+	})
+	if txErr != nil {
+		t.Fatalf("terminal commit: %v", txErr)
+	}
+	close(release)
+
+	res := <-done
+	if res.err != nil {
+		t.Fatal(res.err)
+	}
+	if res.rec == nil {
+		t.Fatal("nil record")
+	}
+	if res.rec.MaxEventSeq > 0 && !a2aTerminalCaseStatus(res.rec.Case.Status) {
+		t.Fatalf("snapshot combined pre-terminal case %s with terminal event seq %d", res.rec.Case.Status, res.rec.MaxEventSeq)
 	}
 }
 
