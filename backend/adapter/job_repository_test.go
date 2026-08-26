@@ -125,6 +125,130 @@ func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) 
 	}
 }
 
+func TestMagiRepository_CommitStatusTransitionCommitsCaseAndEvent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.StatusTransitionCommitter)
+	if !ok {
+		t.Fatal("production repository must provide atomic status transition commits")
+	}
+	caseID := "case-status-committed"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusInvestigating}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseStatusChanged,
+		map[string]any{"status": string(entity.CaseStatusEvidenceGating), "round": 1})
+	committed, err := committer.CommitStatusTransition(context.Background(), caseID,
+		[]entity.CaseStatus{entity.CaseStatusInvestigating}, entity.CaseStatusEvidenceGating, &event)
+	if err != nil || !committed {
+		t.Fatalf("commit status transition: committed=%v err=%v", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status != entity.CaseStatusEvidenceGating {
+		t.Fatalf("case after transition = %+v err=%v", caseAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), caseID)
+	if err != nil || len(events) != 1 || events[0].Type != entity.EventCaseStatusChanged ||
+		events[0].Seq != 1 || event.Seq != 1 {
+		t.Fatalf("transition events = %+v err=%v event=%+v", events, err, event)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", caseID).Error; err != nil || cursor.NextSeq != 2 {
+		t.Fatalf("transition cursor = %+v err=%v", cursor, err)
+	}
+}
+
+func TestMagiRepository_CommitStatusTransitionFenceLossWritesNothing(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.StatusTransitionCommitter)
+	if !ok {
+		t.Fatal("production repository must provide atomic status transition commits")
+	}
+	caseID := "case-status-fence"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusInvestigating}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseStatusChanged,
+		map[string]any{"status": string(entity.CaseStatusEvidenceGating), "round": 1})
+	committed, err := committer.CommitStatusTransition(context.Background(), caseID,
+		[]entity.CaseStatus{entity.CaseStatusResolved}, entity.CaseStatusEvidenceGating, &event)
+	if err != nil || committed {
+		t.Fatalf("fence loss = committed=%v err=%v, want no commit", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status != entity.CaseStatusInvestigating {
+		t.Fatalf("case after fence loss = %+v err=%v", caseAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), caseID)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events after fence loss = %+v err=%v", events, err)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", caseID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("cursor after fence loss = %+v err=%v, want no cursor", cursor, err)
+	}
+}
+
+func TestMagiRepository_CommitStatusTransitionRollsBackOnEventFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.StatusTransitionCommitter)
+	if !ok {
+		t.Fatal("production repository must provide atomic status transition commits")
+	}
+	caseID := "case-status-rollback"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusInvestigating}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	duplicate := entity.NewEvent(caseID, "", nil, entity.EventCaseStatusChanged,
+		map[string]any{"status": string(entity.CaseStatusInvestigating)})
+	if err := repo.EventRepo().Create(context.Background(), &duplicate); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseStatusChanged,
+		map[string]any{"status": string(entity.CaseStatusEvidenceGating), "round": 1})
+	event.ID = duplicate.ID
+	committed, err := committer.CommitStatusTransition(context.Background(), caseID,
+		[]entity.CaseStatus{entity.CaseStatusInvestigating}, entity.CaseStatusEvidenceGating, &event)
+	if err == nil || committed {
+		t.Fatalf("duplicate event insert = committed=%v err=%v, want rollback", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+	if err != nil || caseAfter.Status != entity.CaseStatusInvestigating {
+		t.Fatalf("case after event rollback = %+v err=%v", caseAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), caseID)
+	if err != nil || len(events) != 1 || events[0].ID != duplicate.ID || events[0].Seq != 1 {
+		t.Fatalf("events after event rollback = %+v err=%v", events, err)
+	}
+	if event.Seq != 0 {
+		t.Fatalf("event sequence after rollback = %d, want restored 0", event.Seq)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", caseID).Error; err != nil || cursor.NextSeq != 2 {
+		t.Fatalf("cursor after event rollback = %+v err=%v", cursor, err)
+	}
+}
+
 func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Repository, port.DecisionJobRepository, *entity.DecisionJob) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

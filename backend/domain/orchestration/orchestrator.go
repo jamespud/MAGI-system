@@ -187,7 +187,7 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 			// Custom terminal committers may use an event publisher that lacks a
 			// durable-free fanout capability. Preserve the historical callback
 			// rather than silently dropping the completion notification.
-			o.publish(ctx, case_, event.Type, event.Payload)
+			_ = o.publish(ctx, case_, event.Type, event.Payload)
 		}
 		return nil
 	}
@@ -199,8 +199,7 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 			return fmt.Errorf("persist resolution: %w", err)
 		}
 	}
-	o.publish(ctx, case_, event.Type, event.Payload)
-	return nil
+	return o.publish(ctx, case_, event.Type, event.Payload)
 }
 
 // isNormalTerminal reports whether a status is one of the normal terminal
@@ -243,6 +242,25 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 	if len(allowed) == 0 {
 		return port.ErrLeaseLost
 	}
+	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseStatusChanged,
+		map[string]any{"status": string(to), "round": round})
+	if committer, ok := o.repo.(port.StatusTransitionCommitter); ok {
+		committed, err := committer.CommitStatusTransition(ctx, case_.ID, allowed, to, &event)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return port.ErrLeaseLost
+		}
+		// The transition is durable now: expose it in memory and fan out live.
+		// A live fan-out failure cannot roll back the transaction; durable
+		// polling replays the committed event.
+		case_.Status = to
+		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
+			_ = live.PublishLive(ctx, event)
+		}
+		return nil
+	}
 	if o.caseRepo != nil {
 		if writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter); ok {
 			updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, allowed, to)
@@ -257,8 +275,7 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 		}
 	}
 	case_.Status = to
-	o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(to), "round": round})
-	return nil
+	return o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(to), "round": round})
 }
 
 func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vote {
@@ -608,11 +625,11 @@ func EnforceReflectionRule(prevVotes, newVotes []*entity.Vote, results []*runtim
 	return reflections
 }
 
-func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType, payload any) {
+func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, et entity.EventType, payload any) error {
 	if o.eventPub == nil {
-		return
+		return nil
 	}
-	_ = o.eventPub.Publish(ctx, entity.NewEvent(case_.ID, "", nil, et, payload))
+	return o.eventPub.Publish(ctx, entity.NewEvent(case_.ID, "", nil, et, payload))
 }
 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {

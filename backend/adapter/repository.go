@@ -119,8 +119,50 @@ func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expe
 	return committed, nil
 }
 
+// CommitStatusTransition commits an ordinary FSM status change and its ordered
+// CASE_STATUS_CHANGED event in one transaction. A false result means the case
+// status moved first and nothing was written.
+func (r *magiRepository) CommitStatusTransition(ctx context.Context, caseID string, expected []entity.CaseStatus, target entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
+	if event == nil {
+		return false, fmt.Errorf("status transition commit: event is required")
+	}
+	expectedStatuses := make([]string, 0, len(expected))
+	for _, status := range expected {
+		expectedStatuses = append(expectedStatuses, string(status))
+	}
+	originalSeq := event.Seq
+	committed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&CaseModel{}).
+			Where("id = ? AND status IN ?", caseID, expectedStatuses).
+			Updates(map[string]any{"status": string(target), "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		if err := createEventInTx(tx, event); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	})
+	if err != nil {
+		// createEventInTx assigns Seq before the event INSERT. Never leave an
+		// uncommitted sequence on the caller's event pointer.
+		event.Seq = originalSeq
+		return false, err
+	}
+	if !committed {
+		event.Seq = originalSeq
+	}
+	return committed, nil
+}
+
 var _ port.Repository = (*magiRepository)(nil)
 var _ port.TerminalCommitter = (*magiRepository)(nil)
+var _ port.StatusTransitionCommitter = (*magiRepository)(nil)
 
 // --- CaseRepository ---
 

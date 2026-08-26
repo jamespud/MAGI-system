@@ -1001,6 +1001,55 @@ func (p *captureOnlyEventPublisher) Publish(_ context.Context, event entity.Magi
 	return nil
 }
 
+type statusTransitionCommitRepo struct {
+	port.Repository
+	mu            sync.Mutex
+	committed     []entity.MagiEvent
+	commitStarted chan struct{}
+	release       chan struct{}
+	fenceLost     bool
+	signalOnce    sync.Once
+}
+
+func (r *statusTransitionCommitRepo) CommitStatusTransition(_ context.Context, _ string, _ []entity.CaseStatus, _ entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
+	if r.commitStarted != nil {
+		r.signalOnce.Do(func() { close(r.commitStarted) })
+	}
+	if r.release != nil {
+		<-r.release
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fenceLost {
+		return false, nil
+	}
+	r.committed = append(r.committed, *event)
+	return true, nil
+}
+
+type liveOrderingEventPublisher struct {
+	mu     sync.Mutex
+	events []entity.MagiEvent
+}
+
+func (p *liveOrderingEventPublisher) Publish(_ context.Context, event entity.MagiEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, event)
+	return nil
+}
+
+func (p *liveOrderingEventPublisher) PublishLive(_ context.Context, event entity.MagiEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, event)
+	return nil
+}
+
+type failingEventPublisher struct{ err error }
+
+func (p *failingEventPublisher) Publish(context.Context, entity.MagiEvent) error { return p.err }
+
 func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	repo := newStubRepo()
@@ -1082,6 +1131,122 @@ func TestOrchestrate_TerminalTransitionIsAtomicInFallback(t *testing.T) {
 	}
 	if completed != 1 {
 		t.Fatalf("completion events = %d, want exactly 1", completed)
+	}
+}
+
+// TestOrchestrate_OrdinaryTransitionCommitsBeforeLiveFanout proves an ordinary
+// FSM status change is durable before it is exposed: while the status
+// transition transaction is in flight, no CASE_STATUS_CHANGED reaches the live
+// publisher and the in-memory case status is not yet updated.
+func TestOrchestrate_OrdinaryTransitionCommitsBeforeLiveFanout(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	transitionRepo := &statusTransitionCommitRepo{
+		Repository:    baseRepo,
+		commitStarted: make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	publisher := &liveOrderingEventPublisher{}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      transitionRepo,
+		EventPub:  publisher,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-status-order", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	done := make(chan error, 1)
+	go func() {
+		_, err := orch.Orchestrate(context.Background(), case_)
+		done <- err
+	}()
+
+	<-transitionRepo.commitStarted
+	publisher.mu.Lock()
+	fannedOut := len(publisher.events)
+	publisher.mu.Unlock()
+	if fannedOut != 0 {
+		t.Fatalf("live fan-out arrived before the transition commit: %+v", publisher.events)
+	}
+	if case_.Status != entity.CaseStatusDraft {
+		t.Fatalf("case status = %s, must stay DRAFT while the commit is in flight", case_.Status)
+	}
+	close(transitionRepo.release)
+	if err := <-done; err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	transitionRepo.mu.Lock()
+	committed := len(transitionRepo.committed)
+	transitionRepo.mu.Unlock()
+	if committed == 0 {
+		t.Fatal("orchestrator did not commit the status transition")
+	}
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	for _, ev := range publisher.events {
+		if ev.Type == entity.EventCaseStatusChanged {
+			return
+		}
+	}
+	t.Fatalf("committed transition never fanned out live: %+v", publisher.events)
+}
+
+func TestOrchestrate_OrdinaryTransitionFenceLossStopsFSM(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	baseRepo := newStubRepo()
+	transitionRepo := &statusTransitionCommitRepo{Repository: baseRepo, fenceLost: true}
+	publisher := &liveOrderingEventPublisher{}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      transitionRepo,
+		EventPub:  publisher,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-status-fence", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("error = %v, want ErrLeaseLost", err)
+	}
+	if case_.Status != entity.CaseStatusDraft {
+		t.Fatalf("case status = %s, must stay DRAFT after fence loss", case_.Status)
+	}
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	for _, ev := range publisher.events {
+		if ev.Type == entity.EventCaseStatusChanged {
+			t.Fatalf("fence loss published status event: %+v", ev)
+		}
+	}
+}
+
+func TestOrchestrate_FallbackPublishErrorIsReturned(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	repo := newStubRepo()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		EventPub:  &failingEventPublisher{err: errors.New("persist event")},
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	case_ := &entity.DecisionCase{ID: "case-publish-fallback", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); err == nil || !strings.Contains(err.Error(), "persist event") {
+		t.Fatalf("error = %v, want the event publish failure to stop the FSM", err)
 	}
 }
 
