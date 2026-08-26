@@ -360,6 +360,36 @@ func TestOrchestrate_ExecutionErrorDoesNotPublishTerminalFailure(t *testing.T) {
 	}
 }
 
+func TestOrchestrate_SynchronousFailureCommitsOneDurableFailureEvent(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.errOn["melchior"] = true
+	mrt.votes["balthasar"] = []*entity.Vote{reject()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	repo := &failureTerminalCommitRepo{Repository: baseRepo}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	c := &entity.DecisionCase{ID: "case-sync-failure", Question: "compute", MaxDebateRounds: 1}
+	if _, err := orch.Orchestrate(context.Background(), c); err == nil {
+		t.Fatal("expected synchronous execution error")
+	}
+	if c.Status != entity.CaseStatusFailed {
+		t.Fatalf("case status = %s, want FAILED", c.Status)
+	}
+	if len(repo.events) != 1 || repo.events[0].Type != entity.EventCaseFailed {
+		t.Fatalf("failure events = %+v, want exactly one CASE_FAILED", repo.events)
+	}
+}
+
 // TestOrchestrate_RetriesFailedAgent guards the retry path: an agent that
 // fails on its first attempt is re-dispatched (bounded) instead of being
 // immediately converted to an ABSTAIN, so transient failures do not
@@ -913,6 +943,19 @@ func (r *terminalCommitRaceRepo) CommitTerminal(context.Context, string, entity.
 type terminalCommitSuccessRepo struct {
 	port.Repository
 	called bool
+}
+
+type failureTerminalCommitRepo struct {
+	port.Repository
+	events []entity.MagiEvent
+}
+
+func (r *failureTerminalCommitRepo) CommitTerminal(_ context.Context, caseID string, expected, target entity.CaseStatus, _ *entity.Resolution, event *entity.MagiEvent) (bool, error) {
+	if target != entity.CaseStatusFailed || expected == entity.CaseStatusResolved || expected == entity.CaseStatusFailed || expected == entity.CaseStatusCancelled || expected == entity.CaseStatusTimedOut || expected == entity.CaseStatusInsufficientEv || expected == entity.CaseStatusDeadlocked {
+		return false, nil
+	}
+	r.events = append(r.events, *event)
+	return true, nil
 }
 
 func (r *terminalCommitSuccessRepo) CommitTerminal(context.Context, string, entity.CaseStatus, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {

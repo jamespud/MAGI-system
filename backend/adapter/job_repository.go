@@ -268,6 +268,15 @@ func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerI
 	if event == nil {
 		return false, fmt.Errorf("decision job: final failure event is required")
 	}
+	allowedStatuses := make([]string, 0, len(expectedCaseStatuses))
+	for _, status := range expectedCaseStatuses {
+		if !isPublicTerminalCaseStatus(status) {
+			allowedStatuses = append(allowedStatuses, string(status))
+		}
+	}
+	if len(allowedStatuses) == 0 {
+		return false, nil
+	}
 	originalSeq := event.Seq
 	committed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -284,12 +293,8 @@ func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerI
 		if jobResult.RowsAffected != 1 {
 			return errFinalFailureFence
 		}
-		allowed := make([]string, 0, len(expectedCaseStatuses))
-		for _, status := range expectedCaseStatuses {
-			allowed = append(allowed, string(status))
-		}
 		caseResult := tx.Model(&CaseModel{}).
-			Where("id = ? AND status IN ?", caseID, allowed).
+			Where("id = ? AND status IN ? AND status NOT IN ?", caseID, allowedStatuses, publicTerminalCaseStatuses()).
 			Updates(map[string]any{"status": string(entity.CaseStatusFailed), "updated_at": now})
 		if caseResult.Error != nil {
 			return caseResult.Error
@@ -316,4 +321,24 @@ func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerI
 		event.Seq = originalSeq
 	}
 	return committed, nil
+}
+
+func isPublicTerminalCaseStatus(status entity.CaseStatus) bool {
+	switch status {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusCancelled, entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv,
+		entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func publicTerminalCaseStatuses() []string {
+	return []string{
+		string(entity.CaseStatusResolved), string(entity.CaseStatusMemoryIndexed),
+		string(entity.CaseStatusFailed), string(entity.CaseStatusCancelled),
+		string(entity.CaseStatusTimedOut), string(entity.CaseStatusInsufficientEv),
+		string(entity.CaseStatusDeadlocked),
+	}
 }

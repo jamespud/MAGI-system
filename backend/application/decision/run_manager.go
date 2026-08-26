@@ -401,6 +401,10 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		if c.Status == entity.CaseStatusDraft {
 			statuses = append(statuses, "")
 		}
+		if isTerminalCaseStatus(c.Status) {
+			attemptCancel(port.ErrLeaseLost)
+			return
+		}
 		committed, err := m.jobRepo.CommitFinalFailure(context.Background(), claimed.ID, m.workerID, c.ID, statuses, runErr.Error(), &event)
 		if err != nil {
 			return

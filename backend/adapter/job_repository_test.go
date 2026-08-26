@@ -238,3 +238,42 @@ func TestDecisionJobRepository_CommitFinalFailureEventInsertRollback(t *testing.
 		t.Fatalf("cursor after event rollback = %+v err=%v", cursor, err)
 	}
 }
+
+func TestDecisionJobRepository_CommitFinalFailureRejectsPublicTerminalCase(t *testing.T) {
+	terminalStatuses := []entity.CaseStatus{
+		entity.CaseStatusResolved,
+		entity.CaseStatusMemoryIndexed,
+		entity.CaseStatusFailed,
+		entity.CaseStatusCancelled,
+		entity.CaseStatusTimedOut,
+		entity.CaseStatusInsufficientEv,
+		entity.CaseStatusDeadlocked,
+	}
+	for _, status := range terminalStatuses {
+		t.Run(string(status), func(t *testing.T) {
+			caseID := "case-final-terminal-" + string(status)
+			db, repo, jobs, job := newFinalFailureFixture(t, caseID)
+			if err := db.Model(&magi.CaseModel{}).Where("id = ?", caseID).Update("status", string(status)).Error; err != nil {
+				t.Fatal(err)
+			}
+			event := entity.NewEvent(caseID, "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
+			committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", caseID,
+				[]entity.CaseStatus{status}, "late", &event)
+			if err != nil || committed {
+				t.Fatalf("terminal case commit = committed=%v err=%v, want false,nil", committed, err)
+			}
+			caseAfter, err := repo.CaseRepo().Get(context.Background(), caseID)
+			if err != nil || caseAfter.Status != status {
+				t.Fatalf("case after rejected commit = %+v err=%v", caseAfter, err)
+			}
+			jobAfter, err := jobs.GetByCase(context.Background(), caseID)
+			if err != nil || jobAfter.Status != entity.DecisionJobRunning {
+				t.Fatalf("job after rejected commit = %+v err=%v", jobAfter, err)
+			}
+			events, err := repo.EventRepo().ListByCase(context.Background(), caseID)
+			if err != nil || len(events) != 0 {
+				t.Fatalf("events after rejected commit = %+v err=%v", events, err)
+			}
+		})
+	}
+}

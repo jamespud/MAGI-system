@@ -112,10 +112,14 @@ type fakeJobRepo struct {
 	enqueues    int
 	enqueueErr  error
 	activeCount int
+	cases       map[string]*entity.DecisionCase
+	events      map[string][]*entity.MagiEvent
+	cursors     map[string]uint64
+	commitErr   error
 }
 
 func newFakeJobRepo() *fakeJobRepo {
-	return &fakeJobRepo{jobs: make(map[string]*entity.DecisionJob)}
+	return &fakeJobRepo{jobs: make(map[string]*entity.DecisionJob), cases: make(map[string]*entity.DecisionCase), events: make(map[string][]*entity.MagiEvent), cursors: make(map[string]uint64)}
 }
 
 func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
@@ -126,12 +130,16 @@ func (f *fakeJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts in
 		return nil, f.enqueueErr
 	}
 	if existing, ok := f.jobs[caseID]; ok {
+		if _, present := f.cases[caseID]; !present {
+			f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
+		}
 		return existing, nil
 	}
 	now := time.Now()
 	job := &entity.DecisionJob{ID: "job-" + caseID, CaseID: caseID, Status: entity.DecisionJobQueued,
 		MaxAttempts: maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now}
 	f.jobs[caseID] = job
+	f.cases[caseID] = &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}
 	return job, nil
 }
 
@@ -159,16 +167,55 @@ func (f *fakeJobRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError
 func (f *fakeJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expected []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.commitErr != nil {
+		return false, f.commitErr
+	}
+	if event == nil {
+		return false, errors.New("failure event is required")
+	}
 	for _, job := range f.jobs {
 		if job.ID == jobID && job.Status == entity.DecisionJobRunning && job.WorkerID == workerID {
-			job.Status, job.WorkerID, job.LastError = entity.DecisionJobFailed, "", lastError
-			if event != nil {
-				event.Seq = 1
+			case_, ok := f.cases[caseID]
+			if !ok || !containsExpectedCaseStatus(case_.Status, expected) || isTerminalCaseStatus(case_.Status) {
+				return false, nil
 			}
+			for _, existing := range f.events[caseID] {
+				if existing.ID == event.ID {
+					return false, errors.New("duplicate failure event")
+				}
+			}
+			seq := f.cursors[caseID] + 1
+			ev := *event
+			ev.Seq = seq
+			job.Status, job.WorkerID, job.LastError = entity.DecisionJobFailed, "", lastError
+			case_.Status = entity.CaseStatusFailed
+			f.cursors[caseID] = seq
+			f.events[caseID] = append(f.events[caseID], &ev)
+			event.Seq = seq
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func containsExpectedCaseStatus(status entity.CaseStatus, expected []entity.CaseStatus) bool {
+	for _, candidate := range expected {
+		if candidate == status || (candidate == entity.CaseStatusDraft && status == "") {
+			return true
+		}
+	}
+	return false
+}
+
+func isTerminalCaseStatus(status entity.CaseStatus) bool {
+	switch status {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusCancelled, entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv,
+		entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
 }
 func (f *fakeJobRepo) Cancel(ctx context.Context, jobID string) error { return nil }
 func (f *fakeJobRepo) MarkPaused(ctx context.Context, jobID string) error {
