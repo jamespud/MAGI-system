@@ -263,9 +263,14 @@ func TestA2ASubmission_ConcurrentClaimStartOnMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := magi.NewA2ASubmissionRepository(db)
+	subID := fmt.Sprintf("sub-claim-%d", os.Getpid())
+	msgID := fmt.Sprintf("claim-msg-%d", os.Getpid())
+	taskID := fmt.Sprintf("case-claim-%d", os.Getpid())
+	_ = db.Exec("DELETE FROM a2a_submission WHERE message_id = ?", msgID)
+	_ = db.Exec("DELETE FROM decision_case WHERE id = ?", taskID)
 	cmd := a2a.PrepareCommand{
-		SubmissionID: "sub-claim-1", MessageID: "claim-msg-1", RequestHash: "hash",
-		TaskID: "case-claim-1", ContextID: "", InputMessageID: "", CaseMessageID: "",
+		SubmissionID: subID, MessageID: msgID, RequestHash: "hash",
+		TaskID: taskID, ContextID: "", InputMessageID: "", CaseMessageID: "",
 		UserID: 7, Question: "q", MaxDebateRounds: 3,
 	}
 	if _, _, err := repo.Prepare(context.Background(), cmd); err != nil {
@@ -279,7 +284,7 @@ func TestA2ASubmission_ConcurrentClaimStartOnMySQL(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, claimed, err := repo.ClaimStart(context.Background(), "sub-claim-1", fmt.Sprintf("token-%d", i), lease)
+			_, claimed, err := repo.ClaimStart(context.Background(), subID, fmt.Sprintf("token-%d", i), lease)
 			if err != nil {
 				t.Errorf("claim %d: %v", i, err)
 				return
