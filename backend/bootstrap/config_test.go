@@ -52,13 +52,28 @@ func TestLoadConfig_A2ADefaults(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_A2ARejectsUnsafeRequestLimits(t *testing.T) {
+func secureA2AAuthBody(enabled string) string {
+	return "auth:\n  enabled: " + enabled + "\n  api_keys:\n    - { name: a, key: tok, user_id: 7, role: user }\n"
+}
+
+func a2aFull(publicURL, basePath, maxMessage, maxRequest, maxStreams string) string {
+	return "a2a:\n  enabled: true\n  public_url: " + publicURL + "\n  base_path: " + basePath + "\n" +
+		"  max_message_bytes: " + maxMessage + "\n  max_request_bytes: " + maxRequest + "\n  max_parts: 16\n" +
+		"  max_page_size: 100\n  max_streams_per_user: " + maxStreams + "\n  cross_instance_poll_interval: 2s\n"
+}
+
+func TestLoadConfig_A2ARequiresSecureEnablement(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
-		{name: "request below message budget", body: "a2a:\n  enabled: true\n  public_url: https://a2a.example.com\n  max_message_bytes: 65536\n  max_request_bytes: 1024\n"},
-		{name: "request above hard cap", body: "a2a:\n  enabled: true\n  public_url: https://a2a.example.com\n  max_request_bytes: 5242880\n"},
+		{name: "disabled auth", body: secureA2AAuthBody("false") + a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "8")},
+		{name: "missing public URL", body: secureA2AAuthBody("true") + a2aFull("", "/a2a", "65536", "98304", "8")},
+		{name: "http public URL", body: secureA2AAuthBody("true") + a2aFull("http://a2a.example.com", "/a2a", "65536", "98304", "8")},
+		{name: "noncanonical base path", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/custom", "65536", "98304", "8")},
+		{name: "negative stream limit", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "-1")},
+		{name: "request below message budget", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "1024", "8")},
+		{name: "request above hard cap", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "5242880", "8")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := loadA2ATestConfig(t, tc.body)
@@ -66,34 +81,19 @@ func TestLoadConfig_A2ARejectsUnsafeRequestLimits(t *testing.T) {
 				t.Fatalf("load config: %v", err)
 			}
 			if err := cfg.Validate(); err == nil {
-				t.Fatal("expected A2A request limit validation error")
+				t.Fatal("expected A2A secure-enablement validation error")
 			}
 		})
 	}
 }
 
-func TestLoadConfig_A2AProductionRequiresHTTPSPublicURL(t *testing.T) {
-	t.Setenv("MAGI_ENV", "production")
-	for _, tc := range []struct {
-		name string
-		url  string
-	}{
-		{name: "missing public URL"},
-		{name: "non HTTPS public URL", url: "http://a2a.example.com"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			body := "a2a:\n  enabled: true\n"
-			if tc.url != "" {
-				body += "  public_url: " + tc.url + "\n"
-			}
-			cfg, err := loadA2ATestConfig(t, body)
-			if err != nil {
-				t.Fatalf("load config: %v", err)
-			}
-			if err := cfg.Validate(); err == nil {
-				t.Fatal("expected production A2A public URL validation error")
-			}
-		})
+func TestLoadConfig_A2AValidSecureConfigPasses(t *testing.T) {
+	cfg, err := loadA2ATestConfig(t, secureA2AAuthBody("true")+a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "8"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("secure A2A config must validate: %v", err)
 	}
 }
 

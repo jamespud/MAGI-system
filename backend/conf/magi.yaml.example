@@ -19,6 +19,7 @@ a2a:
   public_url: "https://magi.example.com"
   base_path: "/a2a"
   max_message_bytes: 65536
+  max_request_bytes: 98304
   max_parts: 16
   max_page_size: 100
   max_streams_per_user: 8

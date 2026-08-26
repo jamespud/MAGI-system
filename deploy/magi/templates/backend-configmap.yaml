@@ -14,3 +14,12 @@ data:
   MAGI_MILVUS_ADDRESS: {{ .Values.configuration.milvusAddress | quote }}
   MAGI_ES_ADDRESSES: {{ .Values.configuration.esAddresses | quote }}
   MAGI_AUTH_ENABLED: {{ .Values.configuration.authEnabled | quote }}
+  MAGI_A2A_ENABLED: {{ .Values.configuration.a2a.enabled | quote }}
+  MAGI_A2A_PUBLIC_URL: {{ .Values.configuration.a2a.publicURL | quote }}
+  MAGI_A2A_BASE_PATH: {{ .Values.configuration.a2a.basePath | quote }}
+  MAGI_A2A_MAX_MESSAGE_BYTES: {{ .Values.configuration.a2a.maxMessageBytes | quote }}
+  MAGI_A2A_MAX_REQUEST_BYTES: {{ .Values.configuration.a2a.maxRequestBytes | quote }}
+  MAGI_A2A_MAX_PARTS: {{ .Values.configuration.a2a.maxParts | quote }}
+  MAGI_A2A_MAX_PAGE_SIZE: {{ .Values.configuration.a2a.maxPageSize | quote }}
+  MAGI_A2A_MAX_STREAMS_PER_USER: {{ .Values.configuration.a2a.maxStreamsPerUser | quote }}
+  MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: {{ .Values.configuration.a2a.crossInstancePollInterval | quote }}

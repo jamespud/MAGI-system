@@ -102,6 +102,53 @@ spec:
                 configMapKeyRef:
                   name: {{ include "magi.fullname" . }}-backend-config
                   key: MAGI_AUTH_ENABLED
+            - name: MAGI_ENV
+              value: "production"
+            - name: MAGI_A2A_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_ENABLED
+            - name: MAGI_A2A_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_PUBLIC_URL
+            - name: MAGI_A2A_BASE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_BASE_PATH
+            - name: MAGI_A2A_MAX_MESSAGE_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_MAX_MESSAGE_BYTES
+            - name: MAGI_A2A_MAX_REQUEST_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_MAX_REQUEST_BYTES
+            - name: MAGI_A2A_MAX_PARTS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_MAX_PARTS
+            - name: MAGI_A2A_MAX_PAGE_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_MAX_PAGE_SIZE
+            - name: MAGI_A2A_MAX_STREAMS_PER_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_MAX_STREAMS_PER_USER
+            - name: MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "magi.fullname" . }}-backend-config
+                  key: MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL
           readinessProbe:
             httpGet:
               path: /ready

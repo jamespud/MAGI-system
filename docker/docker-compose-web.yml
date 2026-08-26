@@ -46,6 +46,7 @@ services:
       elasticsearch:
         condition: service_healthy
     environment:
+      MAGI_ENV: production
       MAGI_DB_DSN: "${DB_USER:-magi}:${DB_PASS:-magi123}@tcp(mysql:3306)/${DB_NAME:-magi}?charset=utf8mb4&parseTime=True"
       MAGI_DB_DRIVER: mysql
       MAGI_MODEL_API_KEY: ${MAGI_MODEL_API_KEY:-}
@@ -61,6 +62,19 @@ services:
       # container, where localhost refers to the magi-server container itself.
       MAGI_MILVUS_ADDRESS: "milvus-standalone:19530"
       MAGI_ES_ADDRESSES: "http://elasticsearch:9200"
+      # A2A stays disabled by default. Enabling it requires an HTTPS-terminating
+      # proxy in front of web nginx plus auth (MAGI_AUTH_ENABLED=true and
+      # MAGI_AUTH_API_KEYS) because the server refuses to expose A2A without
+      # authentication.
+      MAGI_A2A_ENABLED: "false"
+      MAGI_A2A_PUBLIC_URL: ${MAGI_A2A_PUBLIC_URL:-https://magi.example.com}
+      MAGI_A2A_BASE_PATH: /a2a
+      MAGI_A2A_MAX_MESSAGE_BYTES: "65536"
+      MAGI_A2A_MAX_REQUEST_BYTES: "98304"
+      MAGI_A2A_MAX_PARTS: "16"
+      MAGI_A2A_MAX_PAGE_SIZE: "100"
+      MAGI_A2A_MAX_STREAMS_PER_USER: "8"
+      MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: "2s"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 5s

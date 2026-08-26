@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -580,6 +579,45 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MAGI_ES_ADDRESSES"); v != "" {
 		cfg.Elasticsearch.Addresses = []string{v}
 	}
+	if v := os.Getenv("MAGI_A2A_ENABLED"); v != "" {
+		cfg.A2A.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("MAGI_A2A_PUBLIC_URL"); v != "" {
+		cfg.A2A.PublicURL = v
+	}
+	if v := os.Getenv("MAGI_A2A_BASE_PATH"); v != "" {
+		cfg.A2A.BasePath = v
+	}
+	if v := os.Getenv("MAGI_A2A_MAX_MESSAGE_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.A2A.MaxMessageBytes = n
+		}
+	}
+	if v := os.Getenv("MAGI_A2A_MAX_REQUEST_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.A2A.MaxRequestBytes = n
+		}
+	}
+	if v := os.Getenv("MAGI_A2A_MAX_PARTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.A2A.MaxParts = n
+		}
+	}
+	if v := os.Getenv("MAGI_A2A_MAX_PAGE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.A2A.MaxPageSize = n
+		}
+	}
+	if v := os.Getenv("MAGI_A2A_MAX_STREAMS_PER_USER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.A2A.MaxStreamsPerUser = n
+		}
+	}
+	if v := os.Getenv("MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.A2A.CrossInstancePollInterval = d
+		}
+	}
 }
 
 // parseAPIKeys parses MAGI_AUTH_API_KEYS entries separated by ';', each in the
@@ -866,9 +904,21 @@ func validateModelOverride(scope string, m *ModelSpec) error {
 	return validateModelProviders(scope+".model", m.Providers)
 }
 
-func validateA2A(cfg *A2AConfig) error {
-	if cfg == nil || !cfg.Enabled {
+func validateA2A(c *Config) error {
+	if c == nil {
 		return nil
+	}
+	cfg := &c.A2A
+	if !cfg.Enabled {
+		return nil
+	}
+
+	// Fail closed: enabling A2A exposes the protocol surface, so authentication
+	// must already be on and the discovery/protocol URLs must be production
+	// reachable. A custom base path is rejected because the shipped nginx/Helm
+	// routes are pinned to /a2a.
+	if !c.Auth.Enabled {
+		return fmt.Errorf("a2a: auth.enabled is required when a2a is enabled")
 	}
 
 	if cfg.MaxRequestBytes < cfg.MaxMessageBytes {
@@ -877,28 +927,21 @@ func validateA2A(cfg *A2AConfig) error {
 	if cfg.MaxRequestBytes > 4*1024*1024 {
 		return fmt.Errorf("a2a.max_request_bytes: must be at most 4194304")
 	}
-
-	rawPath := strings.TrimSpace(cfg.BasePath)
-	cleanPath := path.Clean(rawPath)
-	if rawPath == "" || cleanPath == "." || cleanPath == "/" {
-		return fmt.Errorf("a2a.base_path: must be a non-root absolute path")
+	if cfg.MaxMessageBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxParts <= 0 ||
+		cfg.MaxPageSize <= 0 || cfg.MaxStreamsPerUser <= 0 {
+		return fmt.Errorf("a2a: max_message_bytes, max_request_bytes, max_parts, max_page_size and max_streams_per_user must be positive")
 	}
-	if !strings.HasPrefix(cleanPath, "/") {
-		return fmt.Errorf("a2a.base_path: must be an absolute path")
-	}
-	if rawPath != cleanPath {
-		return fmt.Errorf("a2a.base_path: must not have a trailing slash or non-clean path")
+	if strings.TrimSpace(cfg.BasePath) != "/a2a" {
+		return fmt.Errorf("a2a.base_path: must be /a2a (nginx and Helm routes are pinned to this path)")
 	}
 	if cfg.CrossInstancePollInterval < 250*time.Millisecond {
 		return fmt.Errorf("a2a.cross_instance_poll_interval: must be at least 250ms")
 	}
 
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("MAGI_ENV")), "production") {
-		publicURL := strings.TrimSpace(cfg.PublicURL)
-		u, err := url.Parse(publicURL)
-		if err != nil || !u.IsAbs() || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
-			return fmt.Errorf("a2a.public_url: absolute HTTPS URL is required in production")
-		}
+	publicURL := strings.TrimSpace(cfg.PublicURL)
+	u, err := url.Parse(publicURL)
+	if err != nil || !u.IsAbs() || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+		return fmt.Errorf("a2a.public_url: absolute HTTPS URL is required")
 	}
 	return nil
 }
@@ -1013,7 +1056,7 @@ func (s *MagiSpec) bindTools(cfg *Config) []entity.ToolBinding {
 // Validate returns a descriptive error for invalid or incomplete
 // configurations, so the server fails fast instead of booting broken.
 func (c *Config) Validate() error {
-	if err := validateA2A(&c.A2A); err != nil {
+	if err := validateA2A(c); err != nil {
 		return err
 	}
 	if c.Model.APIKey == "" && c.Model.ModelID == 0 {

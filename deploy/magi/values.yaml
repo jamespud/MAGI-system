@@ -80,6 +80,16 @@ configuration:
   milvusAddress: milvus:19530
   esAddresses: http://elasticsearch:9200
   authEnabled: "true"
+  a2a:
+    enabled: "false"
+    publicURL: ""
+    basePath: "/a2a"
+    maxMessageBytes: "65536"
+    maxRequestBytes: "98304"
+    maxParts: "16"
+    maxPageSize: "100"
+    maxStreamsPerUser: "8"
+    crossInstancePollInterval: "2s"
 
 # For production, prefer secret.create=false plus an externally managed
 # existingSecret. Never commit real values in Helm values files.

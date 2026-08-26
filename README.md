@@ -193,21 +193,40 @@ it deliberately after applying the migrations:
 ```yaml
 a2a:
   enabled: true
-  public_url: "https://magi.example"   # REQUIRED HTTPS URL in production
-  base_path: "/a2a"                    # configurable, defaults to /a2a
+  public_url: "https://magi.example"   # REQUIRED absolute HTTPS URL
+  base_path: "/a2a"                    # pinned to /a2a
+  max_message_bytes: 65536
+  max_request_bytes: 98304
 ```
+
+Enabling A2A is **fail-closed**: the server refuses to start with `a2a.enabled:
+true` unless authentication is already on (`auth.enabled: true` with at least
+one API key), `base_path` is exactly `/a2a`, `public_url` is an absolute HTTPS
+URL, and every numeric limit is positive. This prevents an unauthenticated
+protocol surface from ever being exposed. The `/a2a/*` protocol and the Agent
+Card discovery path are reached through the shipped nginx/Helm routes; a custom
+base path is rejected because those routes are pinned to `/a2a`.
 
 Enablement checklist:
 
 - Apply `magi_s16_event_sequence.sql` during an event-writer maintenance window
   (nullable seq backfill, cursor init, NOT NULL + unique contract), then
   `magi_s17_a2a_submission.sql` before enabling A2A.
+- Apply `magi_s18_a2a_start_claim.sql` (additive) before running the new binary
+  so rolling deployments can briefly run the old writer safely.
 - Deploy with `a2a.enabled: false` first, then flip one canary replica.
 - The Agent Card is served at `https://magi.example/.well-known/agent-card.json`
   and is public. Every `/a2a/*` protocol operation requires auth via the same
   `Authorization: Bearer <token>` or `X-API-Key: <key>` headers as `/api/v1`.
+- Terminate TLS at the edge (ingress/nginx) so the public URL is HTTPS; the
+  backend itself binds plain HTTP inside the network.
 - `/a2a/*` uses a separate rate-limit bucket; nginx buffers are disabled for the
   long-lived SSE streams.
+
+For Compose and Helm, set `MAGI_A2A_ENABLED=true` (or
+`configuration.a2a.enabled=true` in `deploy/magi/values.yaml`) together with
+`MAGI_A2A_PUBLIC_URL`/`configuration.a2a.publicURL`, and set
+`MAGI_ENV=production` (already injected by both deployment manifests).
 
 Official-client discovery example:
 
