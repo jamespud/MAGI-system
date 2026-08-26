@@ -95,3 +95,36 @@ func TestRegistry_A2AMetricsIgnoreUnknownLabels(t *testing.T) {
 		t.Fatalf("unknown labels leaked into metrics output:\n%s", buf.String())
 	}
 }
+
+func TestRegistry_A2ADurationsRecoveryAndZeroValueSeries(t *testing.T) {
+	reg := metrics.New()
+	reg.RecordA2ARequestDuration(25)
+	reg.RecordA2ARequestDuration(3000)
+	reg.RecordA2AStreamDuration(120)
+	reg.RecordA2AEventLag(8)
+	reg.IncA2ARecoveryAttempted()
+	reg.IncA2ARecoverySettled()
+	reg.IncA2ARecoveryRetried()
+
+	var buf strings.Builder
+	reg.WritePrometheus(&buf)
+	out := buf.String()
+	for _, want := range []string{
+		"magi_a2a_request_duration_ms_count 2",
+		"magi_a2a_request_duration_ms_sum 3025",
+		`magi_a2a_request_duration_ms_bucket{le="50"} 1`,
+		`magi_a2a_request_duration_ms_bucket{le="5000"} 2`,
+		"magi_a2a_stream_duration_ms_count 1",
+		"magi_a2a_event_lag_ms_count 1",
+		"magi_a2a_recovery_attempted_total 1",
+		"magi_a2a_recovery_settled_total 1",
+		"magi_a2a_recovery_retried_total 1",
+		// Every fixed operation x result series is always exposed (zero-value).
+		`magi_a2a_requests_total{operation="SendMessage",result="ok"} 0`,
+		`magi_a2a_requests_total{operation="CancelTask",result="error"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}

@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"iter"
+	"time"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
@@ -75,7 +77,8 @@ var _ a2asrv.RequestHandler = (*Handler)(nil)
 func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (_ *a2a.Task, err error) {
 	ctx, span := tracing.Start(ctx, "a2a.GetTask")
 	defer span.End()
-	defer h.finish(metrics.A2AOperationGetTask, &err)
+	start := time.Now()
+	defer h.finishAt(metrics.A2AOperationGetTask, start, &err)
 	if req == nil || req.ID == "" {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "task id is required")
 	}
@@ -95,7 +98,8 @@ func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (_ *a2a.
 func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (_ *a2a.ListTasksResponse, err error) {
 	ctx, span := tracing.Start(ctx, "a2a.ListTasks")
 	defer span.End()
-	defer h.finish(metrics.A2AOperationListTasks, &err)
+	start := time.Now()
+	defer h.finishAt(metrics.A2AOperationListTasks, start, &err)
 	if req == nil {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "list request is required")
 	}
@@ -151,12 +155,15 @@ func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (_ *
 func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_ *a2a.Task, err error) {
 	ctx, span := tracing.Start(ctx, "a2a.CancelTask")
 	defer span.End()
-	defer h.finish(metrics.A2AOperationCancelTask, &err)
+	start := time.Now()
+	defer h.finishAt(metrics.A2AOperationCancelTask, start, &err)
 	if req == nil || req.ID == "" {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, "task id is required")
 	}
 	userID := userIDFrom(ctx)
 	span.SetAttributes(attribute.String("task.id", string(req.ID)), attribute.Int64("user.id", userID))
+	taskID := string(req.ID)
+	defer func() { h.auditCancel(ctx, taskID, userID, err) }()
 	result, err := h.repository.CancelTask(ctx, userID, string(req.ID))
 	if err != nil {
 		return nil, h.internalError(err)
@@ -174,7 +181,6 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_
 		}
 		h.runManager.CancelLocal(string(req.ID))
 		task := h.projector.Project(result.Record, 1, true)
-		h.auditCancel(ctx, req, task.Status.State == a2a.TaskStateCanceled)
 		return task, nil
 	default:
 		return nil, a2a.NewError(a2a.ErrInternalError, "unexpected cancel outcome")
@@ -182,36 +188,53 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_
 }
 
 // SendMessage durably submits a task and returns the current Task snapshot.
-func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (_ a2a.SendMessageResult, err error) {
+func (h *Handler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (result a2a.SendMessageResult, err error) {
 	ctx, span := tracing.Start(ctx, "a2a.SendMessage")
 	defer span.End()
-	defer h.finish(metrics.A2AOperationSendMessage, &err)
+	start := time.Now()
+	defer h.finishAt(metrics.A2AOperationSendMessage, start, &err)
+	defer func() {
+		taskID := ""
+		if task, ok := result.(*a2a.Task); ok && task != nil {
+			taskID = string(task.ID)
+		}
+		h.auditSend(ctx, taskID, messageIDFrom(req), userIDFrom(ctx), err)
+	}()
 	userID := userIDFrom(ctx)
 	span.SetAttributes(attribute.Int64("user.id", userID))
 	task, err := h.submissions.Submit(ctx, userID, req)
 	if err != nil {
 		return nil, h.mapSubmitError(err)
 	}
-	h.auditSend(ctx, task, userID)
 	return task, nil
 }
 
 // SendStreamingMessage durably submits then delegates to the stream projector.
 func (h *Handler) SendStreamingMessage(ctx context.Context, req *a2a.SendMessageRequest) iter.Seq2[a2a.Event, error] {
-	if h.metrics != nil {
-		h.metrics.IncA2ARequest(metrics.A2AOperationSendStreaming, metrics.A2AResultOK)
-	}
 	return func(yield func(a2a.Event, error) bool) {
+		start := time.Now()
+		taskID := ""
+		var finalErr error
+		defer func() {
+			h.finishAt(metrics.A2AOperationSendStreaming, start, &finalErr)
+			h.auditSend(ctx, taskID, messageIDFrom(req), userIDFrom(ctx), finalErr)
+		}()
 		if h.stream == nil {
-			yield(nil, a2a.ErrUnsupportedOperation)
+			finalErr = a2a.ErrUnsupportedOperation
+			yield(nil, finalErr)
 			return
 		}
 		task, err := h.submissions.Submit(ctx, userIDFrom(ctx), req)
 		if err != nil {
+			finalErr = err
 			yield(nil, h.mapSubmitError(err))
 			return
 		}
-		for event, streamErr := range h.stream.Events(ctx, userIDFrom(ctx), string(task.ID)) {
+		taskID = string(task.ID)
+		for event, streamErr := range h.stream.Events(ctx, userIDFrom(ctx), taskID) {
+			if streamErr != nil {
+				finalErr = streamErr
+			}
 			if !yield(event, streamErr) {
 				return
 			}
@@ -221,19 +244,24 @@ func (h *Handler) SendStreamingMessage(ctx context.Context, req *a2a.SendMessage
 
 // SubscribeToTask delegates to the stream projector after owner validation.
 func (h *Handler) SubscribeToTask(ctx context.Context, req *a2a.SubscribeToTaskRequest) iter.Seq2[a2a.Event, error] {
-	if h.metrics != nil {
-		h.metrics.IncA2ARequest(metrics.A2AOperationSubscribeToTask, metrics.A2AResultOK)
-	}
 	return func(yield func(a2a.Event, error) bool) {
+		start := time.Now()
+		var finalErr error
+		defer func() { h.finishAt(metrics.A2AOperationSubscribeToTask, start, &finalErr) }()
 		if h.stream == nil {
-			yield(nil, a2a.ErrUnsupportedOperation)
+			finalErr = a2a.ErrUnsupportedOperation
+			yield(nil, finalErr)
 			return
 		}
 		if req == nil || req.ID == "" {
-			yield(nil, a2a.NewError(a2a.ErrInvalidParams, "task id is required"))
+			finalErr = a2a.NewError(a2a.ErrInvalidParams, "task id is required")
+			yield(nil, finalErr)
 			return
 		}
 		for event, streamErr := range h.stream.Events(ctx, userIDFrom(ctx), string(req.ID)) {
+			if streamErr != nil {
+				finalErr = streamErr
+			}
 			if !yield(event, streamErr) {
 				return
 			}
@@ -241,8 +269,9 @@ func (h *Handler) SubscribeToTask(ctx context.Context, req *a2a.SubscribeToTaskR
 	}
 }
 
-// finish records the bounded request metric from a named error return.
-func (h *Handler) finish(op metrics.A2AOperation, err *error) {
+// finishAt records the bounded request result and duration from a named error
+// return measured since start.
+func (h *Handler) finishAt(op metrics.A2AOperation, start time.Time, err *error) {
 	if h.metrics == nil {
 		return
 	}
@@ -251,31 +280,64 @@ func (h *Handler) finish(op metrics.A2AOperation, err *error) {
 		res = metrics.A2AResultError
 	}
 	h.metrics.IncA2ARequest(op, res)
+	h.metrics.RecordA2ARequestDuration(time.Since(start).Milliseconds())
 }
 
-func (h *Handler) auditSend(ctx context.Context, task *a2a.Task, userID int64) {
-	if h.audit == nil || task == nil {
+// auditSend records the durable Send outcome (success or error) and hashes the
+// external A2A message ID from the request, never a derived internal ID.
+func (h *Handler) auditSend(ctx context.Context, taskID, messageID string, userID int64, err error) {
+	if h.audit == nil {
 		return
 	}
-	h.recordAudit(ctx, "a2a.send", string(task.ID), messageIDFromTask(task), userID, 200)
+	h.recordAudit(ctx, "a2a.send", taskID, messageID, userID, auditStatusFor(err))
 }
 
-func (h *Handler) auditCancel(ctx context.Context, req *a2a.CancelTaskRequest, ok bool) {
-	if h.audit == nil || req == nil {
+func (h *Handler) auditCancel(ctx context.Context, taskID string, userID int64, err error) {
+	if h.audit == nil {
 		return
 	}
 	status := 200
-	if !ok {
+	switch {
+	case err == nil:
+		status = 200
+	case errors.Is(err, a2a.ErrTaskNotFound):
+		status = 404
+	case errors.Is(err, a2a.ErrTaskNotCancelable):
 		status = 409
+	default:
+		status = 500
 	}
-	h.recordAudit(ctx, "a2a.cancel", string(req.ID), "", userIDFrom(ctx), status)
+	h.recordAudit(ctx, "a2a.cancel", taskID, "", userID, status)
+}
+
+// auditStatusFor maps a protocol error to an HTTP-ish audit status: 200 on
+// success, 400 for client-caused protocol errors, 500 for internal failures.
+func auditStatusFor(err error) int {
+	if err == nil {
+		return 200
+	}
+	var ae *a2a.Error
+	if errors.As(err, &ae) {
+		switch ae.Err {
+		case a2a.ErrInvalidParams, a2a.ErrInvalidRequest, a2a.ErrUnsupportedOperation,
+			a2a.ErrUnsupportedContentType, a2a.ErrTaskNotFound, a2a.ErrTaskNotCancelable:
+			return 400
+		}
+	}
+	return 500
 }
 
 func (h *Handler) recordAudit(ctx context.Context, action, taskID, messageID string, userID int64, status int) {
 	p := auth.PrincipalFrom(ctx)
-	detail := "trace=" + uuid.NewString()
+	detail := ""
+	if span := trace.SpanFromContext(ctx); span != nil && span.SpanContext().IsValid() {
+		detail = "trace=" + span.SpanContext().TraceID().String()
+	}
 	if messageID != "" {
-		detail += " message=" + hashID(messageID)
+		if detail != "" {
+			detail += " "
+		}
+		detail += "message=" + hashID(messageID)
 	}
 	event := &entity.AuditEvent{UserID: userID, Action: action, Resource: taskID, Detail: detail, Status: status}
 	if p != nil {
@@ -285,11 +347,11 @@ func (h *Handler) recordAudit(ctx context.Context, action, taskID, messageID str
 	_ = h.audit.Record(ctx, event)
 }
 
-func messageIDFromTask(task *a2a.Task) string {
-	if task == nil || len(task.History) == 0 {
+func messageIDFrom(req *a2a.SendMessageRequest) string {
+	if req == nil || req.Message == nil {
 		return ""
 	}
-	return task.History[0].ID
+	return req.Message.ID
 }
 
 func hashID(id string) string {

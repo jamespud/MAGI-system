@@ -167,6 +167,9 @@ func (s *SubmissionService) settleStart(ctx context.Context, prepared *PreparedS
 			}
 			return settlementUnchanged, err
 		}
+		if s.metrics != nil {
+			s.metrics.IncA2ARecoverySettled()
+		}
 		return settlementStarted, nil
 	case errors.Is(startErr, decision.ErrRateLimited) || errors.Is(startErr, decision.ErrBudgetExceeded):
 		code := "rate_limited"
@@ -178,6 +181,9 @@ func (s *SubmissionService) settleStart(ctx context.Context, prepared *PreparedS
 				return settlementUnchanged, nil
 			}
 			return settlementUnchanged, err
+		}
+		if s.metrics != nil {
+			s.metrics.IncA2ARecoverySettled()
 		}
 		return settlementRejected, nil
 	default:
@@ -200,7 +206,13 @@ func (s *SubmissionService) Recover(ctx context.Context) error {
 		if len(batch) == 0 {
 			return nil
 		}
+		if s.metrics != nil {
+			s.metrics.IncA2ARecoveryRetried()
+		}
 		for _, prepared := range batch {
+			if s.metrics != nil {
+				s.metrics.IncA2ARecoveryAttempted()
+			}
 			if _, err := s.settleStart(ctx, prepared); err != nil {
 				return err
 			}

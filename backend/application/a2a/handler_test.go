@@ -2,8 +2,11 @@ package a2aapp_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,9 +14,11 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	magi "github.com/jamespud/magi/backend/adapter"
 	a2aapp "github.com/jamespud/magi/backend/application/a2a"
+	"github.com/jamespud/magi/backend/application/audit"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/redact"
+	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"gorm.io/gorm"
 	"time"
@@ -35,6 +40,106 @@ func (p *captureLivePublisher) snapshot() []entity.MagiEvent {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]entity.MagiEvent(nil), p.events...)
+}
+
+type memAuditRepo struct {
+	mu     sync.Mutex
+	events []*entity.AuditEvent
+}
+
+func (m *memAuditRepo) Record(_ context.Context, e *entity.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, e)
+	return nil
+}
+
+func (m *memAuditRepo) List(_ context.Context, _, _ int) ([]*entity.AuditEvent, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := append([]*entity.AuditEvent(nil), m.events...)
+	return out, int64(len(out)), nil
+}
+
+func (m *memAuditRepo) snapshot() []*entity.AuditEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]*entity.AuditEvent(nil), m.events...)
+}
+
+func hashMessageID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:8])
+}
+
+func newAuditHarness(t *testing.T) (*testHarness, *memAuditRepo, context.Context) {
+	t.Helper()
+	db := openSubmissionDB(t)
+	jobs := newFakeJobRepo()
+	orch := newBlockingOrch()
+	repo := magi.NewA2ASubmissionRepository(db)
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	parser := a2aapp.NewInputParser(65536, 16)
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3)
+	auditRepo := &memAuditRepo{}
+	handler := a2aapp.NewHandler(svc, repo, proj, a2aapp.CursorCodec{MaxPageSize: 100}, rm, nil,
+		a2aapp.WithHandlerAudit(audit.NewService(auditRepo)))
+	_ = tracing.NewProvider(tracing.Config{Enabled: true}, nil)
+	ctx, span := tracing.Start(context.Background(), "audit-parent")
+	_ = span
+	return &testHarness{handler: handler, repo: repo, rm: rm, orch: orch, db: db}, auditRepo, ctx
+}
+
+// TestHandler_AuditRecordsOutcomesWithExternalMessageID guards the durable
+// audit trail: Send success and failure plus Cancel failure are all recorded,
+// the external A2A message ID is hashed (never a derived internal ID), and the
+// trace field carries the real OTel trace ID rather than a fabricated UUID.
+func TestHandler_AuditRecordsOutcomesWithExternalMessageID(t *testing.T) {
+	h, auditRepo, ctx := newAuditHarness(t)
+	result, err := h.handler.SendMessage(ctx, submissionReq("msg-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := result.(*a2a.Task)
+	if !ok || task == nil {
+		t.Fatalf("send result = %#v, want a Task", result)
+	}
+	if _, err := h.handler.SendMessage(ctx, &a2a.SendMessageRequest{Message: &a2a.Message{
+		ID: "msg-2", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("  ")},
+	}}); err == nil {
+		t.Fatal("expected invalid send to fail")
+	}
+	if _, err := h.handler.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID("case-missing")}); !errors.Is(err, a2a.ErrTaskNotFound) {
+		t.Fatalf("cancel error = %v, want ErrTaskNotFound", err)
+	}
+
+	events := auditRepo.snapshot()
+	if len(events) != 3 {
+		t.Fatalf("audit events = %d, want 3", len(events))
+	}
+	success, failSend, cancel := events[0], events[1], events[2]
+	if success.Action != "a2a.send" || success.Status != 200 || success.Resource != string(task.ID) {
+		t.Fatalf("success audit = %+v", success)
+	}
+	if !strings.Contains(success.Detail, "message="+hashMessageID("msg-1")) {
+		t.Fatalf("success audit detail missing external message hash: %q", success.Detail)
+	}
+	if tracePart := strings.TrimPrefix(success.Detail, "trace="); strings.Contains(success.Detail, "trace=") {
+		tracePart = strings.Split(tracePart, " ")[0]
+		if strings.Contains(tracePart, "-") || len(tracePart) != 32 {
+			t.Fatalf("audit used a fabricated/non-trace id: %q", success.Detail)
+		}
+	}
+	if failSend.Action != "a2a.send" || failSend.Status != 400 {
+		t.Fatalf("failed send audit = %+v", failSend)
+	}
+	if !strings.Contains(failSend.Detail, "message="+hashMessageID("msg-2")) {
+		t.Fatalf("failed send audit detail missing message hash: %q", failSend.Detail)
+	}
+	if cancel.Action != "a2a.cancel" || cancel.Status != 404 || cancel.Resource != "case-missing" {
+		t.Fatalf("cancel audit = %+v", cancel)
+	}
 }
 
 var _ a2asrv.RequestHandler = (*a2aapp.Handler)(nil)

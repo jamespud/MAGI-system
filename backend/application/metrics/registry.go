@@ -10,6 +10,12 @@ import (
 // runDurationBounds are Prometheus histogram bucket upper bounds in ms.
 var runDurationBounds = []int64{100, 500, 1000, 5000, 30000, 120000, 600000}
 
+// a2aDurationBounds are the fixed histogram buckets (ms) for bounded A2A
+// request/stream durations and event lag.
+var a2aDurationBounds = []int64{10, 50, 100, 250, 1000, 5000, 30000}
+
+const lenA2ADurationBounds = 7
+
 // Registry exposes operational counters, a run-duration histogram and cost
 // accounting. All methods are nil-safe so dependencies can pass an optional
 // registry.
@@ -40,8 +46,46 @@ type Registry struct {
 	A2AIdempotencyHits atomic.Int64
 	a2aRequests       [lenA2AOperations][lenA2AResults]atomic.Int64
 	a2aProjectionErr  [lenA2AProjectionKinds]atomic.Int64
+	A2ARequestDuration a2aHistogram
+	A2AStreamDuration  a2aHistogram
+	A2AEventLag        a2aHistogram
+	A2ARecoveryAttempted atomic.Int64
+	A2ARecoverySettled   atomic.Int64
+	A2ARecoveryRetried   atomic.Int64
 
 	perUser sync.Map // userID -> *userUsage
+}
+
+// a2aHistogram is a fixed-bucket histogram in milliseconds. The final slot is
+// +Inf.
+type a2aHistogram struct {
+	sum     atomic.Int64
+	count   atomic.Int64
+	buckets [lenA2ADurationBounds + 1]atomic.Int64
+}
+
+func (h *a2aHistogram) record(ms int64) {
+	if ms < 0 {
+		ms = 0
+	}
+	h.sum.Add(ms)
+	h.count.Add(1)
+	for i, bound := range a2aDurationBounds {
+		if ms <= bound {
+			h.buckets[i].Add(1)
+		}
+	}
+	h.buckets[len(a2aDurationBounds)].Add(1)
+}
+
+func (h *a2aHistogram) writePrometheus(w io.Writer, name string) {
+	fmt.Fprintf(w, "# TYPE %s histogram\n", name)
+	fmt.Fprintf(w, "%s_sum %d\n", name, h.sum.Load())
+	fmt.Fprintf(w, "%s_count %d\n", name, h.count.Load())
+	for i, bound := range a2aDurationBounds {
+		fmt.Fprintf(w, "%s_bucket{le=\"%d\"} %d\n", name, bound, h.buckets[i].Load())
+	}
+	fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n", name, h.buckets[len(a2aDurationBounds)].Load())
 }
 
 // A2AOperation is a fixed label value for A2A request metrics. User input can
@@ -133,6 +177,49 @@ func (r *Registry) IncA2AProjectionError(kind A2AProjectionKind) {
 		return
 	}
 	r.a2aProjectionErr[ki].Add(1)
+}
+
+// RecordA2ARequestDuration records one bounded A2A request duration in ms.
+func (r *Registry) RecordA2ARequestDuration(ms int64) {
+	if r != nil {
+		r.A2ARequestDuration.record(ms)
+	}
+}
+
+// RecordA2AStreamDuration records one bounded A2A stream lifetime in ms.
+func (r *Registry) RecordA2AStreamDuration(ms int64) {
+	if r != nil {
+		r.A2AStreamDuration.record(ms)
+	}
+}
+
+// RecordA2AEventLag records how long a durable event waited before the stream
+// applied it, in ms.
+func (r *Registry) RecordA2AEventLag(ms int64) {
+	if r != nil {
+		r.A2AEventLag.record(ms)
+	}
+}
+
+// IncA2ARecoveryAttempted records one claim attempt by the recovery sweep.
+func (r *Registry) IncA2ARecoveryAttempted() {
+	if r != nil {
+		r.A2ARecoveryAttempted.Add(1)
+	}
+}
+
+// IncA2ARecoverySettled records one recovery attempt that settled durably.
+func (r *Registry) IncA2ARecoverySettled() {
+	if r != nil {
+		r.A2ARecoverySettled.Add(1)
+	}
+}
+
+// IncA2ARecoveryRetried records one recovery sweep that found claimable work.
+func (r *Registry) IncA2ARecoveryRetried() {
+	if r != nil {
+		r.A2ARecoveryRetried.Add(1)
+	}
 }
 
 func indexOfA2AOperation(op A2AOperation) int {
@@ -370,9 +457,9 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 
 	for oi, op := range a2aOperations {
 		for ri, res := range a2aResults {
-			if n := r.a2aRequests[oi][ri].Load(); n > 0 {
-				fmt.Fprintf(w, "# TYPE magi_a2a_requests_total counter\nmagi_a2a_requests_total{operation=%q,result=%q} %d\n", op, res, n)
-			}
+			// Always expose the fixed series (zero-value) so canaries and SLO
+			// dashboards can rely on every operation x result label existing.
+			fmt.Fprintf(w, "# TYPE magi_a2a_requests_total counter\nmagi_a2a_requests_total{operation=%q,result=%q} %d\n", op, res, r.a2aRequests[oi][ri].Load())
 		}
 	}
 	if n := r.A2AActiveStreams.Load(); n != 0 {
@@ -386,4 +473,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 			fmt.Fprintf(w, "# TYPE magi_a2a_projection_errors_total counter\nmagi_a2a_projection_errors_total{kind=%q} %d\n", kind, n)
 		}
 	}
+	r.A2ARequestDuration.writePrometheus(w, "magi_a2a_request_duration_ms")
+	r.A2AStreamDuration.writePrometheus(w, "magi_a2a_stream_duration_ms")
+	r.A2AEventLag.writePrometheus(w, "magi_a2a_event_lag_ms")
+	fmt.Fprintf(w, "# TYPE magi_a2a_recovery_attempted_total counter\nmagi_a2a_recovery_attempted_total %d\n", r.A2ARecoveryAttempted.Load())
+	fmt.Fprintf(w, "# TYPE magi_a2a_recovery_settled_total counter\nmagi_a2a_recovery_settled_total %d\n", r.A2ARecoverySettled.Load())
+	fmt.Fprintf(w, "# TYPE magi_a2a_recovery_retried_total counter\nmagi_a2a_recovery_retried_total %d\n", r.A2ARecoveryRetried.Load())
 }

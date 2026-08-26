@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/jamespud/magi/backend/application/metrics"
+	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -68,6 +69,15 @@ func (s *DurableStreamProjector) Events(ctx context.Context, userID int64, taskI
 }
 
 func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID string, yield func(a2a.Event, error) bool) {
+	start := time.Now()
+	ctx, span := tracing.Start(ctx, "a2a.stream")
+	defer span.End()
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.RecordA2AStreamDuration(time.Since(start).Milliseconds())
+		}
+	}()
+
 	release := s.acquire(userID)
 	if release == nil {
 		yield(nil, ErrStreamLimitExceeded)
@@ -200,6 +210,9 @@ func (s *DurableStreamProjector) drainEvents(ctx context.Context, userID int64, 
 func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, taskID string, state *streamState, ev *entity.MagiEvent, yield func(a2a.Event, error) bool) (bool, error) {
 	if ev == nil || ev.Seq <= state.watermark {
 		return false, nil
+	}
+	if s.metrics != nil {
+		s.metrics.RecordA2AEventLag(time.Since(ev.Timestamp).Milliseconds())
 	}
 	state.watermark = ev.Seq
 	if !isPublicStatusEvent(ev.Type) {
