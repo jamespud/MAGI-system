@@ -88,7 +88,7 @@ func (h *Handler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (_ *a2a.
 	if err != nil {
 		return nil, h.internalError(err)
 	}
-	return h.projector.Project(record, historyLength(req.HistoryLength)), nil
+	return h.projector.Project(record, historyLength(req.HistoryLength), true), nil
 }
 
 // ListTasks lists owner-scoped tasks with keyset pagination.
@@ -101,6 +101,9 @@ func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (_ *
 	}
 	userID := userIDFrom(ctx)
 	span.SetAttributes(attribute.Int64("user.id", userID))
+	if req.Status != "" && !IsSupportedListState(req.Status) {
+		return nil, a2a.NewError(a2a.ErrInvalidParams, "unsupported task state")
+	}
 	pageSize, err := h.cursor.ValidatePageSize(req.PageSize)
 	if err != nil {
 		return nil, a2a.NewError(a2a.ErrInvalidParams, err.Error())
@@ -131,7 +134,7 @@ func (h *Handler) ListTasks(ctx context.Context, req *a2a.ListTasksRequest) (_ *
 		PageSize:  pageSize,
 	}
 	for i := range page.Records {
-		response.Tasks = append(response.Tasks, h.projector.Project(&page.Records[i], filter.HistoryLength))
+		response.Tasks = append(response.Tasks, h.projector.Project(&page.Records[i], filter.HistoryLength, filter.IncludeArtifacts))
 	}
 	if page.Next != nil {
 		token, err := h.cursor.Encode(*page.Next)
@@ -170,7 +173,7 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_
 			_ = h.live.PublishLive(ctx, *result.Event)
 		}
 		h.runManager.CancelLocal(string(req.ID))
-		task := h.projector.Project(result.Record, 1)
+		task := h.projector.Project(result.Record, 1, true)
 		h.auditCancel(ctx, req, task.Status.State == a2a.TaskStateCanceled)
 		return task, nil
 	default:

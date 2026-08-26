@@ -1253,6 +1253,7 @@ func ProvideA2A(db *gorm.DB, cfg *Config, rm *decision.RunManager, broker *appse
 		MountDeps: &a2atransport.MountDeps{
 			Handler: handler, PublicURL: cfg.A2A.PublicURL, BasePath: cfg.A2A.BasePath,
 			Name: "MAGI", Description: "Evidence-driven decision assistant",
+			MaxRequestBytes: int64(cfg.A2A.MaxRequestBytes),
 		},
 	}
 }

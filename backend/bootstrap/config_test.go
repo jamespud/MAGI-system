@@ -35,6 +35,9 @@ func TestLoadConfig_A2ADefaults(t *testing.T) {
 	if cfg.A2A.MaxMessageBytes != 65536 {
 		t.Errorf("MaxMessageBytes = %d, want 65536", cfg.A2A.MaxMessageBytes)
 	}
+	if cfg.A2A.MaxRequestBytes != 98304 {
+		t.Errorf("MaxRequestBytes = %d, want 98304", cfg.A2A.MaxRequestBytes)
+	}
 	if cfg.A2A.MaxParts != 16 {
 		t.Errorf("MaxParts = %d, want 16", cfg.A2A.MaxParts)
 	}
@@ -46,6 +49,26 @@ func TestLoadConfig_A2ADefaults(t *testing.T) {
 	}
 	if cfg.A2A.CrossInstancePollInterval != 2*time.Second {
 		t.Errorf("CrossInstancePollInterval = %s, want 2s", cfg.A2A.CrossInstancePollInterval)
+	}
+}
+
+func TestLoadConfig_A2ARejectsUnsafeRequestLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "request below message budget", body: "a2a:\n  enabled: true\n  public_url: https://a2a.example.com\n  max_message_bytes: 65536\n  max_request_bytes: 1024\n"},
+		{name: "request above hard cap", body: "a2a:\n  enabled: true\n  public_url: https://a2a.example.com\n  max_request_bytes: 5242880\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := loadA2ATestConfig(t, tc.body)
+			if err != nil {
+				t.Fatalf("load config: %v", err)
+			}
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected A2A request limit validation error")
+			}
+		})
 	}
 }
 

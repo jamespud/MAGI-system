@@ -112,6 +112,7 @@ type A2AConfig struct {
 	PublicURL                 string        `yaml:"public_url"`
 	BasePath                  string        `yaml:"base_path"`
 	MaxMessageBytes           int           `yaml:"max_message_bytes"`
+	MaxRequestBytes           int           `yaml:"max_request_bytes"`
 	MaxParts                  int           `yaml:"max_parts"`
 	MaxPageSize               int           `yaml:"max_page_size"`
 	MaxStreamsPerUser         int           `yaml:"max_streams_per_user"`
@@ -125,6 +126,7 @@ func (c *A2AConfig) UnmarshalYAML(value *yaml.Node) error {
 		PublicURL                 string `yaml:"public_url"`
 		BasePath                  string `yaml:"base_path"`
 		MaxMessageBytes           int    `yaml:"max_message_bytes"`
+		MaxRequestBytes           int    `yaml:"max_request_bytes"`
 		MaxParts                  int    `yaml:"max_parts"`
 		MaxPageSize               int    `yaml:"max_page_size"`
 		MaxStreamsPerUser         int    `yaml:"max_streams_per_user"`
@@ -146,6 +148,7 @@ func (c *A2AConfig) UnmarshalYAML(value *yaml.Node) error {
 		PublicURL:                 aux.PublicURL,
 		BasePath:                  aux.BasePath,
 		MaxMessageBytes:           aux.MaxMessageBytes,
+		MaxRequestBytes:           aux.MaxRequestBytes,
 		MaxParts:                  aux.MaxParts,
 		MaxPageSize:               aux.MaxPageSize,
 		MaxStreamsPerUser:         aux.MaxStreamsPerUser,
@@ -468,6 +471,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.A2A.MaxMessageBytes == 0 {
 		cfg.A2A.MaxMessageBytes = 65536
+	}
+	if cfg.A2A.MaxRequestBytes == 0 {
+		cfg.A2A.MaxRequestBytes = 98304
 	}
 	if cfg.A2A.MaxParts == 0 {
 		cfg.A2A.MaxParts = 16
@@ -863,6 +869,13 @@ func validateModelOverride(scope string, m *ModelSpec) error {
 func validateA2A(cfg *A2AConfig) error {
 	if cfg == nil || !cfg.Enabled {
 		return nil
+	}
+
+	if cfg.MaxRequestBytes < cfg.MaxMessageBytes {
+		return fmt.Errorf("a2a.max_request_bytes: must be at least max_message_bytes (%d)", cfg.MaxMessageBytes)
+	}
+	if cfg.MaxRequestBytes > 4*1024*1024 {
+		return fmt.Errorf("a2a.max_request_bytes: must be at most 4194304")
 	}
 
 	rawPath := strings.TrimSpace(cfg.BasePath)

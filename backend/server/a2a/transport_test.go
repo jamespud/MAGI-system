@@ -72,6 +72,9 @@ var _ a2asrv.RequestHandler = (*fakeHandler)(nil)
 
 func TestAgentCard_SnapshotIsStableAndLeakFree(t *testing.T) {
 	card := a2atransport.AgentCard("https://magi.example/", "/a2a", "MAGI Decision", "evidence-driven decisions")
+	if strings.TrimSpace(card.Version) == "" {
+		t.Fatal("agent card version must not be empty")
+	}
 	if len(card.SupportedInterfaces) != 1 {
 		t.Fatalf("interfaces = %d", len(card.SupportedInterfaces))
 	}
@@ -110,6 +113,19 @@ func TestAgentCard_SnapshotIsStableAndLeakFree(t *testing.T) {
 	raw, err := json.Marshal(card)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := decoded["version"].(string); v == "" {
+		t.Fatalf("agent card JSON missing non-empty version: %s", raw)
+	}
+	if _, ok := decoded["securitySchemes"].(map[string]any)["bearer"]; !ok {
+		t.Fatalf("agent card JSON missing bearer scheme: %s", raw)
+	}
+	if _, ok := decoded["securitySchemes"].(map[string]any)["apiKey"]; !ok {
+		t.Fatalf("agent card JSON missing apiKey scheme: %s", raw)
 	}
 	for _, leaked := range []string{"sk-", "gpt-", "127.0.0.1", "db.internal", "magi-mysql", "tenant-", "magi-db"} {
 		if strings.Contains(string(raw), leaked) {
@@ -208,6 +224,55 @@ func TestMount_RejectsWrongToken(t *testing.T) {
 	} else {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
+	}
+}
+
+// TestMount_RejectsOversizedRequestBody guards the MaxBytesHandler wiring: a
+// request body larger than the configured transport cap is rejected before the
+// SDK JSON parser runs, so huge metadata can never be decoded or hashed.
+func TestMount_RejectsOversizedRequestBody(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	h := hzserver.Default(hzserver.WithHostPorts(addr))
+	h.Use(server.Auth(svc))
+	a2atransport.Mount(h, a2atransport.MountDeps{
+		Handler: &fakeHandler{}, PublicURL: "http://" + addr, BasePath: "/a2a",
+		Name: "MAGI", Description: "d", MaxRequestBytes: 128,
+	})
+	go func() { h.Spin() }()
+	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	baseURL := "http://" + addr
+	body := []byte(`{"message":{"messageId":"m-1","role":"ROLE_USER","parts":[{"text":"` + strings.Repeat("x", 512) + `"}]}}`)
+	req, _ := http.NewRequest(http.MethodPost, baseURL+"/a2a/message:send", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "tok-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("oversized body = %d, want 413 body=%s", resp.StatusCode, data)
 	}
 }
 

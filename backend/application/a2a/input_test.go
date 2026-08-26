@@ -2,6 +2,7 @@ package a2aapp
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestInputParserParseTextAndMetadata(t *testing.T) {
-	parser := InputParser{MaxMessageBytes: 64, MaxParts: 4}
+	parser := InputParser{MaxMessageBytes: 65536, MaxParts: 4}
 	got, err := parser.Parse(&a2a.SendMessageRequest{Message: &a2a.Message{
 		ID: "msg-1", Role: a2a.MessageRoleUser,
 		ContextID: "ctx-1",
@@ -93,15 +94,47 @@ func TestInputParserHashIgnoresMetadataMapOrder(t *testing.T) {
 	}
 	a := makeReq(map[string]any{"background": "b", "constraints": []any{map[string]any{"key": "k", "value": "v", "hard": false}}})
 	b := makeReq(map[string]any{"constraints": []any{map[string]any{"hard": false, "value": "v", "key": "k"}}, "background": "b"})
-	pa, err := (InputParser{MaxMessageBytes: 64, MaxParts: 4}).Parse(a)
+	pa, err := (InputParser{MaxMessageBytes: 65536, MaxParts: 4}).Parse(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pb, err := (InputParser{MaxMessageBytes: 64, MaxParts: 4}).Parse(b)
+	pb, err := (InputParser{MaxMessageBytes: 65536, MaxParts: 4}).Parse(b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pa.RequestHash != pb.RequestHash {
 		t.Fatalf("hashes differ: %s != %s", pa.RequestHash, pb.RequestHash)
+	}
+}
+
+func TestInputParserRejectsOversizedIdentifiersAndCanonicalBody(t *testing.T) {
+	longID := strings.Repeat("m", 129)
+	longCtx := strings.Repeat("c", 65)
+	msg := func(id, ctxID string, background string) *a2a.SendMessageRequest {
+		metadata := map[string]any(nil)
+		if background != "" {
+			metadata = map[string]any{"magi": map[string]any{"background": background}}
+		}
+		return &a2a.SendMessageRequest{Message: &a2a.Message{
+			ID: id, ContextID: ctxID, Role: a2a.MessageRoleUser,
+			Parts: a2a.ContentParts{a2a.NewTextPart("x")}, Metadata: metadata,
+		}}
+	}
+	if _, err := (InputParser{MaxMessageBytes: 65536, MaxParts: 4}).Parse(msg(longID, "", "")); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized message id error = %v", err)
+	}
+	if _, err := (InputParser{MaxMessageBytes: 65536, MaxParts: 4}).Parse(msg("m", longCtx, "")); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized context id error = %v", err)
+	}
+	// The question is tiny but the canonical body (background) blows the
+	// message budget: oversized metadata must be rejected before hashing.
+	if _, err := (InputParser{MaxMessageBytes: 64, MaxParts: 4}).Parse(msg("m", "", strings.Repeat("b", 200))); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized canonical body error = %v", err)
+	}
+	// Exact boundary identifiers are accepted.
+	okID := strings.Repeat("m", 128)
+	okCtx := strings.Repeat("c", 64)
+	if _, err := (InputParser{MaxMessageBytes: 65536, MaxParts: 4}).Parse(msg(okID, okCtx, "")); err != nil {
+		t.Fatalf("boundary identifiers rejected: %v", err)
 	}
 }

@@ -144,6 +144,22 @@ func TestHandler_ListTasksRejectsBadTokenAndBadPageSize(t *testing.T) {
 	}
 }
 
+func TestHandler_ListTasksRejectsUnsupportedStatus(t *testing.T) {
+	h := newTestHarness(t)
+	if _, err := h.handler.ListTasks(principalCtx(7), &a2a.ListTasksRequest{Status: a2a.TaskState("TASK_STATE_UNKNOWN")}); !errors.Is(err, a2a.ErrInvalidParams) {
+		t.Fatalf("unsupported status error = %v, want ErrInvalidParams", err)
+	}
+	// Supported states and an empty status still reach the repository.
+	for _, state := range []a2a.TaskState{
+		"", a2a.TaskStateSubmitted, a2a.TaskStateWorking, a2a.TaskStateCompleted,
+		a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateRejected,
+	} {
+		if _, err := h.handler.ListTasks(principalCtx(7), &a2a.ListTasksRequest{Status: state}); err != nil {
+			t.Fatalf("supported status %q rejected: %v", state, err)
+		}
+	}
+}
+
 func TestHandler_CancelTaskIsIdempotent(t *testing.T) {
 	h := newTestHarness(t)
 	result, err := h.handler.SendMessage(principalCtx(7), submissionReq("msg-1"))

@@ -84,7 +84,7 @@ func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID s
 		s.yieldInternalError(ctx, yield, "initial task read", err)
 		return
 	}
-	initial := s.projector.Project(record, 1)
+	initial := s.projector.Project(record, 1, true)
 	if initial.Status.State.Terminal() {
 		yield(initial, nil)
 		return
@@ -209,7 +209,7 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 	if err != nil {
 		return false, err
 	}
-	task := s.projector.Project(record, 1)
+	task := s.projector.Project(record, 1, true)
 	state.task = task
 	if task.Status.State == state.lastState && pausedOf(task) == state.lastPaused {
 		return false, nil

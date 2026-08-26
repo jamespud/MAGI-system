@@ -3,6 +3,7 @@ package a2aapp
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,7 +134,7 @@ func TestStatusPredicate_ParityWithClassifyState(t *testing.T) {
 		a2a.TaskStateSubmitted, a2a.TaskStateWorking, a2a.TaskStateCompleted,
 		a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateRejected,
 	}
-	bindings := []SubmissionState{SubmissionPrepared, SubmissionStarted, SubmissionRejected}
+	bindings := []SubmissionState{SubmissionPrepared, SubmissionStarting, SubmissionStarted, SubmissionRejected}
 	for _, binding := range bindings {
 		for _, cs := range allCaseStatuses() {
 			for _, job := range allJobStates() {
@@ -165,7 +166,7 @@ func jobStatusLabel(job *entity.DecisionJob) string {
 
 func resolvedRecord() *TaskRecord {
 	return &TaskRecord{
-		Submission:   Submission{TaskID: "case-1", ContextID: "conv-1", State: SubmissionStarted},
+		Submission:   Submission{TaskID: "case-1", MessageID: "msg-1", ContextID: "conv-1", State: SubmissionStarted},
 		Case:         &entity.DecisionCase{ID: "case-1", Status: entity.CaseStatusResolved, UpdatedAt: time.Date(2026, 8, 25, 1, 2, 3, 0, time.UTC)},
 		Job:          jobWith(entity.DecisionJobSucceeded),
 		InputMessage: &entity.ConversationMessage{ID: "input-1", Content: "Should we ship?"},
@@ -189,7 +190,7 @@ func resolvedRecord() *TaskRecord {
 
 func TestTaskProjector_ResolvedArtifactsAreDeterministic(t *testing.T) {
 	proj := NewTaskProjector(redact.New("sk-secret"))
-	first := proj.Project(resolvedRecord(), 1)
+	first := proj.Project(resolvedRecord(), 1, true)
 	if first.ID != "case-1" || first.ContextID != "conv-1" {
 		t.Fatalf("task ids = %s/%s", first.ID, first.ContextID)
 	}
@@ -210,7 +211,7 @@ func TestTaskProjector_ResolvedArtifactsAreDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := json.Marshal(proj.Project(resolvedRecord(), 1))
+	again, err := json.Marshal(proj.Project(resolvedRecord(), 1, true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,30 +247,21 @@ func TestTaskProjector_ResolvedArtifactsAreDeterministic(t *testing.T) {
 	}
 }
 
-func TestTaskProjector_FallbackForDeadlockAndInsufficientEvidence(t *testing.T) {
+// TestTaskProjector_CompletedWithoutResolutionHasNoArtifacts guards the
+// projection invariant: a completed Task without a structured Resolution must
+// never fabricate fallback artifacts.
+func TestTaskProjector_CompletedWithoutResolutionHasNoArtifacts(t *testing.T) {
 	proj := NewTaskProjector(redact.New())
 	for _, cs := range []entity.CaseStatus{entity.CaseStatusDeadlocked, entity.CaseStatusInsufficientEv} {
 		rec := resolvedRecord()
 		rec.Case.Status = cs
 		rec.Resolution = nil
-		task := proj.Project(rec, 0)
+		task := proj.Project(rec, 0, true)
 		if task.Status.State != a2a.TaskStateCompleted {
 			t.Fatalf("state = %s", task.Status.State)
 		}
-		if len(task.Artifacts) != 2 {
-			t.Fatalf("artifacts = %d", len(task.Artifacts))
-		}
-		raw, _ := json.Marshal(task.Artifacts[1].Parts[0].Data())
-		var result decisionResultJSON
-		if err := json.Unmarshal(raw, &result); err != nil {
-			t.Fatal(err)
-		}
-		want := "deadlocked"
-		if cs == entity.CaseStatusInsufficientEv {
-			want = "insufficient_evidence"
-		}
-		if result.Outcome != want || result.Decision != nil || result.Confidence != nil {
-			t.Fatalf("%s result = %+v", cs, result)
+		if len(task.Artifacts) != 0 {
+			t.Fatalf("%s completed task fabricated %d artifacts without a Resolution", cs, len(task.Artifacts))
 		}
 	}
 }
@@ -280,11 +272,11 @@ func TestTaskProjector_HistoryAndMetadata(t *testing.T) {
 	rec.Case.Status = entity.CaseStatusInvestigating
 	rec.Job = jobWith(entity.DecisionJobRunning)
 	rec.Resolution = nil
-	withHistory := proj.Project(rec, 1)
-	if len(withHistory.History) != 1 || withHistory.History[0].ID != "input-1" {
+	withHistory := proj.Project(rec, 1, true)
+	if len(withHistory.History) != 1 || withHistory.History[0].ID != "msg-1" {
 		t.Fatalf("history = %+v", withHistory.History)
 	}
-	without := proj.Project(rec, 0)
+	without := proj.Project(rec, 0, true)
 	if len(without.History) != 0 {
 		t.Fatalf("history not suppressed: %+v", without.History)
 	}
@@ -303,7 +295,7 @@ func TestTaskProjector_CanceledNeverEmitsArtifacts(t *testing.T) {
 	rec.Case.Status = entity.CaseStatusCancelled
 	rec.Job = jobWith(entity.DecisionJobCancelled)
 	rec.Resolution = nil
-	task := proj.Project(rec, 0)
+	task := proj.Project(rec, 0, true)
 	if task.Status.State != a2a.TaskStateCanceled {
 		t.Fatalf("state = %s", task.Status.State)
 	}
@@ -312,7 +304,7 @@ func TestTaskProjector_CanceledNeverEmitsArtifacts(t *testing.T) {
 	}
 }
 
-func TestTaskProjector_FailedStatusMessageIsRedacted(t *testing.T) {
+func TestTaskProjector_FailedStatusMessageIsStable(t *testing.T) {
 	proj := NewTaskProjector(redact.New("sk-secret-1"))
 	rec := resolvedRecord()
 	rec.Case.Status = entity.CaseStatusFailed
@@ -320,12 +312,16 @@ func TestTaskProjector_FailedStatusMessageIsRedacted(t *testing.T) {
 	rec.Job.LastError = "provider failed with sk-secret-1"
 	rec.Submission.ErrorCode = "provider_error"
 	rec.Resolution = nil
-	task := proj.Project(rec, 0)
+	task := proj.Project(rec, 0, true)
 	if task.Status.State != a2a.TaskStateFailed {
 		t.Fatalf("state = %s", task.Status.State)
 	}
-	if task.Status.Message == nil || len(task.Status.Message.Parts) == 0 || task.Status.Message.Parts[0].Text() != "provider_error: provider failed with [REDACTED]" {
+	if task.Status.Message == nil || len(task.Status.Message.Parts) == 0 ||
+		task.Status.Message.Parts[0].Text() != "provider_error: The task failed during execution." {
 		t.Fatalf("status message = %+v", task.Status.Message)
+	}
+	if strings.Contains(task.Status.Message.Parts[0].Text(), "sk-secret-1") || strings.Contains(task.Status.Message.Parts[0].Text(), "provider failed") {
+		t.Fatalf("internal failure text leaked: %+v", task.Status.Message.Parts[0].Text())
 	}
 }
 
@@ -334,7 +330,7 @@ func TestTaskProjector_StatusTimestampIsStable(t *testing.T) {
 	rec := resolvedRecord()
 	rec.Case.UpdatedAt = time.Date(2026, 8, 25, 2, 0, 0, 0, time.UTC)
 	rec.Job.UpdatedAt = time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC)
-	task := proj.Project(rec, 0)
+	task := proj.Project(rec, 0, true)
 	if task.Status.Timestamp == nil || !task.Status.Timestamp.Equal(rec.Case.UpdatedAt) {
 		t.Fatalf("timestamp = %v, want case updated at", task.Status.Timestamp)
 	}

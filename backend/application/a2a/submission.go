@@ -116,7 +116,7 @@ func (s *SubmissionService) Submit(ctx context.Context, userID int64, req *a2a.S
 	if err != nil {
 		return nil, err
 	}
-	return s.projector.Project(record, 1), nil
+	return s.projector.Project(record, 1, true), nil
 }
 
 // settlement describes how a claimable binding left its waiting state.

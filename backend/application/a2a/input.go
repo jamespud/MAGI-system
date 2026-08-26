@@ -66,6 +66,12 @@ func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
 	if strings.TrimSpace(m.ID) == "" {
 		return ParsedInput{}, fmt.Errorf("%w: message id is required", ErrInvalidInput)
 	}
+	if len([]byte(m.ID)) > 128 {
+		return ParsedInput{}, fmt.Errorf("%w: message id exceeds 128 bytes", ErrInvalidInput)
+	}
+	if len([]byte(m.ContextID)) > 64 {
+		return ParsedInput{}, fmt.Errorf("%w: context id exceeds 64 bytes", ErrInvalidInput)
+	}
 	if m.Role != a2a.MessageRoleUser {
 		return ParsedInput{}, fmt.Errorf("%w: role must be ROLE_USER", ErrInvalidInput)
 	}
@@ -125,6 +131,9 @@ func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
 	canonical, err := json.Marshal(normalized)
 	if err != nil {
 		return ParsedInput{}, fmt.Errorf("%w: canonical request: %v", ErrInvalidInput, err)
+	}
+	if len(canonical) > maxBytes {
+		return ParsedInput{}, fmt.Errorf("%w: canonical message exceeds %d bytes", ErrInvalidInput, maxBytes)
 	}
 	hash := sha256.Sum256(canonical)
 	return ParsedInput{

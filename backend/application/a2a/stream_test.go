@@ -571,9 +571,11 @@ func TestProjector_TerminalVisibilityRequiresResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := a2aapp.NewTaskProjector(redact.New("sk-secret")).Project(record, 1)
+	task := a2aapp.NewTaskProjector(redact.New("sk-secret")).Project(record, 1, true)
 	if task.Status.State == a2a.TaskStateCompleted && record.Resolution == nil {
-		t.Fatal("completed task became visible before terminal result was committed")
+		if len(task.Artifacts) != 0 {
+			t.Fatal("completed task fabricated artifacts before terminal result was committed")
+		}
 	}
 }
 

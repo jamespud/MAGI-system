@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
@@ -33,6 +32,18 @@ var completedCaseStatuses = []entity.CaseStatus{
 
 var failedCaseStatuses = []entity.CaseStatus{
 	entity.CaseStatusFailed, entity.CaseStatusTimedOut,
+}
+
+// IsSupportedListState reports whether a public A2A TaskState is filterable by
+// ListTasks. Unknown or extension states are rejected as invalid params.
+func IsSupportedListState(state a2a.TaskState) bool {
+	switch state {
+	case a2a.TaskStateSubmitted, a2a.TaskStateWorking, a2a.TaskStateCompleted,
+		a2a.TaskStateFailed, a2a.TaskStateCanceled, a2a.TaskStateRejected:
+		return true
+	default:
+		return false
+	}
 }
 
 // processingCaseStatuses are the non-terminal, non-draft FSM positions.
@@ -127,7 +138,7 @@ func ClassifyState(binding SubmissionState, cs entity.CaseStatus, job *entity.De
 	if binding == SubmissionRejected {
 		return a2a.TaskStateRejected, false
 	}
-	if binding == SubmissionPrepared && cs == entity.CaseStatusDraft &&
+	if (binding == SubmissionPrepared || binding == SubmissionStarting) && cs == entity.CaseStatusDraft &&
 		(jobStatus == "" || jobStatus == string(entity.DecisionJobQueued)) {
 		return a2a.TaskStateSubmitted, false
 	}
@@ -216,8 +227,11 @@ func NewTaskProjector(redactor *redact.Redactor) *TaskProjector {
 }
 
 // Project renders one A2A Task snapshot. history controls whether the task's
-// single input message is attached: 0 omits it, any positive value includes it.
-func (p *TaskProjector) Project(rec *TaskRecord, history int) *a2a.Task {
+// single input message is attached: 0 omits it, any positive value includes
+// it. includeArtifacts controls whether the completed task's resolution
+// artifacts are attached; without a Resolution there is nothing structured to
+// expose, so no fallback artifacts are fabricated.
+func (p *TaskProjector) Project(rec *TaskRecord, history int, includeArtifacts bool) *a2a.Task {
 	state, paused := ClassifyState(rec.Submission.State, rec.Case.Status, rec.Job)
 	task := &a2a.Task{
 		ID:        a2a.TaskID(rec.Case.ID),
@@ -233,13 +247,13 @@ func (p *TaskProjector) Project(rec *TaskRecord, history int) *a2a.Task {
 	}
 	if history > 0 && rec.InputMessage != nil {
 		task.History = []*a2a.Message{{
-			ID:        rec.InputMessage.ID,
+			ID:        rec.Submission.MessageID,
 			ContextID: rec.Submission.ContextID,
 			Role:      a2a.MessageRoleUser,
 			Parts:     a2a.ContentParts{a2a.NewTextPart(p.redactor.String(rec.InputMessage.Content))},
 		}}
 	}
-	if state == a2a.TaskStateCompleted {
+	if includeArtifacts && state == a2a.TaskStateCompleted && rec.Resolution != nil {
 		task.Artifacts = p.buildArtifacts(rec)
 	}
 	return task
@@ -292,14 +306,9 @@ func (p *TaskProjector) failedMessage(rec *TaskRecord) *a2a.Message {
 	if rec.Submission.ErrorCode != "" {
 		code = rec.Submission.ErrorCode
 	}
-	detail := ""
-	if rec.Job != nil {
-		detail = rec.Job.LastError
-	}
-	summary := strings.TrimSpace(p.redactor.String(detail))
-	if summary == "" {
-		summary = "The task failed during execution."
-	}
+	// A stable public sentence; SQL, paths, tool responses, and LastError stay
+	// internal so they can never leak over the protocol.
+	summary := "The task failed during execution."
 	return &a2a.Message{
 		ID:        fmt.Sprintf("%s-status", rec.Case.ID),
 		ContextID: rec.Submission.ContextID,
