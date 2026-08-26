@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,14 +29,25 @@ func emptyStream() iter.Seq2[a2a.Event, error] {
 
 // fakeHandler captures the authenticated principal and echoes a submitted task.
 type fakeHandler struct {
+	mu        sync.Mutex
 	principal *auth.Principal
 	sent      *a2a.SendMessageRequest
 }
 
 func (f *fakeHandler) SendMessage(ctx context.Context, req *a2a.SendMessageRequest) (a2a.SendMessageResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.principal = auth.PrincipalFrom(ctx)
 	f.sent = req
 	return &a2a.Task{ID: "case-1", ContextID: "conv-1", Status: a2a.TaskStatus{State: a2a.TaskStateSubmitted}}, nil
+}
+
+// snapshot returns the last captured principal and request under the lock so
+// race-detector runs can read them after an async HTTP round trip.
+func (f *fakeHandler) snapshot() (*auth.Principal, *a2a.SendMessageRequest) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.principal, f.sent
 }
 func (f *fakeHandler) GetTask(ctx context.Context, req *a2a.GetTaskRequest) (*a2a.Task, error) {
 	return nil, a2a.ErrTaskNotFound
@@ -147,8 +159,8 @@ func TestRESTHandler_StripsBasePathAndKeepsSDKPaths(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("send status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.sent == nil || fake.sent.Message == nil || fake.sent.Message.ID != "m-1" {
-		t.Fatalf("fake received = %+v", fake.sent)
+	if _, sent := fake.snapshot(); sent == nil || sent.Message == nil || sent.Message.ID != "m-1" {
+		t.Fatalf("fake received = %+v", sent)
 	}
 }
 
@@ -203,8 +215,9 @@ func TestMount_AuthBridgePropagatesPrincipal(t *testing.T) {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 	}
-	if fake.sent == nil || fake.principal == nil || fake.principal.UserID != 7 {
-		t.Fatalf("principal propagation failed: sent=%+v principal=%+v", fake.sent, fake.principal)
+	principal, sent := fake.snapshot()
+	if sent == nil || principal == nil || principal.UserID != 7 {
+		t.Fatalf("principal propagation failed: sent=%+v principal=%+v", sent, principal)
 	}
 }
 
