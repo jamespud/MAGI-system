@@ -308,11 +308,15 @@ func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
 	}
 	repo := magi.NewA2ASubmissionRepository(db)
 	caseID := fmt.Sprintf("case-snap-%d", os.Getpid())
+	jobID := fmt.Sprintf("job-snap-%d", os.Getpid())
+	resID := fmt.Sprintf("res-snap-%d", os.Getpid())
+	evID := fmt.Sprintf("ev-snap-%d", os.Getpid())
 	cmd := a2a.PrepareCommand{
-		SubmissionID: "sub-snap-1", MessageID: "snap-msg-1", RequestHash: "hash",
+		SubmissionID: fmt.Sprintf("sub-snap-%d", os.Getpid()), MessageID: fmt.Sprintf("snap-msg-%d", os.Getpid()), RequestHash: "hash",
 		TaskID: caseID, ContextID: "", InputMessageID: "", CaseMessageID: "",
 		UserID: 7, Question: "q", MaxDebateRounds: 3,
 	}
+	_ = db.Exec("DELETE FROM a2a_submission WHERE message_id = ?", cmd.MessageID)
 	_ = db.Exec("DELETE FROM a2a_submission WHERE task_id = ?", caseID)
 	_ = db.Exec("DELETE FROM decision_case WHERE id = ?", caseID)
 	if _, _, err := repo.Prepare(context.Background(), cmd); err != nil {
@@ -321,7 +325,7 @@ func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
 	if err := db.Model(&magi.CaseModel{}).Where("id = ?", caseID).Update("status", string(entity.CaseStatusInvestigating)).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&magi.DecisionJobModel{ID: "job-snap-1", CaseID: caseID, Status: string(entity.DecisionJobRunning), AvailableAt: time.Now()}).Error; err != nil {
+	if err := db.Create(&magi.DecisionJobModel{ID: jobID, CaseID: caseID, Status: string(entity.DecisionJobRunning), AvailableAt: time.Now()}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,10 +357,10 @@ func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	consensus, _ := json.Marshal(entity.ConsensusResult{Outcome: entity.ConsensusStrongApproval, Round: 1})
-	if err := db.Create(&magi.ResolutionModel{ID: "res-snap-1", CaseID: caseID, FinalDecision: string(entity.VoteDecisionApprove), ConsensusJSON: string(consensus)}).Error; err != nil {
+	if err := db.Create(&magi.ResolutionModel{ID: resID, CaseID: caseID, FinalDecision: string(entity.VoteDecisionApprove), ConsensusJSON: string(consensus)}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&magi.EventModel{ID: "ev-snap-1", CaseID: caseID, Seq: 1, Type: string(entity.EventCaseCompleted), Timestamp: time.Now()}).Error; err != nil {
+	if err := db.Create(&magi.EventModel{ID: evID, CaseID: caseID, Seq: 1, Type: string(entity.EventCaseCompleted), Timestamp: time.Now()}).Error; err != nil {
 		t.Fatal(err)
 	}
 	close(stop)
