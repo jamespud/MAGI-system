@@ -14,17 +14,17 @@ import (
 // SubmissionService owns the durable A2A submit lifecycle: parse, prepare,
 // idempotent start, and recovery of PREPARED bindings after a crash.
 type SubmissionService struct {
-	parser          InputParser
-	repo            SubmissionRepository
-	runManager      *decision.RunManager
-	projector       *TaskProjector
-	maxDebateRounds int
-	startTimeout    time.Duration
-	claimLease      time.Duration
-	recoveryInterval time.Duration
-	recoveryBackoff time.Duration
+	parser             InputParser
+	repo               SubmissionRepository
+	runManager         *decision.RunManager
+	projector          *TaskProjector
+	maxDebateRounds    int
+	startTimeout       time.Duration
+	claimLease         time.Duration
+	recoveryInterval   time.Duration
+	recoveryBackoff    time.Duration
 	recoveryMaxBackoff time.Duration
-	metrics         *metrics.Registry
+	metrics            *metrics.Registry
 }
 
 // SubmissionOption configures optional observability on the submission service.
@@ -159,7 +159,9 @@ func (s *SubmissionService) settleStart(ctx context.Context, prepared *PreparedS
 	defer cancel()
 	startErr := s.runManager.EnsureStarted(startCtx, locked.Case)
 	switch {
-	case startErr == nil || errors.Is(startErr, decision.ErrAlreadyRunning) || errors.Is(startErr, decision.ErrAlreadyCompleted):
+	case startErr == nil || errors.Is(startErr, decision.ErrAlreadyRunning) || errors.Is(startErr, decision.ErrAlreadyCompleted) || errors.Is(startErr, decision.ErrJobTerminated):
+		// The durable job already exists. STARTED describes admission/binding;
+		// the projector derives failed, cancelled, or paused from Case + Job.
 		if err := s.repo.SettleStarted(ctx, locked.Binding.ID, token); err != nil {
 			if errors.Is(err, ErrClaimLost) {
 				// The winner already settled; our projection is stale.

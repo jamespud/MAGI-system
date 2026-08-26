@@ -127,3 +127,18 @@ func TestEnsureEventSequenceSchema_RejectsStaleCursor(t *testing.T) {
 		t.Fatalf("stale cursor error = %v, want cursor guidance", err)
 	}
 }
+
+func TestEnsureEventSequenceSchema_RejectsEventCaseWithoutCursor(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	setupRawEventSchema(t, db, true, true, 2)
+	if err := db.Exec("DELETE FROM magi_event_cursor WHERE case_id = ?", "c1").Error; err != nil {
+		t.Fatal(err)
+	}
+	err = ensureEventSequenceSchema(db)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "missing cursor") {
+		t.Fatalf("missing cursor error = %v, want missing cursor guidance", err)
+	}
+}

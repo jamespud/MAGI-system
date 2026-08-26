@@ -1090,9 +1090,22 @@ func columnNotNull(db *gorm.DB, table, column string) (bool, error) {
 	return false, fmt.Errorf("column %s.%s not found", table, column)
 }
 
-// verifyEventCursor fails startup when any cursor row is stale relative to the
-// events it tracks (next_seq must equal MAX(seq)+1).
+// verifyEventCursor fails startup when an event-bearing case has no cursor or
+// any cursor row is stale relative to the events it tracks (next_seq must equal
+// MAX(seq)+1).
 func verifyEventCursor(db *gorm.DB) error {
+	var missing int64
+	if err := db.Raw(`
+		SELECT COUNT(DISTINCT e.case_id)
+		FROM magi_event e
+		LEFT JOIN magi_event_cursor c ON c.case_id = e.case_id
+		WHERE c.case_id IS NULL`).
+		Scan(&missing).Error; err != nil {
+		return fmt.Errorf("event sequence schema check failed: %w", err)
+	}
+	if missing > 0 {
+		return fmt.Errorf("event sequence schema incomplete: %d event-bearing cases are missing cursor rows; re-run the S16 backfill", missing)
+	}
 	var stale int64
 	if err := db.Raw(`
 		SELECT COUNT(*) FROM magi_event_cursor c

@@ -247,6 +247,38 @@ func newSubmissionSvc(db *gorm.DB, jobs *fakeJobRepo, orch *blockingOrch, budget
 	return svc, repo
 }
 
+type countingSubmissionRepo struct {
+	a2aapp.SubmissionRepository
+	claimStartCount     int
+	settleStartedCount  int
+	settleRejectedCount int
+}
+
+type countingDecisionJobRepo struct {
+	port.DecisionJobRepository
+	enqueueCount int
+}
+
+func (r *countingDecisionJobRepo) Enqueue(ctx context.Context, caseID string, maxAttempts int) (*entity.DecisionJob, error) {
+	r.enqueueCount++
+	return r.DecisionJobRepository.Enqueue(ctx, caseID, maxAttempts)
+}
+
+func (r *countingSubmissionRepo) ClaimStart(ctx context.Context, id, token string, leaseUntil time.Time) (*a2aapp.PreparedSubmission, bool, error) {
+	r.claimStartCount++
+	return r.SubmissionRepository.ClaimStart(ctx, id, token, leaseUntil)
+}
+
+func (r *countingSubmissionRepo) SettleStarted(ctx context.Context, id, token string) error {
+	r.settleStartedCount++
+	return r.SubmissionRepository.SettleStarted(ctx, id, token)
+}
+
+func (r *countingSubmissionRepo) SettleRejected(ctx context.Context, id, token, code string) error {
+	r.settleRejectedCount++
+	return r.SubmissionRepository.SettleRejected(ctx, id, token, code)
+}
+
 func submissionReq(messageID string) *a2a.SendMessageRequest {
 	return &a2a.SendMessageRequest{Message: &a2a.Message{
 		ID: messageID, Role: a2a.MessageRoleUser,
@@ -458,6 +490,102 @@ func TestSubmissionService_RecoverLeavesClaimForRecovery(t *testing.T) {
 	}
 	if sub.State != a2aapp.SubmissionStarting {
 		t.Fatalf("binding state = %s, want STARTING lease when start keeps failing", sub.State)
+	}
+}
+
+func TestSubmissionService_RecoverSettlesExistingTerminalJobsOnce(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		jobStatus entity.DecisionJobStatus
+		wantState a2a.TaskState
+		wantPause bool
+	}{
+		{name: "failed", jobStatus: entity.DecisionJobFailed, wantState: a2a.TaskStateFailed},
+		{name: "cancelled", jobStatus: entity.DecisionJobCancelled, wantState: a2a.TaskStateCanceled},
+		{name: "paused", jobStatus: entity.DecisionJobPaused, wantState: a2a.TaskStateWorking, wantPause: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openSubmissionDB(t)
+			ctx := context.Background()
+			caseID := "terminal-recovery-" + tt.name
+			baseRepo := magi.NewA2ASubmissionRepository(db)
+			if _, _, err := baseRepo.Prepare(ctx, a2aapp.PrepareCommand{
+				SubmissionID: "sub-" + caseID, MessageID: "msg-" + caseID, RequestHash: "hash-" + caseID,
+				TaskID: caseID, ContextID: "conv-" + caseID, InputMessageID: "input-" + caseID,
+				CaseMessageID: "case-msg-" + caseID, UserID: 7, Question: "q", MaxDebateRounds: 3,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, claimed, err := baseRepo.ClaimStart(ctx, "sub-"+caseID, "expired-token", time.Now().Add(-time.Minute)); err != nil || !claimed {
+				t.Fatalf("expired claim = claimed %v err %v", claimed, err)
+			}
+			now := time.Now()
+			if err := db.Create(&magi.DecisionJobModel{
+				ID: "job-" + caseID, CaseID: caseID, Status: string(tt.jobStatus),
+				AvailableAt: now, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			jobs := &countingDecisionJobRepo{DecisionJobRepository: magi.NewDecisionJobRepository(db)}
+			rm := decision.NewRunManager(newBlockingOrch(), decision.RunManagerDeps{JobRepo: jobs})
+			countedRepo := &countingSubmissionRepo{SubmissionRepository: baseRepo}
+			proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+			svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), countedRepo, rm, proj, 3)
+
+			if err := svc.Recover(ctx); err != nil {
+				t.Fatalf("first recovery: %v", err)
+			}
+			sub, err := baseRepo.GetByTask(ctx, 7, caseID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sub.State != a2aapp.SubmissionStarted {
+				t.Fatalf("job %s left binding in %s, want STARTED", tt.jobStatus, sub.State)
+			}
+			if jobs.enqueueCount != 0 {
+				t.Fatalf("existing %s job was enqueued again: %d", tt.jobStatus, jobs.enqueueCount)
+			}
+			record, err := baseRepo.GetTaskRecord(ctx, 7, caseID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task := proj.Project(record, 1, false)
+			if task.Status.State != tt.wantState {
+				t.Fatalf("projected state = %s, want %s", task.Status.State, tt.wantState)
+			}
+			magiMetadata, ok := task.Metadata["magi"].(map[string]any)
+			if !ok {
+				t.Fatalf("task metadata missing magi object: %#v", task.Metadata)
+			}
+			if paused, _ := magiMetadata["paused"].(bool); paused != tt.wantPause {
+				t.Fatalf("projected paused = %v, want %v", paused, tt.wantPause)
+			}
+
+			var jobsBefore int64
+			if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", caseID).Count(&jobsBefore).Error; err != nil {
+				t.Fatal(err)
+			}
+			claimsBefore, settlesBefore, enqueuesBefore := countedRepo.claimStartCount, countedRepo.settleStartedCount, jobs.enqueueCount
+			if err := svc.Recover(ctx); err != nil {
+				t.Fatalf("second recovery: %v", err)
+			}
+			var jobsAfter int64
+			if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", caseID).Count(&jobsAfter).Error; err != nil {
+				t.Fatal(err)
+			}
+			if countedRepo.claimStartCount != claimsBefore || countedRepo.settleStartedCount != settlesBefore {
+				t.Fatalf("second recovery changed claim/settle counts: claims %d -> %d, settles %d -> %d", claimsBefore, countedRepo.claimStartCount, settlesBefore, countedRepo.settleStartedCount)
+			}
+			if jobs.enqueueCount != enqueuesBefore {
+				t.Fatalf("second recovery changed enqueue count: %d -> %d", enqueuesBefore, jobs.enqueueCount)
+			}
+			if jobsAfter != jobsBefore {
+				t.Fatalf("second recovery changed job count: %d -> %d", jobsBefore, jobsAfter)
+			}
+			if countedRepo.settleRejectedCount != 0 {
+				t.Fatalf("terminal job was rejected %d times", countedRepo.settleRejectedCount)
+			}
+		})
 	}
 }
 
