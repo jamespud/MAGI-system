@@ -73,7 +73,7 @@ services:
       MAGI_A2A_MAX_REQUEST_BYTES: "98304"
       MAGI_A2A_MAX_PARTS: "16"
       MAGI_A2A_MAX_PAGE_SIZE: "100"
-      MAGI_A2A_MAX_STREAMS_PER_USER: "8"
+      MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: "8"
       MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: "2s"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]

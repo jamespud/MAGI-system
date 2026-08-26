@@ -65,8 +65,8 @@ func TestLoadConfig_A2ADefaults(t *testing.T) {
 	if cfg.A2A.MaxPageSize != 100 {
 		t.Errorf("MaxPageSize = %d, want 100", cfg.A2A.MaxPageSize)
 	}
-	if cfg.A2A.MaxStreamsPerUser != 8 {
-		t.Errorf("MaxStreamsPerUser = %d, want 8", cfg.A2A.MaxStreamsPerUser)
+	if cfg.A2A.MaxStreamsPerUserPerReplica != 8 {
+		t.Errorf("MaxStreamsPerUserPerReplica = %d, want 8", cfg.A2A.MaxStreamsPerUserPerReplica)
 	}
 	if cfg.A2A.CrossInstancePollInterval != 2*time.Second {
 		t.Errorf("CrossInstancePollInterval = %s, want 2s", cfg.A2A.CrossInstancePollInterval)
@@ -80,7 +80,7 @@ func secureA2AAuthBody(enabled string) string {
 func a2aFull(publicURL, basePath, maxMessage, maxRequest, maxStreams string) string {
 	return "a2a:\n  enabled: true\n  public_url: " + publicURL + "\n  base_path: " + basePath + "\n" +
 		"  max_message_bytes: " + maxMessage + "\n  max_request_bytes: " + maxRequest + "\n  max_parts: 16\n" +
-		"  max_page_size: 100\n  max_streams_per_user: " + maxStreams + "\n  cross_instance_poll_interval: 2s\n"
+		"  max_page_size: 100\n  max_streams_per_user_per_replica: " + maxStreams + "\n  cross_instance_poll_interval: 2s\n"
 }
 
 func TestLoadConfig_A2ARequiresSecureEnablement(t *testing.T) {
@@ -91,6 +91,12 @@ func TestLoadConfig_A2ARequiresSecureEnablement(t *testing.T) {
 		{name: "disabled auth", body: secureA2AAuthBody("false") + a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "8")},
 		{name: "missing public URL", body: secureA2AAuthBody("true") + a2aFull("", "/a2a", "65536", "98304", "8")},
 		{name: "http public URL", body: secureA2AAuthBody("true") + a2aFull("http://a2a.example.com", "/a2a", "65536", "98304", "8")},
+		{name: "public URL userinfo", body: secureA2AAuthBody("true") + a2aFull("https://user:password@a2a.example.com", "/a2a", "65536", "98304", "8")},
+		{name: "public URL non-root path", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com/public", "/a2a", "65536", "98304", "8")},
+		{name: "public URL escaped path", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com/%2Fsecret", "/a2a", "65536", "98304", "8")},
+		{name: "public URL query", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com?token=secret", "/a2a", "65536", "98304", "8")},
+		{name: "public URL fragment", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com#agent", "/a2a", "65536", "98304", "8")},
+		{name: "public URL opaque", body: secureA2AAuthBody("true") + a2aFull("https:opaque", "/a2a", "65536", "98304", "8")},
 		{name: "noncanonical base path", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/custom", "65536", "98304", "8")},
 		{name: "negative stream limit", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "-1")},
 		{name: "request below message budget", body: secureA2AAuthBody("true") + a2aFull("https://a2a.example.com", "/a2a", "65536", "1024", "8")},
@@ -109,12 +115,35 @@ func TestLoadConfig_A2ARequiresSecureEnablement(t *testing.T) {
 }
 
 func TestLoadConfig_A2AValidSecureConfigPasses(t *testing.T) {
-	cfg, err := loadA2ATestConfig(t, secureA2AAuthBody("true")+a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "8"))
+	for _, publicURL := range []string{"https://a2a.example.com", "https://a2a.example.com/"} {
+		cfg, err := loadA2ATestConfig(t, secureA2AAuthBody("true")+a2aFull(publicURL, "/a2a", "65536", "98304", "8"))
+		if err != nil {
+			t.Fatalf("load config for %q: %v", publicURL, err)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("secure A2A config %q must validate: %v", publicURL, err)
+		}
+	}
+}
+
+func TestLoadConfig_A2AStreamLimitUsesPerReplicaName(t *testing.T) {
+	cfg, err := loadA2ATestConfig(t, secureA2AAuthBody("true")+a2aFull("https://a2a.example.com", "/a2a", "65536", "98304", "11"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("secure A2A config must validate: %v", err)
+	if cfg.A2A.MaxStreamsPerUserPerReplica != 11 {
+		t.Fatalf("MaxStreamsPerUserPerReplica = %d, want 11", cfg.A2A.MaxStreamsPerUserPerReplica)
+	}
+}
+
+func TestLoadConfig_A2AStreamLimitEnvironmentUsesPerReplicaName(t *testing.T) {
+	t.Setenv("MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA", "13")
+	cfg, err := loadA2ATestConfig(t, "a2a: {}\n")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.A2A.MaxStreamsPerUserPerReplica != 13 {
+		t.Fatalf("MaxStreamsPerUserPerReplica = %d, want 13", cfg.A2A.MaxStreamsPerUserPerReplica)
 	}
 }
 

@@ -88,7 +88,8 @@ configuration:
     maxRequestBytes: "98304"
     maxParts: "16"
     maxPageSize: "100"
-    maxStreamsPerUser: "8"
+    # Enforced independently by each backend replica; ingress governs global load.
+    maxStreamsPerUserPerReplica: "8"
     crossInstancePollInterval: "2s"
 
 # For production, prefer secret.create=false plus an externally managed

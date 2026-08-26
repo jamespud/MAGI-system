@@ -837,12 +837,16 @@ func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.
 		dataset.WithMetrics(reg))
 }
 
+// serverMaxRequestBodyBytes caps every Hertz handler before routing. The A2A
+// surface additionally applies its own smaller per-request cap in transport.
+const serverMaxRequestBodyBytes = 4 * 1024 * 1024
+
 func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	addr := os.Getenv("MAGI_HTTP_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
-	h := hzserver.Default(hzserver.WithHostPorts(addr))
+	h := hzserver.Default(hzserver.WithHostPorts(addr), hzserver.WithMaxRequestBodySize(serverMaxRequestBodyBytes))
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go h.Spin()
@@ -1372,7 +1376,7 @@ func ProvideA2A(db *gorm.DB, cfg *Config, rm *decision.RunManager, broker *appse
 	svc := a2aapp.NewSubmissionService(parser, a2aRepo, rm, proj, cfg.Magi.MaxDebateRounds,
 		a2aapp.WithSubmissionMetrics(reg))
 	stream := a2aapp.NewDurableStreamProjector(a2aRepo, repo.EventRepo(), broker, proj,
-		cfg.A2A.MaxStreamsPerUser, cfg.A2A.CrossInstancePollInterval,
+		cfg.A2A.MaxStreamsPerUserPerReplica, cfg.A2A.CrossInstancePollInterval,
 		a2aapp.WithStreamMetrics(reg))
 	handler := a2aapp.NewHandler(svc, a2aRepo, proj, cursor, rm, stream,
 		a2aapp.WithHandlerMetrics(reg), a2aapp.WithHandlerAudit(auditSvc),

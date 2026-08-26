@@ -27,15 +27,16 @@ type EventSubscriber interface {
 // DurableStreamProjector merges the durable snapshot, the local broker, and the
 // database poller into one ordered A2A event stream per task.
 type DurableStreamProjector struct {
-	repo              SubmissionRepository
-	events            port.EventRepository
-	broker            EventSubscriber
-	projector         *TaskProjector
-	maxStreamsPerUser int
-	pollInterval      time.Duration
-	active            map[int64]int
-	mu                sync.Mutex
-	metrics           *metrics.Registry
+	repo      SubmissionRepository
+	events    port.EventRepository
+	broker    EventSubscriber
+	projector *TaskProjector
+	// maxStreamsPerUserPerReplica is process-local; global admission belongs at ingress.
+	maxStreamsPerUserPerReplica int
+	pollInterval                time.Duration
+	active                      map[int64]int
+	mu                          sync.Mutex
+	metrics                     *metrics.Registry
 }
 
 // StreamOption configures optional observability on the stream projector.
@@ -46,13 +47,13 @@ func WithStreamMetrics(reg *metrics.Registry) StreamOption {
 	return func(s *DurableStreamProjector) { s.metrics = reg }
 }
 
-func NewDurableStreamProjector(repo SubmissionRepository, events port.EventRepository, broker EventSubscriber, projector *TaskProjector, maxStreamsPerUser int, pollInterval time.Duration, opts ...StreamOption) *DurableStreamProjector {
+func NewDurableStreamProjector(repo SubmissionRepository, events port.EventRepository, broker EventSubscriber, projector *TaskProjector, maxStreamsPerUserPerReplica int, pollInterval time.Duration, opts ...StreamOption) *DurableStreamProjector {
 	if pollInterval <= 0 {
 		pollInterval = time.Second
 	}
 	s := &DurableStreamProjector{
 		repo: repo, events: events, broker: broker, projector: projector,
-		maxStreamsPerUser: maxStreamsPerUser, pollInterval: pollInterval,
+		maxStreamsPerUserPerReplica: maxStreamsPerUserPerReplica, pollInterval: pollInterval,
 		active: make(map[int64]int),
 	}
 	for _, opt := range opts {
@@ -293,7 +294,7 @@ func (s *DurableStreamProjector) yieldInternalError(ctx context.Context, yield f
 func (s *DurableStreamProjector) acquire(userID int64) func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.maxStreamsPerUser > 0 && s.active[userID] >= s.maxStreamsPerUser {
+	if s.maxStreamsPerUserPerReplica > 0 && s.active[userID] >= s.maxStreamsPerUserPerReplica {
 		return nil
 	}
 	s.active[userID]++

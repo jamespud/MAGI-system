@@ -21,5 +21,5 @@ data:
   MAGI_A2A_MAX_REQUEST_BYTES: {{ .Values.configuration.a2a.maxRequestBytes | quote }}
   MAGI_A2A_MAX_PARTS: {{ .Values.configuration.a2a.maxParts | quote }}
   MAGI_A2A_MAX_PAGE_SIZE: {{ .Values.configuration.a2a.maxPageSize | quote }}
-  MAGI_A2A_MAX_STREAMS_PER_USER: {{ .Values.configuration.a2a.maxStreamsPerUser | quote }}
+  MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: {{ .Values.configuration.a2a.maxStreamsPerUserPerReplica | quote }}
   MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: {{ .Values.configuration.a2a.crossInstancePollInterval | quote }}

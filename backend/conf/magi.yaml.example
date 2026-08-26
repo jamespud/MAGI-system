@@ -22,7 +22,8 @@ a2a:
   max_request_bytes: 98304
   max_parts: 16
   max_page_size: 100
-  max_streams_per_user: 8
+  # Limit applies independently on each MAGI replica.
+  max_streams_per_user_per_replica: 8
   cross_instance_poll_interval: "2s"
 
 # Database (usually injected via env: MAGI_DB_DSN / MAGI_DB_DRIVER).

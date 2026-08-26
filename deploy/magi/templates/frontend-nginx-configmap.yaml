@@ -39,6 +39,7 @@ data:
         proxy_set_header X-Forwarded-Proto {{ print "$" }}scheme;
       }
       location /a2a/ {
+        client_max_body_size {{ .Values.configuration.a2a.maxRequestBytes }};
         proxy_pass http://{{ include "magi.fullname" . }}-backend:{{ .Values.backend.service.port }};
         proxy_http_version 1.1;
         proxy_set_header Host {{ print "$" }}host;

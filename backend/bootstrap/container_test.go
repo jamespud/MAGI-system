@@ -120,7 +120,7 @@ func a2aTestConfig(enabled bool) *bootstrap.Config {
 	cfg.A2A.MaxMessageBytes = 65536
 	cfg.A2A.MaxParts = 16
 	cfg.A2A.MaxPageSize = 100
-	cfg.A2A.MaxStreamsPerUser = 8
+	cfg.A2A.MaxStreamsPerUserPerReplica = 8
 	cfg.A2A.CrossInstancePollInterval = 2 * time.Second
 	cfg.Magi.MaxDebateRounds = 3
 	return cfg

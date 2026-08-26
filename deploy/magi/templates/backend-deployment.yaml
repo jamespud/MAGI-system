@@ -139,11 +139,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "magi.fullname" . }}-backend-config
                   key: MAGI_A2A_MAX_PAGE_SIZE
-            - name: MAGI_A2A_MAX_STREAMS_PER_USER
+            - name: MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "magi.fullname" . }}-backend-config
-                  key: MAGI_A2A_MAX_STREAMS_PER_USER
+                  key: MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA
             - name: MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL
               valueFrom:
                 configMapKeyRef:

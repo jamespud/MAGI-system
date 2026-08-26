@@ -276,6 +276,54 @@ func TestMount_RejectsOversizedRequestBody(t *testing.T) {
 	}
 }
 
+func TestMount_RejectsChunkedOversizedRequestBody(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	h := hzserver.Default(hzserver.WithHostPorts(addr))
+	h.Use(server.Auth(svc))
+	a2atransport.Mount(h, a2atransport.MountDeps{
+		Handler: &fakeHandler{}, PublicURL: "http://" + addr, BasePath: "/a2a",
+		Name: "MAGI", Description: "d", MaxRequestBytes: 128,
+	})
+	go func() { h.Spin() }()
+	t.Cleanup(func() { _ = h.Shutdown(context.Background()) })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	body := `{"message":{"messageId":"m-1","role":"ROLE_USER","parts":[{"text":"` + strings.Repeat("x", 512) + `"}]}}`
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/a2a/message:send", io.LimitReader(strings.NewReader(body), int64(len(body))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "tok-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("chunked oversized body = %d, want 413 body=%s", resp.StatusCode, data)
+	}
+}
+
 func startA2AMount(t *testing.T, authSvc *auth.Service, fake a2asrv.RequestHandler, basePath string) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

@@ -107,29 +107,30 @@ type Config struct {
 
 // A2AConfig configures the optional A2A server surface.
 type A2AConfig struct {
-	Enabled                   bool          `yaml:"enabled"`
-	PublicURL                 string        `yaml:"public_url"`
-	BasePath                  string        `yaml:"base_path"`
-	MaxMessageBytes           int           `yaml:"max_message_bytes"`
-	MaxRequestBytes           int           `yaml:"max_request_bytes"`
-	MaxParts                  int           `yaml:"max_parts"`
-	MaxPageSize               int           `yaml:"max_page_size"`
-	MaxStreamsPerUser         int           `yaml:"max_streams_per_user"`
-	CrossInstancePollInterval time.Duration `yaml:"cross_instance_poll_interval"`
+	Enabled         bool   `yaml:"enabled"`
+	PublicURL       string `yaml:"public_url"`
+	BasePath        string `yaml:"base_path"`
+	MaxMessageBytes int    `yaml:"max_message_bytes"`
+	MaxRequestBytes int    `yaml:"max_request_bytes"`
+	MaxParts        int    `yaml:"max_parts"`
+	MaxPageSize     int    `yaml:"max_page_size"`
+	// MaxStreamsPerUserPerReplica is enforced independently by each MAGI replica.
+	MaxStreamsPerUserPerReplica int           `yaml:"max_streams_per_user_per_replica"`
+	CrossInstancePollInterval   time.Duration `yaml:"cross_instance_poll_interval"`
 }
 
 // UnmarshalYAML accepts Go duration strings for the polling interval.
 func (c *A2AConfig) UnmarshalYAML(value *yaml.Node) error {
 	var aux struct {
-		Enabled                   bool   `yaml:"enabled"`
-		PublicURL                 string `yaml:"public_url"`
-		BasePath                  string `yaml:"base_path"`
-		MaxMessageBytes           int    `yaml:"max_message_bytes"`
-		MaxRequestBytes           int    `yaml:"max_request_bytes"`
-		MaxParts                  int    `yaml:"max_parts"`
-		MaxPageSize               int    `yaml:"max_page_size"`
-		MaxStreamsPerUser         int    `yaml:"max_streams_per_user"`
-		CrossInstancePollInterval string `yaml:"cross_instance_poll_interval"`
+		Enabled                     bool   `yaml:"enabled"`
+		PublicURL                   string `yaml:"public_url"`
+		BasePath                    string `yaml:"base_path"`
+		MaxMessageBytes             int    `yaml:"max_message_bytes"`
+		MaxRequestBytes             int    `yaml:"max_request_bytes"`
+		MaxParts                    int    `yaml:"max_parts"`
+		MaxPageSize                 int    `yaml:"max_page_size"`
+		MaxStreamsPerUserPerReplica int    `yaml:"max_streams_per_user_per_replica"`
+		CrossInstancePollInterval   string `yaml:"cross_instance_poll_interval"`
 	}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -143,15 +144,15 @@ func (c *A2AConfig) UnmarshalYAML(value *yaml.Node) error {
 		}
 	}
 	*c = A2AConfig{
-		Enabled:                   aux.Enabled,
-		PublicURL:                 aux.PublicURL,
-		BasePath:                  aux.BasePath,
-		MaxMessageBytes:           aux.MaxMessageBytes,
-		MaxRequestBytes:           aux.MaxRequestBytes,
-		MaxParts:                  aux.MaxParts,
-		MaxPageSize:               aux.MaxPageSize,
-		MaxStreamsPerUser:         aux.MaxStreamsPerUser,
-		CrossInstancePollInterval: pollInterval,
+		Enabled:                     aux.Enabled,
+		PublicURL:                   aux.PublicURL,
+		BasePath:                    aux.BasePath,
+		MaxMessageBytes:             aux.MaxMessageBytes,
+		MaxRequestBytes:             aux.MaxRequestBytes,
+		MaxParts:                    aux.MaxParts,
+		MaxPageSize:                 aux.MaxPageSize,
+		MaxStreamsPerUserPerReplica: aux.MaxStreamsPerUserPerReplica,
+		CrossInstancePollInterval:   pollInterval,
 	}
 	return nil
 }
@@ -311,18 +312,18 @@ type ESConfig struct {
 }
 
 type RAGConfig struct {
-	Levels             []int  `yaml:"levels"`
-	TopK               int    `yaml:"top_k"`
-	RRFK               int    `yaml:"rrf_k"`
-	MergeThreshold900  int    `yaml:"merge_threshold_900"`
-	MergeThreshold1800 int    `yaml:"merge_threshold_1800"`
-	OrphanStrategy     string `yaml:"orphan_strategy"`
-	StoreAsync         bool   `yaml:"store_async"`
-	StoreWorkers       int    `yaml:"store_workers"`
-	IndexJobMaxAttempts int   `yaml:"index_job_max_attempts"`
-	IndexLeaseSeconds  int    `yaml:"index_lease_seconds"`
-	IndexPollIntervalMS int   `yaml:"index_poll_interval_ms"`
-	IndexRetryBaseMS   int    `yaml:"index_retry_base_ms"`
+	Levels              []int  `yaml:"levels"`
+	TopK                int    `yaml:"top_k"`
+	RRFK                int    `yaml:"rrf_k"`
+	MergeThreshold900   int    `yaml:"merge_threshold_900"`
+	MergeThreshold1800  int    `yaml:"merge_threshold_1800"`
+	OrphanStrategy      string `yaml:"orphan_strategy"`
+	StoreAsync          bool   `yaml:"store_async"`
+	StoreWorkers        int    `yaml:"store_workers"`
+	IndexJobMaxAttempts int    `yaml:"index_job_max_attempts"`
+	IndexLeaseSeconds   int    `yaml:"index_lease_seconds"`
+	IndexPollIntervalMS int    `yaml:"index_poll_interval_ms"`
+	IndexRetryBaseMS    int    `yaml:"index_retry_base_ms"`
 }
 
 type ModelSpec struct {
@@ -480,8 +481,8 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.A2A.MaxPageSize == 0 {
 		cfg.A2A.MaxPageSize = 100
 	}
-	if cfg.A2A.MaxStreamsPerUser == 0 {
-		cfg.A2A.MaxStreamsPerUser = 8
+	if cfg.A2A.MaxStreamsPerUserPerReplica == 0 {
+		cfg.A2A.MaxStreamsPerUserPerReplica = 8
 	}
 	if cfg.A2A.CrossInstancePollInterval == 0 {
 		cfg.A2A.CrossInstancePollInterval = 2 * time.Second
@@ -608,9 +609,9 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.A2A.MaxPageSize = n
 		}
 	}
-	if v := os.Getenv("MAGI_A2A_MAX_STREAMS_PER_USER"); v != "" {
+	if v := os.Getenv("MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			cfg.A2A.MaxStreamsPerUser = n
+			cfg.A2A.MaxStreamsPerUserPerReplica = n
 		}
 	}
 	if v := os.Getenv("MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL"); v != "" {
@@ -928,8 +929,8 @@ func validateA2A(c *Config) error {
 		return fmt.Errorf("a2a.max_request_bytes: must be at most 4194304")
 	}
 	if cfg.MaxMessageBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxParts <= 0 ||
-		cfg.MaxPageSize <= 0 || cfg.MaxStreamsPerUser <= 0 {
-		return fmt.Errorf("a2a: max_message_bytes, max_request_bytes, max_parts, max_page_size and max_streams_per_user must be positive")
+		cfg.MaxPageSize <= 0 || cfg.MaxStreamsPerUserPerReplica <= 0 {
+		return fmt.Errorf("a2a: max_message_bytes, max_request_bytes, max_parts, max_page_size and max_streams_per_user_per_replica must be positive")
 	}
 	if strings.TrimSpace(cfg.BasePath) != "/a2a" {
 		return fmt.Errorf("a2a.base_path: must be /a2a (nginx and Helm routes are pinned to this path)")
@@ -940,7 +941,8 @@ func validateA2A(c *Config) error {
 
 	publicURL := strings.TrimSpace(cfg.PublicURL)
 	u, err := url.Parse(publicURL)
-	if err != nil || !u.IsAbs() || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+	if err != nil || !u.IsAbs() || u.Opaque != "" || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.User != nil || u.RawPath != "" ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("a2a.public_url: absolute HTTPS URL is required")
 	}
 	return nil
