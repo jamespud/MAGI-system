@@ -101,6 +101,16 @@ const (
 	CancelNotFound        CancelOutcome = "not_found"
 )
 
+// CancelResult is the durable outcome of a cancellation. Event is the ordered
+// durable CANCELLED event committed by CancelTask when cancellation applied; it
+// is nil for already-canceled, terminal, or not-found outcomes. Record is the
+// owner-scoped Task snapshot read in the same transaction as the cancel.
+type CancelResult struct {
+	Record  *TaskRecord
+	Outcome CancelOutcome
+	Event   *entity.MagiEvent
+}
+
 type SubmissionRepository interface {
 	Prepare(context.Context, PrepareCommand) (*PreparedSubmission, bool, error)
 	MarkStarted(context.Context, string) error
@@ -109,5 +119,5 @@ type SubmissionRepository interface {
 	GetByTask(context.Context, int64, string) (*Submission, error)
 	GetTaskRecord(context.Context, int64, string) (*TaskRecord, error)
 	ListTasks(context.Context, TaskListFilter) (*TaskPage, error)
-	CancelTask(context.Context, int64, string) (*TaskRecord, CancelOutcome, error)
+	CancelTask(context.Context, int64, string) (*CancelResult, error)
 }

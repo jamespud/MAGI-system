@@ -1217,7 +1217,8 @@ func ProvideA2A(db *gorm.DB, cfg *Config, rm *decision.RunManager, broker *appse
 		cfg.A2A.MaxStreamsPerUser, cfg.A2A.CrossInstancePollInterval,
 		a2aapp.WithStreamMetrics(reg))
 	handler := a2aapp.NewHandler(svc, a2aRepo, proj, cursor, rm, stream,
-		a2aapp.WithHandlerMetrics(reg), a2aapp.WithHandlerAudit(auditSvc))
+		a2aapp.WithHandlerMetrics(reg), a2aapp.WithHandlerAudit(auditSvc),
+		a2aapp.WithHandlerLivePublisher(broker))
 	return &A2A{
 		Enabled:         true,
 		SubmissionRepo:  a2aRepo,

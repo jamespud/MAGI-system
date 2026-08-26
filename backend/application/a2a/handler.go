@@ -18,6 +18,7 @@ import (
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 // StreamProjector yields ordered A2A events for an owner-scoped task. The
@@ -36,6 +37,7 @@ type Handler struct {
 	cursor      CursorCodec
 	runManager  *decision.RunManager
 	stream      StreamProjector
+	live        port.LiveEventPublisher
 	metrics     *metrics.Registry
 	audit       *audit.Service
 }
@@ -51,6 +53,12 @@ func WithHandlerMetrics(reg *metrics.Registry) HandlerOption {
 // WithHandlerAudit records Send/Cancel audit events (message IDs are hashed).
 func WithHandlerAudit(auditSvc *audit.Service) HandlerOption {
 	return func(h *Handler) { h.audit = auditSvc }
+}
+
+// WithHandlerLivePublisher fans out events that the repository already made
+// durable, so in-process streams observe cancellations immediately.
+func WithHandlerLivePublisher(live port.LiveEventPublisher) HandlerOption {
+	return func(h *Handler) { h.live = live }
 }
 
 func NewHandler(submissions *SubmissionService, repository SubmissionRepository, projector *TaskProjector, cursor CursorCodec, runManager *decision.RunManager, stream StreamProjector, opts ...HandlerOption) *Handler {
@@ -146,18 +154,23 @@ func (h *Handler) CancelTask(ctx context.Context, req *a2a.CancelTaskRequest) (_
 	}
 	userID := userIDFrom(ctx)
 	span.SetAttributes(attribute.String("task.id", string(req.ID)), attribute.Int64("user.id", userID))
-	record, outcome, err := h.repository.CancelTask(ctx, userID, string(req.ID))
+	result, err := h.repository.CancelTask(ctx, userID, string(req.ID))
 	if err != nil {
 		return nil, h.internalError(err)
 	}
-	switch outcome {
+	switch result.Outcome {
 	case CancelNotFound:
 		return nil, a2a.NewError(a2a.ErrTaskNotFound, "task not found")
 	case CancelNotCancelable:
 		return nil, a2a.NewError(a2a.ErrTaskNotCancelable, "task is in a terminal state")
 	case CancelApplied, CancelAlreadyCanceled:
+		if result.Event != nil && h.live != nil {
+			// The event is already durable; this is a best-effort live fanout
+			// for in-process streams. Remote replicas read the durable event.
+			_ = h.live.PublishLive(ctx, *result.Event)
+		}
 		h.runManager.CancelLocal(string(req.ID))
-		task := h.projector.Project(record, 1)
+		task := h.projector.Project(result.Record, 1)
 		h.auditCancel(ctx, req, task.Status.State == a2a.TaskStateCanceled)
 		return task, nil
 	default:

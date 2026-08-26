@@ -289,14 +289,26 @@ func (r *a2aSubmissionRepo) GetByTask(ctx context.Context, userID int64, taskID 
 }
 
 func (r *a2aSubmissionRepo) GetTaskRecord(ctx context.Context, userID int64, taskID string) (*a2aapp.TaskRecord, error) {
-	var model A2ASubmissionModel
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND task_id = ?", userID, taskID).First(&model).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, a2aapp.ErrNotFound
+	// The owner-scoped binding, Case, Job, artifacts, and MaxEventSeq must be
+	// read inside one transaction so a concurrent terminal commit can never
+	// yield a pre-terminal Case paired with a terminal event watermark.
+	var record *a2aapp.TaskRecord
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model A2ASubmissionModel
+		if err := tx.Where("user_id = ? AND task_id = ?", userID, taskID).First(&model).Error; err != nil {
+			return err
 		}
+		var loadErr error
+		record, loadErr = loadTaskRecord(tx, model, true)
+		return loadErr
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, a2aapp.ErrNotFound
+	}
+	if err != nil {
 		return nil, err
 	}
-	return loadTaskRecord(r.db.WithContext(ctx), model, true)
+	return record, nil
 }
 
 func (r *a2aSubmissionRepo) ListTasks(ctx context.Context, filter a2aapp.TaskListFilter) (*a2aapp.TaskPage, error) {
@@ -349,13 +361,24 @@ func (r *a2aSubmissionRepo) ListTasks(ctx context.Context, filter a2aapp.TaskLis
 		page.Next = &a2aapp.TaskCursor{CreatedAt: last.CreatedAt, ID: last.TaskID}
 	}
 	for _, model := range models {
-		record, err := loadTaskRecord(r.db.WithContext(ctx), model, filter.IncludeArtifacts)
+		record, err := r.loadRecordTx(ctx, model, filter.IncludeArtifacts)
 		if err != nil {
 			return nil, err
 		}
 		page.Records = append(page.Records, *record)
 	}
 	return page, nil
+}
+
+// loadRecordTx loads one TaskRecord inside a consistent read transaction.
+func (r *a2aSubmissionRepo) loadRecordTx(ctx context.Context, model A2ASubmissionModel, includeArtifacts bool) (*a2aapp.TaskRecord, error) {
+	var record *a2aapp.TaskRecord
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var loadErr error
+		record, loadErr = loadTaskRecord(tx, model, includeArtifacts)
+		return loadErr
+	})
+	return record, err
 }
 
 func statusPredicateSQL(state string) (string, []any) {
@@ -414,13 +437,13 @@ func inPlaceholders(n int) string {
 	return strings.TrimRight(strings.Repeat("?,", n), ",")
 }
 
-func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID string) (*a2aapp.TaskRecord, a2aapp.CancelOutcome, error) {
-	var record *a2aapp.TaskRecord
-	outcome := a2aapp.CancelNotFound
+func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID string) (*a2aapp.CancelResult, error) {
+	var result *a2aapp.CancelResult
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var binding A2ASubmissionModel
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND task_id = ?", userID, taskID).First(&binding).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			result = &a2aapp.CancelResult{Outcome: a2aapp.CancelNotFound}
 			return nil
 		}
 		if err != nil {
@@ -431,24 +454,46 @@ func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID
 			return err
 		}
 		caseEntity := caseFromModel(&caseModel)
-		if caseEntity.Status == entity.CaseStatusCancelled {
-			outcome = a2aapp.CancelAlreadyCanceled
-		} else if isTerminalCaseStatus(caseEntity.Status) {
-			outcome = a2aapp.CancelNotCancelable
-		} else {
-			if err := tx.Model(&CaseModel{}).Where("id = ?", binding.TaskID).Updates(map[string]any{"status": string(entity.CaseStatusCancelled), "updated_at": time.Now().UTC()}).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&DecisionJobModel{}).Where("case_id = ?", binding.TaskID).Update("status", string(entity.DecisionJobCancelled)).Error; err != nil {
-				return err
-			}
-			outcome = a2aapp.CancelApplied
+		// A REJECTED binding is already terminal from the client's perspective
+		// (the Case stays DRAFT for other MAGI queries), so it must never
+		// become cancelable. Check it before the DRAFT Case status.
+		if binding.State == string(a2aapp.SubmissionRejected) {
+			result = &a2aapp.CancelResult{Outcome: a2aapp.CancelNotCancelable}
+			return nil
 		}
-		var loadErr error
-		record, loadErr = loadTaskRecord(tx, binding, true)
-		return loadErr
+		if caseEntity.Status == entity.CaseStatusCancelled {
+			record, loadErr := loadTaskRecord(tx, binding, true)
+			if loadErr != nil {
+				return loadErr
+			}
+			result = &a2aapp.CancelResult{Record: record, Outcome: a2aapp.CancelAlreadyCanceled}
+			return nil
+		}
+		if isTerminalCaseStatus(caseEntity.Status) {
+			result = &a2aapp.CancelResult{Outcome: a2aapp.CancelNotCancelable}
+			return nil
+		}
+		if err := tx.Model(&CaseModel{}).Where("id = ?", binding.TaskID).Updates(map[string]any{"status": string(entity.CaseStatusCancelled), "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&DecisionJobModel{}).Where("case_id = ?", binding.TaskID).Update("status", string(entity.DecisionJobCancelled)).Error; err != nil {
+			return err
+		}
+		// Every applied cancellation emits exactly one ordered durable event so
+		// remote replicas can observe the transition; the live broker only
+		// fans this committed event out after the transaction commits.
+		event := entity.NewEvent(binding.TaskID, "", nil, entity.EventCaseStatusChanged, map[string]any{"status": string(entity.CaseStatusCancelled)})
+		if err := createEventInTx(tx, &event); err != nil {
+			return err
+		}
+		record, loadErr := loadTaskRecord(tx, binding, true)
+		if loadErr != nil {
+			return loadErr
+		}
+		result = &a2aapp.CancelResult{Record: record, Outcome: a2aapp.CancelApplied, Event: &event}
+		return nil
 	})
-	return record, outcome, err
+	return result, err
 }
 
 func loadPreparedSubmission(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.PreparedSubmission, error) {

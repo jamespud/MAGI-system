@@ -134,9 +134,42 @@ func TestA2ASubmissionTaskAccess_IsOwnerScoped(t *testing.T) {
 	if err != nil || len(page.Records) != 0 {
 		t.Fatalf("foreign list = (%+v, %v), want no records", page, err)
 	}
-	record, outcome, err := repo.CancelTask(ctx, 8, "task-1")
-	if err != nil || record != nil || outcome != a2a.CancelNotFound {
-		t.Fatalf("foreign cancel = (%+v, %q, %v), want not found", record, outcome, err)
+	result, err := repo.CancelTask(ctx, 8, "task-1")
+	if err != nil || result == nil || result.Record != nil || result.Outcome != a2a.CancelNotFound {
+		t.Fatalf("foreign cancel = (%+v, %v), want not found", result, err)
+	}
+}
+
+// TestA2ASubmissionCancel_RejectedBindingIsNotCancelable guards the invariant
+// that a REJECTED binding is terminal from the A2A client's perspective even
+// though the Case stays DRAFT: CancelTask must report not-cancelable and must
+// not flip the Case to CANCELLED or emit an event.
+func TestA2ASubmissionCancel_RejectedBindingIsNotCancelable(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	ctx := context.Background()
+	if _, _, err := repo.Prepare(ctx, a2aPrepareCommand(7, "message-1", "hash", "task-1", "context-1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkRejected(ctx, "sub-task-1", "budget_exceeded"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := repo.CancelTask(ctx, 7, "task-1")
+	if err != nil || result == nil || result.Outcome != a2a.CancelNotCancelable || result.Event != nil {
+		t.Fatalf("rejected cancel = %+v err=%v, want not-cancelable without event", result, err)
+	}
+	var caseModel magi.CaseModel
+	if err := db.Where("id = ?", "task-1").First(&caseModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if caseModel.Status != string(entity.CaseStatusDraft) {
+		t.Fatalf("case status = %s, want DRAFT (rejected cancel must not touch the case)", caseModel.Status)
+	}
+	var events int64
+	if err := db.Model(&magi.EventModel{}).Where("case_id = ?", "task-1").Count(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if events != 0 {
+		t.Fatalf("rejected cancel wrote %d durable events, want 0", events)
 	}
 }
 
