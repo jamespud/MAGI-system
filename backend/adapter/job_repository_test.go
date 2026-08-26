@@ -124,3 +124,116 @@ func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) 
 		t.Fatalf("events after rejected terminal commit: %+v err=%v", events, err)
 	}
 }
+
+func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Repository, port.DecisionJobRepository, *entity.DecisionJob) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(magi.AllModels()...); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusInvestigating}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	jobs := magi.NewDecisionJobRepository(db)
+	job, err := jobs.Enqueue(context.Background(), caseID, 1)
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("claim: job=%+v ok=%v err=%v", claimed, ok, err)
+	}
+	return db, repo, jobs, claimed
+}
+
+func TestDecisionJobRepository_CommitFinalFailureAtomically(t *testing.T) {
+	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-failure")
+	event := entity.NewEvent("case-final-failure", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", "case-final-failure",
+		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "boom", &event)
+	if err != nil || !committed {
+		t.Fatalf("commit final failure: committed=%v err=%v", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), "case-final-failure")
+	if err != nil || caseAfter.Status != entity.CaseStatusFailed {
+		t.Fatalf("case after final failure = %+v err=%v", caseAfter, err)
+	}
+	jobAfter, err := jobs.GetByCase(context.Background(), "case-final-failure")
+	if err != nil || jobAfter.Status != entity.DecisionJobFailed || jobAfter.LastError != "boom" {
+		t.Fatalf("job after final failure = %+v err=%v", jobAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), "case-final-failure")
+	if err != nil || len(events) != 1 || events[0].Type != entity.EventCaseFailed || events[0].Seq != 1 || event.Seq != 1 {
+		t.Fatalf("failure events = %+v err=%v event=%+v", events, err, event)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", "case-final-failure").Error; err != nil || cursor.NextSeq != 2 {
+		t.Fatalf("failure cursor = %+v err=%v", cursor, err)
+	}
+}
+
+func TestDecisionJobRepository_CommitFinalFailureFenceLossRollsBack(t *testing.T) {
+	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-fence")
+	event := entity.NewEvent("case-final-fence", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-b", "case-final-fence",
+		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "late", &event)
+	if err != nil || committed {
+		t.Fatalf("fence loss = committed=%v err=%v, want no commit", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), "case-final-fence")
+	if err != nil || caseAfter.Status != entity.CaseStatusInvestigating {
+		t.Fatalf("case after fence loss = %+v err=%v", caseAfter, err)
+	}
+	jobAfter, err := jobs.GetByCase(context.Background(), "case-final-fence")
+	if err != nil || jobAfter.Status != entity.DecisionJobRunning || jobAfter.WorkerID != "worker-a" {
+		t.Fatalf("job after fence loss = %+v err=%v", jobAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), "case-final-fence")
+	if err != nil || len(events) != 0 {
+		t.Fatalf("events after fence loss = %+v err=%v", events, err)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", "case-final-fence").Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("cursor after fence loss = %+v err=%v, want no cursor", cursor, err)
+	}
+}
+
+func TestDecisionJobRepository_CommitFinalFailureEventInsertRollback(t *testing.T) {
+	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-event-rollback")
+	duplicate := entity.NewEvent("case-final-event-rollback", "", nil, entity.EventCaseStatusChanged, map[string]any{"status": "INVESTIGATING"})
+	if err := repo.EventRepo().Create(context.Background(), &duplicate); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	failed := entity.NewEvent("case-final-event-rollback", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
+	failed.ID = duplicate.ID
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", "case-final-event-rollback",
+		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "boom", &failed)
+	if err == nil || committed {
+		t.Fatalf("duplicate event insert = committed=%v err=%v, want rollback", committed, err)
+	}
+	caseAfter, err := repo.CaseRepo().Get(context.Background(), "case-final-event-rollback")
+	if err != nil || caseAfter.Status != entity.CaseStatusInvestigating {
+		t.Fatalf("case after event rollback = %+v err=%v", caseAfter, err)
+	}
+	jobAfter, err := jobs.GetByCase(context.Background(), "case-final-event-rollback")
+	if err != nil || jobAfter.Status != entity.DecisionJobRunning || jobAfter.WorkerID != "worker-a" {
+		t.Fatalf("job after event rollback = %+v err=%v", jobAfter, err)
+	}
+	events, err := repo.EventRepo().ListByCase(context.Background(), "case-final-event-rollback")
+	if err != nil || len(events) != 1 || events[0].ID != duplicate.ID || events[0].Seq != 1 {
+		t.Fatalf("events after event rollback = %+v err=%v", events, err)
+	}
+	var cursor magi.EventCursorModel
+	if err := db.First(&cursor, "case_id = ?", "case-final-event-rollback").Error; err != nil || cursor.NextSeq != 2 {
+		t.Fatalf("cursor after event rollback = %+v err=%v", cursor, err)
+	}
+}

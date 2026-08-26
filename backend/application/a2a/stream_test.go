@@ -7,14 +7,17 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
 	magi "github.com/jamespud/magi/backend/adapter"
 	a2aapp "github.com/jamespud/magi/backend/application/a2a"
+	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/gorm"
 )
 
@@ -192,6 +195,38 @@ type streamCollector struct {
 	done   chan struct{}
 }
 
+type retryTerminalOrchestrator struct {
+	caseRepo       port.CaseRepository
+	resolutionRepo port.ResolutionRepository
+	events         port.EventRepository
+	calls          atomic.Int32
+}
+
+func (o *retryTerminalOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	if o.calls.Add(1) == 1 {
+		if err := o.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusFailed); err != nil {
+			return nil, err
+		}
+		failed := entity.NewEvent(c.ID, "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
+		if err := o.events.Create(ctx, &failed); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("transient")
+	}
+	if err := o.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusResolved); err != nil {
+		return nil, err
+	}
+	resolution := &entity.Resolution{ID: "res-" + c.ID, CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}
+	if err := o.resolutionRepo.Create(ctx, resolution); err != nil {
+		return nil, err
+	}
+	completed := entity.NewEvent(c.ID, "", nil, entity.EventCaseCompleted, map[string]any{"status": "RESOLVED"})
+	if err := o.events.Create(ctx, &completed); err != nil {
+		return nil, err
+	}
+	return resolution, nil
+}
+
 func startCollect(ctx context.Context, seq iter.Seq2[a2a.Event, error]) *streamCollector {
 	c := &streamCollector{done: make(chan struct{})}
 	go func() {
@@ -304,6 +339,95 @@ func TestStreamProjector_SubscribeTerminalClosesImmediately(t *testing.T) {
 	task, ok := events[0].(*a2a.Task)
 	if !ok || task.Status.State != a2a.TaskStateCompleted || len(task.Artifacts) != 2 {
 		t.Fatalf("terminal snapshot = %#v", events[0])
+	}
+}
+
+func TestRunManager_RetryDoesNotCloseA2AStreamBeforeSuccess(t *testing.T) {
+	stream, db, repo, broker := newStreamHarness(t, 8)
+	aggregate := magi.NewRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	stream = a2aapp.NewDurableStreamProjector(repo, aggregate.EventRepo(), broker, a2aapp.NewTaskProjector(redact.New("sk-secret")), 8, 10*time.Millisecond)
+	seedStreamTask(t, db, repo, "case-retry-stream", "conv-retry", entity.CaseStatusDraft, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	collector := startCollect(ctx, stream.Events(ctx, 7, "case-retry-stream"))
+	waitFor(t, time.Second, func() bool { return len(collector.snapshot()) >= 1 })
+
+	orch := &retryTerminalOrchestrator{
+		caseRepo:       aggregate.CaseRepo(),
+		resolutionRepo: aggregate.ResolutionRepo(),
+		events:         aggregate.EventRepo(),
+	}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: aggregate.CaseRepo(), WorkerID: "retry-stream-worker",
+		MaxAttempts: 2, RetryBase: 100 * time.Millisecond,
+	})
+	case_, err := aggregate.CaseRepo().Get(context.Background(), "case-retry-stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rm.Start(ctx, case_); err != nil {
+		t.Fatalf("start retry: %v", err)
+	}
+
+	select {
+	case <-collector.done:
+	case <-ctx.Done():
+		job, jobErr := jobs.GetByCase(context.Background(), "case-retry-stream")
+		caseAfter, caseErr := aggregate.CaseRepo().Get(context.Background(), "case-retry-stream")
+		durableEvents, eventErr := aggregate.EventRepo().ListByCase(context.Background(), "case-retry-stream")
+		t.Fatalf("A2A stream did not terminate after retry success: calls=%d job=%+v jobErr=%v case=%+v caseErr=%v durableEvents=%+v eventErr=%v events=%v", orch.calls.Load(), job, jobErr, caseAfter, caseErr, durableEvents, eventErr, collector.snapshot())
+	}
+	var states []a2a.TaskState
+	for _, event := range collector.snapshot() {
+		switch e := event.(type) {
+		case *a2a.Task:
+			states = append(states, e.Status.State)
+		case *a2a.TaskStatusUpdateEvent:
+			states = append(states, e.Status.State)
+		}
+	}
+	if len(states) < 2 {
+		t.Fatalf("retry stream states = %v, want at least initial and final", states)
+	}
+	for i, state := range states[:len(states)-1] {
+		if state.Terminal() {
+			t.Fatalf("state[%d]=%s became terminal before retry success; states=%v", i, state, states)
+		}
+	}
+	if got := states[len(states)-1]; got != a2a.TaskStateCompleted {
+		t.Fatalf("final state=%s, want COMPLETED; states=%v", got, states)
+	}
+}
+
+func TestDurableStream_TerminalSnapshotClosesAfterEmptyDrain(t *testing.T) {
+	stream, db, repo, _ := newStreamHarness(t, 8)
+	seedStreamTask(t, db, repo, "case-eventless-failure", "conv-1", entity.CaseStatusInvestigating, running())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	c := startCollect(ctx, stream.Events(ctx, 7, "case-eventless-failure"))
+	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
+
+	// Simulate a legacy/event-loss row: the authoritative Case reaches FAILED
+	// after the initial watermark, but its terminal event is absent.
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-eventless-failure").Update("status", string(entity.CaseStatusFailed)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-c.done:
+	case <-ctx.Done():
+		t.Fatal("stream did not close after observing terminal snapshot without an event")
+	}
+	events := c.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("eventless terminal sequence = %d events, want initial snapshot and one failed update", len(events))
+	}
+	status, ok := events[1].(*a2a.TaskStatusUpdateEvent)
+	if !ok || status.Status.State != a2a.TaskStateFailed {
+		t.Fatalf("eventless terminal update = %#v, want FAILED status", events[1])
 	}
 }
 
