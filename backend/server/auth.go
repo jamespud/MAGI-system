@@ -7,6 +7,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/server/a2aerror"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -41,7 +42,11 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 			}
 		}
 		if !ok {
-			c.JSON(consts.StatusUnauthorized, dto.ErrorResponse{Error: "unauthorized"})
+			if a2aerror.IsProtocolPath(string(c.Path())) {
+				a2aerror.Write(c, consts.StatusUnauthorized, "UNAUTHENTICATED", "UNAUTHENTICATED", "unauthorized")
+			} else {
+				c.JSON(consts.StatusUnauthorized, dto.ErrorResponse{Error: "unauthorized"})
+			}
 			c.Abort()
 			return
 		}

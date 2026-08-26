@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
 	"github.com/jamespud/magi/backend/application/auth"
+	"github.com/jamespud/magi/backend/server/a2aerror"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -123,9 +124,14 @@ func RateLimit(cfg RateLimitConfig) app.HandlerFunc {
 		ok, retryAfter := lim.Allow(userID, ip)
 		if !ok {
 			c.Header("Retry-After", retryAfterHeader(retryAfter))
-			c.AbortWithStatusJSON(consts.StatusTooManyRequests, dto.ErrorResponse{
-				Error: "rate limit exceeded",
-			})
+			if a2aerror.IsProtocolPath(string(c.Path())) {
+				a2aerror.Write(c, consts.StatusTooManyRequests, "RESOURCE_EXHAUSTED", "RESOURCE_EXHAUSTED", "rate limit exceeded")
+				c.Abort()
+			} else {
+				c.AbortWithStatusJSON(consts.StatusTooManyRequests, dto.ErrorResponse{
+					Error: "rate limit exceeded",
+				})
+			}
 			return
 		}
 		c.Next(ctx)

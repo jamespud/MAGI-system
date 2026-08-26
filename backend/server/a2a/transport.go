@@ -11,9 +11,10 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/cloudwego/hertz/pkg/common/utils"
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
+
+	"github.com/jamespud/magi/backend/server/a2aerror"
 )
 
 // WellKnownAgentCardPath is the A2A discovery path.
@@ -95,7 +96,8 @@ func Mount(h *hzserver.Hertz, deps MountDeps) {
 func requestBodyLimit(limit int64) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		if int64(c.Request.Header.ContentLength()) > limit {
-			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, utils.H{"error": "request body too large"})
+			a2aerror.Write(c, http.StatusRequestEntityTooLarge, "INVALID_ARGUMENT", "INVALID_ARGUMENT", "request body too large")
+			c.Abort()
 			return
 		}
 		c.Next(ctx)

@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -96,12 +97,65 @@ func TestAuth_A2ABasePathRequiresToken(t *testing.T) {
 	h.GET("/a2a/tasks", func(ctx context.Context, c *app.RequestContext) {
 		c.JSON(200, map[string]any{"ok": true})
 	})
-	if w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil); w.Code != 401 {
-		t.Fatalf("/a2a without token = %d, want 401", w.Code)
+	unauth := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil)
+	if unauth.Code != 401 {
+		t.Fatalf("/a2a without token = %d, want 401", unauth.Code)
 	}
-	w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil, ut.Header{Key: "X-API-Key", Value: "tok-1"})
-	if w.Code != 200 {
-		t.Fatalf("/a2a with token = %d, want 200", w.Code)
+	assertA2AProtocolError(t, unauth.Body.Bytes(), 401, "UNAUTHENTICATED", "unauthorized")
+	authed := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil, ut.Header{Key: "X-API-Key", Value: "tok-1"})
+	if authed.Code != 200 {
+		t.Fatalf("/a2a with token = %d, want 200", authed.Code)
+	}
+}
+
+func TestAuth_NonA2AUnauthorizedKeepsLegacyDTO(t *testing.T) {
+	svc := auth.NewService(true, []auth.KeySpec{{Name: "a", Key: "tok-1", UserID: 7, Role: "user"}})
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.Auth(svc))
+	h.GET("/api/v1/decision", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	w := ut.PerformRequest(h.Engine, "GET", "/api/v1/decision", nil)
+	if w.Code != 401 {
+		t.Fatalf("non-A2A 401 = %d", w.Code)
+	}
+	var legacy struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &legacy); err != nil {
+		t.Fatalf("decode legacy body: %v", err)
+	}
+	if legacy.Error != "unauthorized" {
+		t.Fatalf("legacy body error = %q, want unauthorized", legacy.Error)
+	}
+}
+
+func assertA2AProtocolError(t *testing.T, body []byte, wantCode int, wantStatus, wantMessage string) {
+	t.Helper()
+	var parsed struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+			Details []struct {
+				Type   string `json:"@type"`
+				Reason string `json:"reason"`
+				Domain string `json:"domain"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("decode A2A protocol error: %v (body=%s)", err, body)
+	}
+	if parsed.Error.Code != wantCode || parsed.Error.Status != wantStatus || parsed.Error.Message != wantMessage {
+		t.Fatalf("protocol error = code=%d status=%s message=%s", parsed.Error.Code, parsed.Error.Status, parsed.Error.Message)
+	}
+	if len(parsed.Error.Details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(parsed.Error.Details))
+	}
+	d := parsed.Error.Details[0]
+	if d.Type != "type.googleapis.com/google.rpc.ErrorInfo" || d.Reason != wantStatus || d.Domain != "a2a-protocol.org" {
+		t.Fatalf("error info = %+v", d)
 	}
 }
 

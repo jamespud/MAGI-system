@@ -3,8 +3,13 @@ package server_test
 import (
 	"testing"
 
+	"context"
+	"encoding/json"
 	"net/http"
 
+	"github.com/cloudwego/hertz/pkg/app"
+	hzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/server"
 )
@@ -40,6 +45,75 @@ func TestRateLimiter_IPFallback(t *testing.T) {
 	}
 	if ok, _ := lim.Allow(0, "8.8.8.8"); !ok {
 		t.Fatal("a different ip must be allowed")
+	}
+}
+
+func TestRateLimit_A2A429UsesProtocolEnvelope(t *testing.T) {
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.RateLimit(server.RateLimitConfig{Enabled: true, PerIPPerMinute: 1}))
+	h.GET("/a2a/tasks", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	h.GET("/api/v1/decision", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	ip := ut.Header{Key: "X-Forwarded-For", Value: "5.5.5.5"}
+
+	if w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil, ip); w.Code != 200 {
+		t.Fatalf("first /a2a = %d, want 200", w.Code)
+	}
+	w := ut.PerformRequest(h.Engine, "GET", "/a2a/tasks", nil, ip)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second /a2a = %d, want 429", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got == "" {
+		t.Fatal("429 must carry Retry-After")
+	}
+	var parsed struct {
+		Error struct {
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+			Details []struct {
+				Type   string `json:"@type"`
+				Reason string `json:"reason"`
+				Domain string `json:"domain"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("decode 429 body: %v", err)
+	}
+	if parsed.Error.Code != 429 || parsed.Error.Status != "RESOURCE_EXHAUSTED" || parsed.Error.Message != "rate limit exceeded" {
+		t.Fatalf("429 protocol error = %+v", parsed.Error)
+	}
+	if len(parsed.Error.Details) != 1 || parsed.Error.Details[0].Domain != "a2a-protocol.org" {
+		t.Fatalf("429 details = %+v", parsed.Error.Details)
+	}
+}
+
+func TestRateLimit_NonA2A429KeepsLegacyDTO(t *testing.T) {
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.RateLimit(server.RateLimitConfig{Enabled: true, PerIPPerMinute: 1}))
+	h.GET("/api/v1/decision", func(ctx context.Context, c *app.RequestContext) {
+		c.JSON(200, map[string]any{"ok": true})
+	})
+	ip := ut.Header{Key: "X-Forwarded-For", Value: "6.6.6.6"}
+	if w := ut.PerformRequest(h.Engine, "GET", "/api/v1/decision", nil, ip); w.Code != 200 {
+		t.Fatalf("first = %d", w.Code)
+	}
+	w := ut.PerformRequest(h.Engine, "GET", "/api/v1/decision", nil, ip)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second = %d, want 429", w.Code)
+	}
+	var legacy struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &legacy); err != nil {
+		t.Fatalf("decode legacy 429: %v", err)
+	}
+	if legacy.Error != "rate limit exceeded" {
+		t.Fatalf("legacy 429 error = %q", legacy.Error)
 	}
 }
 
