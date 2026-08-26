@@ -22,6 +22,12 @@ type durableRetryOrchestrator struct {
 	calls int32
 }
 
+type terminalCaseErrorOrchestrator struct{}
+
+func (terminalCaseErrorOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
+	return nil, errors.New("late failure after terminal case state")
+}
+
 type blockingHeartbeatRepo struct {
 	port.DecisionJobRepository
 	started chan struct{}
@@ -107,10 +113,30 @@ func openJobDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func TestRunManager_TerminalCaseFailureSettlesRunningJob(t *testing.T) {
+	db := openJobDB(t)
+	repo := magi.NewRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	caseID := "case-terminal-job-settlement"
+	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusResolved}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	rm := decision.NewRunManager(terminalCaseErrorOrchestrator{}, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "terminal-settler", MaxAttempts: 1,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusResolved}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	job := waitJobStatus(t, jobs, caseID, entity.DecisionJobSucceeded)
+	if job.Status == entity.DecisionJobRunning {
+		t.Fatalf("terminal case left job running: %+v", job)
+	}
 }
 
 func waitJobStatus(t *testing.T, repo interface {

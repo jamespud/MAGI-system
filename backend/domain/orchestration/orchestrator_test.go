@@ -390,6 +390,35 @@ func TestOrchestrate_SynchronousFailureCommitsOneDurableFailureEvent(t *testing.
 	}
 }
 
+func TestOrchestrate_SynchronousFailureDoesNotOverwriteTerminalCase(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	c := &entity.DecisionCase{ID: "case-sync-terminal", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusMemoryIndexed}
+	baseRepo := newStubRepo()
+	repo := &failureTerminalCommitRepo{Repository: baseRepo}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+	if _, err := orch.Orchestrate(context.Background(), c); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("error = %v, want terminal fence", err)
+	}
+	if c.Status != entity.CaseStatusMemoryIndexed {
+		t.Fatalf("terminal case status = %s, want MEMORY_INDEXED", c.Status)
+	}
+	if repo.called {
+		t.Fatal("failure path attempted to overwrite a terminal case")
+	}
+	if len(repo.events) != 0 {
+		t.Fatalf("terminal overwrite emitted failure events: %+v", repo.events)
+	}
+}
+
 // TestOrchestrate_RetriesFailedAgent guards the retry path: an agent that
 // fails on its first attempt is re-dispatched (bounded) instead of being
 // immediately converted to an ABSTAIN, so transient failures do not
@@ -948,9 +977,11 @@ type terminalCommitSuccessRepo struct {
 type failureTerminalCommitRepo struct {
 	port.Repository
 	events []entity.MagiEvent
+	called bool
 }
 
 func (r *failureTerminalCommitRepo) CommitTerminal(_ context.Context, caseID string, expected, target entity.CaseStatus, _ *entity.Resolution, event *entity.MagiEvent) (bool, error) {
+	r.called = true
 	if target != entity.CaseStatusFailed || expected == entity.CaseStatusResolved || expected == entity.CaseStatusFailed || expected == entity.CaseStatusCancelled || expected == entity.CaseStatusTimedOut || expected == entity.CaseStatusInsufficientEv || expected == entity.CaseStatusDeadlocked {
 		return false, nil
 	}

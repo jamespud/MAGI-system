@@ -402,7 +402,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			statuses = append(statuses, "")
 		}
 		if isTerminalCaseStatus(c.Status) {
-			attemptCancel(port.ErrLeaseLost)
+			m.settleTerminalCaseJob(claimed, c, runErr.Error(), attemptCancel)
 			return
 		}
 		committed, err := m.jobRepo.CommitFinalFailure(context.Background(), claimed.ID, m.workerID, c.ID, statuses, runErr.Error(), &event)
@@ -418,6 +418,25 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			_ = m.liveEvents.PublishLive(context.Background(), event)
 		}
 		return
+	}
+}
+
+// settleTerminalCaseJob closes a still-running owner claim when the Case has
+// already reached an authoritative terminal state. This can happen when a
+// remote replica wins the Case transition while this worker is executing.
+func (m *RunManager) settleTerminalCaseJob(job *entity.DecisionJob, c *entity.DecisionCase, lastError string, onLeaseLost func(error)) {
+	var err error
+	switch c.Status {
+	case entity.CaseStatusFailed, entity.CaseStatusCancelled, entity.CaseStatusTimedOut:
+		err = m.jobRepo.MarkFailed(context.Background(), job.ID, m.workerID, lastError, nil)
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
+		err = m.jobRepo.MarkSucceeded(context.Background(), job.ID, m.workerID)
+	default:
+		onLeaseLost(port.ErrLeaseLost)
+		return
+	}
+	if errors.Is(err, port.ErrLeaseLost) {
+		onLeaseLost(port.ErrLeaseLost)
 	}
 }
 

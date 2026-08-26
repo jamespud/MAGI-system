@@ -617,6 +617,12 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
 	runErr := fmt.Errorf("%s", msg)
+	if isPublicTerminalCaseStatus(case_.Status) {
+		if case_.ExecutionAttempt > 0 {
+			return nil, runErr
+		}
+		return nil, port.ErrLeaseLost
+	}
 	if case_.ExecutionAttempt > 0 {
 		return nil, runErr
 	}
@@ -627,6 +633,17 @@ func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg
 	}
 	case_.Status = entity.CaseStatusFailed
 	return nil, runErr
+}
+
+func isPublicTerminalCaseStatus(status entity.CaseStatus) bool {
+	switch status {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusCancelled, entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv,
+		entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 // failedAgentReasons collects the failure reasons carried by ABSTAIN votes
