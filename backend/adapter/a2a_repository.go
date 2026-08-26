@@ -2,6 +2,7 @@ package magi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -87,13 +88,14 @@ func contextContentionBackoff(attempt int) time.Duration {
 func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareCommand) (*a2aapp.PreparedSubmission, bool, error) {
 	var prepared *a2aapp.PreparedSubmission
 	created := false
-		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		binding := A2ASubmissionModel{
 			ID: cmd.SubmissionID, UserID: cmd.UserID, MessageID: cmd.MessageID,
 			RequestHash: cmd.RequestHash, TaskID: cmd.TaskID, ContextID: cmd.ContextID,
 			InputMessageID: cmd.InputMessageID, CaseMessageID: cmd.CaseMessageID,
 			State: string(a2aapp.SubmissionPrepared), CreatedAt: now, UpdatedAt: now,
+			AcceptedOutputModesJSON: marshalOutputModes(cmd.AcceptedOutputModes),
 		}
 		// Atomic upsert on the (user_id, message_id) unique key: a single
 		// INSERT ... ON DUPLICATE KEY UPDATE avoids the SELECT-then-INSERT
@@ -300,7 +302,7 @@ func (r *a2aSubmissionRepo) ClaimStart(ctx context.Context, id, token string, le
 			return nil // STARTED / REJECTED are already settled
 		}
 		if err := tx.Model(&A2ASubmissionModel{}).Where("id = ?", id).Updates(map[string]any{
-			"state": string(a2aapp.SubmissionStarting),
+			"state":             string(a2aapp.SubmissionStarting),
 			"start_claim_token": token, "start_claim_until": leaseUntil,
 			"updated_at": now,
 		}).Error; err != nil {
@@ -323,7 +325,7 @@ func (r *a2aSubmissionRepo) SettleStarted(ctx context.Context, id, token string)
 	res := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).
 		Where("id = ? AND state = ? AND start_claim_token = ?", id, string(a2aapp.SubmissionStarting), token).
 		Updates(map[string]any{
-			"state": string(a2aapp.SubmissionStarted),
+			"state":             string(a2aapp.SubmissionStarted),
 			"start_claim_token": "", "start_claim_until": nil,
 			"updated_at": time.Now().UTC(),
 		})
@@ -709,7 +711,46 @@ func voteFromModel(m *VoteModel) *entity.Vote {
 func submissionFromModel(m A2ASubmissionModel) a2aapp.Submission {
 	return a2aapp.Submission{ID: m.ID, MessageID: m.MessageID, RequestHash: m.RequestHash, TaskID: m.TaskID,
 		ContextID: m.ContextID, InputMessageID: m.InputMessageID, UserID: m.UserID,
-		State: a2aapp.SubmissionState(m.State), ErrorCode: m.ErrorCode, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
+		State: a2aapp.SubmissionState(m.State), ErrorCode: m.ErrorCode,
+		AcceptedOutputModes: parseOutputModes(m.AcceptedOutputModesJSON),
+		CreatedAt:           m.CreatedAt, UpdatedAt: m.UpdatedAt}
+}
+
+func marshalOutputModes(modes []string) string {
+	if len(modes) == 0 {
+		return `["text/markdown","application/json"]`
+	}
+	ordered := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, mode := range []string{"text/markdown", "application/json"} {
+		for _, in := range modes {
+			if in == mode && !seen[mode] {
+				ordered = append(ordered, mode)
+				seen[mode] = true
+				break
+			}
+		}
+	}
+	raw, err := json.Marshal(ordered)
+	if err != nil {
+		return `["text/markdown","application/json"]`
+	}
+	return string(raw)
+}
+
+func parseOutputModes(raw string) []string {
+	if raw == "" {
+		return []string{"text/markdown", "application/json"}
+	}
+	var modes []string
+	if err := json.Unmarshal([]byte(raw), &modes); err != nil {
+		// Fail closed: malformed stored JSON must not broaden output.
+		return []string{"text/markdown", "application/json"}
+	}
+	if len(modes) == 0 {
+		return []string{"text/markdown", "application/json"}
+	}
+	return modes
 }
 
 func isUniqueViolation(err error) bool {

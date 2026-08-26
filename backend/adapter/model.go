@@ -450,20 +450,21 @@ func (RunAdmissionLockModel) TableName() string { return "magi_user_run_admissio
 // MAGI task. It is deliberately independent of foreign-key cascades: Cases
 // remain audit records even when conversation records are later removed.
 type A2ASubmissionModel struct {
-	ID             string    `gorm:"primaryKey;size:64"`
-	UserID         int64     `gorm:"not null;uniqueIndex:uq_a2a_submission_user_message,priority:1;index"`
-	MessageID      string    `gorm:"not null;size:128;uniqueIndex:uq_a2a_submission_user_message,priority:2"`
-	RequestHash    string    `gorm:"not null;size:128"`
-	TaskID         string    `gorm:"not null;size:64;uniqueIndex:uq_a2a_submission_task"`
-	ContextID      string    `gorm:"size:64;index"`
-	InputMessageID string    `gorm:"size:64;index"`
-	CaseMessageID  string    `gorm:"size:64"`
-	State           string     `gorm:"not null;size:16;index:idx_a2a_submission_state,priority:1"`
-	ErrorCode       string     `gorm:"size:64"`
-	StartClaimToken string     `gorm:"not null;size:64;default:''"`
-	StartClaimUntil *time.Time `gorm:"index:idx_a2a_submission_start_claim,priority:2"`
-	CreatedAt       time.Time  `gorm:"index;index:idx_a2a_submission_state,priority:2"`
-	UpdatedAt       time.Time
+	ID                      string     `gorm:"primaryKey;size:64"`
+	UserID                  int64      `gorm:"not null;uniqueIndex:uq_a2a_submission_user_message,priority:1;index"`
+	MessageID               string     `gorm:"not null;size:128;uniqueIndex:uq_a2a_submission_user_message,priority:2"`
+	RequestHash             string     `gorm:"not null;size:128"`
+	TaskID                  string     `gorm:"not null;size:64;uniqueIndex:uq_a2a_submission_task"`
+	ContextID               string     `gorm:"size:64;index"`
+	InputMessageID          string     `gorm:"size:64;index"`
+	CaseMessageID           string     `gorm:"size:64"`
+	State                   string     `gorm:"not null;size:16;index:idx_a2a_submission_state,priority:1"`
+	ErrorCode               string     `gorm:"size:64"`
+	AcceptedOutputModesJSON string     `gorm:"size:128;not null;default:'[\"text/markdown\",\"application/json\"]'"`
+	StartClaimToken         string     `gorm:"not null;size:64;default:''"`
+	StartClaimUntil         *time.Time `gorm:"index:idx_a2a_submission_start_claim,priority:2"`
+	CreatedAt               time.Time  `gorm:"index;index:idx_a2a_submission_state,priority:2"`
+	UpdatedAt               time.Time
 }
 
 func (A2ASubmissionModel) TableName() string { return "a2a_submission" }

@@ -38,12 +38,13 @@ func NewInputParser(maxMessageBytes, maxParts int) InputParser {
 
 // ParsedInput is the normalized request data used by the submission service.
 type ParsedInput struct {
-	MessageID   string
-	ContextID   string
-	Question    string
-	Background  string
-	Constraints []entity.Constraint
-	RequestHash string
+	MessageID           string
+	ContextID           string
+	Question            string
+	Background          string
+	Constraints         []entity.Constraint
+	AcceptedOutputModes []string
+	RequestHash         string
 }
 
 type inputMetadata struct {
@@ -52,10 +53,11 @@ type inputMetadata struct {
 }
 
 type canonicalInput struct {
-	Question    string              `json:"question"`
-	ContextID   string              `json:"contextId,omitempty"`
-	Background  string              `json:"background,omitempty"`
-	Constraints []entity.Constraint `json:"constraints,omitempty"`
+	Question            string              `json:"question"`
+	ContextID           string              `json:"contextId,omitempty"`
+	Background          string              `json:"background,omitempty"`
+	Constraints         []entity.Constraint `json:"constraints,omitempty"`
+	AcceptedOutputModes []string            `json:"acceptedOutputModes,omitempty"`
 }
 
 func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
@@ -82,10 +84,8 @@ func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
 		if req.Config.PushConfig != nil {
 			return ParsedInput{}, fmt.Errorf("%w: push notifications are not supported", ErrTaskMessageNotSupported)
 		}
-		for _, mode := range req.Config.AcceptedOutputModes {
-			if mode != "text/markdown" && mode != "application/json" {
-				return ParsedInput{}, fmt.Errorf("%w: output mode %q", ErrContentTypeNotSupported, mode)
-			}
+		if err := validateOutputModes(req.Config.AcceptedOutputModes); err != nil {
+			return ParsedInput{}, err
 		}
 	}
 	maxParts := p.MaxParts
@@ -127,6 +127,7 @@ func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
 	normalized := canonicalInput{
 		Question: question, ContextID: m.ContextID,
 		Background: metadata.Background, Constraints: metadata.Constraints,
+		AcceptedOutputModes: normalizeOutputModes(reqAcceptedModes(req)),
 	}
 	canonical, err := json.Marshal(normalized)
 	if err != nil {
@@ -139,8 +140,47 @@ func (p InputParser) Parse(req *a2a.SendMessageRequest) (ParsedInput, error) {
 	return ParsedInput{
 		MessageID: m.ID, ContextID: m.ContextID, Question: question,
 		Background: metadata.Background, Constraints: metadata.Constraints,
-		RequestHash: hex.EncodeToString(hash[:]),
+		AcceptedOutputModes: normalizeOutputModes(reqAcceptedModes(req)),
+		RequestHash:         hex.EncodeToString(hash[:]),
 	}, nil
+}
+
+var defaultOutputModes = []string{"text/markdown", "application/json"}
+
+func reqAcceptedModes(req *a2a.SendMessageRequest) []string {
+	if req == nil || req.Config == nil {
+		return nil
+	}
+	return req.Config.AcceptedOutputModes
+}
+
+func validateOutputModes(modes []string) error {
+	for _, mode := range modes {
+		if mode != "text/markdown" && mode != "application/json" {
+			return fmt.Errorf("%w: output mode %q", ErrContentTypeNotSupported, mode)
+		}
+	}
+	return nil
+}
+
+// normalizeOutputModes returns the server's stable order with duplicates
+// removed. An empty/omitted request negotiates both advertised defaults.
+func normalizeOutputModes(modes []string) []string {
+	if len(modes) == 0 {
+		return append([]string(nil), defaultOutputModes...)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, mode := range defaultOutputModes {
+		for _, in := range modes {
+			if in == mode && !seen[mode] {
+				out = append(out, mode)
+				seen[mode] = true
+				break
+			}
+		}
+	}
+	return out
 }
 
 func parseInputMetadata(metadata map[string]any) (inputMetadata, error) {

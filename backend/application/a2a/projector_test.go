@@ -247,6 +247,35 @@ func TestTaskProjector_ResolvedArtifactsAreDeterministic(t *testing.T) {
 	}
 }
 
+func TestTaskProjector_ArtifactsRespectAcceptedOutputModes(t *testing.T) {
+	proj := NewTaskProjector(redact.New("sk-secret"))
+	cases := []struct {
+		name          string
+		modes         []string
+		wantNames     []string
+		wantArtifacts int
+	}{
+		{"default both", []string{"text/markdown", "application/json"}, []string{"decision-report.md", "decision-result.json"}, 2},
+		{"markdown only", []string{"text/markdown"}, []string{"decision-report.md"}, 1},
+		{"json only", []string{"application/json"}, []string{"decision-result.json"}, 1},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := resolvedRecord()
+			rec.Submission.AcceptedOutputModes = tt.modes
+			task := proj.Project(rec, 1, true)
+			if len(task.Artifacts) != tt.wantArtifacts {
+				t.Fatalf("artifacts = %d, want %d (%v)", len(task.Artifacts), tt.wantArtifacts, task.Artifacts)
+			}
+			for i, name := range tt.wantNames {
+				if i >= len(task.Artifacts) || task.Artifacts[i].Name != name {
+					t.Fatalf("artifact[%d].Name = %v, want %s", i, task.Artifacts, name)
+				}
+			}
+		})
+	}
+}
+
 // TestTaskProjector_CompletedWithoutResolutionHasNoArtifacts guards the
 // projection invariant: a completed Task without a structured Resolution must
 // never fabricate fallback artifacts.

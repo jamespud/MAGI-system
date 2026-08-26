@@ -89,18 +89,19 @@ func (s *SubmissionService) Submit(ctx context.Context, userID int64, req *a2a.S
 		contextID = "conv-" + uuid.NewString()
 	}
 	cmd := PrepareCommand{
-		SubmissionID:    "sub-" + uuid.NewString(),
-		MessageID:       parsed.MessageID,
-		RequestHash:     parsed.RequestHash,
-		TaskID:          "case-" + uuid.NewString(),
-		ContextID:       contextID,
-		InputMessageID:  "msg-" + uuid.NewString(),
-		CaseMessageID:   "msg-" + uuid.NewString(),
-		UserID:          userID,
-		Question:        parsed.Question,
-		Background:      parsed.Background,
-		Constraints:     parsed.Constraints,
-		MaxDebateRounds: s.maxDebateRounds,
+		SubmissionID:        "sub-" + uuid.NewString(),
+		MessageID:           parsed.MessageID,
+		RequestHash:         parsed.RequestHash,
+		TaskID:              "case-" + uuid.NewString(),
+		ContextID:           contextID,
+		InputMessageID:      "msg-" + uuid.NewString(),
+		CaseMessageID:       "msg-" + uuid.NewString(),
+		UserID:              userID,
+		Question:            parsed.Question,
+		Background:          parsed.Background,
+		Constraints:         parsed.Constraints,
+		AcceptedOutputModes: parsed.AcceptedOutputModes,
+		MaxDebateRounds:     s.maxDebateRounds,
 	}
 	prepared, created, err := s.repo.Prepare(ctx, cmd)
 	if err != nil {

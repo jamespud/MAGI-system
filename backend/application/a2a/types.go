@@ -44,6 +44,7 @@ type Submission struct {
 	UserID                                                        int64
 	State                                                         SubmissionState
 	ErrorCode                                                     string
+	AcceptedOutputModes                                           []string
 	CreatedAt, UpdatedAt                                          time.Time
 }
 
@@ -53,6 +54,7 @@ type PrepareCommand struct {
 	UserID                                                  int64
 	Question, Background                                    string
 	Constraints                                             []entity.Constraint
+	AcceptedOutputModes                                     []string
 	MaxDebateRounds                                         int
 }
 

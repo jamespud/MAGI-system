@@ -2,6 +2,7 @@ package a2aapp
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,6 +86,59 @@ func TestInputParserRejectsLimitsAndUnknownMetadata(t *testing.T) {
 	deepReq := &a2a.SendMessageRequest{Message: &a2a.Message{ID: "m", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("x")}, Metadata: map[string]any{"magi": deep}}}
 	if _, err := (InputParser{MaxMessageBytes: 64, MaxParts: 4}).Parse(deepReq); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("deep metadata error = %v", err)
+	}
+}
+
+func TestInputParser_NormalizesAcceptedOutputModes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"omitted", nil, []string{"text/markdown", "application/json"}},
+		{"empty", []string{}, []string{"text/markdown", "application/json"}},
+		{"markdown only", []string{"text/markdown"}, []string{"text/markdown"}},
+		{"json only", []string{"application/json"}, []string{"application/json"}},
+		{"both reversed with duplicate", []string{"application/json", "text/markdown", "application/json"}, []string{"text/markdown", "application/json"}},
+	}
+	parser := InputParser{MaxMessageBytes: 65536, MaxParts: 4}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &a2a.SendMessageRequest{Message: &a2a.Message{ID: "m", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("x")}}}
+			if tt.in != nil {
+				req.Config = &a2a.SendMessageConfig{AcceptedOutputModes: tt.in}
+			}
+			got, err := parser.Parse(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.AcceptedOutputModes, tt.want) {
+				t.Fatalf("modes = %v, want %v", got.AcceptedOutputModes, tt.want)
+			}
+		})
+	}
+	if _, err := parser.Parse(&a2a.SendMessageRequest{Message: &a2a.Message{ID: "m", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("x")}},
+		Config: &a2a.SendMessageConfig{AcceptedOutputModes: []string{"image/png"}}}); !errors.Is(err, ErrContentTypeNotSupported) {
+		t.Fatalf("unsupported mode error = %v, want ErrContentTypeNotSupported", err)
+	}
+}
+
+func TestInputParser_ModesInfluenceRequestHash(t *testing.T) {
+	parser := InputParser{MaxMessageBytes: 65536, MaxParts: 4}
+	markdown := &a2a.SendMessageRequest{Message: &a2a.Message{ID: "m", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("x")}},
+		Config: &a2a.SendMessageConfig{AcceptedOutputModes: []string{"text/markdown"}}}
+	jsonOnly := &a2a.SendMessageRequest{Message: &a2a.Message{ID: "m", Role: a2a.MessageRoleUser, Parts: a2a.ContentParts{a2a.NewTextPart("x")}},
+		Config: &a2a.SendMessageConfig{AcceptedOutputModes: []string{"application/json"}}}
+	a, err := parser.Parse(markdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := parser.Parse(jsonOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.RequestHash == b.RequestHash {
+		t.Fatal("different negotiated output modes must produce different request hashes")
 	}
 }
 

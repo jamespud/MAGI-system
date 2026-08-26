@@ -319,18 +319,34 @@ func (p *TaskProjector) failedMessage(rec *TaskRecord) *a2a.Message {
 
 func (p *TaskProjector) buildArtifacts(rec *TaskRecord) []*a2a.Artifact {
 	markdown, result := p.artifactParts(rec)
-	return []*a2a.Artifact{
-		{
+	accepted := acceptedModes(rec.Submission.AcceptedOutputModes)
+	var out []*a2a.Artifact
+	if accepted["text/markdown"] {
+		out = append(out, &a2a.Artifact{
 			ID:    a2a.ArtifactID(rec.Case.ID + "-decision-report"),
 			Name:  "decision-report.md",
 			Parts: a2a.ContentParts{markdown},
-		},
-		{
+		})
+	}
+	if accepted["application/json"] {
+		out = append(out, &a2a.Artifact{
 			ID:    a2a.ArtifactID(rec.Case.ID + "-decision-result"),
 			Name:  "decision-result.json",
 			Parts: a2a.ContentParts{result},
-		},
+		})
 	}
+	return out
+}
+
+func acceptedModes(modes []string) map[string]bool {
+	if len(modes) == 0 {
+		return map[string]bool{"text/markdown": true, "application/json": true}
+	}
+	out := map[string]bool{}
+	for _, mode := range modes {
+		out[mode] = true
+	}
+	return out
 }
 
 func (p *TaskProjector) artifactParts(rec *TaskRecord) (*a2a.Part, *a2a.Part) {

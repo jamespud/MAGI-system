@@ -555,3 +555,25 @@ func assertA2ASubmissionCounts(t *testing.T, db *gorm.DB, submissions, cases, co
 		}
 	}
 }
+
+// TestA2ASubmission_OutputModesRoundTrip proves negotiated modes survive
+// process reconstruction: Prepare persists them, and GetTaskRecord reads them
+// back in stable order so a later artifact projection honors the contract.
+func TestA2ASubmission_OutputModesRoundTrip(t *testing.T) {
+	_, repo := newA2ASubmissionRepo(t)
+	cmd := a2aPrepareCommand(7, "msg-roundtrip", "hash-roundtrip", "case-roundtrip", "conv-roundtrip")
+	cmd.AcceptedOutputModes = []string{"application/json", "text/markdown"}
+	if _, created, err := repo.Prepare(context.Background(), cmd); err != nil || !created {
+		t.Fatalf("prepare = created %v err %v", created, err)
+	}
+	rec, err := repo.GetTaskRecord(context.Background(), 7, "case-roundtrip")
+	if err != nil {
+		t.Fatalf("get task record: %v", err)
+	}
+	if !reflect.DeepEqual(rec.Submission.AcceptedOutputModes, []string{"text/markdown", "application/json"}) {
+		t.Fatalf("roundtrip modes = %v", rec.Submission.AcceptedOutputModes)
+	}
+	if len(rec.Submission.AcceptedOutputModes) != 2 {
+		t.Fatalf("accepted modes len = %d", len(rec.Submission.AcceptedOutputModes))
+	}
+}
