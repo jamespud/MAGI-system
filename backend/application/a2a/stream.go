@@ -8,6 +8,9 @@ import (
 	"time"
 
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -78,10 +81,7 @@ func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID s
 		return
 	}
 	if err != nil {
-		if s.metrics != nil {
-			s.metrics.IncA2AProjectionError(metrics.A2AProjectionStatus)
-		}
-		yield(nil, err)
+		s.yieldInternalError(ctx, yield, "initial task read", err)
 		return
 	}
 	initial := s.projector.Project(record, 1)
@@ -104,11 +104,12 @@ func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID s
 
 	// Durable catch-up closes the window between the snapshot watermark and
 	// the broker subscription.
-	if err := s.drainEvents(ctx, userID, taskID, state, yield); err != nil {
-		yield(nil, err)
+	finished, err := s.drainEvents(ctx, userID, taskID, state, yield)
+	if err != nil {
+		s.yieldInternalError(ctx, yield, "durable catch-up", err)
 		return
 	}
-	if s.finished(state) {
+	if finished {
 		return
 	}
 
@@ -124,44 +125,71 @@ func (s *DurableStreamProjector) run(ctx context.Context, userID int64, taskID s
 			if ev == nil {
 				continue
 			}
+			// Broker events are wake-ups. A live event that has not yet been
+			// persisted is out of order; drain the durable store first so the
+			// sequence is never skipped. Only applyOrderedEvent advances the
+			// watermark.
+			if ev.Seq > state.watermark+1 {
+				finished, err := s.drainEvents(ctx, userID, taskID, state, yield)
+				if err != nil {
+					s.yieldInternalError(ctx, yield, "gap drain", err)
+					return
+				}
+				if finished {
+					return
+				}
+			}
+			if ev.Seq <= state.watermark {
+				// The durable drain already replayed this event as the ordered
+				// copy; discard the live duplicate.
+				continue
+			}
+			if ev.Seq != state.watermark+1 {
+				// The durable store still has a gap (the live fan-out raced
+				// ahead of the durable write). Retain the watermark and wait
+				// for the poller to fill the missing event in order.
+				continue
+			}
 			done, err := s.handleEvent(ctx, userID, taskID, state, ev, yield)
 			if err != nil {
-				yield(nil, err)
+				s.yieldInternalError(ctx, yield, "live event", err)
 				return
 			}
 			if done {
 				return
 			}
 		case <-ticker.C:
-			if err := s.drainEvents(ctx, userID, taskID, state, yield); err != nil {
-				yield(nil, err)
+			finished, err := s.drainEvents(ctx, userID, taskID, state, yield)
+			if err != nil {
+				s.yieldInternalError(ctx, yield, "durable poll", err)
 				return
 			}
-			if s.finished(state) {
+			if finished {
 				return
 			}
 		}
 	}
 }
 
-// drainEvents replays every durable event after the watermark. It returns when
-// caught up or when a terminal event ended the stream.
-func (s *DurableStreamProjector) drainEvents(ctx context.Context, userID int64, taskID string, state *streamState, yield func(a2a.Event, error) bool) error {
+// drainEvents replays every durable event after the watermark in order. It
+// returns (true, nil) when a terminal event ended the stream and (false, nil)
+// when it is caught up without a terminal state.
+func (s *DurableStreamProjector) drainEvents(ctx context.Context, userID int64, taskID string, state *streamState, yield func(a2a.Event, error) bool) (bool, error) {
 	for {
 		batch, err := s.events.ListAfterSeq(ctx, taskID, state.watermark, 100)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(batch) == 0 {
-			return nil
+			return false, nil
 		}
 		for _, ev := range batch {
 			done, err := s.handleEvent(ctx, userID, taskID, state, ev, yield)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if done {
-				return nil
+				return true, nil
 			}
 		}
 	}
@@ -179,12 +207,10 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 	}
 	record, err := s.repo.GetTaskRecord(ctx, userID, taskID)
 	if err != nil {
-		if s.metrics != nil {
-			s.metrics.IncA2AProjectionError(metrics.A2AProjectionStatus)
-		}
 		return false, err
 	}
 	task := s.projector.Project(record, 1)
+	state.task = task
 	if task.Status.State == state.lastState && pausedOf(task) == state.lastPaused {
 		return false, nil
 	}
@@ -216,8 +242,18 @@ func (s *DurableStreamProjector) handleEvent(ctx context.Context, userID int64, 
 	return false, nil
 }
 
-func (s *DurableStreamProjector) finished(state *streamState) bool {
-	return state.task != nil && state.task.Status.State.Terminal()
+// yieldInternalError records the original error under the active tracing span
+// but only exposes a stable public error to the client, so SQL, paths, tool
+// responses, and other internal text never leak over the protocol.
+func (s *DurableStreamProjector) yieldInternalError(ctx context.Context, yield func(a2a.Event, error) bool, op string, err error) {
+	if s.metrics != nil {
+		s.metrics.IncA2AProjectionError(metrics.A2AProjectionStatus)
+	}
+	if span := trace.SpanFromContext(ctx); span != nil && span.SpanContext().IsValid() {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, op)
+	}
+	yield(nil, a2a.NewError(a2a.ErrInternalError, "internal task stream error"))
 }
 
 func (s *DurableStreamProjector) acquire(userID int64) func() {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -459,10 +460,12 @@ func TestStreamProjector_CatchUpTerminalClosesStream(t *testing.T) {
 	}
 }
 
-// TestStreamProjector_LiveGapDoesNotSkipDurableEvent guards ordered delivery:
-// when a live broker event with a sequence gap arrives while the durable
-// intermediate event has not been drained, the stream must not jump the
-// watermark past the gap. The durable event must be emitted in order.
+// TestStreamProjector_LiveGapDoesNotSkipDurableEvent guards watermark
+// integrity: when a live broker event with a sequence gap arrives while the
+// durable event has not been drained, the stream must treat the live event as
+// a wake-up and drain the durable store first. Here the durable N+1 is the
+// terminal completion and the live N+2 is a non-public event; without the gap
+// guard the watermark jumps to N+2 and the terminal event is missed forever.
 func TestStreamProjector_LiveGapDoesNotSkipDurableEvent(t *testing.T) {
 	_, db, repo, broker := newStreamHarness(t, 8)
 	// A long poll interval keeps the live broker path deterministic: without
@@ -476,18 +479,7 @@ func TestStreamProjector_LiveGapDoesNotSkipDurableEvent(t *testing.T) {
 	c := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
 	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
 
-	// Durable N+1 from a remote replica: Working -> Paused.
-	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusPaused)).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "case-1").Update("status", string(entity.DecisionJobPaused)).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := broker.PublishRemote(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseStatusChanged, map[string]any{"status": string(entity.CaseStatusPaused)})); err != nil {
-		t.Fatal(err)
-	}
-
-	// Live N+2 arrives before N+1 was drained.
+	// Durable N+1 from a remote replica: the terminal completion.
 	if err := db.Model(&magi.CaseModel{}).Where("id = ?", "case-1").Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -495,23 +487,28 @@ func TestStreamProjector_LiveGapDoesNotSkipDurableEvent(t *testing.T) {
 	if err := db.Model(&magi.DecisionJobModel{}).Where("case_id = ?", "case-1").Update("status", string(entity.DecisionJobSucceeded)).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := broker.Publish(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})); err != nil {
+	if err := broker.PublishRemote(ctx, entity.NewEvent("case-1", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Live N+2 (non-public) arrives before N+1 was drained.
+	if err := broker.Publish(ctx, entity.NewEvent("case-1", "", nil, entity.EventTaskNormalized, map[string]any{})); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
 	case <-c.done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("stream did not terminate after the live terminal event")
+		t.Fatal("stream skipped the durable terminal event and never terminated")
 	}
-	var states []a2a.TaskState
+	terminal := false
 	for _, ev := range c.snapshot() {
-		if s, ok := ev.(*a2a.TaskStatusUpdateEvent); ok {
-			states = append(states, s.Status.State)
+		if s, ok := ev.(*a2a.TaskStatusUpdateEvent); ok && s.Status.State == a2a.TaskStateCompleted {
+			terminal = true
 		}
 	}
-	if len(states) != 2 || states[0] != a2a.TaskStateWorking || states[1] != a2a.TaskStateCompleted {
-		t.Fatalf("ordered status sequence = %v, want [working completed] (durable N+1 was skipped)", states)
+	if !terminal {
+		t.Fatalf("live-gap stream never emitted the durable terminal status: %#v", c.snapshot())
 	}
 }
 
@@ -520,7 +517,7 @@ func TestStreamProjector_LiveGapDoesNotSkipDurableEvent(t *testing.T) {
 // established Subscribe as a canceled status and terminate the stream. A
 // cancel that only mutates Case/Job without a durable event is invisible.
 func TestStreamProjector_RemoteCancelClosesStream(t *testing.T) {
-	stream, db, repo, _ := newStreamHarness(t, 8)
+	stream, db, repo, broker := newStreamHarness(t, 8)
 	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -528,8 +525,17 @@ func TestStreamProjector_RemoteCancelClosesStream(t *testing.T) {
 	c := startCollect(ctx, stream.Events(ctx, 7, "case-1"))
 	waitFor(t, time.Second, func() bool { return len(c.snapshot()) >= 1 })
 
-	if _, outcome, err := repo.CancelTask(ctx, 7, "case-1"); err != nil || outcome != a2aapp.CancelApplied {
-		t.Fatalf("cancel = %q err=%v, want applied", outcome, err)
+	// CancelTask mutates the DB state and returns the durable CANCELLED event
+	// it committed. In this harness the stream's durable journal is the
+	// testEventBroker (not the SQLite magi_event table), so mirror the event
+	// into the journal exactly as a remote replica's commit would become
+	// visible to the shared store.
+	cancelResult, err := repo.CancelTask(ctx, 7, "case-1")
+	if err != nil || cancelResult == nil || cancelResult.Outcome != a2aapp.CancelApplied || cancelResult.Event == nil {
+		t.Fatalf("cancel = %+v err=%v, want applied with a durable event", cancelResult, err)
+	}
+	if err := broker.PublishRemote(ctx, *cancelResult.Event); err != nil {
+		t.Fatal(err)
 	}
 
 	select {
@@ -617,4 +623,40 @@ func collectAll(t *testing.T, ctx context.Context, seq iter.Seq2[a2a.Event, erro
 		out = append(out, ev)
 	}
 	return out
+}
+
+type erringTaskRepo struct {
+	a2aapp.SubmissionRepository
+	err error
+}
+
+func (r *erringTaskRepo) GetTaskRecord(context.Context, int64, string) (*a2aapp.TaskRecord, error) {
+	return nil, r.err
+}
+
+// TestStreamProjector_InternalErrorsAreHidden guards error disclosure: a
+// repository failure (SQL text, paths, tool responses) must never reach the
+// client over the protocol; the stream yields only a stable ErrInternalError.
+func TestStreamProjector_InternalErrorsAreHidden(t *testing.T) {
+	_, db, repo, broker := newStreamHarness(t, 8)
+	seedStreamTask(t, db, repo, "case-1", "conv-1", entity.CaseStatusInvestigating, running())
+	rawErr := errors.New("sql: no such table /var/lib/mysql/magi_event for case-1")
+	erring := &erringTaskRepo{SubmissionRepository: repo, err: rawErr}
+	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
+	stream := a2aapp.NewDurableStreamProjector(erring, broker, broker, proj, 8, time.Millisecond)
+
+	var gotErr error
+	for _, err := range stream.Events(context.Background(), 7, "case-1") {
+		gotErr = err
+		break
+	}
+	if gotErr == nil {
+		t.Fatal("expected an internal stream error")
+	}
+	if !errors.Is(gotErr, a2a.ErrInternalError) {
+		t.Fatalf("error = %v, want ErrInternalError", gotErr)
+	}
+	if strings.Contains(gotErr.Error(), rawErr.Error()) || strings.Contains(gotErr.Error(), "magi_event") {
+		t.Fatalf("internal error leaked to the protocol: %v", gotErr)
+	}
 }
