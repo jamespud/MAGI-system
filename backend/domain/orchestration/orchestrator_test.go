@@ -895,17 +895,12 @@ func (rejectingCaseStatusWriter) UpdateStatusIfCurrent(context.Context, string, 
 	return false, nil
 }
 
-type terminalRaceCaseStatusWriter struct {
-	port.CaseRepository
-	status entity.CaseStatus
-}
-
 type terminalCommitRaceRepo struct {
 	port.Repository
 	called bool
 }
 
-func (r *terminalCommitRaceRepo) CommitTerminal(context.Context, string, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
+func (r *terminalCommitRaceRepo) CommitTerminal(context.Context, string, entity.CaseStatus, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
 	r.called = true
 	// Simulates a cancel transaction that wins after an earlier read/CAS but
 	// before terminal artifacts would be written.
@@ -917,7 +912,7 @@ type terminalCommitSuccessRepo struct {
 	called bool
 }
 
-func (r *terminalCommitSuccessRepo) CommitTerminal(context.Context, string, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
+func (r *terminalCommitSuccessRepo) CommitTerminal(context.Context, string, entity.CaseStatus, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
 	r.called = true
 	return true, nil
 }
@@ -927,22 +922,6 @@ type captureOnlyEventPublisher struct{ events []entity.MagiEvent }
 func (p *captureOnlyEventPublisher) Publish(_ context.Context, event entity.MagiEvent) error {
 	p.events = append(p.events, event)
 	return nil
-}
-
-func (r *terminalRaceCaseStatusWriter) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
-	for _, status := range from {
-		if r.status != status {
-			continue
-		}
-		r.status = to
-		if to == entity.CaseStatusResolved {
-			// Another replica cancels after the terminal status transition and
-			// before the next terminal action dispatch.
-			r.status = entity.CaseStatusCancelled
-		}
-		return true, nil
-	}
-	return false, nil
 }
 
 func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing.T) {
@@ -975,46 +954,57 @@ func TestOrchestrate_DoesNotPublishOrMutateAfterConditionalStatusLoss(t *testing
 	}
 }
 
-func TestOrchestrate_TerminalConfirmationFencesLateResolutionAndCompletionEvent(t *testing.T) {
+// TestOrchestrate_TerminalTransitionIsAtomicInFallback proves the non-
+// TerminalCommitter fallback still commits the normal terminal outcome
+// atomically from the outside: one status write to RESOLVED, one persisted
+// Resolution, one completion event, and no prior CASE_STATUS_CHANGED(RESOLVED).
+func TestOrchestrate_TerminalTransitionIsAtomicInFallback(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.votes["melchior"] = []*entity.Vote{approve()}
 	mrt.votes["balthasar"] = []*entity.Vote{approve()}
 	mrt.votes["casper"] = []*entity.Vote{approve()}
 	repo := newStubRepo()
 	broker := server.NewEventBroker()
-	writer := &terminalRaceCaseStatusWriter{CaseRepository: repo.CaseRepo(), status: entity.CaseStatusDraft}
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop: mrt,
 		Consensus: consensus.NewConsensusEngine(),
 		Debate:    debate.NewDebateEngine(nil),
 		Commander: newCommander(t),
-		CaseRepo:  writer,
+		CaseRepo:  repo.CaseRepo(),
 		Repo:      repo,
 		EventPub:  broker,
 		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
 		Policy:    consensus.DefaultConsensusPolicy(),
 	})
 	case_ := &entity.DecisionCase{ID: "case-terminal-race", Question: "compute", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
-	if _, err := orch.Orchestrate(context.Background(), case_); !errors.Is(err, port.ErrLeaseLost) {
-		t.Fatalf("error = %v, want ErrLeaseLost", err)
+	res, err := orch.Orchestrate(context.Background(), case_)
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
 	}
-	if writer.status != entity.CaseStatusCancelled {
-		t.Fatalf("persisted status = %s, want CANCELLED", writer.status)
+	if res == nil || case_.Status != entity.CaseStatusResolved {
+		t.Fatalf("resolution = %+v case status = %s, want RESOLVED", res, case_.Status)
 	}
 	repo.mu.Lock()
 	resolutions := len(repo.resolutions)
 	repo.mu.Unlock()
-	if resolutions != 0 {
-		t.Fatalf("late terminal path persisted %d resolutions", resolutions)
+	if resolutions != 1 {
+		t.Fatalf("terminal transition persisted %d resolutions, want 1", resolutions)
 	}
 	events, err := broker.ListByCase(context.Background(), case_.ID)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
+	completed := 0
 	for _, event := range events {
-		if event.Type == entity.EventCaseCompleted {
-			t.Fatalf("late terminal path published completion event: %+v", event)
+		if event.Type == entity.EventCaseStatusChanged && eventPayloadStatus(t, event) == string(entity.CaseStatusResolved) {
+			t.Fatalf("RESOLVED status event published before the terminal commit: %+v", event)
 		}
+		if event.Type == entity.EventCaseCompleted {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("completion events = %d, want exactly 1", completed)
 	}
 }
 
@@ -1114,7 +1104,7 @@ func eventPayloadStatus(t *testing.T, ev *entity.MagiEvent) string {
 	return status
 }
 
-func (r *blockingTerminalCommitter) CommitTerminal(_ context.Context, _ string, _ entity.CaseStatus, _ *entity.Resolution, _ *entity.MagiEvent) (bool, error) {
+func (r *blockingTerminalCommitter) CommitTerminal(_ context.Context, _ string, _ entity.CaseStatus, _ entity.CaseStatus, _ *entity.Resolution, _ *entity.MagiEvent) (bool, error) {
 	close(r.commitStarted)
 	<-r.release
 	return true, nil

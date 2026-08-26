@@ -97,6 +97,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			return existing, nil
 		}
 	}
+	if status == entity.CaseStatusDeadlocked {
+		// DEADLOCKED is a terminal success: replaying an already-deadlocked
+		// case must not re-run the terminal commit or duplicate its event.
+		return nil, nil
+	}
 	if status == entity.CaseStatusFailed || status == entity.CaseStatusCancelled || status == entity.CaseStatusTimedOut {
 		return nil, port.ErrLeaseLost
 	}
@@ -121,6 +126,18 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			return o.fail(ctx, case_, err.Error())
 		}
 		prevStatus = status
+		if isNormalTerminal(next) {
+			// Normal terminal outcomes are committed atomically: the status
+			// transition, the terminal artifacts, and the one ordered
+			// completion event land in a single transaction. No
+			// CASE_STATUS_CHANGED is published first, so an A2A subscriber can
+			// never observe a completed Task before its Resolution exists.
+			if err := o.commitTerminal(ctx, case_, status, next, st.Resolution, terminalCompletionEvent(case_, next, st)); err != nil {
+				return nil, err
+			}
+			case_.Status = next
+			return st.Resolution, nil
+		}
 		if done {
 			if next != status {
 				if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round); err != nil {
@@ -136,33 +153,33 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	}
 }
 
-// confirmCurrentStatus fences terminal side effects after the preceding FSM
-// transition. A remote cancellation can win between advanceStatus and the
-// terminal action on the following dispatch iteration.
-func (o *Orchestrator) confirmCurrentStatus(ctx context.Context, case_ *entity.DecisionCase, status entity.CaseStatus) error {
+// confirmCurrentStatus persists an expected->target case transition through
+// the conditional writer when available, degrading to a plain update for
+// in-memory fakes.
+func (o *Orchestrator) confirmCurrentStatus(ctx context.Context, case_ *entity.DecisionCase, expected, target entity.CaseStatus) error {
 	if o.caseRepo == nil {
 		return nil
 	}
 	writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter)
-	if !ok {
+	if ok {
+		updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, []entity.CaseStatus{expected}, target)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return port.ErrLeaseLost
+		}
 		return nil
 	}
-	updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, []entity.CaseStatus{status}, status)
-	if err != nil {
-		return err
-	}
-	if !updated {
-		return port.ErrLeaseLost
-	}
-	return nil
+	return o.caseRepo.UpdateStatus(ctx, case_.ID, target)
 }
 
 // commitTerminal writes the terminal artifacts behind one production
 // transaction fence. Test/in-memory repositories retain the historical
 // conditional-status fallback so their narrow fakes need no DB transaction.
-func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.DecisionCase, status entity.CaseStatus, resolution *entity.Resolution, event entity.MagiEvent) error {
+func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.DecisionCase, expected, target entity.CaseStatus, resolution *entity.Resolution, event entity.MagiEvent) error {
 	if committer, ok := o.repo.(port.TerminalCommitter); ok {
-		committed, err := committer.CommitTerminal(ctx, case_.ID, status, resolution, &event)
+		committed, err := committer.CommitTerminal(ctx, case_.ID, expected, target, resolution, &event)
 		if err != nil {
 			return err
 		}
@@ -179,7 +196,7 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 		return nil
 	}
-	if err := o.confirmCurrentStatus(ctx, case_, status); err != nil {
+	if err := o.confirmCurrentStatus(ctx, case_, expected, target); err != nil {
 		return err
 	}
 	if resolution != nil && o.repo != nil {
@@ -189,6 +206,24 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 	}
 	o.publish(ctx, case_, event.Type, event.Payload)
 	return nil
+}
+
+// isNormalTerminal reports whether a status is one of the normal terminal
+// outcomes committed atomically by commitTerminal. Cancelled, failed, and
+// timed-out outcomes use their own (failure) paths.
+func isNormalTerminal(status entity.CaseStatus) bool {
+	return status == entity.CaseStatusResolved || status == entity.CaseStatusDeadlocked
+}
+
+// terminalCompletionEvent builds the single durable completion event published
+// with a normal terminal transition.
+func terminalCompletionEvent(case_ *entity.DecisionCase, target entity.CaseStatus, st *State) entity.MagiEvent {
+	payload := map[string]any{"status": string(target)}
+	if target == entity.CaseStatusDeadlocked {
+		payload["outcome"] = "deadlocked"
+		payload["round"] = st.Round
+	}
+	return entity.NewEvent(case_.ID, "", nil, entity.EventCaseCompleted, payload)
 }
 
 // advanceStatus persists the FSM transition before exposing it in memory or

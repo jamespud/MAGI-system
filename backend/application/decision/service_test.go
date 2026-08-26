@@ -258,7 +258,7 @@ func TestService_CancelFencesTerminalCommitAndRejectedTerminalWrite(t *testing.T
 		t.Fatalf("create resolved case: %v", err)
 	}
 	completion := entity.NewEvent(resolvedID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
-	committed, err := committer.CommitTerminal(ctx, resolvedID, entity.CaseStatusResolved,
+	committed, err := committer.CommitTerminal(ctx, resolvedID, entity.CaseStatusResolved, entity.CaseStatusResolved,
 		&entity.Resolution{ID: "resolution-cancel-fence", CaseID: resolvedID, FinalDecision: entity.VoteDecisionApprove}, &completion)
 	if err != nil || !committed {
 		t.Fatalf("commit terminal: committed=%v err=%v", committed, err)
@@ -286,7 +286,7 @@ func TestService_CancelFencesTerminalCommitAndRejectedTerminalWrite(t *testing.T
 		t.Fatalf("cancel active case: %v", err)
 	}
 	lateCompletion := entity.NewEvent(cancelledID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
-	committed, err = committer.CommitTerminal(ctx, cancelledID, entity.CaseStatusResolved,
+	committed, err = committer.CommitTerminal(ctx, cancelledID, entity.CaseStatusResolved, entity.CaseStatusResolved,
 		&entity.Resolution{ID: "resolution-late-terminal", CaseID: cancelledID, FinalDecision: entity.VoteDecisionApprove}, &lateCompletion)
 	if err != nil || committed {
 		t.Fatalf("late terminal commit after cancel: committed=%v err=%v", committed, err)

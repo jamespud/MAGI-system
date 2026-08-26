@@ -86,7 +86,7 @@ func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &me
 func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
 func (r *magiRepository) PromptRepo() port.PromptRepository         { return NewPromptRepository(r.db) }
 
-func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error) {
+func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, targetStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error) {
 	if event == nil {
 		return false, fmt.Errorf("terminal commit: event is required")
 	}
@@ -94,7 +94,7 @@ func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expe
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&CaseModel{}).
 			Where("id = ? AND status = ?", caseID, string(expectedStatus)).
-			Updates(map[string]any{"status": string(expectedStatus), "updated_at": time.Now()})
+			Updates(map[string]any{"status": string(targetStatus), "updated_at": time.Now()})
 		if result.Error != nil {
 			return result.Error
 		}

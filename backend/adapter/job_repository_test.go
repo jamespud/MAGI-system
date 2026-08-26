@@ -108,7 +108,7 @@ func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) 
 		t.Fatalf("create case: %v", err)
 	}
 	event := entity.NewEvent(caseID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
-	committed, err := committer.CommitTerminal(context.Background(), caseID, entity.CaseStatusResolved,
+	committed, err := committer.CommitTerminal(context.Background(), caseID, entity.CaseStatusResolved, entity.CaseStatusResolved,
 		&entity.Resolution{ID: "res-terminal-cancelled", CaseID: caseID, FinalDecision: entity.VoteDecisionApprove}, &event)
 	if err != nil {
 		t.Fatalf("commit terminal: %v", err)

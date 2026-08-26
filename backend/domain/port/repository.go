@@ -94,7 +94,7 @@ type ConditionalCaseStatusWriter interface {
 // its durable artifacts. A false result means another transaction changed the
 // case status before this worker could commit anything.
 type TerminalCommitter interface {
-	CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error)
+	CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, targetStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error)
 }
 
 // PauseStatusWriter is an optional CaseRepository capability that persists
