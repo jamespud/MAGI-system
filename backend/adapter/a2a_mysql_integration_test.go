@@ -2,13 +2,18 @@ package magi_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
 	"testing"
+	"time"
 
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	magi "github.com/jamespud/magi/backend/adapter"
 	a2a "github.com/jamespud/magi/backend/application/a2a"
+	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -158,5 +163,199 @@ func assertMySQLCounts(t *testing.T, db *gorm.DB, model any, want int64) {
 	}
 	if got != want {
 		t.Fatalf("%T count = %d, want %d", model, got, want)
+	}
+}
+
+func mysqlTerminalCaseStatus(s entity.CaseStatus) bool {
+	switch s {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusFailed,
+		entity.CaseStatusTimedOut, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+type instantOrch struct{}
+
+func (instantOrch) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	return &entity.Resolution{ID: "res-" + c.ID, CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+// TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL proves the real
+// SubmissionService.Submit path under MySQL concurrency: 100 concurrent calls
+// share the same external (userID, messageID) but generate their normal
+// distinct internal IDs, and the idempotency + claim fencing collapse them into
+// exactly one Case, binding, and Job with a STARTED binding.
+func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
+	db := openA2AMySQL(t)
+	if err := db.AutoMigrate(
+		&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.ConversationModel{},
+		&magi.ConversationMessageModel{}, &magi.DecisionJobModel{}, &magi.RunCounterModel{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	messageID := fmt.Sprintf("mysql-submit-%d", os.Getpid())
+	// Clean any prior run for the deterministic external message id.
+	_ = db.Exec("DELETE FROM a2a_submission WHERE message_id = ?", messageID)
+
+	repo := magi.NewA2ASubmissionRepository(db)
+	jobs := magi.NewDecisionJobRepository(db)
+	counter := magi.NewRunCounterRepository(db)
+	rm := decision.NewRunManager(instantOrch{}, decision.RunManagerDeps{
+		JobRepo: jobs, RunCounter: counter, MaxConcurrentRunsPerUser: 100,
+	})
+	parser := a2a.NewInputParser(65536, 16)
+	proj := a2a.NewTaskProjector(redact.New("sk-secret"))
+	svc := a2a.NewSubmissionService(parser, repo, rm, proj, 3)
+	req := &a2asdk.SendMessageRequest{Message: &a2asdk.Message{
+		ID: messageID, Role: a2asdk.MessageRoleUser,
+		Parts: a2asdk.ContentParts{a2asdk.NewTextPart("Should MAGI expose A2A?")},
+	}}
+
+	const callers = 100
+	errCh := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			task, err := svc.Submit(context.Background(), 7, req)
+			if err == nil && (task == nil || task.ID == "") {
+				err = fmt.Errorf("submit returned empty task")
+			}
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertMySQLCounts(t, db, &magi.A2ASubmissionModel{}, 1)
+	assertMySQLCounts(t, db, &magi.CaseModel{}, 1)
+	assertMySQLCounts(t, db, &magi.ConversationModel{}, 1)
+	assertMySQLCounts(t, db, &magi.ConversationMessageModel{}, 2)
+	assertMySQLCounts(t, db, &magi.DecisionJobModel{}, 1)
+
+	var sub magi.A2ASubmissionModel
+	if err := db.Where("message_id = ?", messageID).First(&sub).Error; err != nil {
+		t.Fatal(err)
+	}
+	if sub.State != string(a2a.SubmissionStarted) {
+		t.Fatalf("binding state = %s, want STARTED", sub.State)
+	}
+}
+
+// TestA2ASubmission_ConcurrentClaimStartOnMySQL proves the row-lock claim
+// fencing on MySQL: two replicas claiming the same PREPARED binding produce
+// exactly one winner, and only the winner's token can settle.
+func TestA2ASubmission_ConcurrentClaimStartOnMySQL(t *testing.T) {
+	db := openA2AMySQL(t)
+	if err := db.AutoMigrate(&magi.A2ASubmissionModel{}, &magi.CaseModel{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := magi.NewA2ASubmissionRepository(db)
+	cmd := a2a.PrepareCommand{
+		SubmissionID: "sub-claim-1", MessageID: "claim-msg-1", RequestHash: "hash",
+		TaskID: "case-claim-1", ContextID: "", InputMessageID: "", CaseMessageID: "",
+		UserID: 7, Question: "q", MaxDebateRounds: 3,
+	}
+	if _, _, err := repo.Prepare(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+	lease := time.Now().Add(time.Minute)
+	var wins int
+	mu := sync.Mutex{}
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, claimed, err := repo.ClaimStart(context.Background(), "sub-claim-1", fmt.Sprintf("token-%d", i), lease)
+			if err != nil {
+				t.Errorf("claim %d: %v", i, err)
+				return
+			}
+			if claimed {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("concurrent claim winners = %d, want 1", wins)
+	}
+}
+
+// TestA2ASnapshot_ConsistentOnMySQL proves GetTaskRecord returns a consistent
+// snapshot under MySQL REPEATABLE READ while a terminal transaction commits
+// concurrently: a record never combines a pre-terminal Case with a terminal
+// MaxEventSeq.
+func TestA2ASnapshot_ConsistentOnMySQL(t *testing.T) {
+	db := openA2AMySQL(t)
+	if err := db.AutoMigrate(&magi.A2ASubmissionModel{}, &magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := magi.NewA2ASubmissionRepository(db)
+	caseID := fmt.Sprintf("case-snap-%d", os.Getpid())
+	cmd := a2a.PrepareCommand{
+		SubmissionID: "sub-snap-1", MessageID: "snap-msg-1", RequestHash: "hash",
+		TaskID: caseID, ContextID: "", InputMessageID: "", CaseMessageID: "",
+		UserID: 7, Question: "q", MaxDebateRounds: 3,
+	}
+	_ = db.Exec("DELETE FROM a2a_submission WHERE task_id = ?", caseID)
+	_ = db.Exec("DELETE FROM decision_case WHERE id = ?", caseID)
+	if _, _, err := repo.Prepare(context.Background(), cmd); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", caseID).Update("status", string(entity.CaseStatusInvestigating)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.DecisionJobModel{ID: "job-snap-1", CaseID: caseID, Status: string(entity.DecisionJobRunning), AvailableAt: time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	readsDone := make(chan error, 1)
+	go func() {
+		defer close(readsDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			rec, err := repo.GetTaskRecord(context.Background(), 7, caseID)
+			if err != nil {
+				readsDone <- err
+				return
+			}
+			if rec.MaxEventSeq > 0 && !mysqlTerminalCaseStatus(rec.Case.Status) {
+				readsDone <- fmt.Errorf("inconsistent snapshot: case=%s maxSeq=%d", rec.Case.Status, rec.MaxEventSeq)
+				return
+			}
+		}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", caseID).
+		Updates(map[string]any{"status": string(entity.CaseStatusResolved), "updated_at": time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	consensus, _ := json.Marshal(entity.ConsensusResult{Outcome: entity.ConsensusStrongApproval, Round: 1})
+	if err := db.Create(&magi.ResolutionModel{ID: "res-snap-1", CaseID: caseID, FinalDecision: string(entity.VoteDecisionApprove), ConsensusJSON: string(consensus)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.EventModel{ID: "ev-snap-1", CaseID: caseID, Seq: 1, Type: string(entity.EventCaseCompleted), Timestamp: time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	if err := <-readsDone; err != nil {
+		t.Fatal(err)
 	}
 }

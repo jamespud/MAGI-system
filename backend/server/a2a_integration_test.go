@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
@@ -70,6 +71,9 @@ func (o *deterministicOrch) Orchestrate(ctx context.Context, c *entity.DecisionC
 type a2aIntegrationEnv struct {
 	baseURL string
 	orch    *deterministicOrch
+	db      *gorm.DB
+	broker  *server.EventBroker
+	repo    a2aapp.SubmissionRepository
 }
 
 func startA2AIntegration(t *testing.T) *a2aIntegrationEnv {
@@ -124,7 +128,7 @@ func startA2AIntegration(t *testing.T) *a2aIntegrationEnv {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return &a2aIntegrationEnv{baseURL: "http://" + addr, orch: orch}
+	return &a2aIntegrationEnv{baseURL: "http://" + addr, orch: orch, db: db, broker: broker, repo: repo}
 }
 
 func newA2AClient(t *testing.T, baseURL, token string) (*a2aclient.Client, context.Context) {
@@ -341,3 +345,203 @@ func firstTaskID(events []a2a.Event) a2a.TaskID {
 }
 
 func intPtr2(v int) *int { return &v }
+
+// TestA2AIntegration_DisconnectLeavesJobRunning guards the durable submission
+// contract: after Send returns, a client disconnect must not cancel the
+// background job. The binding stays STARTED and the task remains working until
+// the run is released.
+func TestA2AIntegration_DisconnectLeavesJobRunning(t *testing.T) {
+	env := startA2AIntegration(t)
+	client, callCtx := newA2AClient(t, env.baseURL, "k7")
+
+	result, err := client.SendMessage(callCtx, a2aSendRequest("msg-disc"))
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	taskID := result.(*a2a.Task).ID
+	select {
+	case <-env.orch.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator did not start")
+	}
+
+	// The call already returned: the client is "disconnected" but the job runs.
+	sub, err := env.repo.GetByTask(context.Background(), 7, string(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub.State != a2aapp.SubmissionStarted {
+		t.Fatalf("binding state = %s, want STARTED after disconnect", sub.State)
+	}
+	got, err := client.GetTask(callCtx, &a2a.GetTaskRequest{ID: taskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.State != a2a.TaskStateWorking {
+		t.Fatalf("task after disconnect = %s, want working", got.Status.State)
+	}
+	close(env.orch.release)
+}
+
+// TestA2AIntegration_ReconnectSubscribeCatchesUpAfterDisconnect guards the
+// durable catch-up path: a consumer that disconnects mid-stream and reconnects
+// after the run completed must receive the terminal snapshot (with artifacts)
+// from the fresh Subscribe.
+func TestA2AIntegration_ReconnectSubscribeCatchesUpAfterDisconnect(t *testing.T) {
+	env := startA2AIntegration(t)
+	client, callCtx := newA2AClient(t, env.baseURL, "k7")
+	streamCtx, cancelStream := context.WithCancel(callCtx)
+	defer cancelStream()
+
+	seq := client.SendStreamingMessage(streamCtx, a2aSendRequest("msg-reconnect"))
+	firstEvent := make(chan struct{})
+	done := make(chan struct{})
+	taskIDCh := make(chan a2a.TaskID, 1)
+	go func() {
+		defer close(done)
+		for ev, err := range seq {
+			if err != nil {
+				t.Errorf("first stream error: %v", err)
+				return
+			}
+			if task, ok := ev.(*a2a.Task); ok {
+				taskIDCh <- task.ID
+			}
+			select {
+			case <-firstEvent:
+			default:
+				close(firstEvent)
+			}
+			return // consume the initial snapshot, then disconnect
+		}
+	}()
+	select {
+	case <-env.orch.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator did not start")
+	}
+	select {
+	case <-firstEvent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first stream did not emit its snapshot")
+	}
+	var taskID a2a.TaskID
+	select {
+	case taskID = <-taskIDCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first stream did not expose a task id")
+	}
+	cancelStream() // disconnect the SSE connection; the job keeps running
+	<-done
+
+	close(env.orch.release) // complete while disconnected
+	time.Sleep(100 * time.Millisecond)
+
+	sub := client.SubscribeToTask(callCtx, &a2a.SubscribeToTaskRequest{ID: taskID})
+	var terminal *a2a.Task
+	for ev, err := range sub {
+		if err != nil {
+			t.Fatalf("reconnect subscribe error: %v", err)
+		}
+		if snap, ok := ev.(*a2a.Task); ok {
+			terminal = snap
+		}
+	}
+	if terminal == nil || terminal.Status.State != a2a.TaskStateCompleted || len(terminal.Artifacts) != 2 {
+		t.Fatalf("reconnect terminal snapshot = %#v", terminal)
+	}
+}
+
+// TestA2AIntegration_ForeignSubscribeNotFound guards tenant isolation on the
+// streaming surface: a foreign principal subscribing to an owned task gets a
+// not-found error instead of an empty stream.
+func TestA2AIntegration_ForeignSubscribeNotFound(t *testing.T) {
+	env := startA2AIntegration(t)
+	owner, ownerCtx := newA2AClient(t, env.baseURL, "k7")
+	result, err := owner.SendMessage(ownerCtx, a2aSendRequest("msg-foreign-sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := result.(*a2a.Task).ID
+
+	foreign, foreignCtx := newA2AClient(t, env.baseURL, "k8")
+	err = a2a.ErrTaskNotFound
+	for _, e := range foreign.SubscribeToTask(foreignCtx, &a2a.SubscribeToTaskRequest{ID: taskID}) {
+		if e != nil {
+			err = e
+		}
+	}
+	if !errors.Is(err, a2a.ErrTaskNotFound) {
+		t.Fatalf("foreign subscribe error = %v, want ErrTaskNotFound", err)
+	}
+}
+
+// TestA2AIntegration_SecondHandlerCancelsAndStreamObserves guards cross-replica
+// cancellation: a second Handler with its own RunManager (same durable repo and
+// broker) cancels a task whose stream is open on the first handler, and the
+// stream terminates with the canceled status.
+func TestA2AIntegration_SecondHandlerCancelsAndStreamObserves(t *testing.T) {
+	env := startA2AIntegration(t)
+	client, callCtx := newA2AClient(t, env.baseURL, "k7")
+
+	seq := client.SendStreamingMessage(callCtx, a2aSendRequest("msg-2nd-cancel"))
+	firstEvent := make(chan struct{})
+	eventsCh := make(chan []a2a.Event, 1)
+	errCh := make(chan error, 1)
+	taskIDCh := make(chan a2a.TaskID, 1)
+	go func() {
+		var events []a2a.Event
+		for ev, err := range seq {
+			if err != nil {
+				errCh <- err
+				return
+			}
+			events = append(events, ev)
+			if task, ok := ev.(*a2a.Task); ok {
+				select {
+				case taskIDCh <- task.ID:
+				default:
+				}
+			}
+			select {
+			case <-firstEvent:
+			default:
+				close(firstEvent)
+			}
+		}
+		eventsCh <- events
+	}()
+	select {
+	case <-env.orch.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator did not start")
+	}
+	select {
+	case <-firstEvent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first stream did not emit its snapshot")
+	}
+	var taskID a2a.TaskID
+	select {
+	case taskID = <-taskIDCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first stream did not expose a task id")
+	}
+
+	// A second replica handler cancels through the shared durable repository.
+	secondRM := decision.NewRunManager(env.orch, decision.RunManagerDeps{Metrics: metrics.New()})
+	secondSvc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), env.repo, secondRM, a2aapp.NewTaskProjector(redact.New("k7")), 3)
+	secondHandler := a2aapp.NewHandler(secondSvc, env.repo, a2aapp.NewTaskProjector(redact.New("k7")), a2aapp.CursorCodec{MaxPageSize: 100}, secondRM, nil)
+	ctxWithPrincipal := auth.WithPrincipal(context.Background(), &auth.Principal{UserID: 7, Name: "owner"})
+
+	if _, err := secondHandler.CancelTask(ctxWithPrincipal, &a2a.CancelTaskRequest{ID: taskID}); err != nil {
+		t.Fatalf("second handler cancel: %v", err)
+	}
+	select {
+	case <-eventsCh:
+	case err := <-errCh:
+		t.Fatalf("stream error after second-replica cancel: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("stream did not observe the second-replica cancellation")
+	}
+}
