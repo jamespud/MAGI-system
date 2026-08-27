@@ -115,7 +115,7 @@
 | | 标准基准集 / 评测指标看板 | ✅ | `POST /admin/benchmarks/seed` 幂等植入内置 "MAGI Decision Sanity Suite"（跨 DB/采购/SRE/安全/战略的 approve/reject/conditional 用例，`application/dataset/service.go`）；`GET /admin/eval/summary` 聚合总运行/成功/失败、平均准确率/稳定性、回归失败数与按数据集/最近运行明细；Benchmark 页评测看板卡片 + seed 按钮 |
 | **可观测性** | OTel span / X-Trace-ID / 事件流 / Prometheus /metrics | ✅ | `application/tracing`、`server/metrics.go` |
 | | 前端 trace 可视化 | ✅ | Replay 页 Trace 模式：按 run/agent 分泳道的时间轴可视化（事件按时间定位、按类型着色）、事件计数/运行数/智能体数/错误数统计、点击 marker 查看事件详情（`frontend/src/pages/Replay.tsx`、`api.getTrace`） |
-| | 告警默认部署 / 看板栈 | ✅ | `docker/docker-compose-monitoring.yml` 一键启动 Prometheus（抓取 `magi-server:8080/metrics`）+ Alertmanager + Grafana（自动 provisioning 数据源与 MAGI Overview 看板）；告警规则单一来源 `deploy/prometheus-alerts.example.yml`；`make monitoring-up` |
+| | 告警默认部署 / 看板栈 | ✅ | `docker/docker-compose-monitoring.yml` 一键启动 Prometheus（抓取 `magi-server:<MAGI_HTTP_PORT>/metrics`，默认 8080）+ Alertmanager + Grafana（自动 provisioning 数据源与 MAGI Overview 看板）；告警规则单一来源 `deploy/prometheus-alerts.example.yml`；启动命令 `docker compose -f docker/docker-compose-monitoring.yml up -d` |
 | | **Hibernate-and-Wake** 长任务休眠/唤醒 | ✅ | `POST /cases/:id/pause|resume`：暂停取消 worker 并持久化 PAUSED + PausedFromStatus，durable job 置为 paused（不重试不计活跃）；唤醒恢复暂停前状态、重新入队并重启 worker（`RunManager.Pause/Resume`、`caseRepo.UpdatePaused`、`decision_job.MarkPaused/ResumeQueued`）；前端工作台暂停/唤醒按钮 |
 | **UI** | 决策工作台/证据图/时间线/审批/评测/数据集/模板/benchmark/history/memory/tools/settings | ✅ | `frontend/src/router.tsx`，14 个功能页 |
 | | 管理员用量可视化 / 用户管理 / 知识库管理 / 配置管理 | ✅ | `/me/usage` + `/admin/usage` 用量卡片（D9）、Users 页（D8）、Knowledge 页（D7）、prompt 管理（D12） |

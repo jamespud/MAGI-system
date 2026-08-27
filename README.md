@@ -163,7 +163,7 @@ frontend/
     stores/            # Zustand: case, agent, event, ui
     api/               # REST client + SSE stream consumer
     lib/               # stance helper (color/label normalization)
-scripts/               # dev.sh, build.sh, env.sh
+scripts/               # serve.sh, docker.sh, deploy.sh, db.sh, build.sh
 docs/superpowers/      # specs + implementation plans
 ```
 
