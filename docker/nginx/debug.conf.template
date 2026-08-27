@@ -4,9 +4,9 @@ server {
     index index.html;
 
     # API proxy to Go backend (includes SSE streaming). The nginx debug container
-    # runs with --network host, so 127.0.0.1:8080 is the host's go-run backend.
+    # runs with --network host, so 127.0.0.1:${MAGI_HTTP_PORT} is the host go-run backend.
     location /api/ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${MAGI_HTTP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -21,13 +21,13 @@ server {
 
     # Health check
     location /health {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${MAGI_HTTP_PORT};
     }
 
     # A2A protocol + Agent Card discovery: long-lived streams must not be
     # buffered, and the discovery JSON must reach the backend (not the SPA).
     location = /.well-known/agent-card.json {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${MAGI_HTTP_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -35,7 +35,7 @@ server {
     }
     location /a2a/ {
         client_max_body_size 96k;
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${MAGI_HTTP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

@@ -58,8 +58,10 @@ esac
 bash "$ROOT/scripts/docker.sh" start
 
 if [ "$MODE" = "dev" ]; then
-  echo "Starting dev stack: middleware + vite (:5173) + backend go run (:8080)"
-  export VITE_PROXY_TARGET="http://localhost:8080"
+  # Backend listen port follows MAGI_HTTP_PORT (default 8080); the vite dev
+  # proxy targets the same address so changing the backend port keeps working.
+  export VITE_PROXY_TARGET="http://localhost:${MAGI_HTTP_PORT:-8080}"
+  echo "Starting dev stack: middleware + vite (:5173) + backend go run ($VITE_PROXY_TARGET)"
   export VITE_DEV_SERVER_PORT="5173"
   ( npm -C "$ROOT/frontend" run dev ) &
   trap 'pkill -f "vite" >/dev/null 2>&1 || true' EXIT
@@ -70,9 +72,12 @@ else
   if [ ! -x "$ROOT/bin/magi" ]; then
     bash "$ROOT/scripts/build.sh" backend
   fi
+  # nginx:1.27-alpine renders *.template files under /etc/nginx/templates via
+  # its entrypoint envsubst, so MAGI_HTTP_PORT drives the proxy target here too.
   docker run -d --name magi-dev-nginx \
     --network host \
-    -v "$ROOT/docker/nginx/debug.conf:/etc/nginx/conf.d/default.conf:ro" \
+    -e MAGI_HTTP_PORT="${MAGI_HTTP_PORT:-8080}" \
+    -v "$ROOT/docker/nginx/debug.conf.template:/etc/nginx/templates/default.conf.template:ro" \
     -v "$ROOT/frontend/dist:/usr/share/nginx/html:ro" \
     nginx:1.27-alpine
   exec "$ROOT/bin/magi"
