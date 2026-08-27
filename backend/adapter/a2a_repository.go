@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -385,11 +386,33 @@ func (r *a2aSubmissionRepo) ListClaimable(ctx context.Context, limit int, afterI
 	for _, model := range models {
 		item, err := loadPreparedSubmission(r.db.WithContext(ctx), model)
 		if err != nil {
-			return nil, err
+			// A binding that can no longer be hydrated (corrupt output modes,
+			// a deleted case, a missing conversation) must not abort recovery
+			// and block startup for every healthy binding behind it. Quarantine
+			// the row to REJECTED so later sweeps advance past it.
+			log.Printf("a2a recovery: quarantining binding %s (task %s): %v", model.ID, model.TaskID, err)
+			r.quarantineBinding(ctx, model.ID)
+			continue
 		}
 		prepared = append(prepared, item)
 	}
 	return prepared, nil
+}
+
+// quarantineBinding parks an unloadable claimable binding in REJECTED with a
+// stable code so recovery scanning can continue past it. A live claim token,
+// if any, is cleared because the binding can never be settled.
+func (r *a2aSubmissionRepo) quarantineBinding(ctx context.Context, id string) {
+	res := r.db.WithContext(ctx).Model(&A2ASubmissionModel{}).
+		Where("id = ? AND state IN ?", id, []string{string(a2aapp.SubmissionPrepared), string(a2aapp.SubmissionStarting)}).
+		Updates(map[string]any{
+			"state": string(a2aapp.SubmissionRejected), "error_code": "invalid_binding",
+			"start_claim_token": "", "start_claim_until": nil,
+			"updated_at": time.Now().UTC(),
+		})
+	if res.Error != nil {
+		log.Printf("a2a recovery: failed to quarantine binding %s: %v", id, res.Error)
+	}
 }
 
 func (r *a2aSubmissionRepo) GetByTask(ctx context.Context, userID int64, taskID string) (*a2aapp.Submission, error) {
@@ -757,6 +780,11 @@ func parseOutputModes(raw string) ([]string, error) {
 	if raw == "" {
 		return []string{"text/markdown", "application/json"}, nil
 	}
+	if strings.TrimSpace(raw) == "null" {
+		// A stored literal null is invalid field content: json.Unmarshal maps
+		// it to a nil slice, which must never be widened to both defaults.
+		return nil, fmt.Errorf("a2a submission: malformed accepted_output_modes_json: null is not a mode list")
+	}
 	var modes []string
 	if err := json.Unmarshal([]byte(raw), &modes); err != nil {
 		// Fail closed: malformed stored JSON must never broaden negotiated
@@ -765,7 +793,14 @@ func parseOutputModes(raw string) ([]string, error) {
 		return nil, fmt.Errorf("a2a submission: malformed accepted_output_modes_json: %w", err)
 	}
 	if len(modes) == 0 {
+		// An explicit empty array means nothing extra was negotiated; the write
+		// path already normalizes an empty list to the defaults.
 		return []string{"text/markdown", "application/json"}, nil
+	}
+	for _, mode := range modes {
+		if mode != "text/markdown" && mode != "application/json" {
+			return nil, fmt.Errorf("a2a submission: unsupported accepted_output_modes_json mode %q", mode)
+		}
 	}
 	return modes, nil
 }

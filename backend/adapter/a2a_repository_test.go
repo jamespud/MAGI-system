@@ -597,3 +597,97 @@ func TestA2ASubmission_FailsClosedOnMalformedOutputModes(t *testing.T) {
 		t.Fatal("expected fail-closed error for malformed stored output modes")
 	}
 }
+
+// TestA2ASubmission_FailsClosedOnNullOutputModes guards the fail-closed
+// contract against a stored literal null: json.Unmarshal maps null to a nil
+// slice, which must not be treated as an empty list that broadens output.
+func TestA2ASubmission_FailsClosedOnNullOutputModes(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	cmd := a2aPrepareCommand(7, "msg-null", "hash-null", "case-null", "conv-null")
+	if _, created, err := repo.Prepare(context.Background(), cmd); err != nil || !created {
+		t.Fatalf("prepare = created %v err %v", created, err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).
+		Where("task_id = ?", "case-null").
+		Update("accepted_output_modes_json", "null").Error; err != nil {
+		t.Fatalf("corrupt stored modes: %v", err)
+	}
+	if _, err := repo.GetTaskRecord(context.Background(), 7, "case-null"); err == nil {
+		t.Fatal("expected fail-closed error for null stored output modes")
+	}
+}
+
+// TestA2ASubmission_FailsClosedOnUnsupportedOutputMode proves an out-of-band
+// stored mode that the write path never normalizes is refused instead of
+// silently exposing unnegotiated output to the client.
+func TestA2ASubmission_FailsClosedOnUnsupportedOutputMode(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	cmd := a2aPrepareCommand(7, "msg-unsupported", "hash-unsupported", "case-unsupported", "conv-unsupported")
+	if _, created, err := repo.Prepare(context.Background(), cmd); err != nil || !created {
+		t.Fatalf("prepare = created %v err %v", created, err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).
+		Where("task_id = ?", "case-unsupported").
+		Update("accepted_output_modes_json", `["text/html"]`).Error; err != nil {
+		t.Fatalf("corrupt stored modes: %v", err)
+	}
+	if _, err := repo.GetTaskRecord(context.Background(), 7, "case-unsupported"); err == nil {
+		t.Fatal("expected fail-closed error for unsupported stored output modes")
+	}
+}
+
+// TestA2ASubmission_EmptyOutputModesNormalizeToDefaults pins the distinction
+// between an explicit empty array (allowed, default semantics) and null
+// (rejected): the write path already normalizes an empty list.
+func TestA2ASubmission_EmptyOutputModesNormalizeToDefaults(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	cmd := a2aPrepareCommand(7, "msg-empty", "hash-empty", "case-empty", "conv-empty")
+	if _, created, err := repo.Prepare(context.Background(), cmd); err != nil || !created {
+		t.Fatalf("prepare = created %v err %v", created, err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).
+		Where("task_id = ?", "case-empty").
+		Update("accepted_output_modes_json", "[]").Error; err != nil {
+		t.Fatalf("corrupt stored modes: %v", err)
+	}
+	rec, err := repo.GetTaskRecord(context.Background(), 7, "case-empty")
+	if err != nil {
+		t.Fatalf("get task record: %v", err)
+	}
+	if !reflect.DeepEqual(rec.Submission.AcceptedOutputModes, []string{"text/markdown", "application/json"}) {
+		t.Fatalf("empty modes = %v, want defaults", rec.Submission.AcceptedOutputModes)
+	}
+}
+
+// TestA2ASubmission_ListClaimableSkipsCorruptBinding proves recovery does not
+// abort on the first unloadable binding: the corrupt row is quarantined to
+// REJECTED and the healthy later binding is still returned.
+func TestA2ASubmission_ListClaimableSkipsCorruptBinding(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	ctx := context.Background()
+	if _, created, err := repo.Prepare(ctx, a2aPrepareCommand(7, "msg-early", "hash-early", "case-early", "conv-early")); err != nil || !created {
+		t.Fatalf("prepare early = created %v err %v", created, err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).
+		Where("task_id = ?", "case-early").
+		Update("accepted_output_modes_json", "null").Error; err != nil {
+		t.Fatalf("corrupt early binding: %v", err)
+	}
+	if _, created, err := repo.Prepare(ctx, a2aPrepareCommand(7, "msg-late", "hash-late", "case-late", "conv-late")); err != nil || !created {
+		t.Fatalf("prepare late = created %v err %v", created, err)
+	}
+	batch, err := repo.ListClaimable(ctx, 100, "")
+	if err != nil {
+		t.Fatalf("list claimable must not abort on a corrupt binding: %v", err)
+	}
+	if len(batch) != 1 || batch[0].Binding.TaskID != "case-late" {
+		t.Fatalf("list claimable = %+v, want only the healthy later binding", batch)
+	}
+	var model magi.A2ASubmissionModel
+	if err := db.Where("task_id = ?", "case-early").First(&model).Error; err != nil {
+		t.Fatalf("load early binding: %v", err)
+	}
+	if model.State != string(a2a.SubmissionRejected) {
+		t.Fatalf("corrupt binding state = %s, want REJECTED", model.State)
+	}
+}
