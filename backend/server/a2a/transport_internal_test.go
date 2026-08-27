@@ -52,6 +52,19 @@ func TestNormalizeListTasksQuery_CanonicalWins(t *testing.T) {
 	}
 }
 
+func TestNormalizeListTasksQuery_EmptyCanonicalStillWins(t *testing.T) {
+	fake := &captureListTasksHandler{}
+	h := normalizeListTasksQuery(a2asrv.NewRESTHandler(fake))
+	alias := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	req := httptest.NewRequest(http.MethodGet,
+		"/tasks?statusTimestampAfter=&lastUpdatedAfter="+url.QueryEscape(alias.Format(time.RFC3339)), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if fake.got != nil {
+		t.Fatalf("StatusTimestampAfter = %v, want nil: a present canonical key must win over the alias", fake.got)
+	}
+}
+
 func TestNormalizeListTasksQuery_NoAliasUnchanged(t *testing.T) {
 	fake := &captureListTasksHandler{}
 	h := normalizeListTasksQuery(a2asrv.NewRESTHandler(fake))

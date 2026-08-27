@@ -105,7 +105,7 @@ func normalizeListTasksQuery(inner http.Handler) http.Handler {
 			return
 		}
 		q := r.URL.Query()
-		if q.Get("statusTimestampAfter") == "" && q.Get("lastUpdatedAfter") != "" {
+		if !q.Has("statusTimestampAfter") && q.Get("lastUpdatedAfter") != "" {
 			// Clone the request/URL so we never mutate the caller's request.
 			req := r.Clone(r.Context())
 			urlCopy := *r.URL
