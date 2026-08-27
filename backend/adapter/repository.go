@@ -307,6 +307,21 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	if tx.Error != nil {
 		return tx.Error
 	}
+	// Tool calls and reflections are keyed by agent_run_id, so they must be
+	// removed while magi_agent_run still exists. Deleting AgentRunModel first
+	// would make this subquery see an empty table and silently orphan them.
+	if err := tx.Where("agent_run_id IN (?)",
+		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
+	).Delete(&ToolCallModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Where("agent_run_id IN (?)",
+		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
+	).Delete(&ReflectionModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	tables := []any{
 		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
 		&ResolutionModel{}, &EventModel{}, &EventCursorModel{}, &DebateRoundModel{},
@@ -322,18 +337,6 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	// A2A submissions bind by task_id rather than case_id; remove them so a
 	// binding can never dangle on a deleted task.
 	if err := tx.Where("task_id = ?", id).Delete(&A2ASubmissionModel{}).Error; err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Where("agent_run_id IN (?)",
-		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
-	).Delete(&ToolCallModel{}).Error; err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Where("agent_run_id IN (?)",
-		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
-	).Delete(&ReflectionModel{}).Error; err != nil {
 		_ = tx.Rollback()
 		return err
 	}
