@@ -73,14 +73,23 @@ func (p *EventPublisherAdapter) PublishLive(ctx context.Context, e entity.MagiEv
 func (p *EventPublisherAdapter) publishLive(ctx context.Context, e entity.MagiEvent) error {
 	if p.live != nil {
 		if live, ok := p.live.(port.LiveEventPublisher); ok {
-			_ = live.PublishLive(ctx, e)
+			if err := live.PublishLive(ctx, e); err != nil {
+				return err
+			}
 		} else {
-			_ = p.live.Publish(ctx, e)
+			if err := p.live.Publish(ctx, e); err != nil {
+				return err
+			}
 		}
 	}
 	if p.sender != nil && p.stream != nil {
-		data, _ := json.Marshal(e)
-		_ = p.sender.Send(ctx, p.stream, &hertzsse.Event{Event: string(e.Type), Data: data})
+		data, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		if err := p.sender.Send(ctx, p.stream, &hertzsse.Event{Event: string(e.Type), Data: data}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

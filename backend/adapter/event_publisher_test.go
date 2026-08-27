@@ -39,6 +39,42 @@ func (p *liveCaptureEventPublisher) PublishLive(_ context.Context, e entity.Magi
 	return nil
 }
 
+type errorLivePublisher struct{ err error }
+
+func (p *errorLivePublisher) Publish(_ context.Context, e entity.MagiEvent) error { return p.err }
+
+func (p *errorLivePublisher) PublishLive(_ context.Context, e entity.MagiEvent) error {
+	return p.err
+}
+
+// TestEventPublisher_PublishLiveReturnsFanoutError proves the orchestrator's
+// degradation log can observe a failing live fan-out instead of always seeing
+// nil.
+func TestEventPublisher_PublishLiveReturnsFanoutError(t *testing.T) {
+	store := magi.NewInMemoryEventRepo()
+	live := &errorLivePublisher{err: fmt.Errorf("broker unavailable")}
+	pub := magi.NewEventPublisherAdapterWithFanout(store, live)
+	if err := pub.PublishLive(context.Background(), entity.MagiEvent{ID: "e-fail", CaseID: "c-fail"}); err == nil {
+		t.Fatal("expected live fan-out error to propagate from PublishLive")
+	}
+}
+
+// TestEventPublisher_PublishKeepsDurableSuccessOnLiveError guards the contract
+// that a live delivery failure must never roll back or fail durable
+// persistence: Publish returns nil as long as the store write succeeded.
+func TestEventPublisher_PublishKeepsDurableSuccessOnLiveError(t *testing.T) {
+	store := magi.NewInMemoryEventRepo()
+	live := &errorLivePublisher{err: fmt.Errorf("broker unavailable")}
+	pub := magi.NewEventPublisherAdapterWithFanout(store, live)
+	if err := pub.Publish(context.Background(), entity.MagiEvent{ID: "e-persist", CaseID: "c-persist"}); err != nil {
+		t.Fatalf("durable publish must not fail on live fan-out error: %v", err)
+	}
+	events, _ := store.ListByCase(context.Background(), "c-persist")
+	if len(events) != 1 || events[0].ID != "e-persist" {
+		t.Fatalf("expected durable event persisted: %+v", events)
+	}
+}
+
 func TestEventPublisher_StoreAndList(t *testing.T) {
 	repo := magi.NewInMemoryEventRepo()
 	pub := magi.NewEventPublisherAdapter(repo)
