@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm/clause"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -39,8 +39,18 @@ func (r *decisionJobRepo) Admit(ctx context.Context, caseID string, maxAttempts,
 	admitted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Read the authoritative owner for the case.
+		// On MySQL this must be a locking read: a plain consistent read would
+		// establish this transaction's REPEATABLE READ snapshot before the
+		// per-user admission lock is taken below, so a replica that waits on
+		// that lock could still count a stale view and both pass the limit.
+		// A locking read never creates a snapshot; the queued/running count
+		// below then opens its read view only after the lock is held.
 		var caseModel CaseModel
-		if err := tx.Where("id = ?", caseID).First(&caseModel).Error; err != nil {
+		caseQuery := tx.Where("id = ?", caseID)
+		if tx.Dialector.Name() == "mysql" {
+			caseQuery = caseQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := caseQuery.First(&caseModel).Error; err != nil {
 			return err
 		}
 		userID := caseModel.UserID
