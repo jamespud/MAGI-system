@@ -322,6 +322,15 @@ func (r *caseRepo) Delete(ctx context.Context, id string) error {
 		_ = tx.Rollback()
 		return err
 	}
+	// Working-memory checkpoints are keyed by agent_run_id, not case_id; they
+	// must be removed while magi_agent_run still exists, before the run rows
+	// are deleted below.
+	if err := tx.Where("run_id IN (?)",
+		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
+	).Delete(&CheckpointModel{}).Error; err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	tables := []any{
 		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
 		&ResolutionModel{}, &EventModel{}, &EventCursorModel{}, &DebateRoundModel{},

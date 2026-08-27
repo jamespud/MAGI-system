@@ -164,3 +164,47 @@ func TestCaseRepository_DeleteRemovesCursorAndA2ABinding(t *testing.T) {
 		t.Fatalf("keep rows lost: event=%d cursor=%d submission=%d", keepEvent, keepCursor, keepSub)
 	}
 }
+
+// TestCaseRepository_DeleteRemovesAgentRunCheckpoint proves Delete also drops
+// the working-memory checkpoints keyed by agent_run_id, not just the run row.
+func TestCaseRepository_DeleteRemovesAgentRunCheckpoint(t *testing.T) {
+	db := openCaseDB(t)
+	repo := magi.NewRepository(db)
+	cr := repo.CaseRepo()
+	ctx := context.Background()
+
+	victimID := "case-checkpoint-victim"
+	keepID := "case-checkpoint-keep"
+	for _, id := range []string{victimID, keepID} {
+		if err := cr.Create(ctx, &entity.DecisionCase{ID: id, UserID: 9, Question: "q", CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	if err := db.Create(&magi.AgentRunModel{ID: "run-victim", CaseID: victimID, Round: 1, Status: "completed"}).Error; err != nil {
+		t.Fatalf("seed victim agent run: %v", err)
+	}
+	if err := db.Create(&magi.CheckpointModel{RunID: "run-victim", MessagesJSON: "{}"}).Error; err != nil {
+		t.Fatalf("seed victim checkpoint: %v", err)
+	}
+	if err := db.Create(&magi.AgentRunModel{ID: "run-keep", CaseID: keepID, Round: 1, Status: "completed"}).Error; err != nil {
+		t.Fatalf("seed keep agent run: %v", err)
+	}
+	if err := db.Create(&magi.CheckpointModel{RunID: "run-keep", MessagesJSON: "{}"}).Error; err != nil {
+		t.Fatalf("seed keep checkpoint: %v", err)
+	}
+
+	if err := cr.Delete(ctx, victimID); err != nil {
+		t.Fatalf("delete victim: %v", err)
+	}
+
+	var victimCheckpoint int64
+	db.Model(&magi.CheckpointModel{}).Where("run_id = ?", "run-victim").Count(&victimCheckpoint)
+	if victimCheckpoint != 0 {
+		t.Fatalf("victim checkpoint left after delete: %d", victimCheckpoint)
+	}
+	var keepCheckpoint int64
+	db.Model(&magi.CheckpointModel{}).Where("run_id = ?", "run-keep").Count(&keepCheckpoint)
+	if keepCheckpoint != 1 {
+		t.Fatalf("keep checkpoint lost: %d", keepCheckpoint)
+	}
+}
