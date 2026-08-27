@@ -30,3 +30,28 @@ func TestProvideServerEnablesClientDisconnection(t *testing.T) {
 	}
 	_ = app.Stop(context.Background())
 }
+
+// TestServerListenAddr guards env-var resolution of the HTTP listen address:
+// default :8080, and independent MAGI_HTTP_HOST / MAGI_HTTP_PORT.
+func TestServerListenAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		port string
+		want string
+	}{
+		{"default", "", "", ":8080"},
+		{"host only", "127.0.0.1", "", "127.0.0.1:8080"},
+		{"port only", "", "9090", ":9090"},
+		{"host and port", "0.0.0.0", "9000", "0.0.0.0:9000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MAGI_HTTP_HOST", tc.host)
+			t.Setenv("MAGI_HTTP_PORT", tc.port)
+			if got := serverListenAddr(); got != tc.want {
+				t.Fatalf("serverListenAddr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

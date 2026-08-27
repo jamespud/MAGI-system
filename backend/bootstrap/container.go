@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -835,11 +836,20 @@ func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.
 // surface additionally applies its own smaller per-request cap in transport.
 const serverMaxRequestBodyBytes = 4 * 1024 * 1024
 
-func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
-	addr := os.Getenv("MAGI_HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
+// serverListenAddr resolves the HTTP listen address from the environment.
+// MAGI_HTTP_HOST sets the bind host (empty means all interfaces) and
+// MAGI_HTTP_PORT sets the port (default 8080).
+func serverListenAddr() string {
+	host := os.Getenv("MAGI_HTTP_HOST")
+	port := os.Getenv("MAGI_HTTP_PORT")
+	if port == "" {
+		port = "8080"
 	}
+	return net.JoinHostPort(host, port)
+}
+
+func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
+	addr := serverListenAddr()
 	h := hzserver.Default(
 		hzserver.WithHostPorts(addr),
 		hzserver.WithMaxRequestBodySize(serverMaxRequestBodyBytes),
