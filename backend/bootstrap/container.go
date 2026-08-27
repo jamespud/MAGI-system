@@ -868,12 +868,20 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			if err := rm.Recover(ctx); err != nil {
+				// RecoverOnce may have launched workers before a repository
+				// failure; the lifecycle failure path must not leak them.
+				rm.Shutdown()
 				return err
 			}
 			if err := a2a.Recover(ctx); err != nil {
+				// Workers launched by rm.Recover above are derived from
+				// context.Background(); a failed later startup step must stop
+				// them before returning the error.
+				rm.Shutdown()
 				return err
 			}
 			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
+				rm.Shutdown()
 				return err
 			}
 			// Every fallible startup step above has succeeded, so any goroutine
@@ -948,6 +956,9 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 					<-decisionRecoveryDone
 				}
 			}
+			// Stop any decision workers launched by recovery sweeps so a
+			// graceful stop drains them too.
+			rm.Shutdown()
 			return nil
 		},
 	})

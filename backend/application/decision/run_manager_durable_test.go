@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -597,5 +598,125 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	waitJobStatus(t, jobs, "case-resolved-terminal", entity.DecisionJobSucceeded)
 	if at := orch.calls.Load(); at != 0 {
 		t.Fatalf("orchestrator invoked %d times for a resolved case", at)
+	}
+}
+
+// attemptRecordingOrchestrator records the ExecutionAttempt observed at each
+// Orchestrate call so the retry path can prove attempt-qualified execution.
+type attemptRecordingOrchestrator struct {
+	mu       sync.Mutex
+	attempts []int
+}
+
+func (o *attemptRecordingOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	o.mu.Lock()
+	o.attempts = append(o.attempts, c.ExecutionAttempt)
+	o.mu.Unlock()
+	if len(o.attempts) == 1 {
+		return nil, errors.New("transient model failure")
+	}
+	return &entity.Resolution{CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
+func (o *attemptRecordingOrchestrator) Attempts() []int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := make([]int, len(o.attempts))
+	copy(out, o.attempts)
+	return out
+}
+
+// shutdownBlockingOrchestrator blocks until its context is cancelled so the
+// lifecycle shutdown path can prove in-flight workers are stopped.
+type shutdownBlockingOrchestrator struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (o *shutdownBlockingOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	close(o.started)
+	<-ctx.Done()
+	close(o.cancelled)
+	return nil, ctx.Err()
+}
+
+// TestRunManager_ShutdownCancelsWorkers guards the P1 lifecycle gap where a
+// failed startup after Recover would leave context.Background()-derived
+// workers running forever because nothing cancels them.
+func TestRunManager_ShutdownCancelsWorkers(t *testing.T) {
+	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-shutdown", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	orch := &shutdownBlockingOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "worker-shutdown", MaxAttempts: 1,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-shutdown"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-orch.started
+	rm.Shutdown()
+	select {
+	case <-orch.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not cancel the running worker")
+	}
+	if rm.IsRunning("case-shutdown") {
+		t.Fatal("shutdown left the worker registered")
+	}
+}
+
+// TestRunManager_WaitStoppedDrainsWorker guards the delete fence: after the
+// handler cancels a run it must wait for the worker to fully exit before the
+// cleanup transaction runs, so a final artifact write cannot interleave.
+func TestRunManager_WaitStoppedDrainsWorker(t *testing.T) {
+	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-waitstop", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	orch := &shutdownBlockingOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, WorkerID: "worker-waitstop", MaxAttempts: 1,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-waitstop"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-orch.started
+	if !rm.Cancel("case-waitstop") {
+		t.Fatal("cancel returned false for a running worker")
+	}
+	if !rm.WaitStopped("case-waitstop", time.Second) {
+		t.Fatal("WaitStopped timed out before the worker exited")
+	}
+	if rm.IsRunning("case-waitstop") {
+		t.Fatal("worker still registered after WaitStopped")
+	}
+	// A case with no active worker must not block the delete path.
+	if !rm.WaitStopped("case-waitstop-idle", time.Millisecond) {
+		t.Fatal("WaitStopped blocked for a case with no active worker")
+	}
+}
+
+// TestRunManager_RetryPreservesExecutionAttemptAcrossReload guards the P0
+// regression where the post-claim case re-read (fresh) reset the runtime-only
+// ExecutionAttempt to zero, breaking attempt-qualified artifact IDs.
+func TestRunManager_RetryPreservesExecutionAttemptAcrossReload(t *testing.T) {
+	db := openJobDB(t)
+	repo := magi.NewRepository(db)
+	seedDecisionCase(t, db, "case-attempt-reload", 0)
+	jobs := magi.NewDecisionJobRepository(db)
+	orch := &attemptRecordingOrchestrator{}
+	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-attempt",
+		MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
+	})
+	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-attempt-reload"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	job := waitJobStatus(t, jobs, "case-attempt-reload", entity.DecisionJobSucceeded)
+	if job.Attempt != 2 {
+		t.Fatalf("expected 2 attempts, got %d", job.Attempt)
+	}
+	if got := orch.Attempts(); !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Fatalf("observed ExecutionAttempts = %v, want [1 2]", got)
 	}
 }

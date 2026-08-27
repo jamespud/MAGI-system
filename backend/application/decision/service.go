@@ -58,6 +58,9 @@ func WithAgentRunRepo(repo port.AgentRunRepository) Option {
 type RunController interface {
 	Start(ctx context.Context, c *entity.DecisionCase) error
 	Cancel(caseID string) bool
+	// WaitStopped blocks until the in-process worker for caseID has exited or
+	// the timeout elapses; true means no worker is running.
+	WaitStopped(caseID string, timeout time.Duration) bool
 	Pause(caseID string) bool
 	Resume(caseID string) bool
 }
@@ -201,6 +204,16 @@ func (s *Service) CancelRun(caseID string) bool {
 		return false
 	}
 	return s.runs.Cancel(caseID)
+}
+
+// WaitStopped waits for the in-process worker to drain after a cancel. The
+// delete path uses it so the cleanup transaction cannot interleave with a
+// final artifact write.
+func (s *Service) WaitStopped(caseID string, timeout time.Duration) bool {
+	if s.runs == nil {
+		return true
+	}
+	return s.runs.WaitStopped(caseID, timeout)
 }
 
 // List returns all decision cases (requires CaseRepository). Legacy helper

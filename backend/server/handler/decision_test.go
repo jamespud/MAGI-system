@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	hzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
@@ -17,10 +18,11 @@ import (
 type fakeRunManager struct {
 	started   map[string]bool
 	cancelled map[string]bool
+	waited    map[string]bool
 }
 
 func newFakeRunManager() *fakeRunManager {
-	return &fakeRunManager{started: map[string]bool{}, cancelled: map[string]bool{}}
+	return &fakeRunManager{started: map[string]bool{}, cancelled: map[string]bool{}, waited: map[string]bool{}}
 }
 
 func (f *fakeRunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
@@ -36,6 +38,10 @@ func (f *fakeRunManager) Cancel(caseID string) bool {
 		return true
 	}
 	return false
+}
+func (f *fakeRunManager) WaitStopped(caseID string, timeout time.Duration) bool {
+	f.waited[caseID] = true
+	return true
 }
 func (f *fakeRunManager) Pause(caseID string) bool     { return f.started[caseID] }
 func (f *fakeRunManager) Resume(caseID string) bool    { return false }
@@ -188,5 +194,29 @@ func TestDecisionHandler_PauseRejectsResolvedCase(t *testing.T) {
 	w := ut.PerformRequest(r.Engine, "POST", "/cases/c1/pause", nil)
 	if w.Result().StatusCode() != 400 {
 		t.Fatalf("expected 400 for resolved case, got %d", w.Result().StatusCode())
+	}
+}
+
+// TestDecisionHandler_DeleteWaitsForWorkerDrain proves Delete cancels the run
+// and waits for the worker to fully exit before removing the case artifacts,
+// so the cleanup transaction cannot interleave with a final write.
+func TestDecisionHandler_DeleteWaitsForWorkerDrain(t *testing.T) {
+	rm := newFakeRunManager()
+	rm.started["c-del"] = true
+	c := &entity.DecisionCase{ID: "c-del", Question: "q", Status: entity.CaseStatusDraft}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithRunManager(rm),
+		decision.WithCaseRepo(stubCaseLookup{c: c}))
+	h := handler.NewDecisionHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.DELETE("/cases/:id", h.Delete)
+
+	w := ut.PerformRequest(r.Engine, "DELETE", "/cases/c-del", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("expected 200, got %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+	if !rm.waited["c-del"] {
+		t.Fatal("delete did not wait for the worker to drain before cleanup")
 	}
 }

@@ -312,6 +312,9 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				return
 			}
 			c = fresh
+			// ExecutionAttempt is runtime-only and not part of CaseModel; the
+			// authoritative re-read above must not lose the claim's attempt.
+			c.ExecutionAttempt = claimed.Attempt
 		}
 		// A Case that already reached an authoritative terminal state (for
 		// example a replica committed DEADLOCKED while this worker was down)
@@ -704,6 +707,27 @@ func (m *RunManager) Cancel(caseID string) bool {
 	return local
 }
 
+// WaitStopped blocks until the in-process worker for caseID has fully exited,
+// or the timeout elapses. It returns true when no worker is running. Delete
+// uses this as a fence: cleanup must not interleave with a final artifact
+// write from a worker that was just cancelled.
+func (m *RunManager) WaitStopped(caseID string, timeout time.Duration) bool {
+	m.mu.Lock()
+	h, active := m.runs[caseID]
+	m.mu.Unlock()
+	if !active {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-h.done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 // Pause stops a running case but keeps its durable job parked instead of
 // cancelled, so a later Resume can wake it from its checkpoint. Returns true
 // when a local worker or durable job was stopped.
@@ -788,4 +812,32 @@ func (m *RunManager) IsRunning(caseID string) bool {
 	defer m.mu.Unlock()
 	_, ok := m.runs[caseID]
 	return ok
+}
+
+// Shutdown cancels every in-process worker and waits a bounded time for them
+// to exit. Workers are derived from context.Background() so the container
+// lifecycle owns their cancellation: a failed startup after Recover or a
+// graceful stop must not leak goroutines.
+func (m *RunManager) Shutdown() {
+	m.mu.Lock()
+	handles := make([]*runHandle, 0, len(m.runs))
+	for _, h := range m.runs {
+		handles = append(handles, h)
+	}
+	m.mu.Unlock()
+	for _, h := range handles {
+		h.cancel()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for _, h := range handles {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return
+		}
+		select {
+		case <-h.done:
+		case <-time.After(remaining):
+			return
+		}
+	}
 }

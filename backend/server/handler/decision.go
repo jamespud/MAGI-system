@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -14,6 +15,10 @@ import (
 	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/server/dto"
 )
+
+// deleteWorkerDrainTimeout bounds how long Delete waits for a cancelled
+// in-process worker to fully exit before removing the case and its artifacts.
+const deleteWorkerDrainTimeout = 5 * time.Second
 
 type DecisionHandler struct {
 	svc     *decision.Service
@@ -264,6 +269,12 @@ func (h *DecisionHandler) Delete(ctx context.Context, c *app.RequestContext) {
 	}
 	if h.svc.CancelRun(id) {
 		_ = h.svc.Cancel(ctx, id)
+		// Fence the cleanup: a cancelled worker may still be mid-flight
+		// writing artifacts. Wait for it to fully exit before Delete runs so
+		// the cleanup transaction cannot interleave and leave orphan rows.
+		// Durable cancellation (job + terminal case status) fences workers on
+		// other replicas; this bounds the local in-process window.
+		h.svc.WaitStopped(id, deleteWorkerDrainTimeout)
 	}
 	if err := h.svc.Delete(ctx, id); err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
