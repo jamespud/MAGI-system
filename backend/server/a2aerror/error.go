@@ -42,7 +42,7 @@ type Envelope struct {
 // public and is never authenticated, but it is still an A2A surface; it is
 // matched separately by the caller which leaves it unauthenticated.
 func IsProtocolPath(path string) bool {
-	return strings.HasPrefix(path, "/a2a")
+	return path == "/a2a" || strings.HasPrefix(path, "/a2a/")
 }
 
 // Write emits a protocol-shaped REST error on the given Hertz context.

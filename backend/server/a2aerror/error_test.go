@@ -50,6 +50,7 @@ func TestIsProtocolPath(t *testing.T) {
 		"/a2a":                 true,
 		"/a2a/message:send":    true,
 		"/a2a/tasks/t1:cancel": true,
+		"/a2attack":            false,
 		"/api/v1/decision":     false,
 		"/health":              false,
 	}
