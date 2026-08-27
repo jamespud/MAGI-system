@@ -9,7 +9,8 @@
 #   Grafana:      http://localhost:3000  (admin / admin)
 #
 # Prometheus joins the magi-web_default network created by
-# docker-compose-web.yml so it can scrape magi-server:8080/metrics.
+# docker-compose-web.yml so it can scrape magi-server/metrics on
+# MAGI_HTTP_PORT (default 8080, from .env).
 
 name: magi-monitoring
 
@@ -17,13 +18,21 @@ services:
   prometheus:
     image: prom/prometheus:v2.55.1
     container_name: magi-prometheus
+    # busybox in this image has no envsubst, so entrypoint.sh renders the
+    # scrape target port with sed before exec'ing /bin/prometheus.
+    entrypoint:
+      - /bin/sh
+      - /etc/prometheus/entrypoint.sh
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+    environment:
+      MAGI_HTTP_PORT: ${MAGI_HTTP_PORT:-8080}
     ports:
       - "9090:9090"
     volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/prometheus.yml.template:/etc/prometheus/prometheus.yml.template:ro
+      - ./docker/prometheus/entrypoint.sh:/etc/prometheus/entrypoint.sh:ro
       - ./deploy/prometheus-alerts.example.yml:/etc/prometheus/rules.yml:ro
       - prometheus_data:/prometheus
     depends_on:

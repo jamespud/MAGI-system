@@ -5,7 +5,7 @@ server {
 
     # API proxy to Go backend (includes SSE streaming)
     location /api/ {
-        proxy_pass http://magi-server:8080;
+        proxy_pass http://magi-server:${MAGI_HTTP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -20,13 +20,13 @@ server {
 
     # Health check
     location /health {
-        proxy_pass http://magi-server:8080;
+        proxy_pass http://magi-server:${MAGI_HTTP_PORT};
     }
 
     # Prometheus scrape endpoint. Restrict this to the Prometheus source
     # networks in production; it is intentionally unauthenticated for scraping.
     location = /metrics {
-        proxy_pass http://magi-server:8080;
+        proxy_pass http://magi-server:${MAGI_HTTP_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -36,7 +36,7 @@ server {
     # A2A protocol + Agent Card discovery: long-lived streams must not be
     # buffered, and the discovery JSON must reach the backend (not the SPA).
     location = /.well-known/agent-card.json {
-        proxy_pass http://magi-server:8080;
+        proxy_pass http://magi-server:${MAGI_HTTP_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -44,7 +44,7 @@ server {
     }
     location /a2a/ {
         client_max_body_size 96k;
-        proxy_pass http://magi-server:8080;
+        proxy_pass http://magi-server:${MAGI_HTTP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

@@ -52,6 +52,11 @@ services:
       MAGI_MODEL_API_KEY: ${MAGI_MODEL_API_KEY:-}
       MAGI_MODEL_BASE_URL: ${MAGI_MODEL_BASE_URL:-https://api.deepseek.com}
       MAGI_MODEL_NAME: ${MAGI_MODEL_NAME:-deepseek-v4-flash}
+      # Backend listen port inside the container follows MAGI_HTTP_PORT (from
+      # .env). MAGI_HTTP_HOST is intentionally NOT forwarded: the container
+      # must bind all interfaces so nginx/prometheus can reach it by service
+      # name; host-only binding only makes sense for host-run processes.
+      MAGI_HTTP_PORT: ${MAGI_HTTP_PORT:-8080}
       MAGI_TAVILY_API_KEY: ${MAGI_TAVILY_API_KEY:-}
       MAGI_EMBEDDING_API_KEY: ${MAGI_EMBEDDING_API_KEY:-}
       MAGI_EMBEDDING_BASE_URL: ${MAGI_EMBEDDING_BASE_URL:-}
@@ -78,7 +83,7 @@ services:
       MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: "8"
       MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: "2s"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:${MAGI_HTTP_PORT:-8080}/health"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -93,10 +98,14 @@ services:
     depends_on:
       magi-server:
         condition: service_healthy
+    environment:
+      # The official nginx entrypoint runs envsubst on *.template files in
+      # /etc/nginx/templates and writes the rendered config to /etc/nginx/conf.d.
+      MAGI_HTTP_PORT: ${MAGI_HTTP_PORT:-8080}
     ports:
       - "${WEB_PORT:-80}:80"
     volumes:
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     restart: unless-stopped
 
   # --- RAG infrastructure (shared with docker-compose-debug.yml via external volumes) ---

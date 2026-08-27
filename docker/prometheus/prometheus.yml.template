@@ -8,6 +8,6 @@ rule_files:
 scrape_configs:
   - job_name: magi
     static_configs:
-      - targets: ['magi-server:8080']
+      - targets: ['magi-server:${MAGI_HTTP_PORT}']
         labels:
           service: magi

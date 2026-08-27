@@ -103,8 +103,9 @@ docker compose -f docker/docker-compose-monitoring.yml up -d
 # Prometheus: http://localhost:9090 | Alertmanager: http://localhost:9093 | Grafana: http://localhost:3000
 ```
 
-Prometheus scrapes `magi-server:8080/metrics` over the `magi-web_default`
-network, loads the alert rules from `deploy/prometheus-alerts.example.yml`, and
+Prometheus scrapes `magi-server:<MAGI_HTTP_PORT>/metrics` (default 8080) over
+the `magi-web_default` network, loads the alert rules from
+`deploy/prometheus-alerts.example.yml`, and
 forwards them to Alertmanager. Grafana auto-provisions the Prometheus data
 source and a prebuilt "MAGI Overview" dashboard (request rate, active/failed
 runs, tool/model/search failures and failovers, model cost) from
