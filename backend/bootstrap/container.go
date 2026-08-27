@@ -1065,7 +1065,8 @@ func uniqueIndexColumns(db *gorm.DB, table string) (map[string][]string, error) 
 		if err := db.Raw(`SELECT INDEX_NAME AS index_name, NON_UNIQUE AS non_unique,
 			SEQ_IN_INDEX AS seq_in_index, COLUMN_NAME AS column_name
 			FROM INFORMATION_SCHEMA.STATISTICS
-			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, table).Scan(&rows).Error; err != nil {
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+			ORDER BY INDEX_NAME, SEQ_IN_INDEX`, table).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
