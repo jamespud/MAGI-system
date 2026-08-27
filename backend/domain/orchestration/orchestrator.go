@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -182,7 +183,9 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 			return port.ErrLeaseLost
 		}
 		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
-			_ = live.PublishLive(ctx, event)
+			if err := live.PublishLive(ctx, event); err != nil {
+				log.Printf("orchestrator: live fan-out for terminal case %s degraded: %v", case_.ID, err)
+			}
 		} else {
 			// Custom terminal committers may use an event publisher that lacks a
 			// durable-free fanout capability. Preserve the historical callback
@@ -254,10 +257,13 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 		}
 		// The transition is durable now: expose it in memory and fan out live.
 		// A live fan-out failure cannot roll back the transaction; durable
-		// polling replays the committed event.
+		// polling replays the committed event, so log it as delivery
+		// degradation rather than dropping it silently.
 		case_.Status = to
 		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
-			_ = live.PublishLive(ctx, event)
+			if err := live.PublishLive(ctx, event); err != nil {
+				log.Printf("orchestrator: live fan-out for case %s status %s degraded: %v", case_.ID, to, err)
+			}
 		}
 		return nil
 	}
