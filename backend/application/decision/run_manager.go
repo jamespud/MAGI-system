@@ -300,6 +300,19 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		c.ExecutionAttempt = claimed.Attempt
+		// A remote replica may have committed an authoritative terminal
+		// transition between the case load that launched this worker and this
+		// claim. Re-read the case so the terminal settlement below never acts
+		// on a stale status; when the case can no longer be read, release the
+		// claim and stop instead of running a retry against an unknown state.
+		if m.caseRepo != nil {
+			fresh, err := m.caseRepo.Get(ctx, c.ID)
+			if err != nil {
+				m.releaseRejectedRetryClaim(claimed)
+				return
+			}
+			c = fresh
+		}
 		// A Case that already reached an authoritative terminal state (for
 		// example a replica committed DEADLOCKED while this worker was down)
 		// must settle the durable Job without retry-reset or orchestration.
