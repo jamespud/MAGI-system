@@ -143,7 +143,11 @@ func (r *a2aSubmissionRepo) prepareOnce(ctx context.Context, cmd a2aapp.PrepareC
 			return err
 		}
 
-		result := &a2aapp.PreparedSubmission{Binding: submissionFromModel(binding), Case: caseEntity, Conversation: conv}
+		preparedBinding, err := submissionFromModel(binding)
+		if err != nil {
+			return err
+		}
+		result := &a2aapp.PreparedSubmission{Binding: preparedBinding, Case: caseEntity, Conversation: conv}
 		if conv != nil {
 			input := &entity.ConversationMessage{
 				ID: cmd.InputMessageID, ConversationID: conv.ID, UserID: cmd.UserID,
@@ -393,7 +397,10 @@ func (r *a2aSubmissionRepo) GetByTask(ctx context.Context, userID int64, taskID 
 	if err := r.db.WithContext(ctx).Where("user_id = ? AND task_id = ?", userID, taskID).First(&model).Error; err != nil {
 		return nil, err
 	}
-	result := submissionFromModel(model)
+	result, err := submissionFromModel(model)
+	if err != nil {
+		return nil, err
+	}
 	return &result, nil
 }
 
@@ -606,7 +613,11 @@ func (r *a2aSubmissionRepo) CancelTask(ctx context.Context, userID int64, taskID
 }
 
 func loadPreparedSubmission(db *gorm.DB, binding A2ASubmissionModel) (*a2aapp.PreparedSubmission, error) {
-	result := &a2aapp.PreparedSubmission{Binding: submissionFromModel(binding)}
+	submission, err := submissionFromModel(binding)
+	if err != nil {
+		return nil, err
+	}
+	result := &a2aapp.PreparedSubmission{Binding: submission}
 	var caseModel CaseModel
 	if err := db.Where("id = ?", binding.TaskID).First(&caseModel).Error; err != nil {
 		return nil, err
@@ -708,12 +719,16 @@ func voteFromModel(m *VoteModel) *entity.Vote {
 	}
 }
 
-func submissionFromModel(m A2ASubmissionModel) a2aapp.Submission {
+func submissionFromModel(m A2ASubmissionModel) (a2aapp.Submission, error) {
+	modes, err := parseOutputModes(m.AcceptedOutputModesJSON)
+	if err != nil {
+		return a2aapp.Submission{}, err
+	}
 	return a2aapp.Submission{ID: m.ID, MessageID: m.MessageID, RequestHash: m.RequestHash, TaskID: m.TaskID,
 		ContextID: m.ContextID, InputMessageID: m.InputMessageID, UserID: m.UserID,
 		State: a2aapp.SubmissionState(m.State), ErrorCode: m.ErrorCode,
-		AcceptedOutputModes: parseOutputModes(m.AcceptedOutputModesJSON),
-		CreatedAt:           m.CreatedAt, UpdatedAt: m.UpdatedAt}
+		AcceptedOutputModes: modes,
+		CreatedAt:           m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
 }
 
 func marshalOutputModes(modes []string) string {
@@ -738,19 +753,21 @@ func marshalOutputModes(modes []string) string {
 	return string(raw)
 }
 
-func parseOutputModes(raw string) []string {
+func parseOutputModes(raw string) ([]string, error) {
 	if raw == "" {
-		return []string{"text/markdown", "application/json"}
+		return []string{"text/markdown", "application/json"}, nil
 	}
 	var modes []string
 	if err := json.Unmarshal([]byte(raw), &modes); err != nil {
-		// Fail closed: malformed stored JSON must not broaden output.
-		return []string{"text/markdown", "application/json"}
+		// Fail closed: malformed stored JSON must never broaden negotiated
+		// output. Surface the error so the projection is refused instead of
+		// silently exposing both default modes to the client.
+		return nil, fmt.Errorf("a2a submission: malformed accepted_output_modes_json: %w", err)
 	}
 	if len(modes) == 0 {
-		return []string{"text/markdown", "application/json"}
+		return []string{"text/markdown", "application/json"}, nil
 	}
-	return modes
+	return modes, nil
 }
 
 func isUniqueViolation(err error) bool {

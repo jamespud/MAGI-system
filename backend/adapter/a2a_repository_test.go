@@ -577,3 +577,23 @@ func TestA2ASubmission_OutputModesRoundTrip(t *testing.T) {
 		t.Fatalf("accepted modes len = %d", len(rec.Submission.AcceptedOutputModes))
 	}
 }
+
+// TestA2ASubmission_FailsClosedOnMalformedOutputModes proves a corrupted
+// accepted_output_modes_json column is surfaced as an error instead of being
+// silently replaced with both default modes, which would broaden the output a
+// client never negotiated.
+func TestA2ASubmission_FailsClosedOnMalformedOutputModes(t *testing.T) {
+	db, repo := newA2ASubmissionRepo(t)
+	cmd := a2aPrepareCommand(7, "msg-malformed", "hash-malformed", "case-malformed", "conv-malformed")
+	if _, created, err := repo.Prepare(context.Background(), cmd); err != nil || !created {
+		t.Fatalf("prepare = created %v err %v", created, err)
+	}
+	if err := db.Model(&magi.A2ASubmissionModel{}).
+		Where("task_id = ?", "case-malformed").
+		Update("accepted_output_modes_json", "{not-json").Error; err != nil {
+		t.Fatalf("corrupt stored modes: %v", err)
+	}
+	if _, err := repo.GetTaskRecord(context.Background(), 7, "case-malformed"); err == nil {
+		t.Fatal("expected fail-closed error for malformed stored output modes")
+	}
+}
