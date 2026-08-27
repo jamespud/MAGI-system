@@ -22,12 +22,12 @@ func (s *stubRagIndexJobRepo) Claim(context.Context, string, string, time.Time) 
 	return nil, false, nil
 }
 func (s *stubRagIndexJobRepo) Heartbeat(context.Context, string, string, time.Time) error { return nil }
-func (s *stubRagIndexJobRepo) MarkSucceeded(context.Context, string, string) error       { return nil }
+func (s *stubRagIndexJobRepo) MarkSucceeded(context.Context, string, string) error        { return nil }
 func (s *stubRagIndexJobRepo) MarkFailed(context.Context, string, string, string, *time.Time) error {
 	return nil
 }
-func (s *stubRagIndexJobRepo) Cancel(context.Context, string) error                       { return nil }
-func (s *stubRagIndexJobRepo) RequeueExpired(context.Context, time.Time) error            { return nil }
+func (s *stubRagIndexJobRepo) Cancel(context.Context, string) error            { return nil }
+func (s *stubRagIndexJobRepo) RequeueExpired(context.Context, time.Time) error { return nil }
 func (s *stubRagIndexJobRepo) ListRunnable(context.Context, time.Time) ([]*entity.RagIndexJob, error) {
 	return nil, nil
 }

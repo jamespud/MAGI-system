@@ -127,10 +127,10 @@ func TestA2AEventSequence_StrictlyIncreasingOnMySQL(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-		_ = events.Create(context.Background(), &entity.MagiEvent{
-			ID: fmt.Sprintf("%s-%d", caseID, i), CaseID: caseID,
-			Type: entity.EventCaseStatusChanged, Seq: 0, Timestamp: time.Now(),
-		})
+			_ = events.Create(context.Background(), &entity.MagiEvent{
+				ID: fmt.Sprintf("%s-%d", caseID, i), CaseID: caseID,
+				Type: entity.EventCaseStatusChanged, Seq: 0, Timestamp: time.Now(),
+			})
 		}(i)
 	}
 	wg.Wait()

@@ -42,13 +42,13 @@ type Registry struct {
 	CostTotalMicro     atomic.Int64    // USD * 1e6
 
 	// A2A exposes a bounded-label surface for the A2A server.
-	A2AActiveStreams  atomic.Int64
-	A2AIdempotencyHits atomic.Int64
-	a2aRequests       [lenA2AOperations][lenA2AResults]atomic.Int64
-	a2aProjectionErr  [lenA2AProjectionKinds]atomic.Int64
-	A2ARequestDuration a2aHistogram
-	A2AStreamDuration  a2aHistogram
-	A2AEventLag        a2aHistogram
+	A2AActiveStreams     atomic.Int64
+	A2AIdempotencyHits   atomic.Int64
+	a2aRequests          [lenA2AOperations][lenA2AResults]atomic.Int64
+	a2aProjectionErr     [lenA2AProjectionKinds]atomic.Int64
+	A2ARequestDuration   a2aHistogram
+	A2AStreamDuration    a2aHistogram
+	A2AEventLag          a2aHistogram
 	A2ARecoveryAttempted atomic.Int64
 	A2ARecoverySettled   atomic.Int64
 	A2ARecoveryRetried   atomic.Int64

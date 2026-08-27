@@ -56,7 +56,7 @@ func (s *stubJobRepo) Claim(_ context.Context, jobID, workerID string, lease tim
 	return &entity.RagIndexJob{ID: jobID, Kind: entity.RagIndexJobKindIndex, Source: port.SourceCaseMemory, SourceRef: "case-1", Status: entity.RagIndexJobRunning, Attempt: 1, MaxAttempts: 3, WorkerID: workerID}, true, nil
 }
 func (s *stubJobRepo) Heartbeat(context.Context, string, string, time.Time) error { return nil }
-func (s *stubJobRepo) MarkSucceeded(context.Context, string, string) error       { return nil }
+func (s *stubJobRepo) MarkSucceeded(context.Context, string, string) error        { return nil }
 func (s *stubJobRepo) MarkFailed(context.Context, string, string, string, *time.Time) error {
 	return nil
 }
@@ -71,7 +71,7 @@ type stubMemRepo struct{}
 func (s *stubMemRepo) Get(_ context.Context, caseID string) (*entity.CaseMemoryProjection, error) {
 	return &entity.CaseMemoryProjection{CaseID: caseID}, nil
 }
-func (s *stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error          { return nil }
+func (s *stubMemRepo) Save(context.Context, *entity.CaseMemoryProjection) error { return nil }
 func (s *stubMemRepo) Search(context.Context, string, int) ([]*entity.CaseMemoryProjection, error) {
 	return nil, nil
 }
@@ -87,8 +87,8 @@ func (s *stubKnowRepo) Get(_ context.Context, id string) (*entity.KnowledgeDoc, 
 func (s *stubKnowRepo) ListByUser(context.Context, int64, int, int) ([]*entity.KnowledgeDoc, error) {
 	return nil, nil
 }
-func (s *stubKnowRepo) Update(context.Context, *entity.KnowledgeDoc) error { return nil }
-func (s *stubKnowRepo) Delete(context.Context, string) error               { return nil }
+func (s *stubKnowRepo) Update(context.Context, *entity.KnowledgeDoc) error      { return nil }
+func (s *stubKnowRepo) Delete(context.Context, string) error                    { return nil }
 func (s *stubKnowRepo) ListAll(context.Context) ([]*entity.KnowledgeDoc, error) { return nil, nil }
 
 func TestRagIndexPoller_ProcessesJob(t *testing.T) {
