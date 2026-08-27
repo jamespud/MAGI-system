@@ -1,6 +1,7 @@
 # Generated from deploy/magi for schema-validation and local inspection.
 # Images and secrets contain placeholders; render from production values before applying.
 ---
+---
 # Source: magi/templates/frontend-pdb.yaml
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -65,7 +66,9 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     app.kubernetes.io/managed-by: Helm
 data:
-  MAGI_HTTP_ADDR: ":8080"
+  # Backend listen port; must match backend.service.port so the service and
+  # nginx proxy land on the process that is actually listening.
+  MAGI_HTTP_PORT: "8080"
   MAGI_DB_DRIVER: "mysql"
   MAGI_MODEL_BASE_URL: "https://api.deepseek.com"
   MAGI_MODEL_NAME: "deepseek-v4-flash"
@@ -74,6 +77,16 @@ data:
   MAGI_MILVUS_ADDRESS: "milvus:19530"
   MAGI_ES_ADDRESSES: "http://elasticsearch:9200"
   MAGI_AUTH_ENABLED: "true"
+  MAGI_A2A_ENABLED: "false"
+  MAGI_A2A_PUBLIC_URL: ""
+  MAGI_A2A_BASE_PATH: "/a2a"
+  MAGI_A2A_MAX_MESSAGE_BYTES: "65536"
+  MAGI_A2A_MAX_REQUEST_BYTES: "98304"
+  MAGI_A2A_MAX_PARTS: "16"
+  MAGI_A2A_MAX_PAGE_SIZE: "100"
+  MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: "8"
+  MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: "2s"
+
 ---
 # Source: magi/templates/frontend-nginx-configmap.yaml
 apiVersion: v1
@@ -111,10 +124,44 @@ data:
         proxy_pass http://magi-backend:8080;
       }
 
+      # Prometheus scrape endpoint. Restrict this to Prometheus source networks.
+      location = /metrics {
+        proxy_pass http://magi-backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # A2A protocol + Agent Card discovery: long-lived streams must not be
+      # buffered, and the discovery JSON must reach the backend (not the SPA).
+      location = /.well-known/agent-card.json {
+        proxy_pass http://magi-backend:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+      location /a2a/ {
+        client_max_body_size 98304;
+        proxy_pass http://magi-backend:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        add_header X-Accel-Buffering no;
+      }
+
       location / {
         try_files $uri /index.html;
       }
     }
+
 ---
 # Source: magi/templates/backend-service.yaml
 apiVersion: v1
@@ -138,6 +185,7 @@ spec:
     app.kubernetes.io/name: magi
     app.kubernetes.io/instance: magi
     app.kubernetes.io/component: backend
+
 ---
 # Source: magi/templates/frontend-service.yaml
 apiVersion: v1
@@ -161,6 +209,7 @@ spec:
     app.kubernetes.io/name: magi
     app.kubernetes.io/instance: magi
     app.kubernetes.io/component: frontend
+
 ---
 # Source: magi/templates/backend-deployment.yaml
 apiVersion: apps/v1
@@ -188,7 +237,7 @@ spec:
         app.kubernetes.io/instance: magi
         app.kubernetes.io/component: backend
       annotations:
-        checksum/config: e2388503f180a88a3be33229d32454972f90d285685c47d8509518b54a32f9fb
+        checksum/config: 5fef728cbc30c353063bf4ee4521e6b0ffb38b1aaf7300b5154a8c1cbe6c7b8e
         checksum/secret: 2786849d09249e8033337b03e36047651a8a703d57ba500fcbfe352b6a2bfea3
     spec:
       serviceAccountName: magi
@@ -227,6 +276,11 @@ spec:
                 secretKeyRef:
                   name: magi
                   key: auth-api-keys
+            - name: MAGI_HTTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_HTTP_PORT
             - name: MAGI_DB_DRIVER
               valueFrom:
                 configMapKeyRef:
@@ -267,6 +321,53 @@ spec:
                 configMapKeyRef:
                   name: magi-backend-config
                   key: MAGI_AUTH_ENABLED
+            - name: MAGI_ENV
+              value: "production"
+            - name: MAGI_A2A_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_ENABLED
+            - name: MAGI_A2A_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_PUBLIC_URL
+            - name: MAGI_A2A_BASE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_BASE_PATH
+            - name: MAGI_A2A_MAX_MESSAGE_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_MAX_MESSAGE_BYTES
+            - name: MAGI_A2A_MAX_REQUEST_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_MAX_REQUEST_BYTES
+            - name: MAGI_A2A_MAX_PARTS
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_MAX_PARTS
+            - name: MAGI_A2A_MAX_PAGE_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_MAX_PAGE_SIZE
+            - name: MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA
+            - name: MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: magi-backend-config
+                  key: MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL
           readinessProbe:
             httpGet:
               path: /ready
@@ -289,6 +390,7 @@ spec:
             requests:
               cpu: 250m
               memory: 512Mi
+
 ---
 # Source: magi/templates/frontend-deployment.yaml
 apiVersion: apps/v1
@@ -316,7 +418,7 @@ spec:
         app.kubernetes.io/instance: magi
         app.kubernetes.io/component: frontend
       annotations:
-        checksum/nginx-config: ea6ed41a044d447c1fa52ba02c351f76276c0a79b90ad419deb34e0e265c1efd
+        checksum/nginx-config: 2d1a5161aeaa1bfcf646e7edd611066dde8c46551b004d9f1207d3ed609d47cc
     spec:
       serviceAccountName: magi
       automountServiceAccountToken: false
@@ -355,6 +457,7 @@ spec:
         - name: nginx-config
           configMap:
             name: magi-frontend-nginx
+
 ---
 # Source: magi/templates/ingress.yaml
 apiVersion: networking.k8s.io/v1

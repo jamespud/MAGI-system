@@ -19,6 +19,8 @@ backend:
 
   service:
     type: ClusterIP
+    # Single knob for the backend HTTP port: drives MAGI_HTTP_PORT (listen),
+    # the container port, the Service port, and the nginx proxy target.
     port: 8080
 
   # Start with one replica during the first startup/schema migration, then

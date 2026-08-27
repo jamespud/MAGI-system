@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "magi.labels" . | nindent 4 }}
 data:
-  MAGI_HTTP_ADDR: ":8080"
+  # Backend listen port; must match backend.service.port so the service and
+  # nginx proxy land on the process that is actually listening.
+  MAGI_HTTP_PORT: {{ .Values.backend.service.port | quote }}
   MAGI_DB_DRIVER: {{ .Values.configuration.dbDriver | quote }}
   MAGI_MODEL_BASE_URL: {{ .Values.configuration.modelBaseURL | quote }}
   MAGI_MODEL_NAME: {{ .Values.configuration.modelName | quote }}
