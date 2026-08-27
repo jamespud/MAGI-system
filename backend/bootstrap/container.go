@@ -870,6 +870,15 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 			if err := rm.Recover(ctx); err != nil {
 				return err
 			}
+			if err := a2a.Recover(ctx); err != nil {
+				return err
+			}
+			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
+				return err
+			}
+			// Every fallible startup step above has succeeded, so any goroutine
+			// started below is owned by a hook that will run OnStop even when a
+			// later step fails; a loop started before a later failure would leak.
 			// Run continuous cross-replica recovery for expired decision-job
 			// leases, owned by the lifecycle context so it stops on shutdown.
 			decisionCtx, cancel := context.WithCancel(context.Background())
@@ -881,16 +890,10 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 					log.Printf("decision recovery stopped: %v", err)
 				}
 			}()
-			if err := a2a.Recover(ctx); err != nil {
-				return err
-			}
 			if a2a.Enabled && a2a.SubmissionSvc != nil {
 				// Continuous recovery for transiently failed A2A startup
 				// leases, driven by the lifecycle context.
 				a2aRecoveryCancel = a2a.StartRecoveryWorker(context.Background())
-			}
-			if err := dsSvc.RecoverOrphanRuns(ctx); err != nil {
-				return err
 			}
 			if poller != nil {
 				ragCtx, cancel := context.WithCancel(context.Background())
