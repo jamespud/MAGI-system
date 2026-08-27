@@ -62,7 +62,7 @@ BEGIN
   SELECT case_id, MAX(seq) + 1
     FROM magi_event
    GROUP BY case_id
-  ON DUPLICATE KEY UPDATE next_seq = GREATEST(next_seq, VALUES(next_seq));
+  ON DUPLICATE KEY UPDATE next_seq = VALUES(next_seq);
 
   -- Ensure every event-bearing case has a cursor; seed 1 for an eventless case
   -- so the verifier never reports a missing cursor.
@@ -70,6 +70,15 @@ BEGIN
   SELECT DISTINCT e.case_id, 1
     FROM magi_event e
    WHERE NOT EXISTS (SELECT 1 FROM magi_event_cursor c WHERE c.case_id = e.case_id);
+
+  -- The startup contract requires next_seq to equal MAX(seq)+1 exactly. A
+  -- cursor row left too large by an earlier partial run (or left behind for a
+  -- case whose events were truncated) must be corrected here; otherwise the
+  -- repair can finish yet the service still refuses to start.
+  UPDATE magi_event_cursor c
+    LEFT JOIN magi_event e ON e.case_id = c.case_id
+     SET c.next_seq = 1
+   WHERE e.case_id IS NULL;
 END $$
 
 CREATE PROCEDURE magi_resume_validate()
@@ -81,6 +90,13 @@ BEGIN
     SELECT case_id, seq FROM magi_event GROUP BY case_id, seq HAVING COUNT(*) > 1
   ) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'duplicate magi_event case sequence';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM magi_event_cursor c
+     WHERE c.next_seq <> COALESCE((SELECT MAX(e.seq) + 1 FROM magi_event e
+                                    WHERE e.case_id = c.case_id), 1)
+  ) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'magi_event_cursor contains stale next_seq';
   END IF;
 END $$
 
@@ -119,9 +135,10 @@ BEGIN
     FROM INFORMATION_SCHEMA.STATISTICS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'magi_event'
      AND NON_UNIQUE = 0
-     AND ((COLUMN_NAME = 'case_id' AND SEQ_IN_INDEX = 1) OR (COLUMN_NAME = 'seq' AND SEQ_IN_INDEX = 2))
    GROUP BY INDEX_NAME
   HAVING COUNT(*) = 2
+     AND SUM(CASE WHEN COLUMN_NAME = 'case_id' AND SEQ_IN_INDEX = 1 THEN 1 ELSE 0 END) = 1
+     AND SUM(CASE WHEN COLUMN_NAME = 'seq' AND SEQ_IN_INDEX = 2 THEN 1 ELSE 0 END) = 1
    LIMIT 1;
   IF has_exact_unique = 0 THEN
     ALTER TABLE magi_event ADD UNIQUE KEY uq_magi_event_case_seq (case_id, seq);
