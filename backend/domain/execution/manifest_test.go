@@ -37,6 +37,29 @@ func TestManifestDigestIndependentOfToolOrdering(t *testing.T) {
 	}
 }
 
+func TestManifestDigestTreatsNilAndEmptyToolsAsSameToolset(t *testing.T) {
+	base := entity.RunEnvironment{
+		ModelName:      "model-a",
+		ModelBaseURL:   "https://models.example.test/v1",
+		KnowledgeIndex: true,
+		ConfigVersion:  12,
+		RuntimeVersion: "runtime-v1",
+		PromptVersion:  "prompt-v1",
+	}
+	emptyTools := base
+	emptyTools.Tools = []string{}
+
+	nilManifest := FreezeManifest(base)
+	emptyManifest := FreezeManifest(emptyTools)
+
+	if nilManifest.ManifestDigest != emptyManifest.ManifestDigest {
+		t.Fatalf("manifest digest differs for nil and empty tools: nil=%q empty=%q", nilManifest.ManifestDigest, emptyManifest.ManifestDigest)
+	}
+	if nilManifest.Tools == nil {
+		t.Fatal("FreezeManifest preserved nil tools, want canonical empty slice")
+	}
+}
+
 func TestManifestDigestChangesWhenPromptChanges(t *testing.T) {
 	base := entity.RunEnvironment{
 		ModelName:      "model-a",

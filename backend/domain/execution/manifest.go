@@ -18,7 +18,7 @@ var ErrManifestMismatch = errors.New("execution manifest mismatch")
 // RunEnvironment and backing slice unchanged.
 func FreezeManifest(environment entity.RunEnvironment) entity.RunEnvironment {
 	frozen := environment
-	frozen.Tools = append([]string(nil), environment.Tools...)
+	frozen.Tools = append([]string{}, environment.Tools...)
 	sort.Strings(frozen.Tools)
 
 	frozen.ModelDigest = canonicalDigest("manifest:model:v1", modelFingerprint{
