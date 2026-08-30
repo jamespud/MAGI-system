@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -174,8 +175,14 @@ func isDecimal(value string) bool {
 // canonicalToolArguments normalizes valid JSON for idempotency hashing while
 // leaving malformed arguments available to the existing validation path.
 func canonicalToolArguments(arguments string) []byte {
+	decoder := json.NewDecoder(strings.NewReader(arguments))
+	decoder.UseNumber()
 	var value any
-	if err := json.Unmarshal([]byte(arguments), &value); err != nil {
+	if err := decoder.Decode(&value); err != nil {
+		return []byte(arguments)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return []byte(arguments)
 	}
 	canonical, err := json.Marshal(value)

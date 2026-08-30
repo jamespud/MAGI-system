@@ -279,6 +279,31 @@ func TestAgentLoop_EquivalentJSONArgumentsShareIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_DistinctLargeIntegerArgumentsHaveDistinctIdempotencyKeys(t *testing.T) {
+	run := func(arguments string) string {
+		t.Helper()
+		loop := newAgentLoop(t, []*schema.Message{
+			callMsg("c1", "calc", arguments),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}, nil)
+		res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+			RunID: "c1-melchior-r1-investigate",
+			Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+		})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		return res.Trace.Steps[0].ToolCalls[0].IdempotencyKey
+	}
+
+	first := run(`{"a":1,"b":9007199254740992}`)
+	second := run(`{"a":1,"b":9007199254740993}`)
+	if first == second {
+		t.Fatalf("distinct large integer arguments collided on idempotency key: %q", first)
+	}
+}
+
 func TestAgentLoop_RoleContractAndDecisionBoundary(t *testing.T) {
 	loop := newAgentLoop(t, []*schema.Message{
 		callMsg("c1", "calc", `{"a":1,"b":2}`),
