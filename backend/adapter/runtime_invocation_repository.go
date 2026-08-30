@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -18,6 +19,23 @@ type runtimeInvocationRepo struct {
 
 func NewRuntimeInvocationRepository(db *gorm.DB) port.RuntimeInvocationRepository {
 	return &runtimeInvocationRepo{db: db}
+}
+
+func (r *runtimeInvocationRepo) Ensure(ctx context.Context, invocation *entity.RuntimeInvocation) (*entity.RuntimeInvocation, error) {
+	if invocation == nil {
+		return nil, errors.New("runtime invocation is required")
+	}
+	model := RuntimeInvocationModel{
+		InvocationID: invocation.InvocationID, RunID: invocation.RunID, StepID: invocation.StepID,
+		Kind: invocation.Kind, LogicalOrdinal: invocation.LogicalOrdinal,
+		Status: string(invocation.Status), AttemptCount: invocation.AttemptCount,
+		OperationName: invocation.OperationName, IdempotencyKey: invocation.IdempotencyKey,
+		InputDigest: invocation.InputDigest, InputJSON: invocation.InputJSON,
+	}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return nil, err
+	}
+	return r.Get(ctx, invocation.InvocationID)
 }
 
 func (r *runtimeInvocationRepo) Get(ctx context.Context, invocationID string) (*entity.RuntimeInvocation, error) {
@@ -34,7 +52,11 @@ func (r *runtimeInvocationRepo) BeginAttempt(ctx context.Context, invocationID, 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := tx.NowFunc()
 		result := tx.Model(&RuntimeInvocationModel{}).
-			Where("invocation_id = ? AND status IN ?", invocationID, []string{string(entity.InvocationPending), string(entity.InvocationFailed)}).
+			Where("invocation_id = ? AND status IN ?", invocationID, []string{
+				string(entity.InvocationPending),
+				string(entity.InvocationFailed),
+				string(entity.InvocationUnknown),
+			}).
 			Updates(map[string]any{
 				"status":        string(entity.InvocationRunning),
 				"attempt_count": gorm.Expr("attempt_count + 1"),

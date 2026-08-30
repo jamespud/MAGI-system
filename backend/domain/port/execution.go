@@ -11,6 +11,11 @@ import (
 // transition and may continue executing; false means its attempt is stale or
 // the logical invocation has already reached a terminal result.
 type RuntimeInvocationRepository interface {
+	Ensure(
+		ctx context.Context,
+		invocation *entity.RuntimeInvocation,
+	) (*entity.RuntimeInvocation, error)
+
 	Get(
 		ctx context.Context,
 		invocationID string,

@@ -73,10 +73,52 @@ func seedRuntimeInvocation(t *testing.T, db *gorm.DB, id, idempotencyKey string)
 }
 
 func TestRuntimeInvocationRepository(t *testing.T) {
+	t.Run("EnsureCreatesFreshInvocation", TestInvocationRepository_EnsureCreatesFreshInvocation)
 	t.Run("BeginIsSingleWinner", TestInvocationRepository_BeginIsSingleWinner)
 	t.Run("CompletedResultIsReusable", TestInvocationRepository_CompletedResultIsReusable)
 	t.Run("LateAttemptCannotOverwriteNewAttempt", TestInvocationRepository_LateAttemptCannotOverwriteNewAttempt)
+	t.Run("UnknownCanBeClaimedForApprovedRetry", TestInvocationRepository_UnknownCanBeClaimedForApprovedRetry)
 	t.Run("IdempotencyKeyUnique", TestInvocationRepository_IdempotencyKeyUnique)
+}
+
+func TestInvocationRepository_EnsureCreatesFreshInvocation(t *testing.T) {
+	db := openRuntimeInvocationDB(t)
+	repo := magi.NewRuntimeInvocationRepository(db)
+	ctx := context.Background()
+	want := &entity.RuntimeInvocation{
+		InvocationID:  "invocation-fresh",
+		RunID:         "run-1",
+		StepID:        "step-1",
+		Kind:          "model",
+		Status:        entity.InvocationPending,
+		OperationName: "generate",
+		InputDigest:   "input-digest",
+		InputJSON:     `{"prompt":"hello"}`,
+	}
+
+	created, err := repo.Ensure(ctx, want)
+	if err != nil {
+		t.Fatalf("ensure fresh invocation: %v", err)
+	}
+	if created.InvocationID != want.InvocationID || created.Status != entity.InvocationPending || created.OperationName != want.OperationName || created.InputJSON != want.InputJSON {
+		t.Fatalf("created invocation = %+v, want identity and input from %+v", created, want)
+	}
+
+	reused, err := repo.Ensure(ctx, want)
+	if err != nil {
+		t.Fatalf("ensure existing invocation: %v", err)
+	}
+	if reused.InvocationID != created.InvocationID || reused.Status != entity.InvocationPending {
+		t.Fatalf("reused invocation = %+v, want existing %+v", reused, created)
+	}
+
+	var count int64
+	if err := db.Model(&magi.RuntimeInvocationModel{}).Where("invocation_id = ?", want.InvocationID).Count(&count).Error; err != nil {
+		t.Fatalf("count invocation rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("invocation rows = %d, want 1", count)
+	}
 }
 
 func TestInvocationRepository_BeginIsSingleWinner(t *testing.T) {
@@ -237,6 +279,28 @@ func TestInvocationRepository_LateAttemptCannotOverwriteNewAttempt(t *testing.T)
 	}
 	if got.Status != entity.InvocationSucceeded || got.OutputJSON != `{"answer":"fresh"}` || got.AttemptCount != 2 {
 		t.Fatalf("late attempt overwrote newer result: %+v", got)
+	}
+}
+
+func TestInvocationRepository_UnknownCanBeClaimedForApprovedRetry(t *testing.T) {
+	db := openRuntimeInvocationDB(t)
+	seedRuntimeInvocation(t, db, "invocation-unknown", "idem-unknown")
+	repo := magi.NewRuntimeInvocationRepository(db)
+	ctx := context.Background()
+
+	if _, won, err := repo.BeginAttempt(ctx, "invocation-unknown", "attempt-1"); err != nil || !won {
+		t.Fatalf("begin first attempt: won=%v err=%v", won, err)
+	}
+	if won, err := repo.MarkUnknown(ctx, "invocation-unknown", "attempt-1", "external outcome unavailable"); err != nil || !won {
+		t.Fatalf("mark unknown: won=%v err=%v", won, err)
+	}
+
+	got, won, err := repo.BeginAttempt(ctx, "invocation-unknown", "attempt-2")
+	if err != nil || !won {
+		t.Fatalf("begin approved retry: invocation=%+v won=%v err=%v", got, won, err)
+	}
+	if got.Status != entity.InvocationRunning || got.AttemptCount != 2 {
+		t.Fatalf("retried invocation = %+v, want running attempt 2", got)
 	}
 }
 
