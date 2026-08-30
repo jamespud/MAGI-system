@@ -124,6 +124,35 @@ func TestKernelUnsafeUnknownInvocationDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestKernelUnsafeUnknownCannotBeReclassifiedForRetry(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	kernel := NewKernel(repo, nil)
+	calls := 0
+
+	_, err := kernel.Execute(context.Background(), kernelRequest("attempt-1", RetryUnsafe), func(context.Context) ([]byte, error) {
+		calls++
+		return nil, ErrExternalOutcomeUnknown
+	})
+	if !errors.Is(err, ErrAmbiguousInvocation) {
+		t.Fatalf("unsafe execute error = %v, want ErrAmbiguousInvocation", err)
+	}
+
+	_, err = kernel.Execute(context.Background(), kernelRequest("attempt-2", RetrySafeIdempotent), func(context.Context) ([]byte, error) {
+		calls++
+		return []byte("must not run"), nil
+	})
+	if !errors.Is(err, ErrInvocationMismatch) {
+		t.Fatalf("reclassified retry error = %v, want ErrInvocationMismatch", err)
+	}
+	if calls != 1 {
+		t.Fatalf("executor calls = %d, want 1", calls)
+	}
+	invocation, attempts := repo.snapshot()
+	if invocation.Status != entity.InvocationUnknown || len(attempts) != 1 {
+		t.Fatalf("invocation=%+v attempts=%+v, want one unknown unsafe attempt", invocation, attempts)
+	}
+}
+
 func TestKernelIdempotentInvocationMayRetry(t *testing.T) {
 	repo := &memoryInvocationRepository{}
 	kernel := NewKernel(repo, nil)

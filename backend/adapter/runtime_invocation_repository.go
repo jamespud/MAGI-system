@@ -29,8 +29,9 @@ func (r *runtimeInvocationRepo) Ensure(ctx context.Context, invocation *entity.R
 		InvocationID: invocation.InvocationID, RunID: invocation.RunID, StepID: invocation.StepID,
 		Kind: invocation.Kind, LogicalOrdinal: invocation.LogicalOrdinal,
 		Status: string(invocation.Status), AttemptCount: invocation.AttemptCount,
-		OperationName: invocation.OperationName, IdempotencyKey: invocation.IdempotencyKey,
-		InputDigest: invocation.InputDigest, InputJSON: invocation.InputJSON,
+		OperationName: invocation.OperationName, RetrySafety: invocation.RetrySafety,
+		IdempotencyKey: invocation.IdempotencyKey,
+		InputDigest:    invocation.InputDigest, InputJSON: invocation.InputJSON,
 	}
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
 		return nil, err
@@ -165,8 +166,9 @@ func runtimeInvocationFromModel(model *RuntimeInvocationModel) *entity.RuntimeIn
 		InvocationID: model.InvocationID, RunID: model.RunID, StepID: model.StepID,
 		Kind: model.Kind, LogicalOrdinal: model.LogicalOrdinal,
 		Status: entity.InvocationStatus(model.Status), AttemptCount: model.AttemptCount,
-		OperationName: model.OperationName, IdempotencyKey: model.IdempotencyKey,
-		InputDigest: model.InputDigest, InputJSON: model.InputJSON,
+		OperationName: model.OperationName, RetrySafety: model.RetrySafety,
+		IdempotencyKey: model.IdempotencyKey,
+		InputDigest:    model.InputDigest, InputJSON: model.InputJSON,
 		StartedAt: model.StartedAt, CompletedAt: model.CompletedAt, UpdatedAt: model.UpdatedAt,
 	}
 	if model.OutputJSON != nil {

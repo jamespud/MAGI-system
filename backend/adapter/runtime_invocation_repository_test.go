@@ -92,6 +92,7 @@ func TestInvocationRepository_EnsureCreatesFreshInvocation(t *testing.T) {
 		Kind:          "model",
 		Status:        entity.InvocationPending,
 		OperationName: "generate",
+		RetrySafety:   "unsafe",
 		InputDigest:   "input-digest",
 		InputJSON:     `{"prompt":"hello"}`,
 	}
@@ -100,7 +101,7 @@ func TestInvocationRepository_EnsureCreatesFreshInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure fresh invocation: %v", err)
 	}
-	if created.InvocationID != want.InvocationID || created.Status != entity.InvocationPending || created.OperationName != want.OperationName || created.InputJSON != want.InputJSON {
+	if created.InvocationID != want.InvocationID || created.Status != entity.InvocationPending || created.OperationName != want.OperationName || created.RetrySafety != want.RetrySafety || created.InputJSON != want.InputJSON {
 		t.Fatalf("created invocation = %+v, want identity and input from %+v", created, want)
 	}
 
@@ -201,6 +202,7 @@ func TestRuntimeInvocationModel_AutoMigrateSchemaMatchesS21(t *testing.T) {
 		"output_json":    {typeName: "mediumtext", notNull: false},
 		"attempt_count":  {typeName: "integer", notNull: true, default_: stringPtr("0")},
 		"operation_name": {notNull: true, default_: stringPtr("''")},
+		"retry_safety":   {notNull: true},
 		"input_digest":   {notNull: true, default_: stringPtr("''")},
 	} {
 		got, ok := columns[name]

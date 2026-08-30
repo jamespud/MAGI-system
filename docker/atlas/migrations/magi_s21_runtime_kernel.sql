@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS runtime_invocation (
 
     operation_name VARCHAR(128) NOT NULL DEFAULT '',
 
+    retry_safety VARCHAR(32) NOT NULL,
+
     idempotency_key VARCHAR(128) NULL,
 
     input_digest VARCHAR(64) NOT NULL DEFAULT '',

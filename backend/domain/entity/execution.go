@@ -36,6 +36,7 @@ type RuntimeInvocation struct {
 	Status         InvocationStatus
 	AttemptCount   int
 	OperationName  string
+	RetrySafety    string
 	IdempotencyKey *string
 	InputDigest    string
 	InputJSON      string

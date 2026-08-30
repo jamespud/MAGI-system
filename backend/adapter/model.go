@@ -247,6 +247,7 @@ type RuntimeInvocationModel struct {
 	Status         string  `gorm:"size:32;not null;index:idx_runtime_run_status,priority:2"`
 	AttemptCount   int     `gorm:"not null;default:0"`
 	OperationName  string  `gorm:"size:128;not null;default:''"`
+	RetrySafety    string  `gorm:"size:32;not null"`
 	IdempotencyKey *string `gorm:"size:128;uniqueIndex:uk_runtime_idempotency"`
 	InputDigest    string  `gorm:"size:64;not null;default:''"`
 	InputJSON      string  `gorm:"type:mediumtext;not null"`

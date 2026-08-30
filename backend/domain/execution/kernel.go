@@ -68,6 +68,7 @@ func (k *Kernel) Execute(ctx context.Context, req Request, fn ExecuteFunc) (*Res
 		Kind:          string(req.Kind),
 		Status:        entity.InvocationPending,
 		OperationName: req.OperationName,
+		RetrySafety:   string(req.RetrySafety),
 		InputDigest:   digestBytes(req.Input),
 		InputJSON:     string(req.Input),
 	})
@@ -203,6 +204,7 @@ func matchesRequest(invocation *entity.RuntimeInvocation, req Request) bool {
 		invocation.StepID == req.Identity.StepID &&
 		invocation.Kind == string(req.Kind) &&
 		invocation.OperationName == req.OperationName &&
+		invocation.RetrySafety == string(req.RetrySafety) &&
 		invocation.InputDigest == digestBytes(req.Input) &&
 		invocation.InputJSON == string(req.Input)
 }
