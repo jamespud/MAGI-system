@@ -17,6 +17,7 @@ type LoopTrace struct {
 }
 
 type Step struct {
+	ID          string
 	Index       int
 	ModelOutput *schema.Message
 	ToolCalls   []ToolCallRecord
@@ -27,16 +28,19 @@ type Step struct {
 }
 
 type ToolCallRecord struct {
-	ToolCallID string
-	ToolName   string
-	Arguments  string
-	EvidenceID string
-	Valid      bool
-	Violations []validation.Violation
-	Result     string
-	Err        string
-	ApprovedBy string
-	Duration   time.Duration
+	ToolCallID     string
+	InvocationID   string
+	AttemptID      string
+	IdempotencyKey string
+	ToolName       string
+	Arguments      string
+	EvidenceID     string
+	Valid          bool
+	Violations     []validation.Violation
+	Result         string
+	Err            string
+	ApprovedBy     string
+	Duration       time.Duration
 }
 
 func extractUsage(msg *schema.Message) *entity.Usage {
