@@ -19,6 +19,7 @@ import (
 	"github.com/jamespud/magi/backend/application/toolpolicy"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
+	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/validation"
@@ -167,6 +168,84 @@ func TestAgentLoop_FullFlow(t *testing.T) {
 	}
 	if len(res.Trace.Steps) != 3 || !res.Trace.Steps[2].IsFinal {
 		t.Fatalf("trace: %d", len(res.Trace.Steps))
+	}
+}
+
+func TestAgentLoop_PopulatesExecutionIdentity(t *testing.T) {
+	runID := "c1-melchior-r1-investigate"
+	loop := newAgentLoop(t, []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}, nil)
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		RunID: runID,
+		Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Trace.Steps) != 3 {
+		t.Fatalf("steps: %d", len(res.Trace.Steps))
+	}
+	for i, step := range res.Trace.Steps {
+		want := execution.NewStepID(runID, i+1)
+		if step.ID != want {
+			t.Fatalf("step %d ID = %q, want %q", i+1, step.ID, want)
+		}
+	}
+	if len(res.Trace.Steps[0].ToolCalls) != 1 {
+		t.Fatalf("tool calls: %d", len(res.Trace.Steps[0].ToolCalls))
+	}
+	toolCall := res.Trace.Steps[0].ToolCalls[0]
+	wantInvocationID := execution.NewInvocationID(res.Trace.Steps[0].ID, execution.InvocationTool, 0)
+	if toolCall.InvocationID != wantInvocationID {
+		t.Fatalf("invocation ID = %q, want %q", toolCall.InvocationID, wantInvocationID)
+	}
+	if toolCall.AttemptID != runID {
+		t.Fatalf("attempt ID = %q, want %q", toolCall.AttemptID, runID)
+	}
+	wantKey := execution.ToolIdempotencyKey(wantInvocationID, "calc", []byte(`{"a":1,"b":2}`))
+	if toolCall.IdempotencyKey != wantKey {
+		t.Fatalf("idempotency key = %q, want %q", toolCall.IdempotencyKey, wantKey)
+	}
+}
+
+func TestAgentLoop_IdentityIsStableAcrossRetryRunIDs(t *testing.T) {
+	responses := []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}
+	firstLoop := newAgentLoop(t, responses, nil)
+	first, err := firstLoop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		RunID: "c1-melchior-r1-investigate",
+		Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	secondLoop := newAgentLoop(t, responses, nil)
+	second, err := secondLoop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		RunID: "c1-melchior-r1-investigate-retry1",
+		Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+	})
+	if err != nil {
+		t.Fatalf("retry run: %v", err)
+	}
+	firstTool := first.Trace.Steps[0].ToolCalls[0]
+	secondTool := second.Trace.Steps[0].ToolCalls[0]
+	if first.Trace.Steps[0].ID != second.Trace.Steps[0].ID {
+		t.Fatalf("step ID changed across retry: first=%q second=%q", first.Trace.Steps[0].ID, second.Trace.Steps[0].ID)
+	}
+	if firstTool.InvocationID != secondTool.InvocationID {
+		t.Fatalf("invocation ID changed across retry: first=%q second=%q", firstTool.InvocationID, secondTool.InvocationID)
+	}
+	if firstTool.IdempotencyKey != secondTool.IdempotencyKey {
+		t.Fatalf("idempotency key changed across retry: first=%q second=%q", firstTool.IdempotencyKey, secondTool.IdempotencyKey)
+	}
+	if firstTool.AttemptID == secondTool.AttemptID {
+		t.Fatalf("attempt ID did not change across retry: %q", firstTool.AttemptID)
 	}
 }
 

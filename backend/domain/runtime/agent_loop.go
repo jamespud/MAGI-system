@@ -18,6 +18,7 @@ import (
 	"github.com/jamespud/magi/backend/application/tracing"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
+	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
@@ -147,6 +148,29 @@ func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode
 	_ = l.eventPub.Publish(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
 }
 
+// traceIdentity keeps logical IDs stable across the dispatcher retry convention
+// while retaining the full run ID as the deterministic physical attempt ID.
+func traceIdentity(runID string) (logicalRunID, attemptID string) {
+	if runID == "" {
+		return "", "attempt:0"
+	}
+	const retryMarker = "-retry"
+	markerAt := strings.LastIndex(runID, retryMarker)
+	if markerAt >= 0 && markerAt+len(retryMarker) < len(runID) && isDecimal(runID[markerAt+len(retryMarker):]) {
+		return runID[:markerAt], runID
+	}
+	return runID, runID
+}
+
+func isDecimal(value string) bool {
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return value != ""
+}
+
 // saveCheckpoint persists the working-memory snapshot for resume (§18).
 // Nil-safe: no-op when checkpointRepo is nil or runID is empty.
 func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *TerminationState, phase string) {
@@ -185,6 +209,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if actx == nil {
 		actx = &AgentContext{}
 	}
+	logicalRunID, attemptID := traceIdentity(actx.RunID)
 	maxSteps := cfg.LoopPolicy.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 12
@@ -331,7 +356,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
 		}
 		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
-		st := &Step{Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
+		st := &Step{ID: execution.NewStepID(logicalRunID, step), Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {
 			result.Status = LoopStatusError
 			result.Err = err
@@ -374,9 +399,17 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				trace.Steps = append(trace.Steps, st)
 				continue
 			}
-			for _, tc := range resp.ToolCalls {
+			for ordinal, tc := range resp.ToolCalls {
 				ts.ToolCalls++
-				tcr := ToolCallRecord{ToolCallID: tc.ID, ToolName: tc.Function.Name, Arguments: l.redactor.String(tc.Function.Arguments)}
+				invocationID := execution.NewInvocationID(st.ID, execution.InvocationTool, ordinal)
+				tcr := ToolCallRecord{
+					ToolCallID:     tc.ID,
+					InvocationID:   invocationID,
+					AttemptID:      attemptID,
+					IdempotencyKey: execution.ToolIdempotencyKey(invocationID, tc.Function.Name, []byte(tc.Function.Arguments)),
+					ToolName:       tc.Function.Name,
+					Arguments:      l.redactor.String(tc.Function.Arguments),
+				}
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "arguments": tc.Function.Arguments})
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to
 				// cfg.ToolBindings. nameToDef only contains permitted tools. A tool call
