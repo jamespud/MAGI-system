@@ -26,6 +26,14 @@ type RunEnvironment struct {
 	Tools          []string `json:"tools,omitempty"`
 	KnowledgeIndex bool     `json:"knowledge_index"`
 	ConfigVersion  int64    `json:"config_version"`
+
+	RuntimeVersion string `json:"runtime_version"`
+	PromptVersion  string `json:"prompt_version"`
+
+	ModelDigest    string `json:"model_digest"`
+	ToolsetDigest  string `json:"toolset_digest"`
+	ConfigDigest   string `json:"config_digest"`
+	ManifestDigest string `json:"manifest_digest"`
 }
 
 type AgentRunStatus string
