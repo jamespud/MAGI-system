@@ -236,6 +236,44 @@ type ToolCallModel struct {
 
 func (ToolCallModel) TableName() string { return "magi_tool_call" }
 
+// RuntimeInvocationModel persists the stable logical identity of one model,
+// tool, or sensor invocation. Physical executions live in the attempt table.
+type RuntimeInvocationModel struct {
+	InvocationID   string `gorm:"primaryKey;size:64"`
+	RunID          string `gorm:"size:64;index:idx_runtime_run_step,priority:1;index:idx_runtime_run_status,priority:1"`
+	StepID         string `gorm:"size:64;index:idx_runtime_run_step,priority:2"`
+	Kind           string `gorm:"size:32"`
+	LogicalOrdinal int
+	Status         string `gorm:"size:32;index:idx_runtime_run_status,priority:2"`
+	AttemptCount   int
+	OperationName  string  `gorm:"size:128"`
+	IdempotencyKey *string `gorm:"size:128;uniqueIndex:uk_runtime_idempotency"`
+	InputDigest    string  `gorm:"size:64"`
+	InputJSON      string  `gorm:"type:text"`
+	OutputJSON     *string `gorm:"type:text"`
+	Error          *string `gorm:"type:text"`
+	StartedAt      *time.Time
+	CompletedAt    *time.Time
+	UpdatedAt      time.Time
+}
+
+func (RuntimeInvocationModel) TableName() string { return "runtime_invocation" }
+
+// RuntimeInvocationAttemptModel persists a physical execution attempt without
+// making AttemptID the identity of the logical invocation.
+type RuntimeInvocationAttemptModel struct {
+	AttemptID    string `gorm:"primaryKey;size:64"`
+	InvocationID string `gorm:"size:64;uniqueIndex:uk_runtime_invocation_attempt_no,priority:1;index"`
+	AttemptNo    int    `gorm:"uniqueIndex:uk_runtime_invocation_attempt_no,priority:2"`
+	WorkerID     string `gorm:"size:128"`
+	Status       string `gorm:"size:32"`
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+	Error        *string `gorm:"type:text"`
+}
+
+func (RuntimeInvocationAttemptModel) TableName() string { return "runtime_invocation_attempt" }
+
 type ApprovalModel struct {
 	ID          string `gorm:"primaryKey"`
 	CaseID      string `gorm:"index"`
