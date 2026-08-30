@@ -249,6 +249,36 @@ func TestAgentLoop_IdentityIsStableAcrossRetryRunIDs(t *testing.T) {
 	}
 }
 
+func TestAgentLoop_EquivalentJSONArgumentsShareIdempotencyKey(t *testing.T) {
+	run := func(arguments string) *runtime.ToolCallRecord {
+		t.Helper()
+		loop := newAgentLoop(t, []*schema.Message{
+			callMsg("c1", "calc", arguments),
+			finalMsg(summaryJSON("EV-001")),
+			finalMsg(voteJSON("correctness")),
+		}, nil)
+		res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+			RunID: "c1-melchior-r1-investigate",
+			Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+		})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		return &res.Trace.Steps[0].ToolCalls[0]
+	}
+
+	compact := `{"a":1,"b":2}`
+	reordered := `{ "b": 2, "a": 1 }`
+	first := run(compact)
+	second := run(reordered)
+	if first.IdempotencyKey != second.IdempotencyKey {
+		t.Fatalf("equivalent JSON arguments produced different keys: first=%q second=%q", first.IdempotencyKey, second.IdempotencyKey)
+	}
+	if first.Arguments != compact || second.Arguments != reordered {
+		t.Fatalf("raw arguments were not preserved: first=%q second=%q", first.Arguments, second.Arguments)
+	}
+}
+
 func TestAgentLoop_RoleContractAndDecisionBoundary(t *testing.T) {
 	loop := newAgentLoop(t, []*schema.Message{
 		callMsg("c1", "calc", `{"a":1,"b":2}`),

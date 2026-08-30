@@ -171,6 +171,20 @@ func isDecimal(value string) bool {
 	return value != ""
 }
 
+// canonicalToolArguments normalizes valid JSON for idempotency hashing while
+// leaving malformed arguments available to the existing validation path.
+func canonicalToolArguments(arguments string) []byte {
+	var value any
+	if err := json.Unmarshal([]byte(arguments), &value); err != nil {
+		return []byte(arguments)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return []byte(arguments)
+	}
+	return canonical
+}
+
 // saveCheckpoint persists the working-memory snapshot for resume (§18).
 // Nil-safe: no-op when checkpointRepo is nil or runID is empty.
 func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *TerminationState, phase string) {
@@ -406,7 +420,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					ToolCallID:     tc.ID,
 					InvocationID:   invocationID,
 					AttemptID:      attemptID,
-					IdempotencyKey: execution.ToolIdempotencyKey(invocationID, tc.Function.Name, []byte(tc.Function.Arguments)),
+					IdempotencyKey: execution.ToolIdempotencyKey(invocationID, tc.Function.Name, canonicalToolArguments(tc.Function.Arguments)),
 					ToolName:       tc.Function.Name,
 					Arguments:      l.redactor.String(tc.Function.Arguments),
 				}
