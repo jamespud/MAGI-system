@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -33,25 +32,12 @@ func (r *runtimeInvocationRepo) BeginAttempt(ctx context.Context, invocationID, 
 	var invocation RuntimeInvocationModel
 	won := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("invocation_id = ?", invocationID)
-		if tx.Dialector.Name() == "mysql" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
-		if err := query.First(&invocation).Error; err != nil {
-			return err
-		}
-
-		status := entity.InvocationStatus(invocation.Status)
-		if status != entity.InvocationPending && status != entity.InvocationFailed {
-			return nil
-		}
-
 		now := tx.NowFunc()
 		result := tx.Model(&RuntimeInvocationModel{}).
 			Where("invocation_id = ? AND status IN ?", invocationID, []string{string(entity.InvocationPending), string(entity.InvocationFailed)}).
 			Updates(map[string]any{
 				"status":        string(entity.InvocationRunning),
-				"attempt_count": invocation.AttemptCount + 1,
+				"attempt_count": gorm.Expr("attempt_count + 1"),
 				"error":         nil,
 				"started_at":    now,
 				"completed_at":  nil,
@@ -60,31 +46,24 @@ func (r *runtimeInvocationRepo) BeginAttempt(ctx context.Context, invocationID, 
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected != 1 {
-			return errRuntimeInvocationFenceLost
+		if err := tx.First(&invocation, "invocation_id = ?", invocationID).Error; err != nil {
+			return err
+		}
+		if result.RowsAffected == 0 {
+			return nil
 		}
 
 		attempt := RuntimeInvocationAttemptModel{
-			AttemptID: attemptID, InvocationID: invocationID, AttemptNo: invocation.AttemptCount + 1,
+			AttemptID: attemptID, InvocationID: invocationID, AttemptNo: invocation.AttemptCount,
 			Status: string(entity.InvocationRunning), StartedAt: &now,
 		}
 		if err := tx.Create(&attempt).Error; err != nil {
 			return err
 		}
 
-		invocation.Status = string(entity.InvocationRunning)
-		invocation.AttemptCount++
-		invocation.Error = nil
-		invocation.StartedAt = &now
-		invocation.CompletedAt = nil
-		invocation.UpdatedAt = now
 		won = true
 		return nil
 	})
-	if errors.Is(err, errRuntimeInvocationFenceLost) {
-		current, getErr := r.Get(ctx, invocationID)
-		return current, false, getErr
-	}
 	if err != nil {
 		return nil, false, err
 	}

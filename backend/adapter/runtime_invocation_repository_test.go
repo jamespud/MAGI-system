@@ -2,10 +2,15 @@ package magi_test
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -21,6 +26,30 @@ func openRuntimeInvocationDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func openRuntimeInvocationConcurrentDB(t *testing.T) (*gorm.DB, *gorm.DB) {
+	t.Helper()
+	dsn := "file:" + filepath.Join(t.TempDir(), "runtime_invocation.db") + "?_journal_mode=WAL&_busy_timeout=5000"
+	open := func() *gorm.DB {
+		db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatalf("sql db: %v", err)
+		}
+		sqlDB.SetMaxOpenConns(1)
+		t.Cleanup(func() { _ = sqlDB.Close() })
+		return db
+	}
+	dbA := open()
+	dbB := open()
+	if err := dbA.AutoMigrate(&magi.RuntimeInvocationModel{}, &magi.RuntimeInvocationAttemptModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return dbA, dbB
 }
 
 func seedRuntimeInvocation(t *testing.T, db *gorm.DB, id, idempotencyKey string) {
@@ -51,33 +80,111 @@ func TestRuntimeInvocationRepository(t *testing.T) {
 }
 
 func TestInvocationRepository_BeginIsSingleWinner(t *testing.T) {
-	db := openRuntimeInvocationDB(t)
-	seedRuntimeInvocation(t, db, "invocation-1", "idem-1")
-	repo := magi.NewRuntimeInvocationRepository(db)
+	dbA, dbB := openRuntimeInvocationConcurrentDB(t)
+	seedRuntimeInvocation(t, dbA, "invocation-1", "idem-1")
 
-	first, won, err := repo.BeginAttempt(context.Background(), "invocation-1", "attempt-1")
-	if err != nil || !won {
-		t.Fatalf("first begin: invocation=%+v won=%v err=%v", first, won, err)
+	type beginResult struct {
+		invocation *entity.RuntimeInvocation
+		won        bool
+		err        error
 	}
-	if first.Status != entity.InvocationRunning || first.AttemptCount != 1 {
-		t.Fatalf("first begin state: %+v", first)
+	ready := make(chan struct{}, 2)
+	start := make(chan struct{})
+	results := make(chan beginResult, 2)
+	var wg sync.WaitGroup
+	for attemptID, repo := range map[string]port.RuntimeInvocationRepository{
+		"attempt-1": magi.NewRuntimeInvocationRepository(dbA),
+		"attempt-2": magi.NewRuntimeInvocationRepository(dbB),
+	} {
+		wg.Add(1)
+		go func(attemptID string, repo port.RuntimeInvocationRepository) {
+			defer wg.Done()
+			ready <- struct{}{}
+			<-start
+			invocation, won, err := repo.BeginAttempt(context.Background(), "invocation-1", attemptID)
+			results <- beginResult{invocation: invocation, won: won, err: err}
+		}(attemptID, repo)
 	}
+	for range 2 {
+		<-ready
+	}
+	close(start)
+	wg.Wait()
+	close(results)
 
-	second, won, err := repo.BeginAttempt(context.Background(), "invocation-1", "attempt-2")
-	if err != nil || won {
-		t.Fatalf("second begin: invocation=%+v won=%v err=%v", second, won, err)
+	winners := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent begin: invocation=%+v won=%v err=%v", result.invocation, result.won, result.err)
+		}
+		if result.won {
+			winners++
+		}
 	}
-	if second.Status != entity.InvocationRunning || second.AttemptCount != 1 {
-		t.Fatalf("second begin changed invocation: %+v", second)
+	if winners != 1 {
+		t.Fatalf("concurrent begin winners = %d, want 1", winners)
 	}
 
 	var attempts int64
-	if err := db.Model(&magi.RuntimeInvocationAttemptModel{}).Where("invocation_id = ?", "invocation-1").Count(&attempts).Error; err != nil {
+	if err := dbA.Model(&magi.RuntimeInvocationAttemptModel{}).Where("invocation_id = ?", "invocation-1").Count(&attempts).Error; err != nil {
 		t.Fatalf("count attempts: %v", err)
 	}
 	if attempts != 1 {
 		t.Fatalf("attempt rows = %d, want 1", attempts)
 	}
+}
+
+func TestRuntimeInvocationModel_AutoMigrateSchemaMatchesS21(t *testing.T) {
+	db := openRuntimeInvocationDB(t)
+	type columnInfo struct {
+		Name       string
+		Type       string
+		NotNull    int     `gorm:"column:notnull"`
+		DefaultVal *string `gorm:"column:dflt_value"`
+	}
+	columns := make(map[string]columnInfo)
+	var rows []columnInfo
+	if err := db.Raw("PRAGMA table_info(runtime_invocation)").Scan(&rows).Error; err != nil {
+		t.Fatalf("table info: %v", err)
+	}
+	for _, column := range rows {
+		columns[column.Name] = column
+	}
+	for name, want := range map[string]struct {
+		typeName string
+		notNull  bool
+		default_ *string
+	}{
+		"input_json":     {typeName: "mediumtext", notNull: true},
+		"output_json":    {typeName: "mediumtext", notNull: false},
+		"attempt_count":  {typeName: "integer", notNull: true, default_: stringPtr("0")},
+		"operation_name": {notNull: true, default_: stringPtr("''")},
+		"input_digest":   {notNull: true, default_: stringPtr("''")},
+	} {
+		got, ok := columns[name]
+		if !ok {
+			t.Fatalf("missing column %q", name)
+		}
+		if (want.typeName != "" && !strings.EqualFold(got.Type, want.typeName)) || (got.NotNull != 0) != want.notNull || !sameDefault(got.DefaultVal, want.default_) {
+			t.Fatalf("%s schema = type=%q notNull=%d default=%s, want type=%q notNull=%t default=%s", name, got.Type, got.NotNull, formatDefault(got.DefaultVal), want.typeName, want.notNull, formatDefault(want.default_))
+		}
+	}
+}
+
+func stringPtr(value string) *string { return &value }
+
+func sameDefault(got, want *string) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return strings.Trim(*got, "'\"") == strings.Trim(*want, "'\"")
+}
+
+func formatDefault(value *string) string {
+	if value == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%q", *value)
 }
 
 func TestInvocationRepository_CompletedResultIsReusable(t *testing.T) {
