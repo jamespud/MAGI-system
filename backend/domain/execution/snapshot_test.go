@@ -28,6 +28,10 @@ func TestAgentSnapshotV2RoundTrip(t *testing.T) {
 		LedgerJSON:                ledgerJSON,
 		ManifestDigest:            "manifest-a",
 		LastCommittedInvocationID: "invocation-3",
+		SummaryJSON:               `{"ready":true}`,
+		ReflectionJSON:            `{"ready_to_revote":true}`,
+		PendingResponseJSON:       `{"role":"assistant","content":"pending"}`,
+		PendingToolIndex:          0,
 	})
 	if err != nil {
 		t.Fatalf("marshal snapshot: %v", err)
@@ -37,7 +41,7 @@ func TestAgentSnapshotV2RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse snapshot: %v", err)
 	}
-	if got.Version != execution.AgentSnapshotV2Version || got.NextStep != 4 || !got.Compacted || got.Termination.ToolCalls != 4 || got.Usage.TotalTokens != 13 || got.ManifestDigest != "manifest-a" || got.LastCommittedInvocationID != "invocation-3" {
+	if got.Version != execution.AgentSnapshotV2Version || got.NextStep != 4 || !got.Compacted || got.Termination.ToolCalls != 4 || got.Usage.TotalTokens != 13 || got.ManifestDigest != "manifest-a" || got.LastCommittedInvocationID != "invocation-3" || got.SummaryJSON == "" || got.ReflectionJSON == "" || got.PendingResponseJSON == "" || got.PendingToolIndex != 0 {
 		t.Fatalf("snapshot lost state: %+v", got)
 	}
 	restored, err := evidence.RestoreLedger(got.LedgerJSON)

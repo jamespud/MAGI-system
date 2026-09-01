@@ -209,7 +209,7 @@ func canonicalToolArguments(arguments string) []byte {
 // Nil-safe only when checkpointRepo is nil or runID is empty; a configured
 // repository error is returned so the caller can stop before another side
 // effecting invocation.
-func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, usage *entity.Usage, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string) error {
+func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) error {
 	if l.checkpointRepo == nil || runID == "" {
 		return nil
 	}
@@ -222,8 +222,31 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		return err
 	}
 	currentUsage := entity.Usage{}
-	if usage != nil {
-		currentUsage = *usage
+	if result != nil && result.Usage != nil {
+		currentUsage = *result.Usage
+	}
+	summaryJSON := ""
+	reflectionJSON := ""
+	pendingResponseJSON := ""
+	if result != nil {
+		if result.Summary != nil {
+			summaryJSON, err = marshalCheckpointValue(result.Summary)
+			if err != nil {
+				return err
+			}
+		}
+		if result.Reflection != nil {
+			reflectionJSON, err = marshalCheckpointValue(result.Reflection)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if pendingResponse != nil {
+		pendingResponseJSON, err = marshalCheckpointValue(pendingResponse)
+		if err != nil {
+			return err
+		}
 	}
 	snapshotJSON, err := execution.MarshalAgentSnapshotV2(execution.AgentSnapshotV2{
 		RunID: runID, NextStep: nextStep, Phase: phase, MessagesJSON: string(msgsJSON),
@@ -233,6 +256,8 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		},
 		Usage: currentUsage, Compacted: compacted, LedgerJSON: ledgerJSON,
 		ManifestDigest: manifestDigest, LastCommittedInvocationID: lastCommittedInvocationID,
+		SummaryJSON: summaryJSON, ReflectionJSON: reflectionJSON,
+		PendingResponseJSON: pendingResponseJSON, PendingToolIndex: pendingToolIndex,
 	})
 	if err != nil {
 		return err
@@ -252,7 +277,20 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 	return nil
 }
 
-func checkpointManifest(cfg *entity.MagiConfig, actx *AgentContext) string {
+func marshalCheckpointValue(value any) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("marshal checkpoint value: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// CheckpointManifest returns the stable environment identity used to validate
+// a durable agent-loop checkpoint before any model or tool invocation.
+func CheckpointManifest(cfg *entity.MagiConfig, actx *AgentContext, systemPrompt string) string {
 	bindings := cfg.Tools
 	if len(actx.ToolBindings) > 0 {
 		bindings = actx.ToolBindings
@@ -263,7 +301,10 @@ func checkpointManifest(cfg *entity.MagiConfig, actx *AgentContext) string {
 	}
 	return execution.FreezeManifest(entity.RunEnvironment{
 		ModelName: cfg.Model.ModelName, ModelBaseURL: cfg.Model.BaseURL,
-		Tools: tools, ConfigVersion: cfg.Version,
+		ModelRefDigest: execution.ModelReferenceDigest(cfg.Model),
+		Tools:          tools, ToolBindingsDigest: execution.ToolBindingsDigest(bindings),
+		PromptDigest:  execution.PromptContentDigest(systemPrompt),
+		ConfigVersion: cfg.Version, RuntimeVersion: "agent-loop-checkpoint:v2",
 	}).ManifestDigest
 }
 
@@ -285,38 +326,6 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 	if actx == nil {
 		actx = &AgentContext{}
-	}
-	manifestDigest := checkpointManifest(cfg, actx)
-	var checkpoint *execution.AgentSnapshotV2
-	var legacyCheckpoint *entity.AgentState
-	if l.checkpointRepo != nil && actx.RunID != "" {
-		state, err := l.checkpointRepo.Load(ctx, actx.RunID)
-		if err != nil {
-			return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
-		}
-		if state != nil {
-			if state.SnapshotJSON == "" {
-				if state.MessagesJSON == "" {
-					return nil, errors.New("agent loop: load checkpoint: incomplete legacy checkpoint")
-				}
-				legacyCheckpoint = state
-			} else {
-				parsed, err := execution.ParseAgentSnapshotV2(state.SnapshotJSON)
-				if err != nil {
-					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
-				}
-				if parsed.RunID != actx.RunID {
-					return nil, fmt.Errorf("agent loop: load checkpoint: run ID mismatch checkpoint=%q current=%q", parsed.RunID, actx.RunID)
-				}
-				if state.ManifestDigest != "" && state.ManifestDigest != parsed.ManifestDigest {
-					return nil, fmt.Errorf("agent loop: load checkpoint: %w", execution.ErrManifestMismatch)
-				}
-				if err := execution.ValidateManifest(parsed.ManifestDigest, manifestDigest); err != nil {
-					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
-				}
-				checkpoint = &parsed
-			}
-		}
 	}
 	logicalRunID, attemptID := traceIdentity(actx.RunID)
 	maxSteps := cfg.LoopPolicy.MaxSteps
@@ -390,8 +399,41 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	if question == "" {
 		question = ""
 	}
-	messages := []*schema.Message{schema.SystemMessage(BuildAgentSystemPromptCtx(runCtx, l.prompts, cfg, summarySchema, voteSchema, reflectionSchema, actx.DebateContext, hasTools, actx.KnowledgeCtx))}
+	systemPrompt := BuildAgentSystemPromptCtx(runCtx, l.prompts, cfg, summarySchema, voteSchema, reflectionSchema, actx.DebateContext, hasTools, actx.KnowledgeCtx)
+	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
 	messages = append(messages, schema.UserMessage(question))
+	manifestDigest := CheckpointManifest(cfg, actx, systemPrompt)
+	var checkpoint *execution.AgentSnapshotV2
+	var legacyCheckpoint *entity.AgentState
+	if l.checkpointRepo != nil && actx.RunID != "" {
+		state, err := l.checkpointRepo.Load(ctx, actx.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+		}
+		if state != nil {
+			if state.SnapshotJSON == "" {
+				if state.MessagesJSON == "" {
+					return nil, errors.New("agent loop: load checkpoint: incomplete legacy checkpoint")
+				}
+				legacyCheckpoint = state
+			} else {
+				parsed, err := execution.ParseAgentSnapshotV2(state.SnapshotJSON)
+				if err != nil {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+				}
+				if parsed.RunID != actx.RunID {
+					return nil, fmt.Errorf("agent loop: load checkpoint: run ID mismatch checkpoint=%q current=%q", parsed.RunID, actx.RunID)
+				}
+				if state.ManifestDigest != "" && state.ManifestDigest != parsed.ManifestDigest {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", execution.ErrManifestMismatch)
+				}
+				if err := execution.ValidateManifest(parsed.ManifestDigest, manifestDigest); err != nil {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+				}
+				checkpoint = &parsed
+			}
+		}
+	}
 
 	trace := &LoopTrace{StartedAt: time.Now()}
 	result := &LoopResult{Trace: trace, Ledger: ledger}
@@ -413,6 +455,8 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	ts := &TerminationState{}
 	compacted := false
 	lastCommittedInvocationID := ""
+	var pendingResponse *schema.Message
+	pendingToolIndex := -1
 	agentCode := entity.MagiCode(cfg.Code)
 
 	startStep := 1
@@ -438,6 +482,30 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		}
 		usage := checkpoint.Usage
 		result.Usage = &usage
+		if checkpoint.SummaryJSON != "" {
+			result.Summary = &entity.EvidenceSummary{}
+			if err := json.Unmarshal([]byte(checkpoint.SummaryJSON), result.Summary); err != nil {
+				return nil, fmt.Errorf("agent loop: restore checkpoint summary: %w", err)
+			}
+		} else if checkpoint.Phase == "reconsider_reflect" || checkpoint.Phase == "vote" {
+			result.Summary, err = l.restoreVerifiedCheckpointSummary(messages, ledger, evidenceStd, cfg, hasTools)
+			if err != nil {
+				return nil, fmt.Errorf("agent loop: restore checkpoint summary: %w", err)
+			}
+		}
+		if checkpoint.ReflectionJSON != "" {
+			result.Reflection = &entity.Reflection{}
+			if err := json.Unmarshal([]byte(checkpoint.ReflectionJSON), result.Reflection); err != nil {
+				return nil, fmt.Errorf("agent loop: restore checkpoint reflection: %w", err)
+			}
+		}
+		if checkpoint.PendingResponseJSON != "" {
+			pendingResponse = &schema.Message{}
+			if err := json.Unmarshal([]byte(checkpoint.PendingResponseJSON), pendingResponse); err != nil {
+				return nil, fmt.Errorf("agent loop: restore pending model response: %w", err)
+			}
+			pendingToolIndex = checkpoint.PendingToolIndex
+		}
 		phase = checkpoint.Phase
 		compacted = checkpoint.Compacted
 		lastCommittedInvocationID = checkpoint.LastCommittedInvocationID
@@ -453,6 +521,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		messages = restoredMessages
 		ts.TokenUsed = int64(legacyCheckpoint.TokenUsed)
 		phase = legacyCheckpoint.Phase
+		if phase == "reconsider_reflect" || phase == "vote" {
+			result.Summary, err = l.restoreCheckpointSummaryFromMessages(messages)
+			if err != nil {
+				return nil, fmt.Errorf("agent loop: restore legacy checkpoint summary: %w", err)
+			}
+		}
 		startStep = legacyCheckpoint.StepCount + 1
 	}
 	if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
@@ -461,77 +535,101 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 
 	for step := startStep; step <= maxSteps; step++ {
-		if cfg.LoopPolicy.TokenBudget > 0 && cfg.LoopPolicy.TokenCompactionThreshold > 0 && !compacted &&
-			float64(ts.TokenUsed) >= float64(cfg.LoopPolicy.TokenBudget)*cfg.LoopPolicy.TokenCompactionThreshold {
-			compactedMsgs, usage, cerr := compactHistory(ctx, cm, messages)
-			if cerr == nil && len(compactedMsgs) > 0 {
-				messages = compactedMsgs
-				compacted = true
-				if usage != nil {
-					result.Usage = addUsage(result.Usage, usage)
-					ts.TokenUsed += usage.TotalTokens
-				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.TokenUsed})
-			}
-		}
-		if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result.Usage, compacted, ledger, manifestDigest, lastCommittedInvocationID); err != nil {
-			result.Status = LoopStatusError
-			result.Err = err
-			finalizeTrace(trace, result.Status)
-			return result, err
-		}
-		if err := ctx.Err(); err != nil {
-			result.Status = LoopStatusCancelled
-			result.Err = err
-			finalizeTrace(trace, result.Status)
-			return result, err
-		}
 		stepStart := time.Now()
 		stepID := execution.NewStepID(logicalRunID, step)
-		callCtx := ctx
-		var callCancel context.CancelFunc
-		if cfg.LoopPolicy.CallTimeout > 0 {
-			callCtx, callCancel = context.WithTimeout(ctx, cfg.LoopPolicy.CallTimeout)
-		}
-		stepCtx, stepSpan := tracing.Start(callCtx, "agent.step.generate", attribute.Int("step", step), attribute.String("agent", cfg.Code))
 		var resp *schema.Message
-		if l.modelRuntime == nil {
-			// Kept for existing in-process test harnesses that construct an
-			// AgentLoop without the production Fx dependency graph.
-			resp, err = bound.Generate(stepCtx, messages)
+		resumingPending := pendingResponse != nil
+		if resumingPending {
+			resp = pendingResponse
+			pendingResponse = nil
 		} else {
-			resp, err = l.modelRuntime.Generate(stepCtx, modelruntime.Request{
-				Identity: entity.ExecutionIdentity{
-					RunID: logicalRunID, StepID: stepID,
-					InvocationID: modelruntime.NewInvocationID(stepID, cfg.Model),
-					AttemptID:    attemptID,
-				},
-				ModelRef: cfg.Model,
-				Model:    bound,
-				Input:    messages,
-			})
+			// Persist the pre-compaction state before the compactor can invoke the
+			// model, then persist again if compaction changed the next invocation.
+			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
+			if cfg.LoopPolicy.TokenBudget > 0 && cfg.LoopPolicy.TokenCompactionThreshold > 0 && !compacted &&
+				float64(ts.TokenUsed) >= float64(cfg.LoopPolicy.TokenBudget)*cfg.LoopPolicy.TokenCompactionThreshold {
+				compactedMsgs, usage, cerr := compactHistory(ctx, cm, messages)
+				if cerr == nil && len(compactedMsgs) > 0 {
+					messages = compactedMsgs
+					compacted = true
+					if usage != nil {
+						result.Usage = addUsage(result.Usage, usage)
+						ts.TokenUsed += usage.TotalTokens
+					}
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.TokenUsed})
+					if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+						result.Status = LoopStatusError
+						result.Err = err
+						finalizeTrace(trace, result.Status)
+						return result, err
+					}
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				result.Status = LoopStatusCancelled
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
+			callCtx := ctx
+			var callCancel context.CancelFunc
+			if cfg.LoopPolicy.CallTimeout > 0 {
+				callCtx, callCancel = context.WithTimeout(ctx, cfg.LoopPolicy.CallTimeout)
+			}
+			stepCtx, stepSpan := tracing.Start(callCtx, "agent.step.generate", attribute.Int("step", step), attribute.String("agent", cfg.Code))
+			if l.modelRuntime == nil {
+				// Kept for existing in-process test harnesses that construct an
+				// AgentLoop without the production Fx dependency graph.
+				resp, err = bound.Generate(stepCtx, messages)
+			} else {
+				resp, err = l.modelRuntime.Generate(stepCtx, modelruntime.Request{
+					Identity: entity.ExecutionIdentity{
+						RunID: logicalRunID, StepID: stepID,
+						InvocationID: modelruntime.NewInvocationID(stepID, cfg.Model),
+						AttemptID:    attemptID,
+					},
+					ModelRef: cfg.Model,
+					Model:    bound,
+					Input:    messages,
+				})
+			}
+			stepSpan.End()
+			if callCancel != nil {
+				callCancel()
+			}
+			if err != nil && errors.Is(err, context.DeadlineExceeded) && cfg.LoopPolicy.CallTimeout > 0 {
+				err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
+			}
+			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
 		}
-		stepSpan.End()
-		if callCancel != nil {
-			callCancel()
-		}
-		if err != nil && errors.Is(err, context.DeadlineExceeded) && cfg.LoopPolicy.CallTimeout > 0 {
-			err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
-		}
-		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
 		st := &Step{ID: stepID, Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
-		if err != nil {
+		if !resumingPending && err != nil {
 			result.Status = LoopStatusError
 			result.Err = err
 			trace.Steps = append(trace.Steps, st)
 			finalizeTrace(trace, result.Status)
 			return result, err
 		}
-		lastCommittedInvocationID = modelruntime.NewInvocationID(stepID, cfg.Model)
+		if !resumingPending {
+			lastCommittedInvocationID = modelruntime.NewInvocationID(stepID, cfg.Model)
+		}
 		st.ModelOutput = resp
-		st.ModelUsage = extractUsage(resp)
-		result.Usage = addUsage(result.Usage, st.ModelUsage)
-		ts.TokenUsed += st.ModelUsage.TotalTokens
+		if !resumingPending {
+			st.ModelUsage = extractUsage(resp)
+			result.Usage = addUsage(result.Usage, st.ModelUsage)
+			ts.TokenUsed += st.ModelUsage.TotalTokens
+			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, -1); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
+		}
 		if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 			trace.Steps = append(trace.Steps, st)
 			finalizeTrace(trace, result.Status)
@@ -543,7 +641,9 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 
 		switch pr.Type {
 		case ResponseToolCall:
-			messages = append(messages, resp)
+			if !resumingPending || pendingToolIndex < 0 {
+				messages = append(messages, resp)
+			}
 			// Force convergence: once MaxToolCalls is reached, refuse further tool
 			// calls and demand an EvidenceSummary. The LLM often ignores soft
 			// prompt limits, so this is a deterministic cutoff.
@@ -560,11 +660,37 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				messages = append(messages, schema.UserMessage(fmt.Sprintf(
 					"You have reached the tool-call limit (%d). Stop calling tools and output your EvidenceSummary JSON now, citing the EV-IDs you have gathered.",
 					cfg.LoopPolicy.MaxToolCalls)))
+				if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+					result.Status = LoopStatusError
+					result.Err = err
+					finalizeTrace(trace, result.Status)
+					return result, err
+				}
 				trace.Steps = append(trace.Steps, st)
 				continue
 			}
-			for ordinal, tc := range resp.ToolCalls {
-				ts.ToolCalls++
+			startOrdinal := 0
+			toolAlreadyCounted := false
+			if resumingPending && pendingToolIndex >= 0 {
+				startOrdinal = pendingToolIndex
+				toolAlreadyCounted = true
+			}
+			for ordinal := startOrdinal; ordinal < len(resp.ToolCalls); ordinal++ {
+				if ordinal > 0 {
+					lastCommittedInvocationID = execution.NewInvocationID(st.ID, execution.InvocationTool, ordinal-1)
+				}
+				tc := resp.ToolCalls[ordinal]
+				if toolAlreadyCounted {
+					toolAlreadyCounted = false
+				} else {
+					ts.ToolCalls++
+				}
+				if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, ordinal); err != nil {
+					result.Status = LoopStatusError
+					result.Err = err
+					finalizeTrace(trace, result.Status)
+					return result, err
+				}
 				invocationID := execution.NewInvocationID(st.ID, execution.InvocationTool, ordinal)
 				tcr := ToolCallRecord{
 					ToolCallID:     tc.ID,
@@ -759,6 +885,16 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				messages = append(messages, schema.ToolMessage(quoteToolOutput(tcr.Result), tc.ID))
 				st.ToolCalls = append(st.ToolCalls, tcr)
 			}
+			if len(resp.ToolCalls) > 0 {
+				lastCommittedInvocationID = execution.NewInvocationID(st.ID, execution.InvocationTool, len(resp.ToolCalls)-1)
+			}
+			pendingToolIndex = -1
+			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
 			trace.Steps = append(trace.Steps, st)
 			if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
 				finalizeTrace(trace, result.Status)
@@ -832,6 +968,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
 				phase = "vote"
 			}
+			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
 			trace.Steps = append(trace.Steps, st)
 			continue
 
@@ -840,6 +982,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Reflection recorded. Now output the Vote JSON."))
 			phase = "vote"
+			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
 			trace.Steps = append(trace.Steps, st)
 			continue
 
@@ -877,6 +1025,46 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	result.Err = ErrMaxSteps
 	finalizeTrace(trace, result.Status)
 	return result, ErrMaxSteps
+}
+
+func (l *AgentLoop) restoreVerifiedCheckpointSummary(messages []*schema.Message, ledger *evidence.EvidenceLedger, evidenceStd entity.EvidenceStandard, cfg *entity.MagiConfig, hasTools bool) (*entity.EvidenceSummary, error) {
+	summary, err := l.restoreCheckpointSummaryFromMessages(messages)
+	if err != nil {
+		return nil, err
+	}
+	ledger.RecomputeCorroboration(summary.Claims)
+	gateResult := l.gate.Evaluate(summary, ledger, evidenceStd, cfg.Code)
+	roleViolations := evidence.ValidateRoleAssessment(summary, ledger, cfg.RolePolicy, cfg.Objective, cfg.Code, hasTools)
+	if len(roleViolations) > 0 {
+		gateResult.Passed = false
+		gateResult.Violations = append(gateResult.Violations, roleViolations...)
+	}
+	if !gateResult.Passed {
+		return nil, fmt.Errorf("saved evidence summary no longer verifies: %s", gateViolationsMsg(gateResult))
+	}
+	return summary, nil
+}
+
+func (l *AgentLoop) restoreCheckpointSummaryFromMessages(messages []*schema.Message) (*entity.EvidenceSummary, error) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message == nil || message.Role != schema.Assistant || len(message.ToolCalls) > 0 {
+			continue
+		}
+		parsed := parseResponse(message, "gather", l.summaryVal, l.voteVal, l.claimVal, l.reflectionVal)
+		if parsed.Type != ResponseEvidenceSummary || parsed.Summary == nil {
+			continue
+		}
+		if i+1 >= len(messages) || messages[i+1] == nil || messages[i+1].Role != schema.User {
+			continue
+		}
+		transition := messages[i+1].Content
+		if transition != "Evidence gate passed. Now output the Vote JSON." && transition != "Evidence gate passed. Now output the Reflection JSON." {
+			continue
+		}
+		return parsed.Summary, nil
+	}
+	return nil, errors.New("schema-valid evidence summary with gate-passed transition missing from message history")
 }
 
 func (l *AgentLoop) requestApproval(runCtx context.Context, actx *AgentContext, agentCode entity.MagiCode, tc *schema.ToolCall, td port.ToolDefinition, timeout time.Duration) (bool, string, string, error) {

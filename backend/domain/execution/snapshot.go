@@ -33,6 +33,10 @@ type AgentSnapshotV2 struct {
 	LedgerJSON                string              `json:"ledger_json"`
 	ManifestDigest            string              `json:"manifest_digest"`
 	LastCommittedInvocationID string              `json:"last_committed_invocation_id"`
+	SummaryJSON               string              `json:"summary_json"`
+	ReflectionJSON            string              `json:"reflection_json"`
+	PendingResponseJSON       string              `json:"pending_response_json"`
+	PendingToolIndex          int                 `json:"pending_tool_index"`
 }
 
 func MarshalAgentSnapshotV2(snapshot AgentSnapshotV2) (string, error) {
@@ -59,6 +63,12 @@ func ParseAgentSnapshotV2(encoded string) (AgentSnapshotV2, error) {
 	}
 	if snapshot.RunID == "" || snapshot.NextStep < 1 || snapshot.MessagesJSON == "" || snapshot.ManifestDigest == "" || snapshot.LedgerJSON == "" {
 		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: incomplete state")
+	}
+	if snapshot.PendingToolIndex < -1 {
+		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: invalid pending tool index %d", snapshot.PendingToolIndex)
+	}
+	if snapshot.PendingResponseJSON == "" && snapshot.PendingToolIndex != -1 && snapshot.PendingToolIndex != 0 {
+		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: pending tool index without response")
 	}
 	return snapshot, nil
 }

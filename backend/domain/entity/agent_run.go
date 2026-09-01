@@ -34,6 +34,10 @@ type RunEnvironment struct {
 	ToolsetDigest  string `json:"toolset_digest"`
 	ConfigDigest   string `json:"config_digest"`
 	ManifestDigest string `json:"manifest_digest"`
+
+	ModelRefDigest     string `json:"model_ref_digest"`
+	ToolBindingsDigest string `json:"tool_bindings_digest"`
+	PromptDigest       string `json:"prompt_digest"`
 }
 
 type AgentRunStatus string
