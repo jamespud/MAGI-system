@@ -20,6 +20,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
 	"github.com/jamespud/magi/backend/domain/execution"
+	"github.com/jamespud/magi/backend/domain/modelruntime"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
@@ -59,6 +60,7 @@ func RelaxEvidenceStandard(std entity.EvidenceStandard, hasTools bool) entity.Ev
 
 type AgentLoop struct {
 	modelPort      port.ModelPort
+	modelRuntime   *modelruntime.Runtime
 	toolReg        port.ToolRegistryPort
 	toolExec       port.ToolExecutorPort
 	validator      validation.Validator
@@ -82,6 +84,7 @@ type AgentLoop struct {
 
 type AgentLoopDeps struct {
 	ModelPort      port.ModelPort
+	ModelRuntime   *modelruntime.Runtime
 	ToolReg        port.ToolRegistryPort
 	ToolExec       port.ToolExecutorPort
 	Validator      validation.Validator
@@ -131,7 +134,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 			evidence.NewRawObservationAdapter())
 	}
 	return &AgentLoop{
-		modelPort: d.ModelPort, toolReg: d.ToolReg, toolExec: d.ToolExec,
+		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolExec: d.ToolExec,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo, quota: d.Quota,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal:  rv,
@@ -362,13 +365,29 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			return result, err
 		}
 		stepStart := time.Now()
+		stepID := execution.NewStepID(logicalRunID, step)
 		callCtx := ctx
 		var callCancel context.CancelFunc
 		if cfg.LoopPolicy.CallTimeout > 0 {
 			callCtx, callCancel = context.WithTimeout(ctx, cfg.LoopPolicy.CallTimeout)
 		}
 		stepCtx, stepSpan := tracing.Start(callCtx, "agent.step.generate", attribute.Int("step", step), attribute.String("agent", cfg.Code))
-		resp, err := bound.Generate(stepCtx, messages)
+		var resp *schema.Message
+		if l.modelRuntime == nil {
+			// Kept for existing in-process test harnesses that construct an
+			// AgentLoop without the production Fx dependency graph.
+			resp, err = bound.Generate(stepCtx, messages)
+		} else {
+			resp, err = l.modelRuntime.Generate(stepCtx, modelruntime.Request{
+				Identity: entity.ExecutionIdentity{
+					RunID: logicalRunID, StepID: stepID,
+					InvocationID: execution.NewInvocationID(stepID, execution.InvocationModel, 0),
+					AttemptID:    attemptID,
+				},
+				Model: bound,
+				Input: messages,
+			})
+		}
 		stepSpan.End()
 		if callCancel != nil {
 			callCancel()
@@ -377,7 +396,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
 		}
 		l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
-		st := &Step{ID: execution.NewStepID(logicalRunID, step), Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
+		st := &Step{ID: stepID, Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
 		if err != nil {
 			result.Status = LoopStatusError
 			result.Err = err

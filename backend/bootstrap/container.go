@@ -58,7 +58,9 @@ import (
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/evidence"
+	"github.com/jamespud/magi/backend/domain/execution"
 	domainmemory "github.com/jamespud/magi/backend/domain/memory"
+	"github.com/jamespud/magi/backend/domain/modelruntime"
 	"github.com/jamespud/magi/backend/domain/orchestration"
 	"github.com/jamespud/magi/backend/domain/port"
 	promptpkg "github.com/jamespud/magi/backend/domain/prompt"
@@ -132,6 +134,8 @@ var Module = fx.Options(
 		provideToolQuotaRepository,
 		provideToolQuotaService,
 		provideBudgetChecker,
+		provideRuntimeInvocationRepository,
+		provideModelRuntime,
 
 		// Agent runtime
 		provideAgentLoopHolder,
@@ -288,6 +292,7 @@ func provideAgentLoop(
 	quota *toolquota.Service,
 	prompts port.PromptProvider,
 	taskTree port.TaskTreeRecorder,
+	modelRuntime *modelruntime.Runtime,
 	loopHolder *agentLoopHolder,
 ) (*runtime.AgentLoop, error) {
 	adapterRegistry := evidence.NewEvidenceAdapterRegistry(
@@ -298,13 +303,21 @@ func provideAgentLoop(
 	)
 	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts, TaskTree: taskTree,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts, TaskTree: taskTree, ModelRuntime: modelRuntime,
 	})
 	if err != nil {
 		return nil, err
 	}
 	loopHolder.set(loop)
 	return loop, nil
+}
+
+func provideRuntimeInvocationRepository(db *gorm.DB) port.RuntimeInvocationRepository {
+	return magi.NewRuntimeInvocationRepository(db)
+}
+
+func provideModelRuntime(invocations port.RuntimeInvocationRepository) *modelruntime.Runtime {
+	return modelruntime.New(execution.NewKernel(invocations, nil))
 }
 
 func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
