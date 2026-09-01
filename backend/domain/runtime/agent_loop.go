@@ -22,6 +22,7 @@ import (
 	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/modelruntime"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/toolruntime"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
 
@@ -48,6 +49,13 @@ func phaseExpectedSchema(phase string, summary, vote, reflection []byte) []byte 
 	}
 }
 
+func expectedSchemaForTool(toolName, phase string, summary, vote, reflection []byte) []byte {
+	if toolName != feedbackToolName {
+		return nil
+	}
+	return phaseExpectedSchema(phase, summary, vote, reflection)
+}
+
 // RelaxEvidenceStandard drops count/type requirements when no tools are bound
 // (the agent reasons from intrinsic knowledge), but preserves CustomRules so
 // semantic claim rules (e.g. worst-case claim) remain enforced without tools.
@@ -63,6 +71,7 @@ type AgentLoop struct {
 	modelRuntime   *modelruntime.Runtime
 	toolReg        port.ToolRegistryPort
 	toolExec       port.ToolExecutorPort
+	toolRuntime    *toolruntime.Runtime
 	validator      validation.Validator
 	gen            validation.SchemaGenerator
 	adapter        *evidence.EvidenceAdapterRegistry
@@ -87,6 +96,7 @@ type AgentLoopDeps struct {
 	ModelRuntime   *modelruntime.Runtime
 	ToolReg        port.ToolRegistryPort
 	ToolExec       port.ToolExecutorPort
+	ToolRuntime    *toolruntime.Runtime
 	Validator      validation.Validator
 	Gen            validation.SchemaGenerator
 	Adapter        *evidence.EvidenceAdapterRegistry
@@ -134,7 +144,7 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 			evidence.NewRawObservationAdapter())
 	}
 	return &AgentLoop{
-		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolExec: d.ToolExec,
+		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolExec: d.ToolExec, toolRuntime: d.ToolRuntime,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo, quota: d.Quota,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal:  rv,
@@ -464,6 +474,85 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err, "reason": "tool_not_found",
 					})
 					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
+					st.ToolCalls = append(st.ToolCalls, tcr)
+					continue
+				}
+				if l.toolRuntime != nil {
+					var toolStart time.Time
+					toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
+					runtimeResult, execErr := l.toolRuntime.Execute(toolCtx, toolruntime.Request{
+						Identity: entity.ExecutionIdentity{
+							RunID: logicalRunID, StepID: st.ID, InvocationID: invocationID, AttemptID: attemptID,
+						},
+						Definition:     td,
+						ArgumentsJSON:  tc.Function.Arguments,
+						UserID:         actx.UserID,
+						ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
+						Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {
+							approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
+							return toolruntime.ApprovalDecision{Approved: approved, DecidedBy: decidedBy, Reason: reason}, approvalErr
+						},
+						Lifecycle: func(stage toolruntime.LifecycleStage) {
+							switch stage {
+							case toolruntime.LifecycleValidated:
+								l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
+							case toolruntime.LifecycleStarted:
+								toolStart = time.Now()
+								l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
+							}
+						},
+					})
+					toolSpan.End()
+					if runtimeResult != nil {
+						tcr.Arguments = runtimeResult.Arguments
+						tcr.IdempotencyKey = runtimeResult.IdempotencyKey
+						tcr.ApprovedBy = runtimeResult.ApprovedBy
+						tcr.Violations = runtimeResult.Violations
+					}
+					if !toolStart.IsZero() {
+						tcr.Duration = time.Since(toolStart)
+					}
+					if execErr != nil {
+						if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
+							tcr.Valid = false
+						}
+						tcr.Err = execErr.Error()
+						ts.ConsecToolFail++
+						reason := ""
+						if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
+							reason = "args_invalid"
+						}
+						payload := map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err}
+						if reason != "" {
+							payload["reason"] = reason
+						}
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, payload)
+						messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
+						st.ToolCalls = append(st.ToolCalls, tcr)
+						continue
+					}
+					if runtimeResult == nil || runtimeResult.Execution == nil {
+						tcr.Err = "tool runtime returned no execution result"
+						ts.ConsecToolFail++
+						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err})
+						messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
+						st.ToolCalls = append(st.ToolCalls, tcr)
+						continue
+					}
+					ts.ConsecToolFail = 0
+					tcr.Valid = true
+					tcr.Result = runtimeResult.Output
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds(), "result": quoteToolOutput(tcr.Result)})
+					// Evidence remains a MAGI semantic and is deliberately kept out of ToolRuntime.
+					candidates, _ := l.adapter.Extract(ctx, td, runtimeResult.Execution)
+					for _, c := range candidates {
+						ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
+						if ev != nil {
+							tcr.EvidenceID = ev.ID
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated, map[string]any{"evidence_id": ev.ID, "reliability": ev.Reliability.Final, "observation": ev.Observation, "tool_name": tc.Function.Name})
+						}
+					}
+					messages = append(messages, schema.ToolMessage(quoteToolOutput(tcr.Result), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}

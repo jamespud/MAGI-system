@@ -8,12 +8,24 @@ import (
 
 // ToolDefinition is a resolved tool's schema + source metadata.
 type ToolDefinition struct {
-	Name       string
-	Desc       string
-	ArgsSchema []byte // JSON Schema (unified IR, ADR-003)
-	Source     entity.ToolSource
-	Binding    entity.ToolBinding
+	Name        string
+	Desc        string
+	ArgsSchema  []byte // JSON Schema (unified IR, ADR-003)
+	Source      entity.ToolSource
+	Binding     entity.ToolBinding
+	EffectClass ToolEffectClass
 }
+
+// ToolEffectClass describes the external side-effect semantics of a tool.
+// The zero value is deliberately treated as ToolEffectUnknown by runtimes.
+type ToolEffectClass string
+
+const (
+	ToolEffectReadOnly      ToolEffectClass = "read_only"
+	ToolEffectIdempotent    ToolEffectClass = "idempotent"
+	ToolEffectNonIdempotent ToolEffectClass = "non_idempotent"
+	ToolEffectUnknown       ToolEffectClass = "unknown"
+)
 
 // ToolExecutionRequest is a request to execute a bound tool.
 type ToolExecutionRequest struct {
@@ -25,6 +37,12 @@ type ToolExecutionRequest struct {
 	// Optional; only set by the agent loop for check_output so models need not
 	// reproduce it. Other tools ignore it.
 	ExpectedSchema []byte
+
+	RunID          string
+	StepID         string
+	InvocationID   string
+	AttemptID      string
+	IdempotencyKey string
 }
 
 // ToolExecutionResult is the raw tool output.

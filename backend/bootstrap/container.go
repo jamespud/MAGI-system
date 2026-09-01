@@ -66,6 +66,7 @@ import (
 	promptpkg "github.com/jamespud/magi/backend/domain/prompt"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/service"
+	"github.com/jamespud/magi/backend/domain/toolruntime"
 	"github.com/jamespud/magi/backend/domain/validation"
 	appserver "github.com/jamespud/magi/backend/server"
 	"github.com/jamespud/magi/backend/server/a2a"
@@ -133,6 +134,7 @@ var Module = fx.Options(
 		provideSchedulerLock,
 		provideToolQuotaRepository,
 		provideToolQuotaService,
+		provideToolRuntime,
 		provideBudgetChecker,
 		provideRuntimeInvocationRepository,
 		provideModelRuntime,
@@ -290,6 +292,7 @@ func provideAgentLoop(
 	red *redact.Redactor,
 	approvalRepo port.ApprovalRepository,
 	quota *toolquota.Service,
+	toolRuntime *toolruntime.Runtime,
 	prompts port.PromptProvider,
 	taskTree port.TaskTreeRecorder,
 	modelRuntime *modelruntime.Runtime,
@@ -303,7 +306,7 @@ func provideAgentLoop(
 	)
 	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
 		ModelPort: modelPort, ToolReg: toolReg, ToolExec: toolExec,
-		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, Prompts: prompts, TaskTree: taskTree, ModelRuntime: modelRuntime,
+		Validator: val, Gen: gen, EventPub: eventPub, CheckpointRepo: repo.CheckpointRepo(), Adapter: adapterRegistry, ToolPolicy: toolPol, Metrics: reg, Redactor: red, ApprovalRepo: approvalRepo, Quota: quota, ToolRuntime: toolRuntime, Prompts: prompts, TaskTree: taskTree, ModelRuntime: modelRuntime,
 	})
 	if err != nil {
 		return nil, err
@@ -318,6 +321,26 @@ func provideRuntimeInvocationRepository(db *gorm.DB) port.RuntimeInvocationRepos
 
 func provideModelRuntime(invocations port.RuntimeInvocationRepository) *modelruntime.Runtime {
 	return modelruntime.New(execution.NewKernel(invocations, nil))
+}
+
+func provideToolRuntime(
+	invocations port.RuntimeInvocationRepository,
+	executor port.ToolExecutorPort,
+	validator validation.Validator,
+	policy *toolpolicy.Policy,
+	quota *toolquota.Service,
+	registry *metrics.Registry,
+	redactor *redact.Redactor,
+) (*toolruntime.Runtime, error) {
+	return toolruntime.New(toolruntime.Deps{
+		Kernel:    execution.NewKernel(invocations, nil),
+		Executor:  executor,
+		Validator: validator,
+		Policy:    policy,
+		Quota:     quota,
+		Metrics:   registry,
+		Redactor:  redactor,
+	})
 }
 
 func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
