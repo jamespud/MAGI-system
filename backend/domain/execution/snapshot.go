@@ -67,8 +67,22 @@ func ParseAgentSnapshotV2(encoded string) (AgentSnapshotV2, error) {
 	if snapshot.PendingToolIndex < -1 {
 		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: invalid pending tool index %d", snapshot.PendingToolIndex)
 	}
-	if snapshot.PendingResponseJSON == "" && snapshot.PendingToolIndex != -1 && snapshot.PendingToolIndex != 0 {
-		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: pending tool index without response")
+	if snapshot.PendingResponseJSON == "" {
+		// Snapshots written before pending response state existed decode the
+		// absent integer field as zero. Keep that legacy V2 representation valid.
+		if snapshot.PendingToolIndex != -1 && snapshot.PendingToolIndex != 0 {
+			return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: pending tool index without response")
+		}
+		return snapshot, nil
+	}
+	var pendingResponse struct {
+		ToolCalls []json.RawMessage `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(snapshot.PendingResponseJSON), &pendingResponse); err != nil {
+		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: invalid pending response: %w", err)
+	}
+	if snapshot.PendingToolIndex >= 0 && snapshot.PendingToolIndex >= len(pendingResponse.ToolCalls) {
+		return AgentSnapshotV2{}, fmt.Errorf("agent snapshot: pending tool index %d out of range for %d tool calls", snapshot.PendingToolIndex, len(pendingResponse.ToolCalls))
 	}
 	return snapshot, nil
 }
