@@ -2,6 +2,7 @@ package modelruntime_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -18,8 +19,22 @@ func TestModelRuntimeResumeDoesNotRegenerate(t *testing.T) {
 	repo := &memoryInvocationRepository{}
 	runtime := modelruntime.New(execution.NewKernel(repo, nil))
 	firstResponse := &schema.Message{
-		Role:    schema.Assistant,
-		Content: "response A",
+		Role:             schema.Assistant,
+		Content:          "response A",
+		ReasoningContent: "reasoning A",
+		MultiContent: []schema.ChatMessagePart{
+			{Type: schema.ChatMessagePartTypeText, Text: "summary"},
+			{Type: schema.ChatMessagePartTypeImageURL, ImageURL: &schema.ChatMessageImageURL{
+				URL:   "https://example.test/image.png",
+				Extra: map[string]any{"rank": int64(9)},
+			}},
+		},
+		Extra: map[string]any{
+			"int64":  int64(42),
+			"uint32": uint32(7),
+			"bytes":  []byte{0, 1, 2},
+			"nested": map[string]any{"attempt": int32(3)},
+		},
 		ToolCalls: []schema.ToolCall{{
 			ID:   "call-a",
 			Type: "function",
@@ -27,6 +42,7 @@ func TestModelRuntimeResumeDoesNotRegenerate(t *testing.T) {
 				Name:      "search",
 				Arguments: `{"query":"MAGI"}`,
 			},
+			Extra: map[string]any{"retry": int16(2)},
 		}},
 		ResponseMeta: &schema.ResponseMeta{
 			FinishReason: "tool_calls",
@@ -36,15 +52,17 @@ func TestModelRuntimeResumeDoesNotRegenerate(t *testing.T) {
 	secondResponse := schema.AssistantMessage("response B", nil)
 	provider := &scriptedModel{responses: []*schema.Message{firstResponse, secondResponse}}
 	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
 	messages := []*schema.Message{schema.SystemMessage("system"), schema.UserMessage("question")}
 
 	first, err := runtime.Generate(context.Background(), modelruntime.Request{
 		Identity: entity.ExecutionIdentity{
 			RunID: "run-1", StepID: stepID,
-			InvocationID: execution.NewInvocationID(stepID, execution.InvocationModel, 0), AttemptID: "attempt-1",
+			InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1",
 		},
-		Model: provider,
-		Input: messages,
+		ModelRef: modelRef,
+		Model:    provider,
+		Input:    messages,
 	})
 	if err != nil {
 		t.Fatalf("first generate: %v", err)
@@ -56,16 +74,99 @@ func TestModelRuntimeResumeDoesNotRegenerate(t *testing.T) {
 	resumed, err := runtime.Generate(context.Background(), modelruntime.Request{
 		Identity: entity.ExecutionIdentity{
 			RunID: "run-1", StepID: stepID,
-			InvocationID: execution.NewInvocationID(stepID, execution.InvocationModel, 0), AttemptID: "attempt-2",
+			InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-2",
 		},
-		Model: provider,
-		Input: messages,
+		ModelRef: modelRef,
+		Model:    provider,
+		Input:    messages,
 	})
 	if err != nil {
 		t.Fatalf("resume generate: %v", err)
 	}
 	if !reflect.DeepEqual(resumed, firstResponse) {
 		t.Fatalf("resumed response = %#v, want persisted %#v", resumed, firstResponse)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("model call count = %d, want 1", provider.calls)
+	}
+}
+
+func TestModelRuntimeDifferentModelsDoNotReuseResponse(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	firstRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	secondRef := entity.ModelRef{ModelID: 2, ModelName: "model-b"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, firstRef), AttemptID: "attempt-1"}
+	firstModel := &scriptedModel{responses: []*schema.Message{schema.AssistantMessage("response A", nil)}}
+	secondModel := &scriptedModel{responses: []*schema.Message{schema.AssistantMessage("response B", nil)}}
+	messages := []*schema.Message{schema.UserMessage("question")}
+
+	first, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: firstRef, Model: firstModel, Input: messages})
+	if err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	if first.Content != "response A" {
+		t.Fatalf("first response = %q, want response A", first.Content)
+	}
+
+	identity.InvocationID = modelruntime.NewInvocationID(stepID, secondRef)
+	identity.AttemptID = "attempt-2"
+	second, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: secondRef, Model: secondModel, Input: messages})
+	if err != nil {
+		t.Fatalf("second generate: %v", err)
+	}
+	if second.Content != "response B" {
+		t.Fatalf("second response = %q, want response B", second.Content)
+	}
+	if secondModel.calls != 1 {
+		t.Fatalf("second model call count = %d, want 1", secondModel.calls)
+	}
+}
+
+func TestModelRuntimeRetryUsesNewAttemptID(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &retryScriptedModel{err: errors.New("temporary provider failure"), response: schema.AssistantMessage("response A", nil)}
+	messages := []*schema.Message{schema.UserMessage("question")}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); err == nil {
+		t.Fatal("first generate error = nil, want provider failure")
+	}
+	identity.AttemptID = "attempt-2"
+	response, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages})
+	if err != nil {
+		t.Fatalf("retry generate: %v", err)
+	}
+	if response.Content != "response A" {
+		t.Fatalf("retry response = %q, want response A", response.Content)
+	}
+	if got := repo.attemptsFor(identity.InvocationID); !reflect.DeepEqual(got, []string{"attempt-1", "attempt-2"}) {
+		t.Fatalf("attempt IDs = %v, want distinct physical attempts", got)
+	}
+}
+
+func TestModelRuntimeUnsupportedExtraFailsClosed(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{
+		{Role: schema.Assistant, Content: "unsupported", Extra: map[string]any{"channel": make(chan int)}},
+		schema.AssistantMessage("must not run", nil),
+	}}
+	messages := []*schema.Message{schema.UserMessage("question")}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); !errors.Is(err, execution.ErrAmbiguousInvocation) {
+		t.Fatalf("first generate error = %v, want ambiguous invocation", err)
+	}
+	identity.AttemptID = "attempt-2"
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); !errors.Is(err, execution.ErrAmbiguousInvocation) {
+		t.Fatalf("resume generate error = %v, want ambiguous invocation", err)
 	}
 	if provider.calls != 1 {
 		t.Fatalf("model call count = %d, want 1", provider.calls)
@@ -91,47 +192,84 @@ func (m *scriptedModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatMode
 	return m, nil
 }
 
+type retryScriptedModel struct {
+	err      error
+	response *schema.Message
+	calls    int
+}
+
+func (m *retryScriptedModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+	m.calls++
+	if m.calls == 1 {
+		return nil, m.err
+	}
+	return m.response, nil
+}
+
+func (m *retryScriptedModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, nil
+}
+
+func (m *retryScriptedModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
 type memoryInvocationRepository struct {
-	mu         sync.Mutex
-	invocation *entity.RuntimeInvocation
-	attemptID  string
+	mu          sync.Mutex
+	invocations map[string]*entity.RuntimeInvocation
+	attemptIDs  map[string]string
+	attempts    map[string][]string
 }
 
 func (r *memoryInvocationRepository) Ensure(_ context.Context, invocation *entity.RuntimeInvocation) (*entity.RuntimeInvocation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.invocation == nil {
-		copy := *invocation
-		r.invocation = &copy
+	if r.invocations == nil {
+		r.invocations = make(map[string]*entity.RuntimeInvocation)
+		r.attemptIDs = make(map[string]string)
+		r.attempts = make(map[string][]string)
 	}
-	return cloneInvocation(r.invocation), nil
+	if r.invocations[invocation.InvocationID] == nil {
+		copy := *invocation
+		r.invocations[invocation.InvocationID] = &copy
+	}
+	return cloneInvocation(r.invocations[invocation.InvocationID]), nil
 }
 
-func (r *memoryInvocationRepository) Get(_ context.Context, _ string) (*entity.RuntimeInvocation, error) {
+func (r *memoryInvocationRepository) Get(_ context.Context, invocationID string) (*entity.RuntimeInvocation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return cloneInvocation(r.invocation), nil
+	return cloneInvocation(r.invocations[invocationID]), nil
 }
 
 func (r *memoryInvocationRepository) BeginAttempt(_ context.Context, invocationID, attemptID string) (*entity.RuntimeInvocation, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.invocation.InvocationID != invocationID || r.invocation.Status == entity.InvocationSucceeded {
-		return cloneInvocation(r.invocation), false, nil
+	invocation := r.invocations[invocationID]
+	if invocation == nil || invocation.Status == entity.InvocationSucceeded {
+		return cloneInvocation(invocation), false, nil
 	}
-	r.invocation.Status = entity.InvocationRunning
-	r.attemptID = attemptID
-	return cloneInvocation(r.invocation), true, nil
+	invocation.Status = entity.InvocationRunning
+	r.attemptIDs[invocationID] = attemptID
+	r.attempts[invocationID] = append(r.attempts[invocationID], attemptID)
+	return cloneInvocation(invocation), true, nil
+}
+
+func (r *memoryInvocationRepository) attemptsFor(invocationID string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.attempts[invocationID]...)
 }
 
 func (r *memoryInvocationRepository) Complete(_ context.Context, invocationID, attemptID, output string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.invocation.InvocationID != invocationID || r.invocation.Status != entity.InvocationRunning || r.attemptID != attemptID {
+	invocation := r.invocations[invocationID]
+	if invocation == nil || invocation.Status != entity.InvocationRunning || r.attemptIDs[invocationID] != attemptID {
 		return false, nil
 	}
-	r.invocation.Status = entity.InvocationSucceeded
-	r.invocation.OutputJSON = output
+	invocation.Status = entity.InvocationSucceeded
+	invocation.OutputJSON = output
 	return true, nil
 }
 
@@ -146,11 +284,12 @@ func (r *memoryInvocationRepository) MarkUnknown(_ context.Context, invocationID
 func (r *memoryInvocationRepository) finish(invocationID, attemptID string, status entity.InvocationStatus, reason string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.invocation.InvocationID != invocationID || r.invocation.Status != entity.InvocationRunning || r.attemptID != attemptID {
+	invocation := r.invocations[invocationID]
+	if invocation == nil || invocation.Status != entity.InvocationRunning || r.attemptIDs[invocationID] != attemptID {
 		return false, nil
 	}
-	r.invocation.Status = status
-	r.invocation.Error = reason
+	invocation.Status = status
+	invocation.Error = reason
 	return true, nil
 }
 

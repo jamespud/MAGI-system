@@ -381,11 +381,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			resp, err = l.modelRuntime.Generate(stepCtx, modelruntime.Request{
 				Identity: entity.ExecutionIdentity{
 					RunID: logicalRunID, StepID: stepID,
-					InvocationID: execution.NewInvocationID(stepID, execution.InvocationModel, 0),
+					InvocationID: modelruntime.NewInvocationID(stepID, cfg.Model),
 					AttemptID:    attemptID,
 				},
-				Model: bound,
-				Input: messages,
+				ModelRef: cfg.Model,
+				Model:    bound,
+				Input:    messages,
 			})
 		}
 		stepSpan.End()
