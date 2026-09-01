@@ -29,6 +29,7 @@ var ErrInvalidRequest = errors.New("model runtime: invalid request")
 const (
 	responseCodecPrefix = "magi:model-response:gob:v1:"
 	inputCodecPrefix    = "magi:model-input:canonical-json:v1:"
+	legacyInputPrefix   = "magi:model-input:gob:v1:"
 )
 
 var registerGobTypesOnce sync.Once
@@ -42,6 +43,12 @@ type inputEnvelopeV1 struct {
 	Version  string          `json:"version"`
 	Model    modelIdentityV1 `json:"model"`
 	Messages canonicalValue  `json:"messages"`
+}
+
+type legacyInputEnvelopeV1 struct {
+	Version  string
+	Model    modelIdentityV1
+	Messages []*schema.Message
 }
 
 type canonicalValue struct {
@@ -122,13 +129,13 @@ func (r *Runtime) Generate(ctx context.Context, req Request) (*schema.Message, e
 		return nil, fmt.Errorf("%w: serialize model input: %v", ErrInvalidRequest, err)
 	}
 
-	result, err := r.kernel.Execute(ctx, execution.Request{
+	result, err := r.kernel.ExecuteWithInputMatcher(ctx, execution.Request{
 		Identity:      req.Identity,
 		Kind:          execution.InvocationModel,
 		OperationName: "generate",
 		Input:         input,
 		RetrySafety:   execution.RetryUnsafe,
-	}, func(callCtx context.Context) ([]byte, error) {
+	}, matchLegacyInput, func(callCtx context.Context) ([]byte, error) {
 		response, generateErr := req.Model.Generate(callCtx, req.Input)
 		if generateErr != nil {
 			return nil, generateErr
@@ -156,13 +163,50 @@ func encodeInput(ref entity.ModelRef, messages []*schema.Message) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	return encodeCanonicalInput(canonicalModelIdentity(ref), canonicalMessages)
+}
+
+func encodeCanonicalInput(modelIdentity modelIdentityV1, messages canonicalValue) ([]byte, error) {
 	encoded, err := json.Marshal(inputEnvelopeV1{
-		Version: "v1", Model: canonicalModelIdentity(ref), Messages: canonicalMessages,
+		Version: "v1", Model: modelIdentity, Messages: messages,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return []byte(inputCodecPrefix + string(encoded)), nil
+}
+
+func matchLegacyInput(invocation *entity.RuntimeInvocation, req execution.Request) (bool, error) {
+	if !strings.HasPrefix(invocation.InputJSON, legacyInputPrefix) {
+		return false, nil
+	}
+	var legacy legacyInputEnvelopeV1
+	if err := decodeGob(legacyInputPrefix, []byte(invocation.InputJSON), &legacy); err != nil {
+		return false, err
+	}
+	if legacy.Version != "v1" {
+		return false, errors.New("unsupported legacy model input version")
+	}
+	canonicalMessages, err := canonicalizeInput(reflect.ValueOf(legacy.Messages))
+	if err != nil {
+		return false, err
+	}
+	canonicalInput, err := encodeCanonicalInput(normalizeLegacyModelIdentity(legacy.Model), canonicalMessages)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(canonicalInput, req.Input), nil
+}
+
+// Gob v1 does not preserve a non-nil empty Fallbacks slice. Normalize only
+// that lossy legacy representation before comparing the canonical request.
+func normalizeLegacyModelIdentity(identity modelIdentityV1) modelIdentityV1 {
+	normalized := identity
+	normalized.Fallbacks = make([]modelIdentityV1, len(identity.Fallbacks))
+	for i := range identity.Fallbacks {
+		normalized.Fallbacks[i] = normalizeLegacyModelIdentity(identity.Fallbacks[i])
+	}
+	return normalized
 }
 
 func encodeResponse(response *schema.Message) ([]byte, error) {
@@ -229,6 +273,15 @@ func registerGobTypes() {
 }
 
 func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
+	return canonicalizeInputPath(value, make(map[canonicalVisit]struct{}))
+}
+
+type canonicalVisit struct {
+	type_ reflect.Type
+	ptr   uintptr
+}
+
+func canonicalizeInputPath(value reflect.Value, path map[canonicalVisit]struct{}) (canonicalValue, error) {
 	if !value.IsValid() {
 		return canonicalValue{Type: "invalid", Nil: true}, nil
 	}
@@ -238,12 +291,17 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 		if value.IsNil() {
 			return canonicalValue{Type: typeName, Nil: true}, nil
 		}
-		return canonicalizeInput(value.Elem())
+		return canonicalizeInputPath(value.Elem(), path)
 	case reflect.Pointer:
 		if value.IsNil() {
 			return canonicalValue{Type: typeName, Nil: true}, nil
 		}
-		element, err := canonicalizeInput(value.Elem())
+		leave, err := enterCanonicalPath(value, path)
+		if err != nil {
+			return canonicalValue{}, err
+		}
+		defer leave()
+		element, err := canonicalizeInputPath(value.Elem(), path)
 		if err != nil {
 			return canonicalValue{}, err
 		}
@@ -262,9 +320,18 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 		if value.Kind() == reflect.Slice && value.IsNil() {
 			return canonicalValue{Type: typeName, Nil: true}, nil
 		}
+		var leave func()
+		if value.Kind() == reflect.Slice {
+			var err error
+			leave, err = enterCanonicalPath(value, path)
+			if err != nil {
+				return canonicalValue{}, err
+			}
+			defer leave()
+		}
 		elements := make([]canonicalValue, value.Len())
 		for i := range elements {
-			element, err := canonicalizeInput(value.Index(i))
+			element, err := canonicalizeInputPath(value.Index(i), path)
 			if err != nil {
 				return canonicalValue{}, err
 			}
@@ -275,6 +342,11 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 		if value.IsNil() {
 			return canonicalValue{Type: typeName, Nil: true}, nil
 		}
+		leave, err := enterCanonicalPath(value, path)
+		if err != nil {
+			return canonicalValue{}, err
+		}
+		defer leave()
 		if value.Type().Key().Kind() != reflect.String {
 			return canonicalValue{}, fmt.Errorf("unsupported model input map key type: %s", value.Type().Key())
 		}
@@ -282,7 +354,7 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 		entries := make([]canonicalMapEntry, len(keys))
 		for i, key := range keys {
-			entry, err := canonicalizeInput(value.MapIndex(key))
+			entry, err := canonicalizeInputPath(value.MapIndex(key), path)
 			if err != nil {
 				return canonicalValue{}, err
 			}
@@ -299,7 +371,7 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 			if field.PkgPath != "" {
 				continue
 			}
-			fieldValue, err := canonicalizeInput(value.Field(i))
+			fieldValue, err := canonicalizeInputPath(value.Field(i), path)
 			if err != nil {
 				return canonicalValue{}, err
 			}
@@ -311,7 +383,23 @@ func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
 	}
 }
 
+func enterCanonicalPath(value reflect.Value, path map[canonicalVisit]struct{}) (func(), error) {
+	ptr := value.Pointer()
+	if ptr == 0 {
+		return func() {}, nil
+	}
+	visit := canonicalVisit{type_: value.Type(), ptr: ptr}
+	if _, found := path[visit]; found {
+		return nil, fmt.Errorf("cyclic model input value: %s", value.Type())
+	}
+	path[visit] = struct{}{}
+	return func() { delete(path, visit) }, nil
+}
+
 func canonicalTypeName(t reflect.Type) string {
+	if t.Name() != "" && t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
 	switch t.Kind() {
 	case reflect.Pointer:
 		return "*" + canonicalTypeName(t.Elem())

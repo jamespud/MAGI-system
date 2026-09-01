@@ -1,8 +1,13 @@
 package modelruntime_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/gob"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -123,6 +128,131 @@ func TestModelRuntimeEquivalentInputMapsReuseCachedResponse(t *testing.T) {
 	}
 }
 
+func TestModelRuntimeRoundOneInputReusesSucceededResponse(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage("response A", nil),
+		schema.AssistantMessage("response B", nil),
+	}}
+	messages := []*schema.Message{schema.SystemMessage("system"), schema.UserMessage("question")}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	repo.replaceInput(identity.InvocationID, legacyRoundOneInput(t, modelRef, messages))
+	identity.AttemptID = "attempt-2"
+	resumed, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages})
+	if err != nil {
+		t.Fatalf("resume generate: %v", err)
+	}
+	if resumed.Content != "response A" {
+		t.Fatalf("resumed response = %q, want persisted response A", resumed.Content)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("model call count = %d, want 1", provider.calls)
+	}
+}
+
+func TestModelRuntimeRoundOneInputRejectsChangedRequest(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage("response A", nil),
+		schema.AssistantMessage("response B", nil),
+	}}
+	messages := []*schema.Message{schema.SystemMessage("system"), schema.UserMessage("question")}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	repo.replaceInput(identity.InvocationID, legacyRoundOneInput(t, modelRef, messages))
+	identity.AttemptID = "attempt-2"
+	changedMessages := []*schema.Message{schema.SystemMessage("system"), schema.UserMessage("changed question")}
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: changedMessages}); !errors.Is(err, execution.ErrInvocationMismatch) {
+		t.Fatalf("resume generate error = %v, want immutable input mismatch", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("model call count = %d, want 1", provider.calls)
+	}
+}
+
+func TestModelRuntimeRoundOneInputRejectsInvalidPersistedDigest(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage("response A", nil),
+		schema.AssistantMessage("response B", nil),
+	}}
+	messages := []*schema.Message{schema.SystemMessage("system"), schema.UserMessage("question")}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	repo.replaceInput(identity.InvocationID, legacyRoundOneInput(t, modelRef, messages))
+	repo.replaceInputDigest(identity.InvocationID, "invalid")
+	identity.AttemptID = "attempt-2"
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); !errors.Is(err, execution.ErrInvocationMismatch) {
+		t.Fatalf("resume generate error = %v, want immutable input mismatch", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("model call count = %d, want 1", provider.calls)
+	}
+}
+
+func TestModelRuntimeDefinedContainerTypesDoNotCollide(t *testing.T) {
+	type firstMap map[string]any
+	type secondMap map[string]any
+	type firstSlice []string
+	type secondSlice []string
+	type firstArray [1]string
+	type secondArray [1]string
+
+	for _, test := range []struct {
+		name   string
+		first  any
+		second any
+	}{
+		{name: "map", first: firstMap{"key": "value"}, second: secondMap{"key": "value"}},
+		{name: "slice", first: firstSlice{"value"}, second: secondSlice{"value"}},
+		{name: "array", first: firstArray{"value"}, second: secondArray{"value"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &memoryInvocationRepository{}
+			runtime := modelruntime.New(execution.NewKernel(repo, nil))
+			stepID := execution.NewStepID("run-1", 1)
+			modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+			identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+			provider := &scriptedModel{responses: []*schema.Message{
+				schema.AssistantMessage("response A", nil),
+				schema.AssistantMessage("response B", nil),
+			}}
+
+			firstInput := []*schema.Message{{Role: schema.User, Content: "question", Extra: map[string]any{"value": test.first}}}
+			if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: firstInput}); err != nil {
+				t.Fatalf("first generate: %v", err)
+			}
+			identity.AttemptID = "attempt-2"
+			secondInput := []*schema.Message{{Role: schema.User, Content: "question", Extra: map[string]any{"value": test.second}}}
+			if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: secondInput}); !errors.Is(err, execution.ErrInvocationMismatch) {
+				t.Fatalf("second generate error = %v, want immutable input mismatch", err)
+			}
+			if provider.calls != 1 {
+				t.Fatalf("model call count = %d, want 1", provider.calls)
+			}
+		})
+	}
+}
+
 func TestModelRuntimeDifferentModelsDoNotReuseResponse(t *testing.T) {
 	repo := &memoryInvocationRepository{}
 	runtime := modelruntime.New(execution.NewKernel(repo, nil))
@@ -222,6 +352,25 @@ func TestModelRuntimeUnsupportedInputExtraFailsClosedBeforeProvider(t *testing.T
 	}
 }
 
+func TestModelRuntimeCyclicInputFailsClosedBeforeProvider(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{schema.AssistantMessage("must not run", nil)}}
+	cycle := map[string]any{}
+	cycle["self"] = cycle
+	messages := []*schema.Message{{Role: schema.User, Content: "question", Extra: map[string]any{"cycle": cycle}}}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); !errors.Is(err, modelruntime.ErrInvalidRequest) {
+		t.Fatalf("generate error = %v, want invalid request", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("model call count = %d, want 0", provider.calls)
+	}
+}
+
 func equivalentInputMessages(reverse bool) []*schema.Message {
 	nested := make(map[string]any)
 	extra := make(map[string]any)
@@ -253,6 +402,41 @@ func equivalentInputMessages(reverse bool) []*schema.Message {
 			},
 		}},
 	}}
+}
+
+func legacyRoundOneInput(t *testing.T, modelRef entity.ModelRef, messages []*schema.Message) string {
+	t.Helper()
+	type legacyParams struct {
+		Temperature      *float32
+		MaxTokens        int
+		TopP             *float32
+		TopK             *int32
+		FrequencyPenalty float32
+		PresencePenalty  float32
+		ResponseFormat   entity.ResponseFormat
+		EnableThinking   *bool
+	}
+	type legacyModelIdentity struct {
+		ModelID   int64
+		BaseURL   string
+		ModelName string
+		Params    *legacyParams
+		Fallbacks []legacyModelIdentity
+	}
+	type legacyInputEnvelope struct {
+		Version  string
+		Model    legacyModelIdentity
+		Messages []*schema.Message
+	}
+	model := legacyModelIdentity{
+		ModelID: modelRef.ModelID, BaseURL: modelRef.BaseURL, ModelName: modelRef.ModelName,
+		Fallbacks: make([]legacyModelIdentity, len(modelRef.Fallbacks)),
+	}
+	var buffer bytes.Buffer
+	if err := gob.NewEncoder(&buffer).Encode(legacyInputEnvelope{Version: "v1", Model: model, Messages: messages}); err != nil {
+		t.Fatalf("encode round-one input: %v", err)
+	}
+	return "magi:model-input:gob:v1:" + base64.StdEncoding.EncodeToString(buffer.Bytes())
 }
 
 type scriptedModel struct {
@@ -341,6 +525,21 @@ func (r *memoryInvocationRepository) attemptsFor(invocationID string) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.attempts[invocationID]...)
+}
+
+func (r *memoryInvocationRepository) replaceInput(invocationID, input string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	invocation := r.invocations[invocationID]
+	invocation.InputJSON = input
+	sum := sha256.Sum256([]byte(input))
+	invocation.InputDigest = fmt.Sprintf("%x", sum[:])
+}
+
+func (r *memoryInvocationRepository) replaceInputDigest(invocationID, digest string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.invocations[invocationID].InputDigest = digest
 }
 
 func (r *memoryInvocationRepository) Complete(_ context.Context, invocationID, attemptID, output string) (bool, error) {

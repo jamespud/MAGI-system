@@ -33,6 +33,10 @@ type Result struct {
 
 type ExecuteFunc func(context.Context) ([]byte, error)
 
+// InputMatcher may explicitly approve an older input encoding after the kernel
+// has verified every other immutable request field. It must fail closed.
+type InputMatcher func(*entity.RuntimeInvocation, Request) (bool, error)
+
 // InvocationRecord reports a transition only after the repository has made it
 // durable. It is intentionally smaller than the model and tool runtime APIs.
 type InvocationRecord struct {
@@ -57,6 +61,16 @@ func NewKernel(invocations port.RuntimeInvocationRepository, recorder Recorder) 
 }
 
 func (k *Kernel) Execute(ctx context.Context, req Request, fn ExecuteFunc) (*Result, error) {
+	return k.execute(ctx, req, nil, fn)
+}
+
+// ExecuteWithInputMatcher permits a caller-owned, version-aware compatibility
+// check for historical input encodings without relaxing normal matching.
+func (k *Kernel) ExecuteWithInputMatcher(ctx context.Context, req Request, matcher InputMatcher, fn ExecuteFunc) (*Result, error) {
+	return k.execute(ctx, req, matcher, fn)
+}
+
+func (k *Kernel) execute(ctx context.Context, req Request, matcher InputMatcher, fn ExecuteFunc) (*Result, error) {
 	if err := k.validate(req, fn); err != nil {
 		return nil, err
 	}
@@ -79,7 +93,16 @@ func (k *Kernel) Execute(ctx context.Context, req Request, fn ExecuteFunc) (*Res
 		return nil, repositoryError("ensure invocation", errors.New("repository returned nil invocation"))
 	}
 	if !matchesRequest(invocation, req) {
-		return nil, fmt.Errorf("%w: invocation=%s", ErrInvocationMismatch, req.Identity.InvocationID)
+		compatible := false
+		if matcher != nil && matchesRequestExceptInput(invocation, req) && invocation.InputDigest == digestBytes([]byte(invocation.InputJSON)) {
+			compatible, err = matcher(invocation, req)
+			if err != nil {
+				return nil, fmt.Errorf("%w: invocation=%s: input compatibility: %v", ErrInvocationMismatch, req.Identity.InvocationID, err)
+			}
+		}
+		if !compatible {
+			return nil, fmt.Errorf("%w: invocation=%s", ErrInvocationMismatch, req.Identity.InvocationID)
+		}
 	}
 	if invocation.Status == entity.InvocationSucceeded {
 		return cachedResult(invocation), nil
@@ -199,14 +222,18 @@ func mayRetryUnknown(safety RetrySafety) bool {
 }
 
 func matchesRequest(invocation *entity.RuntimeInvocation, req Request) bool {
+	return matchesRequestExceptInput(invocation, req) &&
+		invocation.InputDigest == digestBytes(req.Input) &&
+		invocation.InputJSON == string(req.Input)
+}
+
+func matchesRequestExceptInput(invocation *entity.RuntimeInvocation, req Request) bool {
 	return invocation.InvocationID == req.Identity.InvocationID &&
 		invocation.RunID == req.Identity.RunID &&
 		invocation.StepID == req.Identity.StepID &&
 		invocation.Kind == string(req.Kind) &&
 		invocation.OperationName == req.OperationName &&
-		invocation.RetrySafety == string(req.RetrySafety) &&
-		invocation.InputDigest == digestBytes(req.Input) &&
-		invocation.InputJSON == string(req.Input)
+		invocation.RetrySafety == string(req.RetrySafety)
 }
 
 func ambiguousError(invocationID string, cause error) error {
