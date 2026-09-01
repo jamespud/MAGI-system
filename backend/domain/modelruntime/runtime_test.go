@@ -91,6 +91,38 @@ func TestModelRuntimeResumeDoesNotRegenerate(t *testing.T) {
 	}
 }
 
+func TestModelRuntimeEquivalentInputMapsReuseCachedResponse(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage("response A", nil),
+		schema.AssistantMessage("response B", nil),
+	}}
+
+	first, err := runtime.Generate(context.Background(), modelruntime.Request{
+		Identity: identity, ModelRef: modelRef, Model: provider, Input: equivalentInputMessages(false),
+	})
+	if err != nil {
+		t.Fatalf("first generate: %v", err)
+	}
+	identity.AttemptID = "attempt-2"
+	resumed, err := runtime.Generate(context.Background(), modelruntime.Request{
+		Identity: identity, ModelRef: modelRef, Model: provider, Input: equivalentInputMessages(true),
+	})
+	if err != nil {
+		t.Fatalf("resume generate: %v", err)
+	}
+	if first.Content != "response A" || resumed.Content != "response A" {
+		t.Fatalf("responses = first=%q resumed=%q, want persisted response A", first.Content, resumed.Content)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("model call count = %d, want 1", provider.calls)
+	}
+}
+
 func TestModelRuntimeDifferentModelsDoNotReuseResponse(t *testing.T) {
 	repo := &memoryInvocationRepository{}
 	runtime := modelruntime.New(execution.NewKernel(repo, nil))
@@ -171,6 +203,56 @@ func TestModelRuntimeUnsupportedExtraFailsClosed(t *testing.T) {
 	if provider.calls != 1 {
 		t.Fatalf("model call count = %d, want 1", provider.calls)
 	}
+}
+
+func TestModelRuntimeUnsupportedInputExtraFailsClosedBeforeProvider(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	runtime := modelruntime.New(execution.NewKernel(repo, nil))
+	stepID := execution.NewStepID("run-1", 1)
+	modelRef := entity.ModelRef{ModelID: 1, ModelName: "model-a"}
+	identity := entity.ExecutionIdentity{RunID: "run-1", StepID: stepID, InvocationID: modelruntime.NewInvocationID(stepID, modelRef), AttemptID: "attempt-1"}
+	provider := &scriptedModel{responses: []*schema.Message{schema.AssistantMessage("must not run", nil)}}
+	messages := []*schema.Message{{Role: schema.User, Content: "question", Extra: map[string]any{"channel": make(chan int)}}}
+
+	if _, err := runtime.Generate(context.Background(), modelruntime.Request{Identity: identity, ModelRef: modelRef, Model: provider, Input: messages}); !errors.Is(err, modelruntime.ErrInvalidRequest) {
+		t.Fatalf("generate error = %v, want invalid request", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("model call count = %d, want 0", provider.calls)
+	}
+}
+
+func equivalentInputMessages(reverse bool) []*schema.Message {
+	nested := make(map[string]any)
+	extra := make(map[string]any)
+	partExtra := make(map[string]any)
+	if reverse {
+		nested["second"] = int64(2)
+		nested["first"] = int64(1)
+		extra["nested"] = nested
+		extra["request"] = "same"
+		partExtra["height"] = int64(200)
+		partExtra["width"] = int64(100)
+	} else {
+		nested["first"] = int64(1)
+		nested["second"] = int64(2)
+		extra["request"] = "same"
+		extra["nested"] = nested
+		partExtra["width"] = int64(100)
+		partExtra["height"] = int64(200)
+	}
+	return []*schema.Message{{
+		Role:    schema.User,
+		Content: "question",
+		Extra:   extra,
+		MultiContent: []schema.ChatMessagePart{{
+			Type: schema.ChatMessagePartTypeImageURL,
+			ImageURL: &schema.ChatMessageImageURL{
+				URL:   "https://example.test/image.png",
+				Extra: partExtra,
+			},
+		}},
+	}}
 }
 
 type scriptedModel struct {

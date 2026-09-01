@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -25,7 +28,7 @@ var ErrInvalidRequest = errors.New("model runtime: invalid request")
 
 const (
 	responseCodecPrefix = "magi:model-response:gob:v1:"
-	inputCodecPrefix    = "magi:model-input:gob:v1:"
+	inputCodecPrefix    = "magi:model-input:canonical-json:v1:"
 )
 
 var registerGobTypesOnce sync.Once
@@ -36,9 +39,28 @@ type responseEnvelopeV1 struct {
 }
 
 type inputEnvelopeV1 struct {
-	Version  string
-	Model    modelIdentityV1
-	Messages []*schema.Message
+	Version  string          `json:"version"`
+	Model    modelIdentityV1 `json:"model"`
+	Messages canonicalValue  `json:"messages"`
+}
+
+type canonicalValue struct {
+	Type     string              `json:"type"`
+	Nil      bool                `json:"nil,omitempty"`
+	Scalar   string              `json:"scalar,omitempty"`
+	Fields   []canonicalField    `json:"fields,omitempty"`
+	Elements []canonicalValue    `json:"elements,omitempty"`
+	Entries  []canonicalMapEntry `json:"entries,omitempty"`
+}
+
+type canonicalField struct {
+	Name  string         `json:"name"`
+	Value canonicalValue `json:"value"`
+}
+
+type canonicalMapEntry struct {
+	Key   string         `json:"key"`
+	Value canonicalValue `json:"value"`
 }
 
 type modelIdentityV1 struct {
@@ -130,7 +152,17 @@ func (r *Runtime) Generate(ctx context.Context, req Request) (*schema.Message, e
 }
 
 func encodeInput(ref entity.ModelRef, messages []*schema.Message) ([]byte, error) {
-	return encodeGob(inputCodecPrefix, inputEnvelopeV1{Version: "v1", Model: canonicalModelIdentity(ref), Messages: messages})
+	canonicalMessages, err := canonicalizeInput(reflect.ValueOf(messages))
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(inputEnvelopeV1{
+		Version: "v1", Model: canonicalModelIdentity(ref), Messages: canonicalMessages,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []byte(inputCodecPrefix + string(encoded)), nil
 }
 
 func encodeResponse(response *schema.Message) ([]byte, error) {
@@ -194,6 +226,128 @@ func registerGobTypes() {
 		gob.Register(float32(0))
 		gob.Register(float64(0))
 	})
+}
+
+func canonicalizeInput(value reflect.Value) (canonicalValue, error) {
+	if !value.IsValid() {
+		return canonicalValue{Type: "invalid", Nil: true}, nil
+	}
+	typeName := canonicalTypeName(value.Type())
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return canonicalValue{Type: typeName, Nil: true}, nil
+		}
+		return canonicalizeInput(value.Elem())
+	case reflect.Pointer:
+		if value.IsNil() {
+			return canonicalValue{Type: typeName, Nil: true}, nil
+		}
+		element, err := canonicalizeInput(value.Elem())
+		if err != nil {
+			return canonicalValue{}, err
+		}
+		return canonicalValue{Type: typeName, Elements: []canonicalValue{element}}, nil
+	case reflect.Bool:
+		return canonicalValue{Type: typeName, Scalar: strconv.FormatBool(value.Bool())}, nil
+	case reflect.String:
+		return canonicalValue{Type: typeName, Scalar: value.String()}, nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return canonicalValue{Type: typeName, Scalar: strconv.FormatInt(value.Int(), 10)}, nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return canonicalValue{Type: typeName, Scalar: strconv.FormatUint(value.Uint(), 10)}, nil
+	case reflect.Float32, reflect.Float64:
+		return canonicalValue{Type: typeName, Scalar: strconv.FormatFloat(value.Float(), 'x', -1, value.Type().Bits())}, nil
+	case reflect.Slice, reflect.Array:
+		if value.Kind() == reflect.Slice && value.IsNil() {
+			return canonicalValue{Type: typeName, Nil: true}, nil
+		}
+		elements := make([]canonicalValue, value.Len())
+		for i := range elements {
+			element, err := canonicalizeInput(value.Index(i))
+			if err != nil {
+				return canonicalValue{}, err
+			}
+			elements[i] = element
+		}
+		return canonicalValue{Type: typeName, Elements: elements}, nil
+	case reflect.Map:
+		if value.IsNil() {
+			return canonicalValue{Type: typeName, Nil: true}, nil
+		}
+		if value.Type().Key().Kind() != reflect.String {
+			return canonicalValue{}, fmt.Errorf("unsupported model input map key type: %s", value.Type().Key())
+		}
+		keys := value.MapKeys()
+		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+		entries := make([]canonicalMapEntry, len(keys))
+		for i, key := range keys {
+			entry, err := canonicalizeInput(value.MapIndex(key))
+			if err != nil {
+				return canonicalValue{}, err
+			}
+			entries[i] = canonicalMapEntry{Key: key.String(), Value: entry}
+		}
+		return canonicalValue{Type: typeName, Entries: entries}, nil
+	case reflect.Struct:
+		if !isSupportedInputStruct(value.Type()) {
+			return canonicalValue{}, fmt.Errorf("unsupported model input struct type: %s", value.Type())
+		}
+		fields := make([]canonicalField, 0, value.NumField())
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Type().Field(i)
+			if field.PkgPath != "" {
+				continue
+			}
+			fieldValue, err := canonicalizeInput(value.Field(i))
+			if err != nil {
+				return canonicalValue{}, err
+			}
+			fields = append(fields, canonicalField{Name: field.Name, Value: fieldValue})
+		}
+		return canonicalValue{Type: typeName, Fields: fields}, nil
+	default:
+		return canonicalValue{}, fmt.Errorf("unsupported model input value type: %s", value.Type())
+	}
+}
+
+func canonicalTypeName(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.Pointer:
+		return "*" + canonicalTypeName(t.Elem())
+	case reflect.Slice:
+		return "[]" + canonicalTypeName(t.Elem())
+	case reflect.Array:
+		return "[" + strconv.Itoa(t.Len()) + "]" + canonicalTypeName(t.Elem())
+	case reflect.Map:
+		return "map[" + canonicalTypeName(t.Key()) + "]" + canonicalTypeName(t.Elem())
+	}
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	return t.String()
+}
+
+func isSupportedInputStruct(t reflect.Type) bool {
+	switch t {
+	case reflect.TypeOf(schema.Message{}),
+		reflect.TypeOf(schema.ToolCall{}),
+		reflect.TypeOf(schema.FunctionCall{}),
+		reflect.TypeOf(schema.ChatMessagePart{}),
+		reflect.TypeOf(schema.ChatMessageImageURL{}),
+		reflect.TypeOf(schema.ChatMessageAudioURL{}),
+		reflect.TypeOf(schema.ChatMessageVideoURL{}),
+		reflect.TypeOf(schema.ChatMessageFileURL{}),
+		reflect.TypeOf(schema.ResponseMeta{}),
+		reflect.TypeOf(schema.TokenUsage{}),
+		reflect.TypeOf(schema.PromptTokenDetails{}),
+		reflect.TypeOf(schema.LogProbs{}),
+		reflect.TypeOf(schema.LogProb{}),
+		reflect.TypeOf(schema.TopLogProb{}):
+		return true
+	default:
+		return false
+	}
 }
 
 func modelDigest(ref entity.ModelRef) string {
