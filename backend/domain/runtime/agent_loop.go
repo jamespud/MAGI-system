@@ -487,6 +487,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						Definition:     td,
 						ArgumentsJSON:  tc.Function.Arguments,
 						UserID:         actx.UserID,
+						Permission:     toolruntime.Permission{ToolName: tc.Function.Name},
 						ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
 						Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {
 							approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)

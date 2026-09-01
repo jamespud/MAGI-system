@@ -21,10 +21,27 @@ func TestToolRuntimeDeniedToolNeverReachesKernel(t *testing.T) {
 		Identity:      testIdentity("attempt-1"),
 		Definition:    port.ToolDefinition{Name: "restricted"},
 		ArgumentsJSON: `{"value":1}`,
-		Permission: func(context.Context, port.ToolDefinition) error {
-			return errors.New("tool is not permitted")
-		},
+		Permission:    Permission{ToolName: "other"},
 	})
+	if !errors.Is(err, ErrToolDenied) {
+		t.Fatalf("execute error = %v, want denied", err)
+	}
+	if executor.calls != 0 {
+		t.Fatalf("executor calls = %d, want 0", executor.calls)
+	}
+	if repo.invocation != nil {
+		t.Fatalf("kernel invocation = %+v, want nil", repo.invocation)
+	}
+}
+
+func TestToolRuntimeMissingPermissionNeverReachesKernel(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	executor := &recordingExecutor{}
+	runtime := newRuntime(t, repo, executor, nil)
+	req := testRequest("attempt-1")
+	req.Permission = Permission{}
+
+	_, err := runtime.Execute(context.Background(), req)
 	if !errors.Is(err, ErrToolDenied) {
 		t.Fatalf("execute error = %v, want denied", err)
 	}
@@ -44,6 +61,24 @@ func TestToolRuntimeQuotaFailureNeverExecutes(t *testing.T) {
 	_, err := runtime.Execute(context.Background(), testRequest("attempt-1"))
 	if !errors.Is(err, ErrToolQuotaExceeded) {
 		t.Fatalf("execute error = %v, want quota exceeded", err)
+	}
+	if executor.calls != 0 {
+		t.Fatalf("executor calls = %d, want 0", executor.calls)
+	}
+	if repo.invocation != nil {
+		t.Fatalf("kernel invocation = %+v, want nil", repo.invocation)
+	}
+}
+
+func TestToolRuntimeQuotaErrorNeverExecutes(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	executor := &recordingExecutor{}
+	quotaErr := errors.New("quota store unavailable")
+	runtime := newRuntime(t, repo, executor, &fakeQuota{allowed: true, err: quotaErr})
+
+	_, err := runtime.Execute(context.Background(), testRequest("attempt-1"))
+	if !errors.Is(err, quotaErr) {
+		t.Fatalf("execute error = %v, want quota error", err)
 	}
 	if executor.calls != 0 {
 		t.Fatalf("executor calls = %d, want 0", executor.calls)
@@ -181,6 +216,7 @@ func testRequest(attemptID string) Request {
 		},
 		ArgumentsJSON: `{"a":1}`,
 		UserID:        "user-1",
+		Permission:    Permission{ToolName: "calculator"},
 	}
 }
 
@@ -191,11 +227,12 @@ func testIdentity(attemptID string) entity.ExecutionIdentity {
 type fakeQuota struct {
 	allowed bool
 	calls   int
+	err     error
 }
 
 func (q *fakeQuota) Allow(context.Context, string, string) (bool, error) {
 	q.calls++
-	return q.allowed, nil
+	return q.allowed, q.err
 }
 
 type recordingExecutor struct {

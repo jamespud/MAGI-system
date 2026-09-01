@@ -62,11 +62,9 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 		r.record(false)
 		return result, fmt.Errorf("%w: resolved tool definition is required", ErrToolDenied)
 	}
-	if req.Permission != nil {
-		if err := req.Permission(ctx, req.Definition); err != nil {
-			r.record(false)
-			return result, fmt.Errorf("%w: %w", ErrToolDenied, r.safeError(err))
-		}
+	if req.Permission.ToolName == "" || req.Permission.ToolName != req.Definition.Name {
+		r.record(false)
+		return result, fmt.Errorf("%w: tool %q is not in the resolved permission context", ErrToolDenied, req.Definition.Name)
 	}
 
 	if r.policy != nil && r.policy.RequiresApproval(req.Definition.Name) && !r.policy.Allowed(req.Definition.Name) {
@@ -85,7 +83,12 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 
 	if r.quota != nil {
 		allowed, err := r.quota.Allow(ctx, req.UserID, req.Definition.Name)
-		if err == nil && !allowed {
+		if err != nil {
+			safeErr := r.safeError(fmt.Errorf("allow tool quota: %w", err))
+			r.record(false)
+			return result, safeErr
+		}
+		if !allowed {
 			return result, fmt.Errorf("%w: %s", ErrToolQuotaExceeded, req.Definition.Name)
 		}
 	}

@@ -8,8 +8,8 @@ import (
 	"github.com/jamespud/magi/backend/domain/validation"
 )
 
-// Request is a governed tool invocation. Definition is permission-scoped by
-// its caller; Permission allows an additional caller-owned admission check.
+// Request is a governed tool invocation. Permission is the resolved-tool
+// capability obtained from the caller's existing tool registry lookup.
 type Request struct {
 	Identity       entity.ExecutionIdentity
 	Definition     port.ToolDefinition
@@ -17,12 +17,17 @@ type Request struct {
 	UserID         string
 	ExpectedSchema []byte
 
-	Permission PermissionFunc
+	Permission Permission
 	Approval   ApprovalFunc
 	Lifecycle  LifecycleFunc
 }
 
-type PermissionFunc func(context.Context, port.ToolDefinition) error
+// Permission proves that the caller resolved and permitted this exact tool.
+// Its zero value is not permitted, so every execution has an explicit
+// permission stage without introducing a second policy source.
+type Permission struct {
+	ToolName string
+}
 
 type ApprovalFunc func(context.Context) (ApprovalDecision, error)
 
