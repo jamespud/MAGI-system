@@ -206,22 +206,65 @@ func canonicalToolArguments(arguments string) []byte {
 }
 
 // saveCheckpoint persists the working-memory snapshot for resume (§18).
-// Nil-safe: no-op when checkpointRepo is nil or runID is empty.
-func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, step int, ts *TerminationState, phase string) {
+// Nil-safe only when checkpointRepo is nil or runID is empty; a configured
+// repository error is returned so the caller can stop before another side
+// effecting invocation.
+func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, usage *entity.Usage, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string) error {
 	if l.checkpointRepo == nil || runID == "" {
-		return
+		return nil
 	}
 	msgsJSON, err := json.Marshal(messages)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal checkpoint messages: %w", err)
 	}
-	_ = l.checkpointRepo.Save(ctx, &entity.AgentState{
-		RunID:        runID,
-		MessagesJSON: string(msgsJSON),
-		StepCount:    step,
-		TokenUsed:    int(ts.TokenUsed),
-		Phase:        phase,
+	ledgerJSON, err := evidence.MarshalLedger(ledger)
+	if err != nil {
+		return err
+	}
+	currentUsage := entity.Usage{}
+	if usage != nil {
+		currentUsage = *usage
+	}
+	snapshotJSON, err := execution.MarshalAgentSnapshotV2(execution.AgentSnapshotV2{
+		RunID: runID, NextStep: nextStep, Phase: phase, MessagesJSON: string(msgsJSON),
+		Termination: execution.TerminationSnapshot{
+			GateFail: ts.GateFail, ConsecToolFail: ts.ConsecToolFail, TokenUsed: ts.TokenUsed,
+			ValidationFail: ts.ValidationFail, ToolCalls: ts.ToolCalls,
+		},
+		Usage: currentUsage, Compacted: compacted, LedgerJSON: ledgerJSON,
+		ManifestDigest: manifestDigest, LastCommittedInvocationID: lastCommittedInvocationID,
 	})
+	if err != nil {
+		return err
+	}
+	if err := l.checkpointRepo.Save(ctx, &entity.AgentState{
+		RunID:           runID,
+		MessagesJSON:    string(msgsJSON),
+		StepCount:       nextStep - 1,
+		TokenUsed:       int(ts.TokenUsed),
+		Phase:           phase,
+		SnapshotVersion: execution.AgentSnapshotV2Version,
+		SnapshotJSON:    snapshotJSON,
+		ManifestDigest:  manifestDigest,
+	}); err != nil {
+		return fmt.Errorf("save checkpoint: %w", err)
+	}
+	return nil
+}
+
+func checkpointManifest(cfg *entity.MagiConfig, actx *AgentContext) string {
+	bindings := cfg.Tools
+	if len(actx.ToolBindings) > 0 {
+		bindings = actx.ToolBindings
+	}
+	tools := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		tools = append(tools, string(binding.Source)+":"+binding.ToolName)
+	}
+	return execution.FreezeManifest(entity.RunEnvironment{
+		ModelName: cfg.Model.ModelName, ModelBaseURL: cfg.Model.BaseURL,
+		Tools: tools, ConfigVersion: cfg.Version,
+	}).ManifestDigest
 }
 
 func (l *AgentLoop) Run(ctx context.Context, cfg *entity.MagiConfig, actx *AgentContext) (*LoopResult, error) {
@@ -242,6 +285,38 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 	if actx == nil {
 		actx = &AgentContext{}
+	}
+	manifestDigest := checkpointManifest(cfg, actx)
+	var checkpoint *execution.AgentSnapshotV2
+	var legacyCheckpoint *entity.AgentState
+	if l.checkpointRepo != nil && actx.RunID != "" {
+		state, err := l.checkpointRepo.Load(ctx, actx.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+		}
+		if state != nil {
+			if state.SnapshotJSON == "" {
+				if state.MessagesJSON == "" {
+					return nil, errors.New("agent loop: load checkpoint: incomplete legacy checkpoint")
+				}
+				legacyCheckpoint = state
+			} else {
+				parsed, err := execution.ParseAgentSnapshotV2(state.SnapshotJSON)
+				if err != nil {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+				}
+				if parsed.RunID != actx.RunID {
+					return nil, fmt.Errorf("agent loop: load checkpoint: run ID mismatch checkpoint=%q current=%q", parsed.RunID, actx.RunID)
+				}
+				if state.ManifestDigest != "" && state.ManifestDigest != parsed.ManifestDigest {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", execution.ErrManifestMismatch)
+				}
+				if err := execution.ValidateManifest(parsed.ManifestDigest, manifestDigest); err != nil {
+					return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
+				}
+				checkpoint = &parsed
+			}
+		}
 	}
 	logicalRunID, attemptID := traceIdentity(actx.RunID)
 	maxSteps := cfg.LoopPolicy.MaxSteps
@@ -305,7 +380,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 
 	// Ledger + schemas
-	ledger := evidence.NewEvidenceLedger(actx.CaseID, "", cfg.Code)
+	ledger := evidence.NewEvidenceLedger(actx.CaseID, actx.RunID, cfg.Code)
 	summarySchema, _ := l.gen.FromStruct(entity.EvidenceSummary{})
 	voteSchema, _ := l.gen.FromStruct(entity.Vote{})
 	reflectionSchema, _ := l.gen.FromStruct(entity.Reflection{})
@@ -337,20 +412,52 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	}
 	ts := &TerminationState{}
 	compacted := false
+	lastCommittedInvocationID := ""
 	agentCode := entity.MagiCode(cfg.Code)
 
-	// Resume from checkpoint if available (§18).
 	startStep := 1
-	if l.checkpointRepo != nil && actx.RunID != "" {
-		if cp, err := l.checkpointRepo.Load(ctx, actx.RunID); err == nil && cp != nil && cp.MessagesJSON != "" {
-			var restored []*schema.Message
-			if json.Unmarshal([]byte(cp.MessagesJSON), &restored) == nil && len(restored) > 0 {
-				messages = restored
-				ts.TokenUsed = int64(cp.TokenUsed)
-				phase = cp.Phase
-				startStep = cp.StepCount + 1
+	if checkpoint != nil {
+		var restoredMessages []*schema.Message
+		if err := json.Unmarshal([]byte(checkpoint.MessagesJSON), &restoredMessages); err != nil || len(restoredMessages) == 0 {
+			if err == nil {
+				err = errors.New("empty message history")
 			}
+			return nil, fmt.Errorf("agent loop: restore checkpoint messages: %w", err)
 		}
+		restoredLedger, err := evidence.RestoreLedger(checkpoint.LedgerJSON)
+		if err != nil {
+			return nil, fmt.Errorf("agent loop: restore checkpoint ledger: %w", err)
+		}
+		messages = restoredMessages
+		ledger = restoredLedger
+		result.Ledger = ledger
+		ts = &TerminationState{
+			GateFail: checkpoint.Termination.GateFail, ConsecToolFail: checkpoint.Termination.ConsecToolFail,
+			TokenUsed: checkpoint.Termination.TokenUsed, ValidationFail: checkpoint.Termination.ValidationFail,
+			ToolCalls: checkpoint.Termination.ToolCalls,
+		}
+		usage := checkpoint.Usage
+		result.Usage = &usage
+		phase = checkpoint.Phase
+		compacted = checkpoint.Compacted
+		lastCommittedInvocationID = checkpoint.LastCommittedInvocationID
+		startStep = checkpoint.NextStep
+	} else if legacyCheckpoint != nil && legacyCheckpoint.MessagesJSON != "" {
+		var restoredMessages []*schema.Message
+		if err := json.Unmarshal([]byte(legacyCheckpoint.MessagesJSON), &restoredMessages); err != nil || len(restoredMessages) == 0 {
+			if err == nil {
+				err = errors.New("empty message history")
+			}
+			return nil, fmt.Errorf("agent loop: restore legacy checkpoint messages: %w", err)
+		}
+		messages = restoredMessages
+		ts.TokenUsed = int64(legacyCheckpoint.TokenUsed)
+		phase = legacyCheckpoint.Phase
+		startStep = legacyCheckpoint.StepCount + 1
+	}
+	if CheckTermination(ts, cfg.LoopPolicy, &result.Status, &result.Err) {
+		finalizeTrace(trace, result.Status)
+		return result, result.Err
 	}
 
 	for step := startStep; step <= maxSteps; step++ {
@@ -367,7 +474,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.TokenUsed})
 			}
 		}
-		l.saveCheckpoint(ctx, actx.RunID, messages, step-1, ts, phase)
+		if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result.Usage, compacted, ledger, manifestDigest, lastCommittedInvocationID); err != nil {
+			result.Status = LoopStatusError
+			result.Err = err
+			finalizeTrace(trace, result.Status)
+			return result, err
+		}
 		if err := ctx.Err(); err != nil {
 			result.Status = LoopStatusCancelled
 			result.Err = err
@@ -415,6 +527,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			finalizeTrace(trace, result.Status)
 			return result, err
 		}
+		lastCommittedInvocationID = modelruntime.NewInvocationID(stepID, cfg.Model)
 		st.ModelOutput = resp
 		st.ModelUsage = extractUsage(resp)
 		result.Usage = addUsage(result.Usage, st.ModelUsage)

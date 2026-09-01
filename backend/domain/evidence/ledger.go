@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -22,12 +23,86 @@ type EvidenceLedger struct {
 	collector   string
 }
 
+type ledgerSnapshot struct {
+	CaseID          string                   `json:"case_id"`
+	AgentRunID      string                   `json:"agent_run_id"`
+	Collector       string                   `json:"collector"`
+	Records         []*entity.EvidenceRecord `json:"records"`
+	Claims          []*entity.Claim          `json:"claims"`
+	EvidenceCounter int                      `json:"evidence_counter"`
+	ClaimCounter    int                      `json:"claim_counter"`
+}
+
 func NewEvidenceLedger(caseID, agentRunID, collector string) *EvidenceLedger {
 	return &EvidenceLedger{
 		records: make(map[string]*entity.EvidenceRecord),
 		claims:  make(map[string]*entity.Claim),
 		caseID:  caseID, agentRunID: agentRunID, collector: collector,
 	}
+}
+
+// MarshalLedger serializes the ledger without changing its business meaning.
+// The counters and insertion order are included so restored identifiers remain
+// stable when the loop records more evidence or claims.
+func MarshalLedger(ledger *EvidenceLedger) (string, error) {
+	if ledger == nil {
+		return "", fmt.Errorf("marshal ledger: nil ledger")
+	}
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+
+	records := make([]*entity.EvidenceRecord, 0, len(ledger.recordOrder))
+	for _, id := range ledger.recordOrder {
+		records = append(records, ledger.records[id])
+	}
+	claims := make([]*entity.Claim, 0, len(ledger.claimOrder))
+	for _, id := range ledger.claimOrder {
+		claims = append(claims, ledger.claims[id])
+	}
+	encoded, err := json.Marshal(ledgerSnapshot{
+		CaseID: ledger.caseID, AgentRunID: ledger.agentRunID, Collector: ledger.collector,
+		Records: records, Claims: claims, EvidenceCounter: ledger.evCounter, ClaimCounter: ledger.clCounter,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal ledger: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// RestoreLedger reverses MarshalLedger. It restores ordering and counters so
+// record/claim IDs are not reused after a checkpoint resume.
+func RestoreLedger(encoded string) (*EvidenceLedger, error) {
+	var snapshot ledgerSnapshot
+	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+		return nil, fmt.Errorf("restore ledger: %w", err)
+	}
+	if snapshot.Records == nil || snapshot.Claims == nil {
+		return nil, fmt.Errorf("restore ledger: incomplete state")
+	}
+	ledger := NewEvidenceLedger(snapshot.CaseID, snapshot.AgentRunID, snapshot.Collector)
+	ledger.evCounter = snapshot.EvidenceCounter
+	ledger.clCounter = snapshot.ClaimCounter
+	for _, record := range snapshot.Records {
+		if record == nil || record.ID == "" {
+			return nil, fmt.Errorf("restore ledger: invalid evidence record")
+		}
+		if _, exists := ledger.records[record.ID]; exists {
+			return nil, fmt.Errorf("restore ledger: duplicate evidence record %q", record.ID)
+		}
+		ledger.records[record.ID] = record
+		ledger.recordOrder = append(ledger.recordOrder, record.ID)
+	}
+	for _, claim := range snapshot.Claims {
+		if claim == nil || claim.ID == "" {
+			return nil, fmt.Errorf("restore ledger: invalid claim")
+		}
+		if _, exists := ledger.claims[claim.ID]; exists {
+			return nil, fmt.Errorf("restore ledger: duplicate claim %q", claim.ID)
+		}
+		ledger.claims[claim.ID] = claim
+		ledger.claimOrder = append(ledger.claimOrder, claim.ID)
+	}
+	return ledger, nil
 }
 
 func (l *EvidenceLedger) Record(toolCallID, toolName, sourceType, sourceURI, observation string, reliability entity.ReliabilityScore) *entity.EvidenceRecord {

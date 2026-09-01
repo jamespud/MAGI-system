@@ -55,6 +55,12 @@ type AgentState struct {
 	StepCount    int
 	TokenUsed    int
 	Phase        string
+
+	// Snapshot V2 is the authoritative checkpoint payload. The legacy fields
+	// remain available while existing checkpoint rows are migrated.
+	SnapshotVersion int
+	SnapshotJSON    string
+	ManifestDigest  string
 }
 
 type MessageRef struct {

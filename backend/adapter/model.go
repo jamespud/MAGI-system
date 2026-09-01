@@ -89,6 +89,10 @@ type CheckpointModel struct {
 	StepCount       int
 	TokenUsed       int
 	Phase           string
+	SnapshotVersion int       `gorm:"not null;default:1"`
+	SnapshotJSON    string    `gorm:"type:mediumtext"`
+	ManifestDigest  string    `gorm:"type:varchar(64);not null;default:''"`
+	UpdatedAt       time.Time `gorm:"not null"`
 }
 
 func (CheckpointModel) TableName() string { return "magi_agent_checkpoint" }

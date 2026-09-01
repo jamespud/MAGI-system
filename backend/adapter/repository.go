@@ -3,6 +3,7 @@ package magi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -765,6 +766,9 @@ func (r *checkpointRepo) Save(ctx context.Context, state *entity.AgentState) err
 		StepCount:       state.StepCount,
 		TokenUsed:       state.TokenUsed,
 		Phase:           state.Phase,
+		SnapshotVersion: state.SnapshotVersion,
+		SnapshotJSON:    state.SnapshotJSON,
+		ManifestDigest:  state.ManifestDigest,
 	}
 	// Save is an upsert so every loop step has one durable snapshot per run.
 	return r.db.WithContext(ctx).Save(&m).Error
@@ -776,15 +780,21 @@ func (r *checkpointRepo) Load(ctx context.Context, runID string) (*entity.AgentS
 	}
 	var m CheckpointModel
 	if err := r.db.WithContext(ctx).First(&m, "run_id = ?", runID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &entity.AgentState{
-		RunID:        m.RunID,
-		Messages:     fromJSON[[]entity.MessageRef](m.MessagesRefJSON),
-		MessagesJSON: m.MessagesJSON,
-		StepCount:    m.StepCount,
-		TokenUsed:    m.TokenUsed,
-		Phase:        m.Phase,
+		RunID:           m.RunID,
+		Messages:        fromJSON[[]entity.MessageRef](m.MessagesRefJSON),
+		MessagesJSON:    m.MessagesJSON,
+		StepCount:       m.StepCount,
+		TokenUsed:       m.TokenUsed,
+		Phase:           m.Phase,
+		SnapshotVersion: m.SnapshotVersion,
+		SnapshotJSON:    m.SnapshotJSON,
+		ManifestDigest:  m.ManifestDigest,
 	}, nil
 }
 

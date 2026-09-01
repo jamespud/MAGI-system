@@ -52,3 +52,9 @@ CREATE TABLE IF NOT EXISTS runtime_invocation_attempt (
     UNIQUE KEY uk_runtime_invocation_attempt_no (invocation_id, attempt_no),
     KEY idx_runtime_attempt_invocation (invocation_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE magi_agent_checkpoint
+    ADD COLUMN snapshot_version INT NOT NULL DEFAULT 1,
+    ADD COLUMN snapshot_json MEDIUMTEXT NULL,
+    ADD COLUMN manifest_digest VARCHAR(64) NOT NULL DEFAULT '',
+    ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP;
