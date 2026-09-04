@@ -125,6 +125,47 @@ func newAgentLoop(t *testing.T, responses []*schema.Message, bindingRel *float64
 	return loop
 }
 
+// testEventRecorder is an execution.EventRecorder that lets a test make only
+// critical events or only telemetry events fail, independently.
+type testEventRecorder struct {
+	critErr error
+	teleErr error
+	crit    []entity.EventType
+	tele    []entity.EventType
+}
+
+func (r *testEventRecorder) Critical(_ context.Context, e entity.MagiEvent) error {
+	r.crit = append(r.crit, e.Type)
+	return r.critErr
+}
+
+func (r *testEventRecorder) Telemetry(_ context.Context, e entity.MagiEvent) {
+	r.tele = append(r.tele, e.Type)
+	// Telemetry errors must be swallowed: a failing publisher must never stop
+	// the run, so we ignore r.teleErr exactly like PublisherEventRecorder does.
+}
+
+var _ execution.EventRecorder = (*testEventRecorder)(nil)
+
+func newAgentLoopWithRecorder(t *testing.T, model *scriptedChatModel, rec execution.EventRecorder) *runtime.AgentLoop {
+	t.Helper()
+	v := validation.NewJSONSchemaValidator()
+	gen := validation.NewReflectSchemaGenerator()
+	calcSchema, _ := gen.FromStruct(calcArgs{})
+	binding := entity.ToolBinding{Source: entity.ToolSourceLocal, ToolName: "calc"}
+	loop, err := runtime.NewAgentLoop(runtime.AgentLoopDeps{
+		ModelPort: &stubModelPort{m: model},
+		ToolReg:   &stubToolReg{defs: []port.ToolDefinition{{Name: "calc", Desc: "add", ArgsSchema: calcSchema, Source: entity.ToolSourceLocal, Binding: binding}}},
+		ToolExec:  &stubToolExec{},
+		Validator: v, Gen: gen,
+		Recorder: rec,
+	})
+	if err != nil {
+		t.Fatalf("new agent loop: %v", err)
+	}
+	return loop
+}
+
 func summaryJSON(ids ...string) string {
 	q := make([]string, len(ids))
 	for i, id := range ids {
@@ -168,6 +209,55 @@ func TestAgentLoop_FullFlow(t *testing.T) {
 	}
 	if len(res.Trace.Steps) != 3 || !res.Trace.Steps[2].IsFinal {
 		t.Fatalf("trace: %d", len(res.Trace.Steps))
+	}
+}
+
+func TestCriticalRecorderFailureStopsExecution(t *testing.T) {
+	model := &scriptedChatModel{responses: []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}}
+	rec := &testEventRecorder{critErr: errors.New("critical history unavailable")}
+	loop := newAgentLoopWithRecorder(t, model, rec)
+
+	_, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		RunID: "run-rec-critical",
+		Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+	})
+	if err == nil {
+		t.Fatal("want error when a critical event cannot be recorded")
+	}
+	if model.calls != 0 {
+		t.Fatalf("model calls = %d, want 0 (critical recorder must stop before invocation)", model.calls)
+	}
+	if len(rec.crit) == 0 {
+		t.Fatal("expected at least one critical event to be attempted")
+	}
+}
+
+func TestTelemetryFailureDoesNotStopExecution(t *testing.T) {
+	model := &scriptedChatModel{responses: []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}}
+	// Critical succeeds; telemetry would fail but its error must be swallowed.
+	rec := &testEventRecorder{teleErr: errors.New("telemetry sink down")}
+	loop := newAgentLoopWithRecorder(t, model, rec)
+
+	res, err := loop.Run(context.Background(), evidenceCfg(1, 0), &runtime.AgentContext{
+		RunID: "run-rec-telemetry",
+		Task:  entity.DecisionTask{CanonicalQuestion: "compute"},
+	})
+	if err != nil {
+		t.Fatalf("run with failing telemetry: %v", err)
+	}
+	if res.Status != runtime.LoopStatusCompleted {
+		t.Fatalf("status = %v, want completed despite telemetry failure", res.Status)
+	}
+	if len(rec.tele) == 0 {
+		t.Fatal("expected telemetry events to be emitted")
 	}
 }
 

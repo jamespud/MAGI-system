@@ -54,6 +54,12 @@ const (
 	EventToolApprovalRequested EventType = "TOOL_APPROVAL_REQUESTED"
 	EventToolApprovalResolved  EventType = "TOOL_APPROVAL_RESOLVED"
 	EventContextCompacted      EventType = "CONTEXT_COMPACTED"
+	EventInvocationStarted     EventType = "INVOCATION_STARTED"
+	EventInvocationSucceeded   EventType = "INVOCATION_SUCCEEDED"
+	EventInvocationFailed      EventType = "INVOCATION_FAILED"
+	EventInvocationUnknown     EventType = "INVOCATION_UNKNOWN"
+	EventCheckpointCommitted   EventType = "CHECKPOINT_COMMITTED"
+	EventCheckpointFailed      EventType = "CHECKPOINT_FAILED"
 )
 
 // NewEvent constructs a MagiEvent with a unique ID and JSON-serialized payload.

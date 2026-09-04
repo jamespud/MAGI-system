@@ -10,6 +10,7 @@ import (
 	hertzsse "github.com/hertz-contrib/sse"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
@@ -94,8 +95,23 @@ func (p *EventPublisherAdapter) publishLive(ctx context.Context, e entity.MagiEv
 	return nil
 }
 
+// Critical implements execution.EventRecorder by surfacing the durable store
+// error. The adapter already returns only the durable-write error from Publish
+// (live/SSE fanout is best effort), so a critical event fails closed.
+func (p *EventPublisherAdapter) Critical(ctx context.Context, e entity.MagiEvent) error {
+	return p.Publish(ctx, e)
+}
+
+// Telemetry implements execution.EventRecorder as fire-and-forget. A telemetry
+// event must never stop a run, even when the durable store is temporarily
+// unavailable.
+func (p *EventPublisherAdapter) Telemetry(ctx context.Context, e entity.MagiEvent) {
+	_ = p.Publish(ctx, e)
+}
+
 var _ port.EventPublisher = (*EventPublisherAdapter)(nil)
 var _ port.LiveEventPublisher = (*EventPublisherAdapter)(nil)
+var _ execution.EventRecorder = (*EventPublisherAdapter)(nil)
 
 // InMemoryEventRepo is a test/in-memory EventRepository.
 type InMemoryEventRepo struct {

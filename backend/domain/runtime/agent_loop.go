@@ -81,6 +81,7 @@ type AgentLoop struct {
 	claimVal       *validation.TypedValidator[entity.ClaimSubmission]
 	reflectionVal  *validation.TypedValidator[entity.Reflection]
 	eventPub       port.EventPublisher
+	recorder       execution.EventRecorder
 	checkpointRepo port.CheckpointRepository
 	toolPolicy     *toolpolicy.Policy
 	metrics        *metrics.Registry
@@ -102,6 +103,7 @@ type AgentLoopDeps struct {
 	Adapter        *evidence.EvidenceAdapterRegistry
 	Gate           *evidence.EvidenceGate
 	EventPub       port.EventPublisher
+	Recorder       execution.EventRecorder
 	CheckpointRepo port.CheckpointRepository
 	ToolPolicy     *toolpolicy.Policy
 	Metrics        *metrics.Registry
@@ -143,23 +145,59 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 			evidence.NewNativeAdapter(),
 			evidence.NewRawObservationAdapter())
 	}
+	recorder := d.Recorder
+	if recorder == nil {
+		recorder = execution.NewEventRecorder(d.EventPub)
+	}
 	return &AgentLoop{
 		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolExec: d.ToolExec, toolRuntime: d.ToolRuntime,
 		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo, quota: d.Quota,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
 		reflectionVal:  rv,
 		eventPub:       d.EventPub,
+		recorder:       recorder,
 		checkpointRepo: d.CheckpointRepo,
 		taskTree:       d.TaskTree,
 	}, nil
 }
 
 func (l *AgentLoop) publish(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, et entity.EventType, payload any) {
+	if l.recorder != nil {
+		ac := agentCode
+		l.recorder.Telemetry(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
+		return
+	}
 	if l.eventPub == nil {
 		return
 	}
 	ac := agentCode
 	_ = l.eventPub.Publish(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
+}
+
+// recordCritical emits a durable execution-history event and fails closed. It
+// is the sole place a critical event failure can stop further side effects.
+func (l *AgentLoop) recordCritical(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, et entity.EventType, payload any) error {
+	if l.recorder == nil {
+		return nil
+	}
+	ac := agentCode
+	return l.recorder.Critical(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
+}
+
+// commitCheckpoint wraps saveCheckpoint with critical execution-history events.
+// A Save failure records CHECKPOINT_FAILED (best effort) and returns the error.
+// A successful Save against a configured repository records CHECKPOINT_COMMITTED
+// and fails closed if that event cannot be persisted. A nil repository or empty
+// run ID stays stateless and only records nothing.
+func (l *AgentLoop) commitCheckpoint(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) error {
+	if err := l.saveCheckpoint(ctx, runID, messages, nextStep, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, pendingResponse, pendingToolIndex); err != nil {
+		_ = l.recordCritical(ctx, caseID, runID, agentCode, entity.EventCheckpointFailed, map[string]any{"step": nextStep, "error": err.Error()})
+		return err
+	}
+	if l.checkpointRepo == nil || runID == "" {
+		return nil
+	}
+	return l.recordCritical(ctx, caseID, runID, agentCode, entity.EventCheckpointCommitted, map[string]any{"step": nextStep})
 }
 
 // traceIdentity keeps logical IDs stable across the dispatcher retry convention
@@ -545,7 +583,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 		} else {
 			// Persist the pre-compaction state before the compactor can invoke the
 			// model, then persist again if compaction changed the next invocation.
-			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+			if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
@@ -562,7 +600,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 						ts.TokenUsed += usage.TotalTokens
 					}
 					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventContextCompacted, map[string]any{"step": step, "tokens_used": ts.TokenUsed})
-					if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+					if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 						result.Status = LoopStatusError
 						result.Err = err
 						finalizeTrace(trace, result.Status)
@@ -572,6 +610,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			}
 			if err := ctx.Err(); err != nil {
 				result.Status = LoopStatusCancelled
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
+			if err := l.recordCritical(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventInvocationStarted, map[string]any{"step": step, "invocation_id": modelruntime.NewInvocationID(stepID, cfg.Model)}); err != nil {
+				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
 				return result, err
@@ -605,6 +649,18 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			if err != nil && errors.Is(err, context.DeadlineExceeded) && cfg.LoopPolicy.CallTimeout > 0 {
 				err = fmt.Errorf("model call timed out after %s: %w", cfg.LoopPolicy.CallTimeout, err)
 			}
+			if err != nil {
+				outcome := entity.EventInvocationFailed
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					outcome = entity.EventInvocationUnknown
+				}
+				_ = l.recordCritical(ctx, actx.CaseID, actx.RunID, agentCode, outcome, map[string]any{"step": step, "error": err.Error()})
+			} else if err := l.recordCritical(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventInvocationSucceeded, map[string]any{"step": step}); err != nil {
+				result.Status = LoopStatusError
+				result.Err = err
+				finalizeTrace(trace, result.Status)
+				return result, err
+			}
 			l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventModelResponded, map[string]any{"step": step})
 		}
 		st := &Step{ID: stepID, Index: step, StartedAt: stepStart, Duration: time.Since(stepStart)}
@@ -623,7 +679,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			st.ModelUsage = extractUsage(resp)
 			result.Usage = addUsage(result.Usage, st.ModelUsage)
 			ts.TokenUsed += st.ModelUsage.TotalTokens
-			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, -1); err != nil {
+			if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, -1); err != nil {
 				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
@@ -660,7 +716,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				messages = append(messages, schema.UserMessage(fmt.Sprintf(
 					"You have reached the tool-call limit (%d). Stop calling tools and output your EvidenceSummary JSON now, citing the EV-IDs you have gathered.",
 					cfg.LoopPolicy.MaxToolCalls)))
-				if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+				if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 					result.Status = LoopStatusError
 					result.Err = err
 					finalizeTrace(trace, result.Status)
@@ -685,7 +741,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				} else {
 					ts.ToolCalls++
 				}
-				if err := l.saveCheckpoint(ctx, actx.RunID, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, ordinal); err != nil {
+				if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, resp, ordinal); err != nil {
 					result.Status = LoopStatusError
 					result.Err = err
 					finalizeTrace(trace, result.Status)
@@ -889,7 +945,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				lastCommittedInvocationID = execution.NewInvocationID(st.ID, execution.InvocationTool, len(resp.ToolCalls)-1)
 			}
 			pendingToolIndex = -1
-			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+			if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
@@ -968,7 +1024,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				messages = append(messages, schema.UserMessage("Evidence gate passed. Now output the Vote JSON."))
 				phase = "vote"
 			}
-			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+			if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
@@ -982,7 +1038,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 			messages = append(messages, resp)
 			messages = append(messages, schema.UserMessage("Reflection recorded. Now output the Vote JSON."))
 			phase = "vote"
-			if err := l.saveCheckpoint(ctx, actx.RunID, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
+			if err := l.commitCheckpoint(ctx, actx.CaseID, actx.RunID, agentCode, messages, step+1, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, nil, -1); err != nil {
 				result.Status = LoopStatusError
 				result.Err = err
 				finalizeTrace(trace, result.Status)
