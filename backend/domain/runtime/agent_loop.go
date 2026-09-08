@@ -206,6 +206,12 @@ func (l *AgentLoop) recordCritical(ctx context.Context, caseID, runID string, ag
 	return l.recorder.Critical(ctx, entity.NewEvent(caseID, runID, &ac, et, payload))
 }
 
+// leaseLost reports whether the run context was cancelled because the worker no
+// longer owns its decision job lease.
+func (l *AgentLoop) leaseLost(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), port.ErrLeaseLost)
+}
+
 // commitCheckpoint wraps saveCheckpoint with critical execution-history events.
 // A Save failure records CHECKPOINT_FAILED (best effort) and returns the error.
 // A successful Save against a configured repository records CHECKPOINT_COMMITTED
@@ -214,6 +220,9 @@ func (l *AgentLoop) recordCritical(ctx context.Context, caseID, runID string, ag
 func (l *AgentLoop) commitCheckpoint(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) error {
 	if runID == "" {
 		return nil
+	}
+	if errors.Is(context.Cause(ctx), port.ErrLeaseLost) {
+		return port.ErrLeaseLost
 	}
 	state, err := l.buildCheckpointState(runID, messages, nextStep, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, pendingResponse, pendingToolIndex)
 	if err != nil {
@@ -590,6 +599,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	for step := startStep; step <= maxSteps; step++ {
 		stepStart := time.Now()
 		stepID := execution.NewStepID(logicalRunID, step)
+		if l.leaseLost(ctx) {
+			result.Status = LoopStatusCancelled
+			result.Err = port.ErrLeaseLost
+			finalizeTrace(trace, result.Status)
+			return result, port.ErrLeaseLost
+		}
 		var resp *schema.Message
 		resumingPending := pendingResponse != nil
 		if resumingPending {

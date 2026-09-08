@@ -58,6 +58,20 @@ type AgentContext struct {
 	KnowledgeCtx  []port.KnowledgeChunk
 	DebateContext *DebateContext
 	PreviousRun   *PreviousAgentState
+	// Execution carries the job fencing identity that a worker owns for this
+	// attempt. It lets the runtime distinguish lease-owned work and refuse to
+	// commit late results once the job lease is lost.
+	Execution *ExecutionContext
+}
+
+// ExecutionContext identifies a worker-owned job attempt. JobID and RunID are
+// the durable identities; WorkerID and JobAttempt are the physical worker/lease
+// fencing fields used to reject late commits after a lease loss.
+type ExecutionContext struct {
+	JobID      string
+	RunID      string
+	WorkerID   string
+	JobAttempt int
 }
 
 type DebateContext struct {
