@@ -112,3 +112,37 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+
+  runtime-conformance:
+    name: Runtime conformance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Execution kernel
+        run: go test ./domain/execution/... -count=1
+
+      - name: Model runtime
+        run: go test ./domain/modelruntime/... -count=1
+
+      - name: Tool runtime
+        run: go test ./domain/toolruntime/... -count=1
+
+      - name: Agent loop crash/recovery surface
+        run: go test ./domain/runtime/... -run 'Crash|Resume|Checkpoint|Invocation' -count=1
+
+      - name: Race across execution/model/tool kernels
+        run: go test -race ./domain/execution/... ./domain/modelruntime/... ./domain/toolruntime/...
