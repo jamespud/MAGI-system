@@ -67,29 +67,25 @@ func RelaxEvidenceStandard(std entity.EvidenceStandard, hasTools bool) entity.Ev
 }
 
 type AgentLoop struct {
-	modelPort      port.ModelPort
-	modelRuntime   *modelruntime.Runtime
-	toolReg        port.ToolRegistryPort
-	toolExec       port.ToolExecutorPort
-	toolRuntime    *toolruntime.Runtime
-	validator      validation.Validator
-	gen            validation.SchemaGenerator
-	adapter        *evidence.EvidenceAdapterRegistry
-	gate           *evidence.EvidenceGate
-	summaryVal     *validation.TypedValidator[entity.EvidenceSummary]
-	voteVal        *validation.TypedValidator[entity.Vote]
-	claimVal       *validation.TypedValidator[entity.ClaimSubmission]
-	reflectionVal  *validation.TypedValidator[entity.Reflection]
-	eventPub       port.EventPublisher
-	recorder       execution.EventRecorder
-	checkpointRepo port.CheckpointRepository
-	toolPolicy     *toolpolicy.Policy
-	metrics        *metrics.Registry
-	redactor       *redact.Redactor
-	approvalRepo   port.ApprovalRepository
-	quota          port.ToolQuotaPort
-	prompts        port.PromptProvider
-	taskTree       port.TaskTreeRecorder
+	modelPort     port.ModelPort
+	modelRuntime  *modelruntime.Runtime
+	toolReg       port.ToolRegistryPort
+	toolRuntime   *toolruntime.Runtime
+	validator     validation.Validator
+	gen           validation.SchemaGenerator
+	adapter       *evidence.EvidenceAdapterRegistry
+	gate          *evidence.EvidenceGate
+	summaryVal    *validation.TypedValidator[entity.EvidenceSummary]
+	voteVal       *validation.TypedValidator[entity.Vote]
+	claimVal      *validation.TypedValidator[entity.ClaimSubmission]
+	reflectionVal *validation.TypedValidator[entity.Reflection]
+	eventPub      port.EventPublisher
+	recorder      execution.EventRecorder
+	checkpoints   *CheckpointService
+	metrics       *metrics.Registry
+	approvalRepo  port.ApprovalRepository
+	prompts       port.PromptProvider
+	taskTree      port.TaskTreeRecorder
 }
 
 type AgentLoopDeps struct {
@@ -105,6 +101,8 @@ type AgentLoopDeps struct {
 	EventPub       port.EventPublisher
 	Recorder       execution.EventRecorder
 	CheckpointRepo port.CheckpointRepository
+	Checkpoints    *CheckpointService
+	Invocations    port.RuntimeInvocationRepository
 	ToolPolicy     *toolpolicy.Policy
 	Metrics        *metrics.Registry
 	Redactor       *redact.Redactor
@@ -149,15 +147,39 @@ func NewAgentLoop(d AgentLoopDeps) (*AgentLoop, error) {
 	if recorder == nil {
 		recorder = execution.NewEventRecorder(d.EventPub)
 	}
+	toolRuntime := d.ToolRuntime
+	if toolRuntime == nil && d.ToolExec != nil {
+		invocations := d.Invocations
+		if invocations == nil {
+			invocations = newMemoryInvocationRepository()
+		}
+		built, terr := toolruntime.New(toolruntime.Deps{
+			Kernel:    execution.NewKernel(invocations, nil),
+			Executor:  d.ToolExec,
+			Validator: d.Validator,
+			Policy:    d.ToolPolicy,
+			Quota:     d.Quota,
+			Metrics:   d.Metrics,
+			Redactor:  d.Redactor,
+		})
+		if terr != nil {
+			return nil, fmt.Errorf("agent loop: tool runtime: %w", terr)
+		}
+		toolRuntime = built
+	}
+	checkpoints := d.Checkpoints
+	if checkpoints == nil {
+		checkpoints = NewCheckpointService(d.CheckpointRepo, recorder)
+	}
 	return &AgentLoop{
-		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolExec: d.ToolExec, toolRuntime: d.ToolRuntime,
-		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, toolPolicy: d.ToolPolicy, metrics: d.Metrics, redactor: d.Redactor, approvalRepo: d.ApprovalRepo, quota: d.Quota,
+		modelPort: d.ModelPort, modelRuntime: d.ModelRuntime, toolReg: d.ToolReg, toolRuntime: toolRuntime,
+		validator: d.Validator, gen: d.Gen, adapter: adapter, gate: gate, metrics: d.Metrics, approvalRepo: d.ApprovalRepo,
 		summaryVal: sv, voteVal: vv, claimVal: cv,
-		reflectionVal:  rv,
-		eventPub:       d.EventPub,
-		recorder:       recorder,
-		checkpointRepo: d.CheckpointRepo,
-		taskTree:       d.TaskTree,
+		reflectionVal: rv,
+		eventPub:      d.EventPub,
+		recorder:      recorder,
+		checkpoints:   checkpoints,
+		taskTree:      d.TaskTree,
 	}, nil
 }
 
@@ -190,14 +212,14 @@ func (l *AgentLoop) recordCritical(ctx context.Context, caseID, runID string, ag
 // and fails closed if that event cannot be persisted. A nil repository or empty
 // run ID stays stateless and only records nothing.
 func (l *AgentLoop) commitCheckpoint(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) error {
-	if err := l.saveCheckpoint(ctx, runID, messages, nextStep, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, pendingResponse, pendingToolIndex); err != nil {
-		_ = l.recordCritical(ctx, caseID, runID, agentCode, entity.EventCheckpointFailed, map[string]any{"step": nextStep, "error": err.Error()})
-		return err
-	}
-	if l.checkpointRepo == nil || runID == "" {
+	if runID == "" {
 		return nil
 	}
-	return l.recordCritical(ctx, caseID, runID, agentCode, entity.EventCheckpointCommitted, map[string]any{"step": nextStep})
+	state, err := l.buildCheckpointState(runID, messages, nextStep, ts, phase, result, compacted, ledger, manifestDigest, lastCommittedInvocationID, pendingResponse, pendingToolIndex)
+	if err != nil {
+		return err
+	}
+	return l.checkpoints.Commit(ctx, caseID, runID, agentCode, state)
 }
 
 // traceIdentity keeps logical IDs stable across the dispatcher retry convention
@@ -243,21 +265,17 @@ func canonicalToolArguments(arguments string) []byte {
 	return canonical
 }
 
-// saveCheckpoint persists the working-memory snapshot for resume (§18).
-// Nil-safe only when checkpointRepo is nil or runID is empty; a configured
-// repository error is returned so the caller can stop before another side
-// effecting invocation.
-func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) error {
-	if l.checkpointRepo == nil || runID == "" {
-		return nil
-	}
+// buildCheckpointState builds the durable AgentState snapshot for resume (§18)
+// without persisting it. Persistence and fail-closed events are owned by
+// CheckpointService.Commit.
+func (l *AgentLoop) buildCheckpointState(runID string, messages []*schema.Message, nextStep int, ts *TerminationState, phase string, result *LoopResult, compacted bool, ledger *evidence.EvidenceLedger, manifestDigest, lastCommittedInvocationID string, pendingResponse *schema.Message, pendingToolIndex int) (*entity.AgentState, error) {
 	msgsJSON, err := json.Marshal(messages)
 	if err != nil {
-		return fmt.Errorf("marshal checkpoint messages: %w", err)
+		return nil, fmt.Errorf("marshal checkpoint messages: %w", err)
 	}
 	ledgerJSON, err := evidence.MarshalLedger(ledger)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	currentUsage := entity.Usage{}
 	if result != nil && result.Usage != nil {
@@ -270,20 +288,20 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		if result.Summary != nil {
 			summaryJSON, err = marshalCheckpointValue(result.Summary)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if result.Reflection != nil {
 			reflectionJSON, err = marshalCheckpointValue(result.Reflection)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if pendingResponse != nil {
 		pendingResponseJSON, err = marshalCheckpointValue(pendingResponse)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	snapshotJSON, err := execution.MarshalAgentSnapshotV2(execution.AgentSnapshotV2{
@@ -298,9 +316,9 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		PendingResponseJSON: pendingResponseJSON, PendingToolIndex: pendingToolIndex,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := l.checkpointRepo.Save(ctx, &entity.AgentState{
+	return &entity.AgentState{
 		RunID:           runID,
 		MessagesJSON:    string(msgsJSON),
 		StepCount:       nextStep - 1,
@@ -309,10 +327,7 @@ func (l *AgentLoop) saveCheckpoint(ctx context.Context, runID string, messages [
 		SnapshotVersion: execution.AgentSnapshotV2Version,
 		SnapshotJSON:    snapshotJSON,
 		ManifestDigest:  manifestDigest,
-	}); err != nil {
-		return fmt.Errorf("save checkpoint: %w", err)
-	}
-	return nil
+	}, nil
 }
 
 func marshalCheckpointValue(value any) (string, error) {
@@ -443,8 +458,8 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	manifestDigest := CheckpointManifest(cfg, actx, systemPrompt)
 	var checkpoint *execution.AgentSnapshotV2
 	var legacyCheckpoint *entity.AgentState
-	if l.checkpointRepo != nil && actx.RunID != "" {
-		state, err := l.checkpointRepo.Load(ctx, actx.RunID)
+	if actx.RunID != "" {
+		state, err := l.checkpoints.Load(ctx, actx.RunID)
 		if err != nil {
 			return nil, fmt.Errorf("agent loop: load checkpoint: %w", err)
 		}
@@ -754,7 +769,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					AttemptID:      attemptID,
 					IdempotencyKey: execution.ToolIdempotencyKey(invocationID, tc.Function.Name, canonicalToolArguments(tc.Function.Arguments)),
 					ToolName:       tc.Function.Name,
-					Arguments:      l.redactor.String(tc.Function.Arguments),
+					Arguments:      tc.Function.Arguments,
 				}
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallRequested, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "arguments": tc.Function.Arguments})
 				// Permission Check: toolReg.List(cfg.Tools) already filtered tools to
@@ -764,7 +779,6 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				if !ok {
 					tcr.Err = "tool not found: " + tc.Function.Name
 					ts.ConsecToolFail++
-					l.metrics.IncToolCall(false)
 					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{
 						"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err, "reason": "tool_not_found",
 					})
@@ -772,153 +786,86 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				if l.toolRuntime != nil {
-					var toolStart time.Time
-					toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
-					runtimeResult, execErr := l.toolRuntime.Execute(toolCtx, toolruntime.Request{
-						Identity: entity.ExecutionIdentity{
-							RunID: logicalRunID, StepID: st.ID, InvocationID: invocationID, AttemptID: attemptID,
-						},
-						Definition:     td,
-						ArgumentsJSON:  tc.Function.Arguments,
-						UserID:         actx.UserID,
-						Permission:     toolruntime.Permission{ToolName: tc.Function.Name},
-						ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
-						Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {
-							approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
-							return toolruntime.ApprovalDecision{Approved: approved, DecidedBy: decidedBy, Reason: reason}, approvalErr
-						},
-						Lifecycle: func(stage toolruntime.LifecycleStage) {
-							switch stage {
-							case toolruntime.LifecycleValidated:
-								l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
-							case toolruntime.LifecycleStarted:
-								toolStart = time.Now()
-								l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
-							}
-						},
-					})
-					toolSpan.End()
-					if runtimeResult != nil {
-						tcr.Arguments = runtimeResult.Arguments
-						tcr.IdempotencyKey = runtimeResult.IdempotencyKey
-						tcr.ApprovedBy = runtimeResult.ApprovedBy
-						tcr.Violations = runtimeResult.Violations
-					}
-					if !toolStart.IsZero() {
-						tcr.Duration = time.Since(toolStart)
-					}
-					if execErr != nil {
-						if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
-							tcr.Valid = false
-						}
-						tcr.Err = execErr.Error()
-						ts.ConsecToolFail++
-						reason := ""
-						if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
-							reason = "args_invalid"
-						}
-						payload := map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err}
-						if reason != "" {
-							payload["reason"] = reason
-						}
-						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, payload)
-						messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
-						st.ToolCalls = append(st.ToolCalls, tcr)
-						continue
-					}
-					if runtimeResult == nil || runtimeResult.Execution == nil {
-						tcr.Err = "tool runtime returned no execution result"
-						ts.ConsecToolFail++
-						l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err})
-						messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
-						st.ToolCalls = append(st.ToolCalls, tcr)
-						continue
-					}
-					ts.ConsecToolFail = 0
-					tcr.Valid = true
-					tcr.Result = runtimeResult.Output
-					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds(), "result": quoteToolOutput(tcr.Result)})
-					// Evidence remains a MAGI semantic and is deliberately kept out of ToolRuntime.
-					candidates, _ := l.adapter.Extract(ctx, td, runtimeResult.Execution)
-					for _, c := range candidates {
-						ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
-						if ev != nil {
-							tcr.EvidenceID = ev.ID
-							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventEvidenceCreated, map[string]any{"evidence_id": ev.ID, "reliability": ev.Reliability.Final, "observation": ev.Observation, "tool_name": tc.Function.Name})
-						}
-					}
-					messages = append(messages, schema.ToolMessage(quoteToolOutput(tcr.Result), tc.ID))
-					st.ToolCalls = append(st.ToolCalls, tcr)
-					continue
-				}
-				if l.toolPolicy != nil && l.toolPolicy.RequiresApproval(td.Name) && !l.toolPolicy.Allowed(td.Name) {
-					approved, decidedBy, reason, aerr := l.requestApproval(runCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
-					if aerr != nil {
-						tcr.Err = "approval check failed: " + aerr.Error()
-						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.ConsecToolFail++
-						st.ToolCalls = append(st.ToolCalls, tcr)
-						continue
-					}
-					if !approved {
-						tcr.Err = "tool rejected by human: " + reason
-						tcr.ApprovedBy = decidedBy
-						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.ConsecToolFail++
-						st.ToolCalls = append(st.ToolCalls, tcr)
-						continue
-					}
-					tcr.ApprovedBy = decidedBy
-				}
-				if l.quota != nil {
-					allowed, qerr := l.quota.Allow(ctx, actx.UserID, td.Name)
-					if qerr == nil && !allowed {
-						tcr.Err = "tool quota exceeded: " + td.Name
-						messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
-						ts.ConsecToolFail++
-						st.ToolCalls = append(st.ToolCalls, tcr)
-						continue
-					}
-				}
-				// Validate args
-				vr := l.validator.Validate(td.ArgsSchema, []byte(tc.Function.Arguments))
-				if vr != nil && !vr.Valid {
-					tcr.Valid = false
-					tcr.Violations = vr.Violations
-					tcr.Err = l.redactor.String(vr.Error())
+				if l.toolRuntime == nil {
+					tcr.Err = "tool runtime not configured"
 					ts.ConsecToolFail++
-					l.metrics.IncToolCall(false)
-					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{
-						"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err, "reason": "args_invalid",
-					})
-					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s args invalid: %s", tc.Function.Name, tcr.Err), tc.ID))
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err})
+					messages = append(messages, schema.ToolMessage(tcr.Err, tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
 					continue
 				}
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
-				// Execute
-				toolStart := time.Now()
-				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
-
+				var toolStart time.Time
+				// The execution kernel fences by a complete execution identity. In
+				// stateless/standalone mode the caller may omit a run ID; fall back to
+				// the deterministic step ID so tools still execute through the kernel
+				// without weakening the production caller's identity invariants.
+				toolRunID := logicalRunID
+				if toolRunID == "" {
+					toolRunID = st.ID
+				}
+				approvalReason := ""
 				toolCtx, toolSpan := tracing.Start(ctx, "agent.tool.call", attribute.String("tool", tc.Function.Name))
-
-				exeReq := port.ToolExecutionRequest{
-					ToolName: tc.Function.Name, ArgumentsJSON: tc.Function.Arguments,
-					UserID: actx.UserID, Binding: td.Binding,
-				}
-				if tc.Function.Name == feedbackToolName {
-					exeReq.ExpectedSchema = phaseExpectedSchema(phase, summarySchema, voteSchema, reflectionSchema)
-				}
-				execRes, execErr := l.toolExec.Execute(toolCtx, exeReq)
-
-				tcr.Duration = time.Since(toolStart)
-
+				runtimeResult, execErr := l.toolRuntime.Execute(toolCtx, toolruntime.Request{
+					Identity: entity.ExecutionIdentity{
+						RunID: toolRunID, StepID: st.ID, InvocationID: invocationID, AttemptID: attemptID,
+					},
+					Definition:     td,
+					ArgumentsJSON:  tc.Function.Arguments,
+					UserID:         actx.UserID,
+					Permission:     toolruntime.Permission{ToolName: tc.Function.Name},
+					ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
+					Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {
+						approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
+						approvalReason = reason
+						return toolruntime.ApprovalDecision{Approved: approved, DecidedBy: decidedBy, Reason: reason}, approvalErr
+					},
+					Lifecycle: func(stage toolruntime.LifecycleStage) {
+						switch stage {
+						case toolruntime.LifecycleValidated:
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallValidated, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
+						case toolruntime.LifecycleStarted:
+							toolStart = time.Now()
+							l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallStarted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name})
+						}
+					},
+				})
 				toolSpan.End()
+				if runtimeResult != nil {
+					tcr.Arguments = runtimeResult.Arguments
+					tcr.IdempotencyKey = runtimeResult.IdempotencyKey
+					tcr.ApprovedBy = runtimeResult.ApprovedBy
+					tcr.Violations = runtimeResult.Violations
+				}
+				if !toolStart.IsZero() {
+					tcr.Duration = time.Since(toolStart)
+				}
 				if execErr != nil {
-					tcr.Err = l.redactor.String(execErr.Error())
+					if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
+						tcr.Valid = false
+					}
+					tcr.Err = execErr.Error()
 					ts.ConsecToolFail++
-					l.metrics.IncToolCall(false)
+					reason := ""
+					if errors.Is(execErr, toolruntime.ErrToolArgumentsInvalid) {
+						reason = "args_invalid"
+					}
+					payload := map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err}
+					if reason != "" {
+						payload["reason"] = reason
+					}
+					feedback := fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err))
+					if errors.Is(execErr, toolruntime.ErrToolApprovalRejected) {
+						tcr.Err = "tool rejected by human: " + approvalReason
+						feedback = quoteToolOutput(tcr.Err)
+					}
+					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, payload)
+					messages = append(messages, schema.ToolMessage(feedback, tc.ID))
+					st.ToolCalls = append(st.ToolCalls, tcr)
+					continue
+				}
+				if runtimeResult == nil || runtimeResult.Execution == nil {
+					tcr.Err = "tool runtime returned no execution result"
+					ts.ConsecToolFail++
 					l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallFailed, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "error": tcr.Err})
 					messages = append(messages, schema.ToolMessage(fmt.Sprintf("tool %s failed: %s", tc.Function.Name, quoteToolOutput(tcr.Err)), tc.ID))
 					st.ToolCalls = append(st.ToolCalls, tcr)
@@ -926,11 +873,10 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 				}
 				ts.ConsecToolFail = 0
 				tcr.Valid = true
-				tcr.Result = l.redactor.String(execRes.Output)
-				l.metrics.IncToolCall(true)
+				tcr.Result = runtimeResult.Output
 				l.publish(ctx, actx.CaseID, actx.RunID, agentCode, entity.EventToolCallCompleted, map[string]any{"tool_call_id": tc.ID, "tool_name": tc.Function.Name, "duration_ms": tcr.Duration.Milliseconds(), "result": quoteToolOutput(tcr.Result)})
-				// Evidence
-				candidates, _ := l.adapter.Extract(ctx, td, execRes)
+				// Evidence remains a MAGI semantic and is deliberately kept out of ToolRuntime.
+				candidates, _ := l.adapter.Extract(ctx, td, runtimeResult.Execution)
 				for _, c := range candidates {
 					ev := ledger.Record(tc.ID, tc.Function.Name, string(td.Source), c.SourceURI, c.Observation, c.Reliability)
 					if ev != nil {
