@@ -39,6 +39,78 @@ func TestKernelCompletedInvocationIsNotExecutedAgain(t *testing.T) {
 	}
 }
 
+func TestKernelPersistsIdempotencyKeyAndOrdinal(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	kernel := NewKernel(repo, nil)
+	req := Request{
+		Identity:       entity.ExecutionIdentity{RunID: "run-idem", StepID: "step-idem", InvocationID: "inv-idem", AttemptID: "att-1"},
+		Kind:           InvocationTool,
+		OperationName:  "calc",
+		Input:          []byte(`{"a":1}`),
+		RetrySafety:    RetrySafeIdempotent,
+		IdempotencyKey: "idem-key-1",
+		LogicalOrdinal: 3,
+	}
+	calls := 0
+	if _, err := kernel.Execute(context.Background(), req, func(context.Context) ([]byte, error) {
+		calls++
+		return []byte("ok"), nil
+	}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	stored, err := repo.Get(context.Background(), "inv-idem")
+	if err != nil {
+		t.Fatalf("get stored: %v", err)
+	}
+	if stored.IdempotencyKey == nil || *stored.IdempotencyKey != "idem-key-1" {
+		t.Fatalf("persisted idempotency key = %v, want idem-key-1", stored.IdempotencyKey)
+	}
+	if stored.LogicalOrdinal != 3 {
+		t.Fatalf("persisted logical ordinal = %d, want 3", stored.LogicalOrdinal)
+	}
+
+	// Replay with the same idempotency key is served from cache and does not
+	// create a second attempt.
+	retry := req
+	retry.Identity.AttemptID = "att-2"
+	result, err := kernel.Execute(context.Background(), retry, func(context.Context) ([]byte, error) {
+		calls++
+		return []byte("must not rerun"), nil
+	})
+	if err != nil {
+		t.Fatalf("cached execute: %v", err)
+	}
+	if !result.Cached || calls != 1 {
+		t.Fatalf("cached=%v calls=%d, want cached after exactly one execution", result.Cached, calls)
+	}
+}
+
+func TestKernelRejectsIdempotencyKeyMismatch(t *testing.T) {
+	repo := &memoryInvocationRepository{}
+	kernel := NewKernel(repo, nil)
+	req := Request{
+		Identity:       entity.ExecutionIdentity{RunID: "run-idem", StepID: "step-idem", InvocationID: "inv-idem", AttemptID: "att-1"},
+		Kind:           InvocationTool,
+		OperationName:  "calc",
+		Input:          []byte(`{"a":1}`),
+		RetrySafety:    RetrySafeIdempotent,
+		IdempotencyKey: "idem-key-1",
+	}
+	if _, err := kernel.Execute(context.Background(), req, func(context.Context) ([]byte, error) {
+		return []byte("ok"), nil
+	}); err != nil {
+		t.Fatalf("first execute: %v", err)
+	}
+	changed := req
+	changed.Identity.AttemptID = "att-2"
+	changed.IdempotencyKey = "idem-key-DIFFERENT"
+	if _, err := kernel.Execute(context.Background(), changed, func(context.Context) ([]byte, error) {
+		return []byte("must not run"), nil
+	}); !errors.Is(err, ErrInvocationMismatch) {
+		t.Fatalf("second execute error = %v, want ErrInvocationMismatch", err)
+	}
+}
+
 func TestKernelInvocationIdentityMismatchPreventsExecution(t *testing.T) {
 	repo := &memoryInvocationRepository{}
 	kernel := NewKernel(repo, nil)

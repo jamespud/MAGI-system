@@ -2,6 +2,7 @@ package harnesstest
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -124,6 +125,19 @@ func (r *RecordingInvocationRepository) Invocation(id string) *entity.RuntimeInv
 		return &clone
 	}
 	return nil
+}
+
+// IDs returns the stable logical invocation IDs recorded so far, sorted for
+// deterministic assertions.
+func (r *RecordingInvocationRepository) IDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ids := make([]string, 0, len(r.invocations))
+	for id := range r.invocations {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 var _ port.RuntimeInvocationRepository = (*RecordingInvocationRepository)(nil)

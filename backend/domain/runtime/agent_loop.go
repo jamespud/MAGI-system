@@ -827,6 +827,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					Definition:     td,
 					ArgumentsJSON:  tc.Function.Arguments,
 					UserID:         actx.UserID,
+					Ordinal:        ordinal,
 					Permission:     toolruntime.Permission{ToolName: tc.Function.Name},
 					ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
 					Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {

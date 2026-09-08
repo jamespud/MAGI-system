@@ -16,6 +16,9 @@ type Request struct {
 	ArgumentsJSON  string
 	UserID         string
 	ExpectedSchema []byte
+	// Ordinal is the tool invocation's index within the agent step. It is
+	// persisted with the invocation so replay/audit can reproduce the sequence.
+	Ordinal int
 
 	Permission Permission
 	Approval   ApprovalFunc

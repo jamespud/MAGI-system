@@ -107,11 +107,13 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 	result.IdempotencyKey = execution.ToolIdempotencyKey(req.Identity.InvocationID, req.Definition.Name, canonicalArguments)
 	var executed *port.ToolExecutionResult
 	kernelResult, kernelErr := r.kernel.Execute(ctx, execution.Request{
-		Identity:      req.Identity,
-		Kind:          execution.InvocationTool,
-		OperationName: req.Definition.Name,
-		Input:         canonicalArguments,
-		RetrySafety:   retrySafety(req.Definition.EffectClass),
+		Identity:       req.Identity,
+		Kind:           execution.InvocationTool,
+		OperationName:  req.Definition.Name,
+		Input:          canonicalArguments,
+		RetrySafety:    retrySafety(req.Definition.EffectClass),
+		IdempotencyKey: result.IdempotencyKey,
+		LogicalOrdinal: req.Ordinal,
 	}, func(executeCtx context.Context) ([]byte, error) {
 		if req.Lifecycle != nil {
 			req.Lifecycle(LifecycleStarted)

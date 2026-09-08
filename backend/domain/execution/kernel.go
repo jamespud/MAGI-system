@@ -24,6 +24,13 @@ type Request struct {
 	OperationName string
 	Input         []byte
 	RetrySafety   RetrySafety
+	// IdempotencyKey is the durable external idempotency identity when the
+	// operation kind has one (tools). It is persisted with the invocation and
+	// must be identical on replay.
+	IdempotencyKey string
+	// LogicalOrdinal is the invocation's ordinal within its step. It is
+	// persisted so replay/audit can reproduce the logical invocation sequence.
+	LogicalOrdinal int
 }
 
 type Result struct {
@@ -76,15 +83,17 @@ func (k *Kernel) execute(ctx context.Context, req Request, matcher InputMatcher,
 	}
 
 	invocation, err := k.invocations.Ensure(ctx, &entity.RuntimeInvocation{
-		InvocationID:  req.Identity.InvocationID,
-		RunID:         req.Identity.RunID,
-		StepID:        req.Identity.StepID,
-		Kind:          string(req.Kind),
-		Status:        entity.InvocationPending,
-		OperationName: req.OperationName,
-		RetrySafety:   string(req.RetrySafety),
-		InputDigest:   digestBytes(req.Input),
-		InputJSON:     string(req.Input),
+		InvocationID:   req.Identity.InvocationID,
+		RunID:          req.Identity.RunID,
+		StepID:         req.Identity.StepID,
+		Kind:           string(req.Kind),
+		Status:         entity.InvocationPending,
+		OperationName:  req.OperationName,
+		RetrySafety:    string(req.RetrySafety),
+		LogicalOrdinal: req.LogicalOrdinal,
+		IdempotencyKey: stringPtr(req.IdempotencyKey),
+		InputDigest:    digestBytes(req.Input),
+		InputJSON:      string(req.Input),
 	})
 	if err != nil {
 		return nil, repositoryError("ensure invocation", err)
@@ -228,12 +237,23 @@ func matchesRequest(invocation *entity.RuntimeInvocation, req Request) bool {
 }
 
 func matchesRequestExceptInput(invocation *entity.RuntimeInvocation, req Request) bool {
+	idempotencyMatches := (req.IdempotencyKey == "" && (invocation.IdempotencyKey == nil || *invocation.IdempotencyKey == "")) ||
+		(req.IdempotencyKey != "" && invocation.IdempotencyKey != nil && *invocation.IdempotencyKey == req.IdempotencyKey)
 	return invocation.InvocationID == req.Identity.InvocationID &&
 		invocation.RunID == req.Identity.RunID &&
 		invocation.StepID == req.Identity.StepID &&
 		invocation.Kind == string(req.Kind) &&
 		invocation.OperationName == req.OperationName &&
-		invocation.RetrySafety == string(req.RetrySafety)
+		invocation.RetrySafety == string(req.RetrySafety) &&
+		invocation.LogicalOrdinal == req.LogicalOrdinal &&
+		idempotencyMatches
+}
+
+func stringPtr(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func ambiguousError(invocationID string, cause error) error {

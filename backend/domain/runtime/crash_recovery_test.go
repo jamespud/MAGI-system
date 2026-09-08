@@ -80,7 +80,13 @@ type crashModel struct {
 
 func (m *crashModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	m.inj.Trigger(harnesstest.CrashBeforeModel)
-	return m.inner.Generate(ctx, input, opts...)
+	msg, err := m.inner.Generate(ctx, input, opts...)
+	// The model has produced a response but the invocation result has not yet
+	// been persisted by the kernel when the execute fn returns.
+	if err == nil {
+		m.inj.Trigger(harnesstest.CrashAfterModelBeforePersist)
+	}
+	return msg, err
 }
 
 func (m *crashModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
@@ -101,7 +107,13 @@ type crashTool struct {
 
 func (t *crashTool) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
 	t.inj.Trigger(harnesstest.CrashBeforeTool)
-	return t.inner.Execute(ctx, req)
+	result, err := t.inner.Execute(ctx, req)
+	// An external side effect may already have happened, but the kernel has not
+	// yet persisted the completed invocation when the execute fn returns.
+	if err == nil {
+		t.inj.Trigger(harnesstest.CrashAfterToolBeforePersist)
+	}
+	return result, err
 }
 
 var _ port.ToolExecutorPort = (*crashTool)(nil)
@@ -156,11 +168,28 @@ func cfgWithTools(minQ float64) *entity.MagiConfig {
 }
 
 type crashHarness struct {
-	invocations *harnesstest.RecordingInvocationRepository
+	invocations port.RuntimeInvocationRepository
 	checkpoints *harnesstest.FailingCheckpointRepository
 	inj         *harnesstest.CrashInjector
 	model       *harnesstest.ScriptedModel
 	tool        port.ToolExecutorPort
+}
+
+// crashInvocationRepository wraps the recording repository and crashes right
+// after a successful invocation result is persisted (Complete), modelling the
+// window where the durable success exists but the process dies before the loop
+// observes it.
+type crashInvocationRepository struct {
+	*harnesstest.RecordingInvocationRepository
+	inj *harnesstest.CrashInjector
+}
+
+func (r *crashInvocationRepository) Complete(ctx context.Context, invocationID, attemptID, outputJSON string) (bool, error) {
+	won, err := r.RecordingInvocationRepository.Complete(ctx, invocationID, attemptID, outputJSON)
+	if won && err == nil {
+		r.inj.Trigger(harnesstest.CrashAfterInvocationPersist)
+	}
+	return won, err
 }
 
 // newLoop builds an AgentLoop that fences both model and tool generations
@@ -365,7 +394,10 @@ func TestCrashAfterToolCompletionPersistedDoesNotExecuteAgain(t *testing.T) {
 func TestCrashRecoveryAtEveryDurableBoundary(t *testing.T) {
 	points := []harnesstest.CrashPoint{
 		harnesstest.CrashBeforeModel,
+		harnesstest.CrashAfterModelBeforePersist,
 		harnesstest.CrashBeforeTool,
+		harnesstest.CrashAfterToolBeforePersist,
+		harnesstest.CrashAfterInvocationPersist,
 		harnesstest.CrashBeforeCheckpoint,
 		harnesstest.CrashAfterCheckpoint,
 	}
@@ -377,8 +409,10 @@ func TestCrashRecoveryAtEveryDurableBoundary(t *testing.T) {
 				finalMsg(voteJSON("correctness")),
 			}
 			sideEffect := &harnesstest.SideEffectTool{}
+			rec := harnesstest.NewRecordingInvocationRepository()
+			wrapped := &crashInvocationRepository{RecordingInvocationRepository: rec, inj: &harnesstest.CrashInjector{Point: point}}
 			h := &crashHarness{
-				invocations: harnesstest.NewRecordingInvocationRepository(),
+				invocations: wrapped,
 				checkpoints: harnesstest.NewFailingCheckpointRepository(nil),
 				inj:         &harnesstest.CrashInjector{Point: point},
 			}
@@ -391,6 +425,7 @@ func TestCrashRecoveryAtEveryDurableBoundary(t *testing.T) {
 			// Disable crash injection for the resume so it can run to a normal
 			// boundary, then restart with the same repos and model/tool instances.
 			h.inj = &harnesstest.CrashInjector{}
+			wrapped.inj = &harnesstest.CrashInjector{}
 			second := h.newLoop(t, responses, sideEffect)
 			res, err := second.Run(context.Background(), cfgWithTools(1), &runtime.AgentContext{RunID: "run-h", Task: entity.DecisionTask{CanonicalQuestion: "q"}})
 			if err != nil {
@@ -404,6 +439,15 @@ func TestCrashRecoveryAtEveryDurableBoundary(t *testing.T) {
 			if sideEffect.ExternalWrites > 1 {
 				t.Fatalf("side effect duplicated: writes = %d", sideEffect.ExternalWrites)
 			}
+			ids := rec.IDs()
+			if len(ids) == 0 {
+				t.Fatal("expected at least one stable logical invocation id after crash+resume")
+			}
+			for _, id := range ids {
+				if id == "" {
+					t.Fatal("recorded a blank logical invocation id")
+				}
+			}
 			switch res.Status {
 			case runtime.LoopStatusCompleted:
 				// A completed resume must have run at least one model step.
@@ -413,6 +457,116 @@ func TestCrashRecoveryAtEveryDurableBoundary(t *testing.T) {
 				t.Fatalf("unexpected final status: %v", res.Status)
 			}
 		})
+	}
+}
+
+// TestToolRuntimePersistsIdempotencyKeyAndOrdinal verifies the durable
+// invocation row records the deterministic idempotency key and step ordinal
+// that toolruntime hands to the kernel.
+func TestToolRuntimePersistsIdempotencyKeyAndOrdinal(t *testing.T) {
+	rec := harnesstest.NewRecordingInvocationRepository()
+	val := validation.NewJSONSchemaValidator()
+	counting := &harnesstest.CountingTool{}
+	countingRuntime, err := toolruntime.New(toolruntime.Deps{
+		Kernel:    execution.NewKernel(rec, nil),
+		Executor:  counting,
+		Validator: val,
+	})
+	if err != nil {
+		t.Fatalf("tool runtime: %v", err)
+	}
+	req := toolRuntimeRequest("att-1", port.ToolEffectIdempotent)
+	req.Ordinal = 2
+	result, err := countingRuntime.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	stored := rec.Invocation("inv-1")
+	if stored == nil {
+		t.Fatal("expected the invocation to be persisted")
+	}
+	if stored.IdempotencyKey == nil || *stored.IdempotencyKey != result.IdempotencyKey {
+		t.Fatalf("persisted idempotency key = %v, want %q", stored.IdempotencyKey, result.IdempotencyKey)
+	}
+	if stored.LogicalOrdinal != 2 {
+		t.Fatalf("persisted logical ordinal = %d, want 2", stored.LogicalOrdinal)
+	}
+}
+
+// TestCrashAfterToolBeforePersistDoesNotReplaySideEffect: a tool that already
+// produced an external side effect before its invocation was persisted must not
+// be executed again after crash + resume.
+func TestCrashAfterToolBeforePersistDoesNotReplaySideEffect(t *testing.T) {
+	responses := []*schema.Message{
+		callMsg("c1", "calc", `{"a":1,"b":2}`),
+		finalMsg(summaryJSON("EV-001")),
+		finalMsg(voteJSON("correctness")),
+	}
+	sideEffect := &harnesstest.SideEffectTool{}
+	rec := harnesstest.NewRecordingInvocationRepository()
+	wrapped := &crashInvocationRepository{RecordingInvocationRepository: rec, inj: &harnesstest.CrashInjector{Point: harnesstest.CrashAfterToolBeforePersist}}
+	h := &crashHarness{
+		invocations: wrapped,
+		checkpoints: harnesstest.NewFailingCheckpointRepository(nil),
+		inj:         &harnesstest.CrashInjector{Point: harnesstest.CrashAfterToolBeforePersist},
+	}
+	first := h.newLoop(t, responses, sideEffect)
+	if !runWithCrash(t, first, cfgWithTools(1), &runtime.AgentContext{RunID: "run-at", Task: entity.DecisionTask{CanonicalQuestion: "q"}}) {
+		t.Fatal("expected the injected crash at after_tool_before_persist")
+	}
+	if sideEffect.ExternalWrites != 1 {
+		t.Fatalf("side effect writes = %d, want exactly 1 before crash", sideEffect.ExternalWrites)
+	}
+
+	h.inj = &harnesstest.CrashInjector{}
+	wrapped.inj = &harnesstest.CrashInjector{}
+	second := h.newLoop(t, responses, sideEffect)
+	_, err := second.Run(context.Background(), cfgWithTools(1), &runtime.AgentContext{RunID: "run-at", Task: entity.DecisionTask{CanonicalQuestion: "q"}})
+	if err != nil && !errors.Is(err, port.ErrLeaseLost) {
+		// A fail-closed resume is acceptable; the crucial invariant is below.
+		t.Logf("resume returned error: %v", err)
+	}
+	if sideEffect.ExternalWrites != 1 {
+		t.Fatalf("side effect replayed: writes = %d, want 1", sideEffect.ExternalWrites)
+	}
+	if sideEffect.Calls != 1 {
+		t.Fatalf("tool executor calls = %d, want 1 (no second execution)", sideEffect.Calls)
+	}
+}
+
+// TestCrashAfterModelBeforePersistDoesNotRegenerateAttempt: a model that
+// returned a response before its invocation was persisted must not get a second
+// physical attempt after crash + resume.
+func TestCrashAfterModelBeforePersistDoesNotRegenerateAttempt(t *testing.T) {
+	responses := []*schema.Message{callMsg("c1", "calc", `{"a":1,"b":2}`)}
+	sideEffect := &harnesstest.SideEffectTool{}
+	rec := harnesstest.NewRecordingInvocationRepository()
+	wrapped := &crashInvocationRepository{RecordingInvocationRepository: rec, inj: &harnesstest.CrashInjector{Point: harnesstest.CrashAfterModelBeforePersist}}
+	h := &crashHarness{
+		invocations: wrapped,
+		checkpoints: harnesstest.NewFailingCheckpointRepository(nil),
+		inj:         &harnesstest.CrashInjector{Point: harnesstest.CrashAfterModelBeforePersist},
+	}
+	first := h.newLoop(t, responses, sideEffect)
+	if !runWithCrash(t, first, cfgWithTools(1), &runtime.AgentContext{RunID: "run-am", Task: entity.DecisionTask{CanonicalQuestion: "q"}}) {
+		t.Fatal("expected the injected crash at after_model_before_persist")
+	}
+	cfg := cfgWithTools(1)
+	stepID := execution.NewStepID("run-am", 1)
+	modelInvocation := modelruntime.NewInvocationID(stepID, cfg.Model)
+	if inv := rec.Invocation(modelInvocation); inv == nil || inv.AttemptCount != 1 {
+		t.Fatalf("model invocation attempt count = %+v, want 1", rec.Invocation(modelInvocation))
+	}
+
+	h.inj = &harnesstest.CrashInjector{}
+	wrapped.inj = &harnesstest.CrashInjector{}
+	second := h.newLoop(t, responses, sideEffect)
+	_, err := second.Run(context.Background(), cfg, &runtime.AgentContext{RunID: "run-am", Task: entity.DecisionTask{CanonicalQuestion: "q"}})
+	if err == nil {
+		t.Fatal("expected a fail-closed error when the incomplete model invocation is fenced")
+	}
+	if inv := rec.Invocation(modelInvocation); inv == nil || inv.AttemptCount != 1 {
+		t.Fatalf("model attempt count after resume = %+v, want still 1 (no regeneration)", rec.Invocation(modelInvocation))
 	}
 }
 
@@ -479,7 +633,8 @@ func TestReadOnlyToolMayRetryAfterAmbiguousCrash(t *testing.T) {
 // invocation ID while using a different physical attempt ID.
 func TestIdempotentToolRetryUsesSameIdempotencyKey(t *testing.T) {
 	tool := &ambiguousTool{}
-	tr := newAmbiguousRuntime(t, tool, harnesstest.NewRecordingInvocationRepository())
+	rec := harnesstest.NewRecordingInvocationRepository()
+	tr := newAmbiguousRuntime(t, tool, rec)
 	first, err := tr.Execute(context.Background(), toolRuntimeRequest("att-1", port.ToolEffectIdempotent))
 	if !errors.Is(err, execution.ErrAmbiguousInvocation) {
 		t.Fatalf("first error = %v, want ErrAmbiguousInvocation", err)
@@ -493,6 +648,16 @@ func TestIdempotentToolRetryUsesSameIdempotencyKey(t *testing.T) {
 	}
 	if second.Output != "ok" {
 		t.Fatalf("retry output = %q, want ok", second.Output)
+	}
+	persisted := rec.Invocation("inv-1")
+	if persisted == nil {
+		t.Fatal("expected the logical invocation to be persisted")
+	}
+	if persisted.IdempotencyKey == nil || *persisted.IdempotencyKey != first.IdempotencyKey {
+		t.Fatalf("persisted idempotency key = %v, want %q", persisted.IdempotencyKey, first.IdempotencyKey)
+	}
+	if persisted.AttemptCount != 2 {
+		t.Fatalf("attempt count = %d, want 2 physical attempts for one logical invocation", persisted.AttemptCount)
 	}
 }
 
