@@ -33,8 +33,14 @@ create_rag_volumes() {
 wait_ready() {
   echo "Waiting for middleware readiness (mysql + milvus :9091 + es :9200)..."
   local ready=0
+  local mysql_health=""
   for _ in $(seq 1 60); do
-    if compose ps --format '{{.Health}}' 2>/dev/null | grep -q 'healthy' \
+    # Wait for MySQL specifically. Checking for any "healthy" service would let
+    # an already-running milvus/es satisfy the gate while mysql is still
+    # initializing, so the backend would connect before mysqld accepts
+    # connections and fail with "invalid connection".
+    mysql_health="$(compose ps mysql --format '{{.Health}}' 2>/dev/null | head -1)"
+    if [ "$mysql_health" = "healthy" ] \
        && curl -sf http://localhost:9091/healthz >/dev/null 2>&1 \
        && curl -sf http://localhost:9200/ >/dev/null 2>&1; then
       ready=1
@@ -43,7 +49,7 @@ wait_ready() {
     sleep 2
   done
   if [ "$ready" -ne 1 ]; then
-    echo "ERROR: middleware did not become ready in time."
+    echo "ERROR: middleware did not become ready in time (mysql health=${mysql_health:-unknown})."
     echo "       Try 'scripts/docker.sh stop' then 'scripts/docker.sh start' again."
     exit 1
   fi

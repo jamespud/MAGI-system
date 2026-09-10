@@ -92,7 +92,7 @@ type CheckpointModel struct {
 	SnapshotVersion int       `gorm:"not null;default:1"`
 	SnapshotJSON    string    `gorm:"type:mediumtext"`
 	ManifestDigest  string    `gorm:"type:varchar(64);not null;default:''"`
-	UpdatedAt       time.Time `gorm:"not null"`
+	UpdatedAt       time.Time `gorm:"not null;type:datetime;default:CURRENT_TIMESTAMP"`
 }
 
 func (CheckpointModel) TableName() string { return "magi_agent_checkpoint" }
@@ -259,7 +259,7 @@ type RuntimeInvocationModel struct {
 	Error          *string `gorm:"type:text"`
 	StartedAt      *time.Time
 	CompletedAt    *time.Time
-	UpdatedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt      time.Time `gorm:"not null;type:datetime;default:CURRENT_TIMESTAMP"`
 }
 
 func (RuntimeInvocationModel) TableName() string { return "runtime_invocation" }
@@ -452,7 +452,9 @@ func AllModels() []any {
 		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{}, &EventCursorModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
-		&ToolCallModel{}, &ApprovalModel{}, &DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
+		&ToolCallModel{}, &ApprovalModel{},
+		&RuntimeInvocationModel{}, &RuntimeInvocationAttemptModel{},
+		&DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
 		&PluginBindingModel{},
 		&RecurringCaseModel{},
 		&JudgeModel{},
