@@ -38,6 +38,25 @@ func (r *memEvidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*ent
 
 var _ port.EvidenceRepository = (*memEvidenceRepo)(nil)
 
+// memVoteRepo is a tiny in-memory VoteRepository for handler tests.
+type memVoteRepo struct{ items []*entity.Vote }
+
+func (r *memVoteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	r.items = append(r.items, v)
+	return nil
+}
+func (r *memVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) {
+	var out []*entity.Vote
+	for _, v := range r.items {
+		if v.CaseID == caseID {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+var _ port.VoteRepository = (*memVoteRepo)(nil)
+
 func TestArtifactHandler_Evidence(t *testing.T) {
 	repo := &memEvidenceRepo{items: []*entity.EvidenceRecord{
 		{ID: "EV-001", CaseID: "c1", Observation: "obs1", Reliability: entity.ReliabilityScore{Final: 0.9}, CollectedBy: entity.MagiCode("melchior"), CreatedAt: time.Now()},
@@ -152,10 +171,10 @@ func (r *memToolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*ent
 
 func TestArtifactHandler_AgentsReturnsArrays(t *testing.T) {
 	evRepo := &memEvidenceRepo{items: []*entity.EvidenceRecord{
-		{ID: "EV-m1", CaseID: "c1", Observation: "obs", Reliability: entity.ReliabilityScore{Final: 0.9}, CollectedBy: entity.MagiCode("melchior"), CreatedAt: time.Now()},
+		{ID: "EV-m1", CaseID: "c1", AgentRunID: "run-m1", Observation: "obs", Reliability: entity.ReliabilityScore{Final: 0.9}, CollectedBy: entity.MagiCode("melchior"), CreatedAt: time.Now()},
 	}}
 	clRepo := &memClaimRepo{items: []*entity.Claim{
-		{ID: "CL-m1", CaseID: "c1", Statement: "claim text", CreatedBy: entity.MagiCode("melchior"), CreatedAt: time.Now()},
+		{ID: "CL-m1", CaseID: "c1", AgentRunID: "run-m1", Statement: "claim text", CreatedBy: entity.MagiCode("melchior"), CreatedAt: time.Now()},
 	}}
 	tcRepo := &memToolCallRepo{items: []*entity.ToolCall{
 		{ID: "tc1", CaseID: "c1", AgentRunID: "run-m1", ToolCallID: "call-1", ToolName: "calc", Arguments: "{}", Valid: true, Result: "3", DurationMs: 5, CreatedAt: time.Now()},
@@ -266,5 +285,85 @@ func TestArtifactHandler_AgentsSnapshotTieBreaksDeterministically(t *testing.T) 
 	}
 	if snap.Status != string(entity.AgentRunStatusRunning) {
 		t.Fatalf("status = %s, want the larger-id run's status", snap.Status)
+	}
+}
+
+// TestArtifactHandler_AgentsSnapshotIsRunScoped covers a same-round retry: the
+// snapshot for the newest run must not contain the older run's evidence,
+// claims, vote or tool calls even though they share an agent code and round.
+func TestArtifactHandler_AgentsSnapshotIsRunScoped(t *testing.T) {
+	started := time.Now()
+	runRepo := &memAgentRunRepo{items: []*entity.AgentRun{
+		{ID: "run-a", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 1, Status: entity.AgentRunStatusCompleted, StartedAt: started},
+		{ID: "run-b", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 1, Status: entity.AgentRunStatusRunning, StartedAt: started},
+	}}
+	evRepo := &memEvidenceRepo{items: []*entity.EvidenceRecord{
+		{ID: "EV-old", CaseID: "c1", AgentRunID: "run-a", Observation: "old", CollectedBy: entity.MagiCode("melchior"), CreatedAt: started},
+		{ID: "EV-new", CaseID: "c1", AgentRunID: "run-b", Observation: "new", CollectedBy: entity.MagiCode("melchior"), CreatedAt: started},
+	}}
+	clRepo := &memClaimRepo{items: []*entity.Claim{
+		{ID: "CL-old", CaseID: "c1", AgentRunID: "run-a", Statement: "old claim", CreatedBy: entity.MagiCode("melchior"), CreatedAt: started},
+		{ID: "CL-new", CaseID: "c1", AgentRunID: "run-b", Statement: "new claim", CreatedBy: entity.MagiCode("melchior"), CreatedAt: started},
+	}}
+	voteRepo := &memVoteRepo{items: []*entity.Vote{
+		{ID: "vote-a", CaseID: "c1", AgentRunID: "run-a", Round: 1, Decision: entity.VoteDecisionApprove, Confidence: 10, CreatedAt: started},
+		{ID: "vote-b", CaseID: "c1", AgentRunID: "run-b", Round: 1, Decision: entity.VoteDecisionReject, Confidence: 90, CreatedAt: started},
+	}}
+	tcRepo := &memToolCallRepo{items: []*entity.ToolCall{
+		{ID: "tc-a", CaseID: "c1", AgentRunID: "run-a", ToolCallID: "call-a", ToolName: "tool-a", Arguments: "{}", Valid: true, CreatedAt: started},
+		{ID: "tc-b", CaseID: "c1", AgentRunID: "run-b", ToolCallID: "call-b", ToolName: "tool-b", Arguments: "{}", Valid: true, CreatedAt: started},
+	}}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithAgentRunRepo(runRepo),
+		decision.WithEvidenceRepo(evRepo),
+		decision.WithClaimRepo(clRepo),
+		decision.WithVoteRepo(voteRepo),
+		decision.WithToolCallRepo(tcRepo))
+	h := handler.NewArtifactHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.GET("/cases/:id/agents", h.Agents)
+
+	w := ut.PerformRequest(r.Engine, "GET", "/cases/c1/agents", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("status: %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+	var out map[string]dto.AgentSnapshotDTO
+	if err := json.Unmarshal(w.Result().Body(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	snap := out["melchior"]
+	if len(snap.Evidence) != 1 || snap.Evidence[0].ID != "EV-new" {
+		t.Fatalf("evidence = %+v, want only the newest run's", snap.Evidence)
+	}
+	if len(snap.Claims) != 1 || snap.Claims[0].ID != "CL-new" {
+		t.Fatalf("claims = %+v, want only the newest run's", snap.Claims)
+	}
+	if len(snap.ToolCalls) != 1 || snap.ToolCalls[0].ToolCallID != "call-b" {
+		t.Fatalf("tool calls = %+v, want only the newest run's", snap.ToolCalls)
+	}
+	if snap.Vote == nil || snap.Vote.Stance != string(entity.VoteDecisionReject) {
+		t.Fatalf("vote = %+v, want the newest run's vote", snap.Vote)
+	}
+}
+
+// TestArtifactHandler_FailsClosedWhenCaseLookupErrors proves the authorization
+// lookup is fail-closed: a repository error is a 5xx, not a 200/403 that hides
+// the outage (open mode previously allowed a nil case through).
+func TestArtifactHandler_FailsClosedWhenCaseLookupErrors(t *testing.T) {
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithCaseRepo(erroringCaseLookup{}),
+		decision.WithEvidenceRepo(&memEvidenceRepo{}))
+	h := handler.NewArtifactHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.GET("/cases/:id/agents", h.Agents)
+	r.GET("/cases/:id/evidence", h.Evidence)
+
+	for _, path := range []string{"/cases/c1/agents", "/cases/c1/evidence"} {
+		w := ut.PerformRequest(r.Engine, "GET", path, nil)
+		if got := w.Result().StatusCode(); got != 500 {
+			t.Fatalf("%s: expected 500 when the case lookup fails, got %d body=%s", path, got, string(w.Result().Body()))
+		}
 	}
 }

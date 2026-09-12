@@ -2,6 +2,7 @@ package decision
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
+
+// ErrCaseRepoUnconfigured signals that no case repository is wired (standalone
+// mode). It is deliberately distinct from a lookup failure so callers do not
+// report a storage outage when there is simply no store.
+var ErrCaseRepoUnconfigured = errors.New("case repository not configured")
 
 // Orchestrator is the domain orchestrator interface (satisfied by
 // orchestration.Orchestrator implicitly).
@@ -304,7 +310,7 @@ func (s *Service) Get(ctx context.Context, id string) (*entity.DecisionCase, err
 	if s.caseRepo != nil {
 		return s.caseRepo.Get(ctx, id)
 	}
-	return nil, fmt.Errorf("case repository not configured")
+	return nil, ErrCaseRepoUnconfigured
 }
 
 // Resolution returns the persisted resolution for a case, or nil if none.

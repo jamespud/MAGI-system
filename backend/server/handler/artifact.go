@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -23,7 +24,16 @@ func NewArtifactHandler(svc *decision.Service) *ArtifactHandler {
 
 // authorize checks that the authenticated principal may access the case.
 func (h *ArtifactHandler) authorize(ctx context.Context, c *app.RequestContext, id string) bool {
-	case_, _ := h.svc.Get(ctx, id)
+	// Fail closed: a repository failure must not be interpreted as "unknown
+	// case" (open mode would then allow the read, and a DB outage would be
+	// served as an empty/forbidden artifact set instead of a 5xx). The only
+	// exempt case is "no case repository wired" (standalone), which is not an
+	// outage and is handled by CaseAllowed below.
+	case_, err := h.svc.Get(ctx, id)
+	if err != nil && !errors.Is(err, decision.ErrCaseRepoUnconfigured) {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return false
+	}
 	if CaseAllowed(ctx, case_) {
 		return true
 	}
@@ -129,30 +139,27 @@ func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	evByAgent := map[string][]dto.EvidenceDTO{}
+	// Group by AgentRunID, not by agent code: after a crash/retry two runs for
+	// the same agent+round exist, and grouping by CollectedBy/CreatedBy would
+	// splice the old run's evidence/claims into the newest run's snapshot.
+	evByRun := map[string][]dto.EvidenceDTO{}
 	for _, e := range evs {
-		code := string(e.CollectedBy)
-		evByAgent[code] = append(evByAgent[code], dto.FromEvidence(e))
+		evByRun[e.AgentRunID] = append(evByRun[e.AgentRunID], dto.FromEvidence(e))
 	}
-	clByAgent := map[string][]dto.ClaimDTO{}
+	clByRun := map[string][]dto.ClaimDTO{}
 	for _, cl := range cls {
-		code := string(cl.CreatedBy)
-		clByAgent[code] = append(clByAgent[code], dto.FromClaim(cl))
+		clByRun[cl.AgentRunID] = append(clByRun[cl.AgentRunID], dto.FromClaim(cl))
 	}
 	tcByRun := map[string][]dto.ToolCallDTO{}
 	for _, tc := range tcs {
 		tcByRun[tc.AgentRunID] = append(tcByRun[tc.AgentRunID], dto.FromToolCall(tc))
 	}
-	// latest vote per agent (by round)
-	voteByAgent := map[string]*dto.VoteDTO{}
+	// latest vote per run
+	voteByRun := map[string]*entity.Vote{}
 	for _, v := range vs {
-		key := agentCodeFromRun(runs, v)
-		if key == "" {
-			continue
-		}
-		vd := dto.FromVote(v, key)
-		if cur, ok := voteByAgent[key]; !ok || v.Round >= cur.Round {
-			voteByAgent[key] = &vd
+		cur, ok := voteByRun[v.AgentRunID]
+		if !ok || voteIsNewer(v, cur) {
+			voteByRun[v.AgentRunID] = v
 		}
 	}
 	// Select the single latest run per agent, then build every field of the
@@ -174,11 +181,11 @@ func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 		if toolCalls == nil {
 			toolCalls = []dto.ToolCallDTO{}
 		}
-		evidence := evByAgent[code]
+		evidence := evByRun[r.ID]
 		if evidence == nil {
 			evidence = []dto.EvidenceDTO{}
 		}
-		claims := clByAgent[code]
+		claims := clByRun[r.ID]
 		if claims == nil {
 			claims = []dto.ClaimDTO{}
 		}
@@ -191,8 +198,9 @@ func (h *ArtifactHandler) Agents(ctx context.Context, c *app.RequestContext) {
 			Evidence:  evidence,
 			Claims:    claims,
 		}
-		if v, ok := voteByAgent[code]; ok {
-			snap.Vote = v
+		if v, ok := voteByRun[r.ID]; ok {
+			vd := dto.FromVote(v, code)
+			snap.Vote = &vd
 		}
 		out[code] = snap
 	}
@@ -213,13 +221,14 @@ func runIsNewer(a, b *entity.AgentRun) bool {
 	return a.ID > b.ID
 }
 
-// agentCodeFromRun resolves the agent code for a vote by joining on AgentRunID
-// when available; votes persisted with a known agent code carry it directly.
-func agentCodeFromRun(runs []*entity.AgentRun, v *entity.Vote) string {
-	for _, r := range runs {
-		if r.ID == v.AgentRunID {
-			return string(r.MagiCode)
-		}
+// voteIsNewer orders votes inside a single run deterministically (a run should
+// hold one vote, but a revote can add another).
+func voteIsNewer(a, b *entity.Vote) bool {
+	if a.Round != b.Round {
+		return a.Round > b.Round
 	}
-	return ""
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID > b.ID
 }
