@@ -3,6 +3,7 @@ package a2aapp_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -21,13 +22,18 @@ import (
 
 func openSubmissionDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	// Use a file-backed SQLite database rather than ":memory:". An in-memory
+	// database lives on a single pooled connection, so if that connection is
+	// ever discarded (a query canceled mid-flight under -race/load can do this)
+	// the schema vanishes and later queries fail with a spurious "no such
+	// table". A file survives connection churn, matching production behavior.
+	dsn := filepath.Join(t.TempDir(), "submission.db")
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A single connection keeps the in-memory SQLite database shared across
-	// goroutines; without it each pooled connection gets its own empty
-	// :memory: database and concurrent tests see "no such table".
+	// Serialize access on one connection so concurrent readers/writers do not
+	// trip SQLITE_BUSY.
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatal(err)

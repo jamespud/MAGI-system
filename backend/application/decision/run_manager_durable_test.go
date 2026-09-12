@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -108,7 +109,11 @@ func (o *durableRetryOrchestrator) Orchestrate(ctx context.Context, c *entity.De
 
 func openJobDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	// File-backed rather than ":memory:": a single pooled in-memory connection
+	// loses the whole schema if it is discarded (e.g. a query canceled
+	// mid-flight), which surfaces as a spurious "no such table".
+	dsn := filepath.Join(t.TempDir(), "jobs.db")
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

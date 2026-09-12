@@ -28,6 +28,7 @@ type testEventBroker struct {
 	subs           map[string][]chan *entity.MagiEvent
 	stored         map[string][]*entity.MagiEvent
 	nextSeq        uint64
+	dropped        int
 	blockSubscribe chan struct{}
 }
 
@@ -67,13 +68,20 @@ func (b *testEventBroker) SubscriberCount(caseID string) int {
 
 func (b *testEventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.nextSeq++
 	e.Seq = b.nextSeq
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], &e)
-	subs := append([]chan *entity.MagiEvent(nil), b.subs[e.CaseID]...)
-	b.mu.Unlock()
-	for _, ch := range subs {
-		ch <- &e
+	// Fan out while holding the lock and without blocking, mirroring the
+	// production broker. Sending outside the lock raced with Unsubscribe's
+	// close(ch) (and could panic on a closed channel); a blocking send under the
+	// lock could deadlock if a subscriber stops draining.
+	for _, ch := range b.subs[e.CaseID] {
+		select {
+		case ch <- &e:
+		default:
+			b.dropped++
+		}
 	}
 	return nil
 }
