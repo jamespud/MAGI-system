@@ -152,13 +152,22 @@ tavily:
 #   price_per_m_input_usd: 2.5
 #   price_per_m_output_usd: 10.0
 
-# API-key authentication. Set enabled: true and define at least one key.
+# Authentication. Two credential kinds exist and they are NOT equivalent:
+#   static_tokens : SERVICE credentials declared in configuration. Each carries
+#                   its role inline and never consults the user store, so
+#                   disabling or deleting a user does NOT revoke them. Use for
+#                   automation/service access, never for human accounts.
+#   user API keys : DB-issued (POST /admin/users/:id/keys). These are owner
+#                   scoped: disabling, deleting or re-roling the account takes
+#                   effect on its keys immediately.
 auth:
   enabled: false
-  api_keys: []
-  # Supply bootstrap keys through MAGI_AUTH_API_KEYS using:
+  static_tokens: []
+  # Supply service tokens through MAGI_AUTH_STATIC_TOKENS using:
   # userID:role:name:<generated-random-secret>
-  # Prefer DB-issued keys after bootstrap; plaintext is shown only once.
+  # Prefer DB-issued user keys after bootstrap; their plaintext is shown once.
+  # `auth.api_keys` and MAGI_AUTH_API_KEYS are the deprecated spellings of
+  # static_tokens and still work.
   # Public self-registration (creates a user-role account + one-time key).
   self_registration: false
   # OpenID Connect authorization-code login (SSO). When enabled, sign in with

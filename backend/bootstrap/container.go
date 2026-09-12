@@ -1285,8 +1285,9 @@ func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKey
 }
 
 func staticKeySpecs(cfg *Config) []auth.KeySpec {
-	keys := make([]auth.KeySpec, 0, len(cfg.Auth.APIKeys))
-	for _, k := range cfg.Auth.APIKeys {
+	staticTokens := cfg.StaticTokens()
+	keys := make([]auth.KeySpec, 0, len(staticTokens))
+	for _, k := range staticTokens {
 		keys = append(keys, auth.KeySpec{Name: k.Name, Key: k.Key, KeyHash: k.KeyHash, UserID: k.UserID, Role: k.Role})
 	}
 	return keys
@@ -1449,7 +1450,7 @@ func provideRedactor(cfg *Config) *redact.Redactor {
 	for _, provider := range webSearchProviderSpecs(cfg) {
 		secrets = append(secrets, provider.APIKey)
 	}
-	for _, k := range cfg.Auth.APIKeys {
+	for _, k := range cfg.StaticTokens() {
 		secrets = append(secrets, k.Key)
 	}
 	return redact.New(secrets...)

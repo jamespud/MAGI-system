@@ -19,16 +19,52 @@ func TestExampleConfigContainsNoActiveBootstrapCredential(t *testing.T) {
 	}
 	var doc struct {
 		Auth struct {
-			APIKeys []bootstrap.APIKeySpec `yaml:"api_keys"`
+			StaticTokens []bootstrap.APIKeySpec `yaml:"static_tokens"`
+			APIKeys      []bootstrap.APIKeySpec `yaml:"api_keys"`
 		} `yaml:"auth"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range doc.Auth.APIKeys {
+	for _, key := range append(doc.Auth.StaticTokens, doc.Auth.APIKeys...) {
 		if strings.TrimSpace(key.Key) != "" || strings.TrimSpace(key.KeyHash) != "" {
 			t.Fatalf("example config contains an active bootstrap credential: name=%q", key.Name)
 		}
+	}
+}
+
+// TestConfig_StaticTokensAcceptsDeprecatedAPIKeysAlias pins the rename contract:
+// the preferred spelling is auth.static_tokens, the older auth.api_keys still
+// works, and a half-migrated config that sets both uses their union.
+func TestConfig_StaticTokensAcceptsDeprecatedAPIKeysAlias(t *testing.T) {
+	cfg, err := loadA2ATestConfig(t, "auth:\n  enabled: true\n  static_tokens:\n    - {user_id: 1, role: admin, name: svc, key: k-new}\n")
+	if err != nil {
+		t.Fatalf("load static_tokens: %v", err)
+	}
+	if got := cfg.StaticTokens(); len(got) != 1 || got[0].Key != "k-new" {
+		t.Fatalf("static_tokens = %+v", got)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("static_tokens should satisfy validation: %v", err)
+	}
+
+	legacy, err := loadA2ATestConfig(t, "auth:\n  enabled: true\n  api_keys:\n    - {user_id: 1, role: admin, name: svc, key: k-old}\n")
+	if err != nil {
+		t.Fatalf("load legacy api_keys: %v", err)
+	}
+	if got := legacy.StaticTokens(); len(got) != 1 || got[0].Key != "k-old" {
+		t.Fatalf("deprecated api_keys = %+v", got)
+	}
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("deprecated api_keys should still satisfy validation: %v", err)
+	}
+
+	both, err := loadA2ATestConfig(t, "auth:\n  enabled: true\n  static_tokens:\n    - {user_id: 1, role: admin, name: svc, key: k-new}\n  api_keys:\n    - {user_id: 2, role: user, name: old, key: k-old}\n")
+	if err != nil {
+		t.Fatalf("load both spellings: %v", err)
+	}
+	if got := both.StaticTokens(); len(got) != 2 {
+		t.Fatalf("union of both spellings = %+v, want both entries", got)
 	}
 }
 

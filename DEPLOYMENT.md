@@ -123,7 +123,13 @@ runs, tool/model/search failures and failovers, model cost) from
   `POST /admin/keys/:id/revoke` disables a key, `POST /admin/keys/:id/rotate`
   revokes and issues a replacement. `GET /me` shows the current principal and
   lets users self-issue keys (`POST /me/keys`).
-- The auth middleware checks static keys first, then DB keys by hash,
+- **Two credential kinds, deliberately different.** `auth.static_tokens`
+  (deprecated spelling: `auth.api_keys`, or `MAGI_AUTH_STATIC_TOKENS` /
+  `MAGI_AUTH_API_KEYS`) are *service* credentials declared in configuration:
+  each carries its role inline, has no user row, and never consults the user
+  store, so disabling a user does not revoke them — use them for automation,
+  never for humans. DB-issued *user* API keys are owner-scoped (below).
+- The auth middleware checks static tokens first, then DB keys by hash,
   updating `last_used_at` for observability. Revoked or deleted keys stop
   authenticating immediately.
 - **DB keys are owner-scoped**: after resolving a key the middleware loads its
@@ -133,6 +139,10 @@ runs, tool/model/search failures and failovers, model cost) from
   key or user store cannot be read the request fails closed with `503` instead
   of authenticating. Static keys declared in `auth.api_keys` are
   operator-declared config with an inline role and never consult the user store.
+  Authorization is evaluated when the credential is resolved (the commit
+  point), not for the whole request lifetime: a change that lands while a
+  request is already being authenticated may let that request finish, but every
+  later request re-checks and is rejected.
 - **Roles**: `admin` (users, API keys, all routes), `operator` (usage,
   prompts, benchmark seed and eval summary), and `user` (own workspace).
   Routes are gated with `RequireAnyRole(...)`; user and API-key management

@@ -41,7 +41,15 @@ type Config struct {
 	} `yaml:"tavily"`
 	Search SearchConfig `yaml:"search"`
 	Auth   struct {
-		Enabled          bool         `yaml:"enabled"`
+		Enabled bool `yaml:"enabled"`
+		// StaticTokens are SERVICE credentials declared in configuration, not
+		// user credentials: each carries its role inline and never consults the
+		// user store, so disabling or deleting a user does not revoke them.
+		// Use DB-issued user keys (see /admin/users/:id/keys) for anything that
+		// should follow an account's lifecycle.
+		StaticTokens []APIKeySpec `yaml:"static_tokens"`
+		// APIKeys is the deprecated spelling of StaticTokens. Both are honored
+		// and their union is used; prefer static_tokens.
 		APIKeys          []APIKeySpec `yaml:"api_keys"`
 		SelfRegistration bool         `yaml:"self_registration"`
 		OIDC             OIDCConfig   `yaml:"oidc"`
@@ -572,6 +580,9 @@ func applyEnvOverrides(cfg *Config) error {
 	if v := os.Getenv("MAGI_AUTH_API_KEYS"); v != "" {
 		cfg.Auth.APIKeys = parseAPIKeys(v)
 	}
+	if v := os.Getenv("MAGI_AUTH_STATIC_TOKENS"); v != "" {
+		cfg.Auth.StaticTokens = parseAPIKeys(v)
+	}
 	if v := os.Getenv("MAGI_EMBEDDING_API_KEY"); v != "" {
 		cfg.Embedding.APIKey = v
 	}
@@ -659,8 +670,9 @@ func applyEnvOverrides(cfg *Config) error {
 	return nil
 }
 
-// parseAPIKeys parses MAGI_AUTH_API_KEYS entries separated by ';', each in the
-// form userID:role:name:key (the key may contain colons).
+// parseAPIKeys parses MAGI_AUTH_STATIC_TOKENS / MAGI_AUTH_API_KEYS entries
+// separated by ';', each in the form userID:role:name:key (the key may contain
+// colons).
 func parseAPIKeys(raw string) []APIKeySpec {
 	var out []APIKeySpec
 	for _, entry := range strings.Split(raw, ";") {
@@ -683,6 +695,23 @@ func parseAPIKeys(raw string) []APIKeySpec {
 			Key:    strings.TrimSpace(parts[3]),
 		})
 	}
+	return out
+}
+
+// StaticTokens returns the configured service credentials, accepting the
+// deprecated `auth.api_keys` spelling as an alias for static_tokens. When both
+// are present their union is used, so a partially migrated config is not
+// silently half-applied.
+func (c *Config) StaticTokens() []APIKeySpec {
+	switch {
+	case len(c.Auth.APIKeys) == 0:
+		return c.Auth.StaticTokens
+	case len(c.Auth.StaticTokens) == 0:
+		return c.Auth.APIKeys
+	}
+	out := make([]APIKeySpec, 0, len(c.Auth.StaticTokens)+len(c.Auth.APIKeys))
+	out = append(out, c.Auth.StaticTokens...)
+	out = append(out, c.Auth.APIKeys...)
 	return out
 }
 
@@ -1117,12 +1146,13 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.Auth.Enabled {
-		if len(c.Auth.APIKeys) == 0 {
-			return fmt.Errorf("auth: at least one api_key is required when enabled")
+		staticTokens := c.StaticTokens()
+		if len(staticTokens) == 0 {
+			return fmt.Errorf("auth: at least one static_token is required when enabled")
 		}
-		for _, k := range c.Auth.APIKeys {
+		for _, k := range staticTokens {
 			if (k.Key == "" && k.KeyHash == "") || k.UserID <= 0 || k.Role == "" {
-				return fmt.Errorf("auth: each api_key needs non-empty key, user_id > 0 and role")
+				return fmt.Errorf("auth: each static_token needs non-empty key, user_id > 0 and role")
 			}
 		}
 	}
