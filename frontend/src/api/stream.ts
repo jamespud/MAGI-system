@@ -121,8 +121,12 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
   const controller = new AbortController();
   let closed = false;
   let retryMs = 500;
-  let lastSeq = 0;
+  // lastEventId is the resume cursor (only the SSE `id:` field writes it);
+  // lastPayloadSeq is the gap checker (only the JSON payload seq writes it).
+  // Keeping them separate is what makes gap detection actually fire when
+  // id == seq on the wire.
   let lastEventId = '';
+  let lastPayloadSeq = 0;
 
   const processEvent = (data: string) => {
     let raw: ApiEvent;
@@ -132,15 +136,13 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       return; // ignore malformed frames
     }
     // Sequence gaps mean the broker dropped frames for a slow consumer;
-    // refetch the authoritative state instead of rendering a hole. The payload
-    // seq is a CONSISTENCY CHECK only — the SSE `id:` field is the sole resume
-    // watermark, so the two can never diverge.
+    // refetch the authoritative state instead of rendering a hole.
     if (typeof raw.seq === 'number' && raw.seq > 0) {
-      if (lastSeq > 0 && raw.seq > lastSeq + 1) {
+      if (lastPayloadSeq > 0 && raw.seq > lastPayloadSeq + 1) {
         void useCaseStore.getState().fetchCase(caseId, { silent: true });
         if (onTerminal) onTerminal(); // refetch artifacts as well
       }
-      lastSeq = Math.max(lastSeq, raw.seq);
+      lastPayloadSeq = Math.max(lastPayloadSeq, raw.seq);
     }
     if (raw.type === 'CASE_STATUS_CHANGED') {
       const status = raw.payload?.status;
@@ -185,11 +187,7 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
     for (const line of frame.split(/\r?\n/)) {
       if (line.startsWith('id:')) {
         const id = line.slice(3).trim();
-        if (id) {
-          lastEventId = id;
-          const seq = Number(id);
-          if (Number.isFinite(seq) && seq > lastSeq) lastSeq = seq;
-        }
+        if (id) lastEventId = id;
       } else if (line.startsWith('data:')) {
         dataLines.push(line.slice(5).trimStart());
       }

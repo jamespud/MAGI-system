@@ -265,4 +265,22 @@ describe('subscribeCaseStream', () => {
     expect((secondInit.headers as Record<string, string>)['Last-Event-ID']).toBeUndefined();
     unsub();
   });
+
+  it('refetches when a sequence gap is detected', async () => {
+    const onTerminal = vi.fn();
+    const sse = setupSSE();
+    const unsub = subscribeCaseStream('c1', onTerminal);
+    await flush();
+
+    // Contiguous sequences do not trigger a refetch.
+    sse.emit({ id: 'e7', type: 'AGENT_STARTED', agent_code: 'melchior', message: 'm', timestamp: 't', seq: 7 });
+    await flush();
+    expect(onTerminal).not.toHaveBeenCalled();
+
+    // 7 -> 10 is a gap: the authoritative state must be refetched.
+    sse.emit({ id: 'e10', type: 'AGENT_STARTED', agent_code: 'melchior', message: 'm', timestamp: 't', seq: 10 });
+    await flush();
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+    unsub();
+  });
 });
