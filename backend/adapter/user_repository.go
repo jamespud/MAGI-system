@@ -2,6 +2,7 @@ package magi
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -23,7 +24,13 @@ func (r *userRepo) Create(ctx context.Context, u *entity.User) error {
 		u.CreatedAt = time.Now()
 	}
 	u.UpdatedAt = u.CreatedAt
-	m := UserModel{Name: u.Name, Email: u.Email, Role: u.Role, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt}
+	if u.Status == "" {
+		u.Status = entity.UserStatusActive
+	}
+	m := UserModel{
+		Name: u.Name, Email: u.Email, Role: u.Role, Status: u.Status,
+		AuthVersion: u.AuthVersion, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
+	}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
 		return err
 	}
@@ -34,17 +41,23 @@ func (r *userRepo) Create(ctx context.Context, u *entity.User) error {
 func (r *userRepo) GetByID(ctx context.Context, id int64) (*entity.User, error) {
 	var m UserModel
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, port.ErrUserNotFound
+		}
 		return nil, err
 	}
-	return &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
+	return userFromModel(&m), nil
 }
 
 func (r *userRepo) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
 	var m UserModel
 	if err := r.db.WithContext(ctx).Where("email = ?", strings.TrimSpace(email)).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, port.ErrUserNotFound
+		}
 		return nil, err
 	}
-	return &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}, nil
+	return userFromModel(&m), nil
 }
 
 func (r *userRepo) List(ctx context.Context) ([]*entity.User, error) {
@@ -54,21 +67,105 @@ func (r *userRepo) List(ctx context.Context) ([]*entity.User, error) {
 	}
 	out := make([]*entity.User, len(models))
 	for i := range models {
-		m := &models[i]
-		out[i] = &entity.User{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
+		out[i] = userFromModel(&models[i])
 	}
 	return out, nil
 }
 
 func (r *userRepo) Update(ctx context.Context, u *entity.User) error {
 	u.UpdatedAt = time.Now()
-	return r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", u.ID).Updates(map[string]any{
+	res := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", u.ID).Updates(map[string]any{
 		"name": u.Name, "email": u.Email, "role": u.Role, "updated_at": u.UpdatedAt,
-	}).Error
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		if _, err := r.GetByID(ctx, u.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *userRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&UserModel{}).Error
+	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&UserModel{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return port.ErrUserNotFound
+	}
+	return nil
+}
+
+// SetUserRole changes the role and bumps auth_version in one statement.
+func (r *userRepo) SetUserRole(ctx context.Context, id int64, role string) (int64, error) {
+	return r.mutate(ctx, id, map[string]any{"role": role})
+}
+
+// SetUserStatus changes active/disabled and bumps auth_version in one statement.
+func (r *userRepo) SetUserStatus(ctx context.Context, id int64, status string) (int64, error) {
+	return r.mutate(ctx, id, map[string]any{"status": status})
+}
+
+// BumpAuthVersion invalidates every existing session for the user.
+func (r *userRepo) BumpAuthVersion(ctx context.Context, id int64) (int64, error) {
+	return r.mutate(ctx, id, nil)
+}
+
+// mutate applies extra column updates together with an atomic auth_version
+// increment, so no reader can observe the new authorization facts paired with
+// the previous version.
+func (r *userRepo) mutate(ctx context.Context, id int64, extra map[string]any) (int64, error) {
+	updates := map[string]any{
+		"auth_version": gorm.Expr("auth_version + 1"),
+		"updated_at":   time.Now(),
+	}
+	for k, v := range extra {
+		updates[k] = v
+	}
+	res := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", id).Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, port.ErrUserNotFound
+	}
+	var m UserModel
+	if err := r.db.WithContext(ctx).Select("auth_version").Where("id = ?", id).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, port.ErrUserNotFound
+		}
+		return 0, err
+	}
+	return m.AuthVersion, nil
+}
+
+// UpdateUserProfile changes name/email without touching auth_version: profile
+// edits must not log the user out of their existing sessions.
+func (r *userRepo) UpdateUserProfile(ctx context.Context, id int64, name, email string) error {
+	res := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", id).Updates(map[string]any{
+		"name": name, "email": email, "updated_at": time.Now(),
+	})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// MySQL reports 0 affected rows when the values are unchanged, so
+		// confirm the row still exists instead of reporting a false not-found.
+		if _, err := r.GetByID(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func userFromModel(m *UserModel) *entity.User {
+	return &entity.User{
+		ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, Status: m.Status,
+		AuthVersion: m.AuthVersion, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}
 }
 
 type apiKeyRepo struct{ db *gorm.DB }

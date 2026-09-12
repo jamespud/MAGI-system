@@ -984,6 +984,7 @@ type UserDTO struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	Role       string `json:"role"`
+	Status     string `json:"status"`
 	ActiveKeys int    `json:"active_keys"`
 	CreatedAt  string `json:"created_at,omitempty"`
 }
@@ -1011,6 +1012,16 @@ type CreateUserRequest struct {
 	Role string `json:"role,omitempty"`
 }
 
+// UpdateUserRequest is an admin account patch. Omitted fields are unchanged.
+// Role/status changes invalidate the account's existing sessions; name/email
+// changes do not.
+type UpdateUserRequest struct {
+	Name   *string `json:"name,omitempty"`
+	Email  *string `json:"email,omitempty"`
+	Role   *string `json:"role,omitempty"`
+	Status *string `json:"status,omitempty"`
+}
+
 type CreateUserResponse struct {
 	User   UserDTO       `json:"user"`
 	ApiKey *IssuedKeyDTO `json:"api_key,omitempty"`
@@ -1035,7 +1046,11 @@ type KeyListResponse struct {
 
 // FromUser maps a user entity (plus key count) to its DTO.
 func FromUser(u *entity.User, activeKeys int) UserDTO {
-	out := UserDTO{ID: u.ID, Name: u.Name, Role: u.Role, ActiveKeys: activeKeys}
+	status := u.Status
+	if status == "" {
+		status = entity.UserStatusActive
+	}
+	out := UserDTO{ID: u.ID, Name: u.Name, Role: u.Role, Status: status, ActiveKeys: activeKeys}
 	if !u.CreatedAt.IsZero() {
 		out.CreatedAt = u.CreatedAt.Format(time.RFC3339)
 	}

@@ -551,12 +551,14 @@ func (KnowledgeDocModel) TableName() string { return "knowledge_docs" }
 
 // UserModel persists a harness account.
 type UserModel struct {
-	ID        int64 `gorm:"primaryKey;autoIncrement"`
-	Name      string
-	Email     string `gorm:"index;size:255"`
-	Role      string `gorm:"size:16;default:user"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          int64 `gorm:"primaryKey;autoIncrement"`
+	Name        string
+	Email       string `gorm:"index;size:255"`
+	Role        string `gorm:"size:16;default:user"`
+	Status      string `gorm:"size:16;default:active"`
+	AuthVersion int64  `gorm:"not null;default:0"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (UserModel) TableName() string { return "users" }

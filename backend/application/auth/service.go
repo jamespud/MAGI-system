@@ -52,6 +52,9 @@ type Service struct {
 	keyStore  KeyStore
 	userStore UserStore
 	session   *SessionCodec
+	// authorizer revalidates OIDC session cookies against current user state.
+	// Nil means sessions cannot be revalidated and are refused.
+	authorizer *SessionAuthorizer
 }
 
 // WithStores wires the DB-backed key/user stores so runtime-issued keys
@@ -68,16 +71,32 @@ func (s *Service) WithSession(codec *SessionCodec) *Service {
 	return s
 }
 
-// AuthenticateSession validates a signed session cookie token.
-func (s *Service) AuthenticateSession(token string) (*Principal, bool) {
+// WithSessionAuthorizer wires the store-backed revalidation used for session
+// cookies. Without it, signed sessions are refused (fail closed) rather than
+// trusted on the strength of the signature alone.
+func (s *Service) WithSessionAuthorizer(a *SessionAuthorizer) *Service {
+	s.authorizer = a
+	return s
+}
+
+// AuthenticateSession validates a signed session cookie and resolves the
+// caller's CURRENT role/status from the user store.
+//
+// The cookie is trusted only for the user id and the auth version it was minted
+// with; role and status always come from the store (via a short TTL cache). It
+// returns ErrSessionUnauthorized when the session is not (or no longer)
+// valid — 401 — and ErrAuthStateUnavailable when the store could not be read,
+// which callers must treat as fail-closed rather than falling back to the
+// cookie's stale claims.
+func (s *Service) AuthenticateSession(ctx context.Context, token string) (*Principal, error) {
 	if !s.enabled || s.session == nil || token == "" {
-		return nil, false
+		return nil, ErrSessionUnauthorized
 	}
-	p, err := s.session.Decode(token)
+	userID, authVersion, err := s.session.Decode(token)
 	if err != nil {
-		return nil, false
+		return nil, ErrSessionUnauthorized
 	}
-	return p, true
+	return s.authorizer.Resolve(ctx, userID, authVersion)
 }
 
 func NewService(enabled bool, keys []KeySpec) *Service {

@@ -90,6 +90,7 @@ var Module = fx.Options(
 		provideMCPAdapter,
 		provideAuthService,
 		provideSessionCodec,
+		provideSessionAuthorizer,
 		provideOIDCClient,
 		provideOIDCHandler,
 		provideUserRepository,
@@ -1264,10 +1265,21 @@ func provideRepository(db *gorm.DB) port.Repository {
 	return magi.NewRepository(db)
 }
 
-func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKeyRepository, codec *auth.SessionCodec) *auth.Service {
+// provideSessionAuthorizer builds the store-backed revalidation used for OIDC
+// session cookies. Without a user repository, sessions cannot be revalidated
+// and are refused (fail closed).
+func provideSessionAuthorizer(users port.UserRepository) *auth.SessionAuthorizer {
+	if users == nil {
+		return nil
+	}
+	return auth.NewSessionAuthorizer(users, auth.DefaultAuthStateTTL)
+}
+
+func provideAuthService(cfg *Config, users port.UserRepository, keys port.ApiKeyRepository, codec *auth.SessionCodec, authorizer *auth.SessionAuthorizer) *auth.Service {
 	svc := auth.NewService(cfg.Auth.Enabled, staticKeySpecs(cfg)).WithStores(keys, users)
 	if codec != nil {
 		svc = svc.WithSession(codec)
+		svc = svc.WithSessionAuthorizer(authorizer)
 	}
 	return svc
 }
@@ -1288,9 +1300,13 @@ func provideApiKeyRepository(db *gorm.DB) port.ApiKeyRepository {
 	return magi.NewApiKeyRepository(db)
 }
 
-func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyRepository, cfg *Config) *users.Service {
+func provideUsersService(userRepo port.UserRepository, keyRepo port.ApiKeyRepository, cfg *Config, authorizer *auth.SessionAuthorizer) *users.Service {
 	selfRegistration := cfg.Auth.SelfRegistration || cfg.Auth.OIDC.SelfRegistration
-	return users.NewServiceWithOptions(userRepo, keyRepo, users.WithSelfRegistration(selfRegistration))
+	opts := []func(*users.Service){users.WithSelfRegistration(selfRegistration)}
+	if authorizer != nil {
+		opts = append(opts, users.WithSessionInvalidator(authorizer))
+	}
+	return users.NewServiceWithOptions(userRepo, keyRepo, opts...)
 }
 
 func provideSessionCodec(cfg *Config) (*auth.SessionCodec, error) {

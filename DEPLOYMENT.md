@@ -143,6 +143,17 @@ for public one-time-key account creation. The one-time state store is
 in-memory, so multi-replica deployments should terminate OIDC at a gateway or
 share state.
 
+The session cookie carries only the user id, an `auth_version` and an expiry —
+never a role. Every request re-resolves the caller's current role/status from
+the user store (through a short-TTL in-process cache), so a permission change
+takes effect immediately: `PATCH /admin/users/:id` with `role` or `status`, and
+`POST /admin/users/:id/revoke-sessions`, both bump `auth_version` and invalidate
+existing cookies. Profile-only edits (name/email) deliberately do not. A
+disabled or deleted account is rejected, and if the user store cannot be read
+the request fails closed with `503` rather than falling back to the cookie's
+old authority. Changing the cookie payload layout is a schema version bump, so
+older cookies are rejected and require a fresh login.
+
 ### Multi-tenant boundaries and sandbox egress
 
 - **Per-user limits are cumulative and independent**: run concurrency

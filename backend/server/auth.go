@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -36,9 +37,27 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 		}
 		p, ok := authSvc.Authenticate(ctx, token)
 		if !ok {
-			// OIDC signed session cookie fallback.
+			// OIDC signed session cookie fallback. The cookie is revalidated
+			// against current user state, so a disabled, demoted, deleted or
+			// explicitly revoked account stops working immediately.
 			if cookie := c.Cookie("magi_session"); len(cookie) > 0 {
-				p, ok = authSvc.AuthenticateSession(string(cookie))
+				sp, serr := authSvc.AuthenticateSession(ctx, string(cookie))
+				switch {
+				case serr == nil:
+					p, ok = sp, true
+				case errors.Is(serr, auth.ErrAuthStateUnavailable):
+					// The session cannot be proven valid (user store down), so
+					// fail closed rather than trusting the cookie's old grants.
+					if a2aerror.IsProtocolPath(string(c.Path())) {
+						a2aerror.Write(c, consts.StatusServiceUnavailable, "UNAVAILABLE", "UNAVAILABLE", "authorization state unavailable")
+					} else {
+						c.JSON(consts.StatusServiceUnavailable, dto.ErrorResponse{Error: "authorization state unavailable"})
+					}
+					c.Abort()
+					return
+				default:
+					// Invalid, expired or revoked session: fall through to 401.
+				}
 			}
 		}
 		if !ok {

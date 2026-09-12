@@ -33,6 +33,24 @@ type Service struct {
 	users            port.UserRepository
 	keys             port.ApiKeyRepository
 	selfRegistration bool
+	invalidator      SessionInvalidator
+}
+
+// SessionInvalidator evicts cached session authorization state. Implemented by
+// auth.SessionAuthorizer; the users service depends on this narrow interface
+// rather than the auth package.
+type SessionInvalidator interface {
+	Invalidate(userID int64)
+}
+
+// UserPatch describes an admin account update. Nil fields are left unchanged.
+// Only Role and Status alterations invalidate existing sessions (they bump
+// auth_version); profile fields deliberately do not.
+type UserPatch struct {
+	Name   *string
+	Email  *string
+	Role   *string
+	Status *string
 }
 
 // NewService creates a UsersService.
@@ -44,6 +62,12 @@ func NewService(users port.UserRepository, keys port.ApiKeyRepository) *Service 
 // auth.self_registration flag).
 func WithSelfRegistration(enabled bool) func(*Service) {
 	return func(s *Service) { s.selfRegistration = enabled }
+}
+
+// WithSessionInvalidator wires session-cache eviction so permission changes
+// take effect immediately instead of after the cache TTL.
+func WithSessionInvalidator(inv SessionInvalidator) func(*Service) {
+	return func(s *Service) { s.invalidator = inv }
 }
 
 func NewServiceWithOptions(users port.UserRepository, keys port.ApiKeyRepository, opts ...func(*Service)) *Service {
@@ -235,7 +259,105 @@ func (s *Service) DeleteUser(ctx context.Context, actorRole string, userID int64
 	for _, k := range keys {
 		_ = s.keys.Delete(ctx, k.ID)
 	}
-	return s.users.Delete(ctx, userID)
+	if err := s.users.Delete(ctx, userID); err != nil {
+		return err
+	}
+	// A cached auth state would otherwise keep the removed account valid until
+	// the TTL expired.
+	s.invalidate(userID)
+	return nil
+}
+
+// UpdateUser applies an admin account patch. Role and status changes bump
+// auth_version and evict the session cache, so existing cookies stop being
+// honored immediately; profile (name/email) edits leave sessions intact.
+func (s *Service) UpdateUser(ctx context.Context, actorRole string, userID int64, patch UserPatch) (*entity.User, error) {
+	if !isAdmin(actorRole) {
+		return nil, ErrForbidden
+	}
+	current, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, port.ErrUserNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	writer, ok := s.users.(port.AuthUserWriter)
+	if !ok {
+		return nil, fmt.Errorf("users: repository does not support versioned updates")
+	}
+
+	authorizationChanged := false
+	if patch.Role != nil {
+		role := strings.TrimSpace(*patch.Role)
+		if !entity.IsValidRole(role) {
+			return nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
+		}
+		if role != current.Role {
+			if _, err := writer.SetUserRole(ctx, userID, role); err != nil {
+				return nil, err
+			}
+			authorizationChanged = true
+		}
+	}
+	if patch.Status != nil {
+		status := strings.TrimSpace(*patch.Status)
+		if !entity.IsValidUserStatus(status) {
+			return nil, fmt.Errorf("users: status must be %q or %q", entity.UserStatusActive, entity.UserStatusDisabled)
+		}
+		if status != current.Status {
+			if _, err := writer.SetUserStatus(ctx, userID, status); err != nil {
+				return nil, err
+			}
+			authorizationChanged = true
+		}
+	}
+	if patch.Name != nil || patch.Email != nil {
+		name := current.Name
+		if patch.Name != nil {
+			name = strings.TrimSpace(*patch.Name)
+		}
+		if name == "" {
+			return nil, fmt.Errorf("users: name is required")
+		}
+		email := current.Email
+		if patch.Email != nil {
+			email = strings.TrimSpace(*patch.Email)
+		}
+		if err := writer.UpdateUserProfile(ctx, userID, name, email); err != nil {
+			return nil, err
+		}
+	}
+	if authorizationChanged {
+		s.invalidate(userID)
+	}
+	return s.users.GetByID(ctx, userID)
+}
+
+// RevokeSessions invalidates every existing session for a user by bumping
+// auth_version (admin-only).
+func (s *Service) RevokeSessions(ctx context.Context, actorRole string, userID int64) error {
+	if !isAdmin(actorRole) {
+		return ErrForbidden
+	}
+	writer, ok := s.users.(port.AuthUserWriter)
+	if !ok {
+		return fmt.Errorf("users: repository does not support versioned updates")
+	}
+	if _, err := writer.BumpAuthVersion(ctx, userID); err != nil {
+		if errors.Is(err, port.ErrUserNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	s.invalidate(userID)
+	return nil
+}
+
+func (s *Service) invalidate(userID int64) {
+	if s.invalidator != nil {
+		s.invalidator.Invalidate(userID)
+	}
 }
 
 func isAdmin(role string) bool { return role == entity.RoleAdmin }

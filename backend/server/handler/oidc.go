@@ -140,7 +140,14 @@ func (h *OIDCHandler) Callback(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusForbidden, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
-	token, err := h.session.Encode(&auth.Principal{UserID: user.ID, Name: user.Name, Role: user.Role})
+	// A disabled account must not be able to obtain a session in the first place.
+	if !user.IsActive() {
+		c.JSON(consts.StatusForbidden, dto.ErrorResponse{Error: "account is disabled"})
+		return
+	}
+	// The cookie carries only identity + the current auth version; role and
+	// status are re-read from the store on every request.
+	token, err := h.session.Encode(user.ID, user.AuthVersion)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return

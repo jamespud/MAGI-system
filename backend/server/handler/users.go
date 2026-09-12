@@ -75,6 +75,43 @@ func (h *UsersHandler) DeleteUser(ctx context.Context, c *app.RequestContext) {
 	c.Status(consts.StatusNoContent)
 }
 
+// UpdateUser applies an admin account patch. Role/status changes bump
+// auth_version (existing sessions stop working); profile edits do not.
+func (h *UsersHandler) UpdateUser(ctx context.Context, c *app.RequestContext) {
+	id, err := userIDParam(c)
+	if err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid user id"})
+		return
+	}
+	var req dto.UpdateUserRequest
+	if err := c.BindAndValidate(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid request body"})
+		return
+	}
+	u, err := h.svc.UpdateUser(ctx, actorRole(ctx), id, users.UserPatch{
+		Name: req.Name, Email: req.Email, Role: req.Role, Status: req.Status,
+	})
+	if err != nil {
+		writeUsersError(c, err)
+		return
+	}
+	c.JSON(consts.StatusOK, dto.FromUser(u, 0))
+}
+
+// RevokeSessions invalidates every existing session for a user.
+func (h *UsersHandler) RevokeSessions(ctx context.Context, c *app.RequestContext) {
+	id, err := userIDParam(c)
+	if err != nil {
+		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid user id"})
+		return
+	}
+	if err := h.svc.RevokeSessions(ctx, actorRole(ctx), id); err != nil {
+		writeUsersError(c, err)
+		return
+	}
+	c.Status(consts.StatusNoContent)
+}
+
 func (h *UsersHandler) ListKeys(ctx context.Context, c *app.RequestContext) {
 	id, err := userIDParam(c)
 	if err != nil {
