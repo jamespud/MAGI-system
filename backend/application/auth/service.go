@@ -7,11 +7,21 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
+
+// ErrUnauthenticated means the presented credential (API key or session
+// cookie) is absent, malformed, revoked, or no longer backed by an active
+// account. Callers map it to 401.
+var ErrUnauthenticated = errors.New("auth: unauthenticated")
+
+// ErrSessionUnauthorized is the session-path spelling of ErrUnauthenticated.
+var ErrSessionUnauthorized = ErrUnauthenticated
 
 // Principal is the authenticated caller identity for a request.
 type Principal struct {
@@ -114,13 +124,21 @@ func NewService(enabled bool, keys []KeySpec) *Service {
 
 func (s *Service) Enabled() bool { return s.enabled }
 
-// Authenticate returns the principal for a token using constant-time
-// comparison to avoid API-key timing side channels. Static configuration keys
-// are checked first; DB-backed runtime keys (by SHA-256 hash) are checked
-// second, recording last-used time best-effort.
-func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, bool) {
+// Authenticate returns the principal for an API key using constant-time
+// comparison to avoid side channels. Static configuration keys are checked
+// first and are authoritative on their own (they carry their role inline and
+// have no user row). DB-backed runtime keys are checked second and are only
+// honored while their owner account exists and is active — the owner's CURRENT
+// role is read on every call, so a role change applies immediately and a
+// disabled/deleted owner stops working at once.
+//
+// It returns ErrUnauthenticated when the credential itself is not (or no
+// longer) valid, and ErrAuthStateUnavailable when the key store or user store
+// could not be read — which callers must treat as fail closed rather than
+// authenticating on a partial lookup.
+func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, error) {
 	if !s.enabled || token == "" {
-		return nil, false
+		return nil, ErrUnauthenticated
 	}
 	for key, p := range s.keys {
 		if len(key) != len(token) {
@@ -128,7 +146,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, b
 		}
 		if subtle.ConstantTimeCompare([]byte(key), []byte(token)) == 1 {
 			cp := p
-			return &cp, true
+			return &cp, nil
 		}
 	}
 	if token != "" && (len(s.hashes) > 0 || s.keyStore != nil) {
@@ -139,23 +157,46 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*Principal, b
 			}
 			if subtle.ConstantTimeCompare([]byte(h), []byte(hash)) == 1 {
 				cp := p
-				return &cp, true
+				return &cp, nil
 			}
 		}
 		if s.keyStore != nil {
-			if key, err := s.keyStore.FindByKeyHash(ctx, hash); err == nil && key != nil && !key.Revoked {
-				role := entity.RoleUser
-				if u, uerr := s.userStore.GetByID(ctx, key.UserID); uerr == nil && u != nil && u.Role != "" {
-					role = u.Role
-				}
-				now := time.Now()
-				key.LastUsedAt = &now
-				_ = s.keyStore.Update(ctx, key) // best-effort observability
-				return &Principal{UserID: key.UserID, Name: key.Name, Role: role}, true
+			key, err := s.keyStore.FindByKeyHash(ctx, hash)
+			switch {
+			case errors.Is(err, port.ErrAPIKeyNotFound):
+				return nil, ErrUnauthenticated
+			case err != nil:
+				return nil, ErrAuthStateUnavailable
 			}
+			if key == nil || key.Revoked {
+				return nil, ErrUnauthenticated
+			}
+			if s.userStore == nil {
+				// Cannot verify the key's owner, so it cannot be honored.
+				return nil, ErrAuthStateUnavailable
+			}
+			u, uerr := s.userStore.GetByID(ctx, key.UserID)
+			switch {
+			case errors.Is(uerr, port.ErrUserNotFound):
+				// Orphaned key: its owner was deleted.
+				return nil, ErrUnauthenticated
+			case uerr != nil:
+				return nil, ErrAuthStateUnavailable
+			}
+			if u == nil || !u.IsActive() {
+				return nil, ErrUnauthenticated
+			}
+			role := u.Role
+			if role == "" {
+				role = entity.RoleUser
+			}
+			now := time.Now()
+			key.LastUsedAt = &now
+			_ = s.keyStore.Update(ctx, key) // best-effort observability
+			return &Principal{UserID: u.ID, Name: key.Name, Role: role}, nil
 		}
 	}
-	return nil, false
+	return nil, ErrUnauthenticated
 }
 
 // HashToken returns the SHA-256 hex digest used to store and look up keys.

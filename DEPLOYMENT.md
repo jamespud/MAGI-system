@@ -126,6 +126,13 @@ runs, tool/model/search failures and failovers, model cost) from
 - The auth middleware checks static keys first, then DB keys by hash,
   updating `last_used_at` for observability. Revoked or deleted keys stop
   authenticating immediately.
+- **DB keys are owner-scoped**: after resolving a key the middleware loads its
+  owner account and requires it to exist and be active, taking the role from
+  the account (not from the key). So disabling, deleting or re-roling a user
+  applies to that user's API keys immediately, with no per-key version. If the
+  key or user store cannot be read the request fails closed with `503` instead
+  of authenticating. Static keys declared in `auth.api_keys` are
+  operator-declared config with an inline role and never consult the user store.
 - **Roles**: `admin` (users, API keys, all routes), `operator` (usage,
   prompts, benchmark seed and eval summary), and `user` (own workspace).
   Routes are gated with `RequireAnyRole(...)`; user and API-key management

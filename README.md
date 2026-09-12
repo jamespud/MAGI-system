@@ -363,7 +363,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Editable consensus rules** - the deterministic voting/consensus policy (quorum, split-to-debate, reconsider-majority, conditional-as-approve) is editable via `GET/PUT /admin/consensus-policy`.
 - **FSM orchestration blueprint** - the legal case-status transition set is editable and validated (`/admin/fsm-blueprint` + `/validate`); each transition declares the orchestrator action, checked at save time and dispatched at runtime through a table-driven action registry (unregistered actions fail fast).
 - **Blueprint-enforced FSM** - the orchestrator validates every status transition against the blueprint at runtime; illegal transitions fail fast.
-- **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`).
+- **Multi-instance operation** — per-user run limits and the recurring scheduler use shared DB state; API keys may be stored hashed (`key_hash`) and are owner-scoped: a DB key only authenticates while its account exists and is active, and it takes the role from the account, so disabling or deleting a user revokes their keys immediately (store outages fail closed with `503`).
 - **MCP resilience** — HTTP auth headers and reconnect-with-backoff for external MCP servers.
 - **Tool quotas & observability** — per-user tool rate limits, run-duration histograms, cost metrics, OTLP export, and per-step/per-tool spans.
 - **Proactive scheduling** — recurring decision templates fire automatically at intervals through the async run manager.

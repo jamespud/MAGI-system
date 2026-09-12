@@ -35,7 +35,16 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 		if token == "" {
 			token = string(c.GetHeader("X-API-Key"))
 		}
-		p, ok := authSvc.Authenticate(ctx, token)
+		p, aerr := authSvc.Authenticate(ctx, token)
+		if errors.Is(aerr, auth.ErrAuthStateUnavailable) {
+			// The credential could not be verified (key/user store down), so it
+			// must not be accepted — and we must not fall back to the session
+			// cookie either, since the same store backs it.
+			writeAuthUnavailable(c)
+			c.Abort()
+			return
+		}
+		ok := aerr == nil
 		if !ok {
 			// OIDC signed session cookie fallback. The cookie is revalidated
 			// against current user state, so a disabled, demoted, deleted or
@@ -48,11 +57,7 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 				case errors.Is(serr, auth.ErrAuthStateUnavailable):
 					// The session cannot be proven valid (user store down), so
 					// fail closed rather than trusting the cookie's old grants.
-					if a2aerror.IsProtocolPath(string(c.Path())) {
-						a2aerror.Write(c, consts.StatusServiceUnavailable, "UNAVAILABLE", "UNAVAILABLE", "authorization state unavailable")
-					} else {
-						c.JSON(consts.StatusServiceUnavailable, dto.ErrorResponse{Error: "authorization state unavailable"})
-					}
+					writeAuthUnavailable(c)
 					c.Abort()
 					return
 				default:
@@ -72,6 +77,17 @@ func Auth(authSvc *auth.Service) app.HandlerFunc {
 		c.Set("auth_principal", p)
 		c.Next(auth.WithPrincipal(ctx, p))
 	}
+}
+
+// writeAuthUnavailable reports that the caller's credential could not be
+// verified because the authorization store was unreadable. This is a fail
+// closed 503, never a silent downgrade to the credential's stale claims.
+func writeAuthUnavailable(c *app.RequestContext) {
+	if a2aerror.IsProtocolPath(string(c.Path())) {
+		a2aerror.Write(c, consts.StatusServiceUnavailable, "UNAVAILABLE", "UNAVAILABLE", "authorization state unavailable")
+		return
+	}
+	c.JSON(consts.StatusServiceUnavailable, dto.ErrorResponse{Error: "authorization state unavailable"})
 }
 
 // RequireRole gates a route to a specific principal role. Open mode (nil

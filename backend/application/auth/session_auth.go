@@ -10,13 +10,8 @@ import (
 )
 
 var (
-	// ErrSessionUnauthorized means the session must not be honored: the cookie
-	// is malformed or expired, the account is gone or disabled, or the cookie's
-	// auth version no longer matches the stored one. Callers treat it as
-	// unauthenticated (401).
-	ErrSessionUnauthorized = errors.New("auth: session is not authorized")
 	// ErrAuthStateUnavailable means the authoritative user state could not be
-	// read. It is deliberately distinct from ErrSessionUnauthorized: the request
+	// read. It is deliberately distinct from ErrUnauthenticated: the request
 	// must fail closed (5xx), never fall back to the cookie's stale claims.
 	ErrAuthStateUnavailable = errors.New("auth: user store unavailable")
 )

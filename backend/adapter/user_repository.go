@@ -210,6 +210,9 @@ func (r *apiKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*entity.Ap
 func (r *apiKeyRepo) FindByKeyHash(ctx context.Context, hash string) (*entity.ApiKey, error) {
 	var m ApiKeyModel
 	if err := r.db.WithContext(ctx).Where("key_hash = ?", hash).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, port.ErrAPIKeyNotFound
+		}
 		return nil, err
 	}
 	return apiKeyFromModel(&m), nil

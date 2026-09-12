@@ -12,6 +12,11 @@ import (
 // failure (fail closed without claiming the account is gone).
 var ErrUserNotFound = errors.New("user not found")
 
+// ErrAPIKeyNotFound is returned by key lookups when no key matches. It lets the
+// authenticator distinguish "no such credential" (reject) from a key-store
+// failure (fail closed).
+var ErrAPIKeyNotFound = errors.New("api key not found")
+
 // UserRepository persists harness accounts.
 type UserRepository interface {
 	Create(ctx context.Context, u *entity.User) error

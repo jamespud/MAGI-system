@@ -124,9 +124,9 @@ func TestUsersService_CreateUserAndAuthenticate(t *testing.T) {
 
 	// The issued key authenticates via the auth service backed by these repos.
 	authSvc := auth.NewService(true, nil).WithStores(krepo, urepo)
-	p, ok := authSvc.Authenticate(context.Background(), key.Plaintext)
-	if !ok || p.UserID != u.ID || p.Role != entity.RoleUser {
-		t.Fatalf("auth issued key: ok=%v p=%+v", ok, p)
+	p, err := authSvc.Authenticate(context.Background(), key.Plaintext)
+	if err != nil || p.UserID != u.ID || p.Role != entity.RoleUser {
+		t.Fatalf("auth issued key: err=%v p=%+v", err, p)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestUsersService_IssueRevokeRotate(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 	authSvc := auth.NewService(true, nil).WithStores(krepo, urepo)
-	if _, ok := authSvc.Authenticate(context.Background(), k1.Plaintext); ok {
+	if _, err := authSvc.Authenticate(context.Background(), k1.Plaintext); err == nil {
 		t.Fatal("revoked key must not authenticate")
 	}
 
@@ -160,7 +160,7 @@ func TestUsersService_IssueRevokeRotate(t *testing.T) {
 	if k2.ID == k1.ID || k2.Plaintext == k1.Plaintext {
 		t.Fatal("rotated key must differ")
 	}
-	if _, ok := authSvc.Authenticate(context.Background(), k2.Plaintext); !ok {
+	if _, err := authSvc.Authenticate(context.Background(), k2.Plaintext); err != nil {
 		t.Fatal("rotated key must authenticate")
 	}
 }

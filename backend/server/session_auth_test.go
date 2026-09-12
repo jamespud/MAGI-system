@@ -135,3 +135,67 @@ func TestSessionCookie_StoreFailureFailsClosed(t *testing.T) {
 		t.Fatalf("store outage: code=%d body=%s, want 503", w.Code, w.Body.String())
 	}
 }
+
+// --- API key path -----------------------------------------------------------
+
+type stubKeys struct {
+	key *entity.ApiKey
+	err error
+}
+
+func (s stubKeys) FindByKeyHash(context.Context, string) (*entity.ApiKey, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.key, nil
+}
+func (s stubKeys) Update(context.Context, *entity.ApiKey) error { return nil }
+
+func apiKeyServer(t *testing.T, keys auth.KeyStore, users port.UserRepository) *hzserver.Hertz {
+	t.Helper()
+	svc := auth.NewService(true, nil).WithStores(keys, users)
+	h := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	h.Use(server.Auth(svc))
+	h.GET("/whoami", func(ctx context.Context, c *app.RequestContext) {
+		p := auth.PrincipalFrom(ctx)
+		if p == nil {
+			c.JSON(401, map[string]any{"user": 0})
+			return
+		}
+		c.JSON(200, map[string]any{"user": p.UserID, "role": p.Role})
+	})
+	return h
+}
+
+func performKey(h *hzserver.Hertz, token string) *ut.ResponseRecorder {
+	return ut.PerformRequest(h.Engine, "GET", "/whoami", nil,
+		ut.Header{Key: "X-API-Key", Value: token})
+}
+
+func TestAPIKeyMiddleware_DisabledOwnerIsUnauthorized(t *testing.T) {
+	keys := stubKeys{key: &entity.ApiKey{ID: "ak-1", UserID: 7, Name: "cli"}}
+	users := stubUsers{user: &entity.User{
+		ID: 7, Name: "alice", Role: entity.RoleAdmin, Status: entity.UserStatusDisabled,
+	}}
+	h := apiKeyServer(t, keys, users)
+	if w := performKey(h, "mag_whatever"); w.Code != 401 {
+		t.Fatalf("disabled owner: code=%d body=%s, want 401", w.Code, w.Body.String())
+	}
+}
+
+func TestAPIKeyMiddleware_DeletedOwnerIsUnauthorized(t *testing.T) {
+	keys := stubKeys{key: &entity.ApiKey{ID: "ak-1", UserID: 7, Name: "cli"}}
+	h := apiKeyServer(t, keys, stubUsers{err: port.ErrUserNotFound})
+	if w := performKey(h, "mag_whatever"); w.Code != 401 {
+		t.Fatalf("deleted owner: code=%d, want 401", w.Code)
+	}
+}
+
+// TestAPIKeyMiddleware_StoreFailureFailsClosed proves a key/user store outage
+// returns 503 rather than authenticating or silently downgrading.
+func TestAPIKeyMiddleware_StoreFailureFailsClosed(t *testing.T) {
+	h := apiKeyServer(t, stubKeys{err: errors.New("db down")}, stubUsers{err: errors.New("db down")})
+	if w := performKey(h, "mag_whatever"); w.Code != 503 {
+		t.Fatalf("key store outage: code=%d body=%s, want 503", w.Code, w.Body.String())
+	}
+}

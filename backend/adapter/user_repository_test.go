@@ -61,12 +61,12 @@ func TestUserAndApiKeyRepository_Lifecycle(t *testing.T) {
 
 	// Auth must reject a revoked key and accept a live one.
 	authSvc := auth.NewService(true, nil).WithStores(keys, users)
-	if _, ok := authSvc.Authenticate(context.Background(), plain); ok {
+	if _, err := authSvc.Authenticate(context.Background(), plain); err == nil {
 		t.Fatal("revoked key must not authenticate")
 	}
 	plain2, _, hash2, _ := auth.GenerateAPIKey()
 	_ = keys.Create(context.Background(), &entity.ApiKey{ID: "ak-2", UserID: u.ID, Name: "cli2", Prefix: "p", KeyHash: hash2})
-	if _, ok := authSvc.Authenticate(context.Background(), plain2); !ok {
+	if _, err := authSvc.Authenticate(context.Background(), plain2); err != nil {
 		t.Fatal("live key must authenticate")
 	}
 
