@@ -102,14 +102,19 @@ END $$
 
 CREATE PROCEDURE magi_resume_contract()
 BEGIN
-  DECLARE is_nullable VARCHAR(3);
+  -- The local variable must not share a name with the column being read: a bare
+  -- IS_NULLABLE in the select list resolves to this variable (NULL at that
+  -- point), so `SELECT IS_NULLABLE INTO is_nullable` would silently yield NULL
+  -- and the NOT NULL tightening below would be skipped, leaving the repaired
+  -- schema failing the startup contract.
+  DECLARE seq_nullable VARCHAR(3);
   DECLARE has_exact_unique INT DEFAULT 0;
   DECLARE wrong_name VARCHAR(64) DEFAULT '';
 
-  SELECT IS_NULLABLE INTO is_nullable
-    FROM INFORMATION_SCHEMA.COLUMNS
-   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'magi_event' AND COLUMN_NAME = 'seq';
-  IF UPPER(is_nullable) = 'YES' THEN
+  SELECT c.IS_NULLABLE INTO seq_nullable
+    FROM INFORMATION_SCHEMA.COLUMNS c
+   WHERE c.TABLE_SCHEMA = DATABASE() AND c.TABLE_NAME = 'magi_event' AND c.COLUMN_NAME = 'seq';
+  IF UPPER(seq_nullable) = 'YES' THEN
     ALTER TABLE magi_event MODIFY COLUMN seq BIGINT UNSIGNED NOT NULL;
   END IF;
 
