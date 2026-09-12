@@ -34,6 +34,24 @@ function agentColor(code: string): string {
     : 'var(--casper)';
 }
 
+// graphSignatureOf encodes exactly the store fields the graph draws. Subscribing
+// to this string (instead of the whole `agents` object) means status/step/tool
+// call updates no longer tear down and rebuild the D3 simulation.
+function graphSignatureOf(agents: Record<AgentId, { evidence: { id: string }[]; claims: { id: string; text: string; supports: string[]; contradicts: string[] }[]; vote: { stance: string } | null } | null>): string {
+  const parts: string[] = [];
+  for (const id of AGENT_IDS) {
+    const a = agents[id];
+    if (!a) continue;
+    parts.push(id);
+    for (const e of a.evidence) parts.push(`e:${e.id}`);
+    for (const c of a.claims) {
+      parts.push(`c:${c.id}:${c.text}:${c.supports.join(',')}:${c.contradicts.join(',')}`);
+    }
+    if (a.vote) parts.push(`v:${a.vote.stance}`);
+  }
+  return parts.join('|');
+}
+
 function buildGraph(evidence: EvidenceInput[], claims: ClaimInput[], votes: VoteInput[]) {
   // One vote node per agent; the store keeps the latest vote per agent.
   const voteByAgent = new Map<string, VoteInput>();
@@ -84,7 +102,7 @@ function buildGraph(evidence: EvidenceInput[], claims: ClaimInput[], votes: Vote
 
 export default function EvidenceGraph() {
   const { caseId } = useParams<{ caseId: string }>();
-  const agents = useAgentStore((s) => s.agents);
+  const graphSignature = useAgentStore((s) => graphSignatureOf(s.agents));
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [empty, setEmpty] = useState(false);
@@ -94,6 +112,7 @@ export default function EvidenceGraph() {
     if (!caseId) return;
 
     setZoomPct(100);
+    const agents = useAgentStore.getState().agents;
     // Build from the agents' live evidence/claims/votes so the graph re-renders
     // incrementally as SSE events arrive and after terminal sync.
     const evidence: EvidenceInput[] = [];
@@ -158,7 +177,8 @@ export default function EvidenceGraph() {
 
       node.append('circle')
         .attr('r', (d) => d.type === 'evidence' ? 8 : d.type === 'vote' ? 12 : 10)
-        .attr('fill', (d) => d.type === 'evidence' ? 'var(--bg-raised)' : d.color + '20')
+        .attr('fill', (d) => (d.type === 'evidence' ? 'var(--bg-raised)' : d.color))
+        .attr('fill-opacity', (d) => (d.type === 'evidence' ? 1 : 0.125))
         .attr('stroke', (d) => d.color)
         .attr('stroke-width', (d) => d.type === 'vote' ? 2 : 1.5);
 
@@ -196,7 +216,7 @@ export default function EvidenceGraph() {
       });
 
       return () => { simulation.stop(); };
-  }, [caseId, agents]);
+  }, [caseId, graphSignature]);
 
   const zoomBy = (factor: number) => {
     const z = zoomRef.current;

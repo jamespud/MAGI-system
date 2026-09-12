@@ -21,33 +21,48 @@ export default function DecisionWorkspace() {
   const loading = useCaseStore((s) => s.loading);
   const error = useCaseStore((s) => s.error);
   const unsubRef = useRef<(() => void) | null>(null);
+  // Bumped whenever the viewed case changes so late responses from a previous
+  // case can be discarded (A -> B fast switching must not mix case state).
+  const genRef = useRef(0);
 
   // refreshCaseData re-fetches the case + all artifacts. Called on open and on
   // run completion (via the SSE terminal callback) so the UI reflects the final
   // status/consensus/votes without a manual page refresh.
-  const refreshCaseData = (id: string) => {
+  const refreshCaseData = (id: string, gen: number) => {
     useCaseStore.getState().fetchCase(id, { silent: true });
     api.getAgents(id)
-      .then((snap) => useAgentStore.getState().loadAgentsFromApi(snap))
+      .then((snap) => {
+        if (genRef.current === gen) useAgentStore.getState().loadAgentsFromApi(snap);
+      })
       .catch(() => {});
     api.getEvents(id)
-      .then((evs) => evs
-        .filter((e) => e.type !== 'CASE_STATUS_CHANGED')
-        .forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e))))
+      .then((evs) => {
+        if (genRef.current !== gen) return;
+        evs
+          .filter((e) => e.type !== 'CASE_STATUS_CHANGED')
+          .forEach((e) => useEventStore.getState().pushEvent(mapBackendEvent(e)));
+      })
       .catch(() => {});
   };
 
   // Load real data + subscribe to SSE when a case is opened.
   useEffect(() => {
     if (!caseId) return;
+    const gen = genRef.current + 1;
+    genRef.current = gen;
+    useCaseStore.getState().setActiveCase(caseId);
+    useAgentStore.getState().resetAgents();
     useEventStore.getState().clearEvents();
-    refreshCaseData(caseId);
-    unsubRef.current = subscribeCaseStream(caseId, () => refreshCaseData(caseId));
+    refreshCaseData(caseId, gen);
+    unsubRef.current = subscribeCaseStream(caseId, () => refreshCaseData(caseId, gen));
     return () => {
+      // Invalidate any in-flight callback for this generation without reading
+      // the ref in cleanup.
+      genRef.current = gen + 1;
+      useCaseStore.getState().setActiveCase(null);
       unsubRef.current?.();
       unsubRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
   const handleCreate = async (question: string, background?: string) => {
@@ -123,10 +138,12 @@ export default function DecisionWorkspace() {
     );
   }
 
-  if (loading || !currentCase) {
+  if (loading || !currentCase || currentCase.id !== caseId) {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        <span className="font-mono text-text-muted">{loading ? 'Loading...' : 'Case not found'}</span>
+        <span className="font-mono text-text-muted">
+          {loading || (currentCase && currentCase.id !== caseId) ? 'Loading...' : 'Case not found'}
+        </span>
       </div>
     );
   }

@@ -122,6 +122,7 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
   let closed = false;
   let retryMs = 500;
   let lastSeq = 0;
+  let lastEventId = '';
 
   const processEvent = (data: string) => {
     let raw: ApiEvent;
@@ -131,7 +132,9 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       return; // ignore malformed frames
     }
     // Sequence gaps mean the broker dropped frames for a slow consumer;
-    // refetch the authoritative state instead of rendering a hole.
+    // refetch the authoritative state instead of rendering a hole. The payload
+    // seq is a CONSISTENCY CHECK only — the SSE `id:` field is the sole resume
+    // watermark, so the two can never diverge.
     if (typeof raw.seq === 'number' && raw.seq > 0) {
       if (lastSeq > 0 && raw.seq > lastSeq + 1) {
         void useCaseStore.getState().fetchCase(caseId, { silent: true });
@@ -163,10 +166,54 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
     }
   };
 
+  // findFrameEnd locates the next frame terminator, accepting both LF (the
+  // common case) and CRLF (some servers/proxies terminate frames with
+  // `\r\n\r\n`), whichever appears first.
+  const findFrameEnd = (buf: string): { idx: number; len: number } | null => {
+    const lf = buf.indexOf('\n\n');
+    const crlf = buf.indexOf('\r\n\r\n');
+    if (crlf !== -1 && (lf === -1 || crlf < lf)) return { idx: crlf, len: 4 };
+    if (lf !== -1) return { idx: lf, len: 2 };
+    return null;
+  };
+
+  // processFrame parses one SSE frame per the wire format: `id:` advances the
+  // resume cursor and `data:` lines are concatenated. Ignoring `id:` (as the
+  // previous parser did) means a reconnect replays the entire history.
+  const processFrame = (frame: string) => {
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith('id:')) {
+        const id = line.slice(3).trim();
+        if (id) {
+          lastEventId = id;
+          const seq = Number(id);
+          if (Number.isFinite(seq) && seq > lastSeq) lastSeq = seq;
+        }
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (dataLines.length) processEvent(dataLines.join('\n'));
+  };
+
+  // scheduleReconnect retries the stream after a backoff. Every non-deliberate
+  // termination (network error *and* graceful EOF) funnels through here so a
+  // proxy close cannot silently end the feed.
+  const scheduleReconnect = () => {
+    if (closed || controller.signal.aborted) return;
+    const delay = retryMs;
+    retryMs = Math.min(retryMs * 2, 10_000);
+    setTimeout(() => {
+      if (!closed && !controller.signal.aborted) void connect();
+    }, delay);
+  };
+
   const connect = async () => {
     const headers: Record<string, string> = { Accept: 'text/event-stream' };
     const key = getApiKey();
     if (key) headers['X-API-Key'] = key;
+    if (lastEventId) headers['Last-Event-ID'] = lastEventId;
     try {
       const res = await fetch(`/api/v1/cases/${caseId}/stream`, { headers, signal: controller.signal });
       if (res.status === 401) {
@@ -181,26 +228,22 @@ export function subscribeCaseStream(caseId: string, onTerminal?: () => void): ()
       let buf = '';
       for (;;) {
         const { done, value } = await reader.read();
-        if (done || closed) break;
+        if (done || closed || controller.signal.aborted) break;
         buf += decoder.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          const dataLines = frame
-            .split('\n')
-            .filter((l) => l.startsWith('data:'))
-            .map((l) => l.slice(5).trimStart());
-          if (dataLines.length) processEvent(dataLines.join('\n'));
+        let end: { idx: number; len: number } | null;
+        while ((end = findFrameEnd(buf)) !== null) {
+          const frame = buf.slice(0, end.idx);
+          buf = buf.slice(end.idx + end.len);
+          processFrame(frame);
         }
       }
+      // EOF from a graceful close still needs a reconnect; only an explicit
+      // unsubscribe (closed) suppresses it.
+      scheduleReconnect();
     } catch (e) {
       if (closed || controller.signal.aborted) return;
       if (e instanceof DOMException && e.name === 'AbortError') return;
-      // Transient network failure: reconnect with backoff like EventSource.
-      await new Promise((r) => setTimeout(r, retryMs));
-      retryMs = Math.min(retryMs * 2, 10_000);
-      if (!closed) void connect();
+      scheduleReconnect();
     }
   };
 

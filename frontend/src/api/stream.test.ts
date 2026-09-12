@@ -25,6 +25,9 @@ function setupSSE() {
     emit(obj: unknown) {
       controller?.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
     },
+    emitRaw(text: string) {
+      controller?.enqueue(encoder.encode(text));
+    },
     close() {
       controller?.close();
     },
@@ -75,6 +78,26 @@ describe('subscribeCaseStream', () => {
     expect(useEventStore.getState().events).toHaveLength(1);
     expect(useEventStore.getState().events[0].type).toBe('VOTE_SUBMITTED');
     expect(useEventStore.getState().events[0].message).toBe('Votes submitted');
+    unsub();
+  });
+
+  it('parses CRLF-terminated SSE frames', async () => {
+    const { sse, unsub } = await subscribeReady();
+    sse.emitRaw('id: 3\r\ndata: {"id":"e3","type":"VOTE_SUBMITTED","message":"m","timestamp":"t"}\r\n\r\n');
+    await flush();
+    expect(useEventStore.getState().events).toHaveLength(1);
+    expect(useEventStore.getState().events[0].id).toBe('e3');
+    unsub();
+  });
+
+  it('handles a CRLF terminator split across read chunks', async () => {
+    const { sse, unsub } = await subscribeReady();
+    sse.emitRaw('data: {"id":"e4","type":"AGENT_STARTED","message":"m","timestamp":"t"}\r\n');
+    await flush();
+    expect(useEventStore.getState().events).toHaveLength(0);
+    sse.emitRaw('\r\n');
+    await flush();
+    expect(useEventStore.getState().events).toHaveLength(1);
     unsub();
   });
 
@@ -176,5 +199,70 @@ describe('subscribeCaseStream', () => {
     } finally {
       window.removeEventListener(UNAUTHORIZED_EVENT, onEvent);
     }
+  });
+
+  it('reconnects after EOF and resumes with Last-Event-ID', async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controllers.push(c);
+        },
+      });
+      return Promise.resolve({ ok: true, status: 200, body: stream } as Response);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const unsub = subscribeCaseStream('c1');
+    await flush();
+    controllers[0].enqueue(
+      encoder.encode(
+        'id: 7\ndata: {"id":"e7","type":"AGENT_STARTED","agent_code":"melchior","message":"m","timestamp":"t","seq":7}\n\n',
+      ),
+    );
+    await flush();
+    expect(useEventStore.getState().events).toHaveLength(1);
+
+    // A graceful server/proxy close (EOF) must trigger a reconnect, not a
+    // silent stop. Wait past the first backoff.
+    controllers[0].close();
+    await new Promise((r) => setTimeout(r, 700));
+    await flush();
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const secondInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect((secondInit.headers as Record<string, string>)['Last-Event-ID']).toBe('7');
+    unsub();
+  });
+
+  it('does not treat the payload seq as a competing resume watermark', async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controllers.push(c);
+        },
+      });
+      return Promise.resolve({ ok: true, status: 200, body: stream } as Response);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const unsub = subscribeCaseStream('c1');
+    await flush();
+    // Payload carries seq=9 but the frame has no `id:`; only `id:` may advance
+    // the resume cursor.
+    controllers[0].enqueue(
+      encoder.encode(
+        'data: {"id":"e9","type":"AGENT_STARTED","agent_code":"melchior","message":"m","timestamp":"t","seq":9}\n\n',
+      ),
+    );
+    await flush();
+    controllers[0].close();
+    await new Promise((r) => setTimeout(r, 700));
+    await flush();
+
+    const secondInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect((secondInit.headers as Record<string, string>)['Last-Event-ID']).toBeUndefined();
+    unsub();
   });
 });

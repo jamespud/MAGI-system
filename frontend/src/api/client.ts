@@ -128,6 +128,9 @@ const BASE_URL = '/api/v1';
 export const AUTH_STORAGE_KEY = 'magi.apiKey';
 export const UNAUTHORIZED_EVENT = 'magi:unauthorized';
 
+// AuthCheckResult distinguishes "the credential is bad" from "we could not ask".
+export type AuthCheckResult = 'valid' | 'invalid' | 'unavailable';
+
 // --- API-key auth channel (P0: D1) ---
 // The backend authenticates via `Authorization: Bearer <key>` or `X-API-Key`.
 // The web UI stores the user's API key in localStorage and injects it as the
@@ -206,13 +209,29 @@ export const api = {
   deleteConversation: (id: string) =>
     request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
-  // verifyAuth returns true when the currently stored API key authenticates
-  // against the protected /status endpoint (200). It is used by the login page.
-  verifyAuth: async (): Promise<boolean> => {
-    const res = await fetch(`${BASE_URL}/status`, {
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    });
-    return res.ok;
+  // verifyAuth classifies a candidate key (defaulting to the stored key)
+  // against the protected /status endpoint:
+  //   2xx        -> 'valid'
+  //   401 / 403  -> 'invalid'      (the credential itself is rejected)
+  //   5xx / net  -> 'unavailable'  (cannot prove the key either way)
+  // The login page only persists the key on 'valid' and never clears state on
+  // 'unavailable' (a transient outage must not look like a bad key).
+  verifyAuth: async (candidateKey?: string): Promise<AuthCheckResult> => {
+    const key = candidateKey ?? getApiKey();
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}/status`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(key ? { 'X-API-Key': key } : {}),
+        },
+      });
+    } catch {
+      return 'unavailable';
+    }
+    if (res.ok) return 'valid';
+    if (res.status === 401 || res.status === 403) return 'invalid';
+    return 'unavailable';
   },
 
   getCases: async (): Promise<ApiCaseResponse[]> => {

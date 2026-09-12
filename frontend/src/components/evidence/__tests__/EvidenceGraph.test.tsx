@@ -9,7 +9,10 @@ const { mockSelect, state } = vi.hoisted(() => ({
 vi.mock('react-router-dom', () => ({ useParams: () => ({ caseId: 'c1' }) }));
 vi.mock('@/stores', () => ({
   useUiStore: Object.assign(vi.fn(() => ({})), { getState: () => ({ select: mockSelect }) }),
-  useAgentStore: (sel: (s: { agents: Record<string, unknown> }) => unknown) => sel({ agents: state.agents }),
+  useAgentStore: Object.assign(
+    (sel: (s: { agents: Record<string, unknown> }) => unknown) => sel({ agents: state.agents }),
+    { getState: () => ({ agents: state.agents }) },
+  ),
 }));
 
 import EvidenceGraph from '../EvidenceGraph';

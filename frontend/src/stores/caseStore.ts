@@ -62,6 +62,10 @@ function patchSummary(list: CaseSummary[], id: string, patch: Partial<CaseSummar
 
 interface CaseState {
   case: Case | null;
+  // activeCaseId is the case the UI is currently showing. Async responses for
+  // any other case are discarded so a fast A -> B switch cannot let A's
+  // in-flight fetch overwrite B's state.
+  activeCaseId: string | null;
   cases: CaseSummary[];
   total: number;
   page: number;
@@ -69,6 +73,7 @@ interface CaseState {
   loading: boolean;
   error: string | null;
   loadCase: (c: Case) => void;
+  setActiveCase: (id: string | null) => void;
   loadCaseList: (list: CaseSummary[]) => void;
   updateCaseStatus: (caseId: string, status: Case['status'], round: number) => void;
   updateConsensus: (consensus: Case['consensus'], confidence: number) => void;
@@ -91,6 +96,7 @@ const PAGE_SIZE = 20;
 
 export const useCaseStore = create<CaseState>((set, get) => ({
   case: null,
+  activeCaseId: null,
   cases: [],
   total: 0,
   page: 0,
@@ -99,6 +105,8 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   error: null,
 
   loadCase: (c) => set({ case: c, loading: false }),
+
+  setActiveCase: (id) => set({ activeCaseId: id }),
 
   loadCaseList: (list) => set({ cases: list }),
 
@@ -185,6 +193,9 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     if (!opts?.silent) set({ loading: true, error: null });
     try {
       const c = await api.getCase(id);
+      // Discard a response for a case the user has navigated away from.
+      const active = get().activeCaseId;
+      if (active !== null && active !== id) return;
       set((s) => ({
         case: mapToCase(c),
         cases: upsertSummary(s.cases, mapToSummary(c)),
@@ -224,7 +235,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     try {
       const res = await api.runCase(id);
       set((s) => ({
-        case: s.case ? { ...s.case, status: res.status as Case['status'] } : null,
+        case: s.case && s.case.id === id ? { ...s.case, status: res.status as Case['status'] } : s.case,
         cases: patchSummary(s.cases, id, { status: res.status as Case['status'] }),
         loading: false,
       }));
@@ -248,7 +259,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     try {
       await api.pauseCase(id);
       set((s) => ({
-        case: s.case ? { ...s.case, status: 'PAUSED' as Case['status'] } : null,
+        case: s.case && s.case.id === id ? { ...s.case, status: 'PAUSED' as Case['status'] } : s.case,
         cases: patchSummary(s.cases, id, { status: 'PAUSED' as Case['status'] }),
       }));
     } catch (e) {
@@ -261,7 +272,7 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     try {
       await api.resumeCase(id);
       set((s) => ({
-        case: s.case ? { ...s.case, status: 'DRAFT' as Case['status'] } : null,
+        case: s.case && s.case.id === id ? { ...s.case, status: 'DRAFT' as Case['status'] } : s.case,
         cases: patchSummary(s.cases, id, { status: 'DRAFT' as Case['status'] }),
       }));
     } catch (e) {

@@ -15,17 +15,24 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     setError('');
+    const trimmed = key.trim();
     try {
-      const trimmed = key.trim();
-      // Store the candidate key so verifyAuth() carries it.
-      setStoredKey(trimmed);
-      const ok = await api.verifyAuth();
-      if (ok) {
+      // Verify the candidate BEFORE persisting it. 'unavailable' (5xx/network)
+      // is distinct from 'invalid': only a rejected credential is bad news.
+      const result = await api.verifyAuth(trimmed);
+      if (result === 'valid') {
+        setStoredKey(trimmed);
         navigate('/', { replace: true });
         return;
       }
-      clearStoredKey();
-      setError('This API key was rejected. Check the key, or use "open mode" if authentication is disabled.');
+      if (result === 'invalid') {
+        setError('This API key was rejected. Check the key, or use "open mode" if authentication is disabled.');
+      } else {
+        setError('Could not reach the server to verify this key. Check your connection and try again.');
+      }
+    } catch {
+      // Network/verification failure: do not persist the candidate key.
+      setError('Could not reach the server to verify this key. Check your connection and try again.');
     } finally {
       setBusy(false);
     }

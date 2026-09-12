@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useCaseStore } from '../caseStore';
-import { api } from '@/api/client';
+import { api, type ApiCaseResponse } from '@/api/client';
 import type { Case } from '@/types/case';
 
 vi.mock('@/api/client', () => ({
@@ -239,5 +239,42 @@ describe('caseStore sidebar list sync', () => {
     ]);
     useCaseStore.getState().updateCaseStatus('test-1', 'DEBATING', 2);
     expect(useCaseStore.getState().cases.find((c) => c.id === 'test-1')?.status).toBe('DEBATING');
+  });
+});
+
+describe('caseStore cross-case isolation', () => {
+  beforeEach(() => {
+    useCaseStore.setState({ case: null, activeCaseId: null, cases: [], loading: false, error: null });
+  });
+
+  it('discards a stale fetchCase response after navigating to another case', async () => {
+    let resolveA: ((value: ApiCaseResponse) => void) | undefined;
+    vi.mocked(api.getCase).mockImplementationOnce(
+      () => new Promise<ApiCaseResponse>((res) => { resolveA = res; }),
+    );
+
+    useCaseStore.getState().setActiveCase('case-a');
+    const pendingA = useCaseStore.getState().fetchCase('case-a');
+
+    // User switches to B before A's request resolves.
+    useCaseStore.getState().setActiveCase('case-b');
+    resolveA?.({
+      id: 'case-a', question: 'A?', background: '', constraints: [],
+      status: 'DRAFT', consensus: null, confidence: 0, round: 0, final_decision: '',
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    });
+    await pendingA;
+
+    expect(useCaseStore.getState().case).toBeNull();
+  });
+
+  it('does not let a stale runCase response re-target the current case', async () => {
+    useCaseStore.getState().loadCase({ ...mockCase, id: 'case-b' });
+    vi.mocked(api.runCase).mockResolvedValueOnce({ id: 'case-a', status: 'INVESTIGATING' });
+
+    await useCaseStore.getState().runCase('case-a');
+
+    expect(useCaseStore.getState().case?.id).toBe('case-b');
+    expect(useCaseStore.getState().case?.status).toBe('DRAFT');
   });
 });

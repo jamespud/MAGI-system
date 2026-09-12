@@ -50,11 +50,14 @@ vi.mock('@/stores', () => {
       runCase: mockRunCase,
       forkCase: mockForkCase,
       createCase: mockCreateCase,
+      setActiveCase: vi.fn(),
       case: currentCase,
     }),
   });
   const agentHook = vi.fn(() => ({}));
-  Object.assign(agentHook, { getState: () => ({ loadAgentsFromApi: mockLoadAgentsFromApi }) });
+  Object.assign(agentHook, {
+    getState: () => ({ loadAgentsFromApi: mockLoadAgentsFromApi, resetAgents: vi.fn() }),
+  });
   const eventHook = vi.fn(() => ({}));
   Object.assign(eventHook, { getState: () => ({ clearEvents: mockClearEvents, pushEvent: mockPushEvent }) });
   return { useCaseStore: caseHook, useAgentStore: agentHook, useEventStore: eventHook };

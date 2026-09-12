@@ -468,13 +468,19 @@ describe('api auth channel (P0: D1)', () => {
     expect(dispatched).toContain(UNAUTHORIZED_EVENT);
   });
 
-  it('verifyAuth returns true on 200 and false on 401', async () => {
+  it('verifyAuth classifies valid / invalid / unavailable separately', async () => {
     vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ status: 'ok' }) } as Response)
-      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) } as Response);
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ status: 'ok' }) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({}) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 403, json: () => Promise.resolve({}) } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 503, json: () => Promise.resolve({}) } as Response)
+      .mockRejectedValueOnce(new Error('network down'));
 
-    expect(await api.verifyAuth()).toBe(true);
-    expect(await api.verifyAuth()).toBe(false);
+    expect(await api.verifyAuth()).toBe('valid');
+    expect(await api.verifyAuth()).toBe('invalid');
+    expect(await api.verifyAuth()).toBe('invalid');
+    expect(await api.verifyAuth()).toBe('unavailable');
+    expect(await api.verifyAuth()).toBe('unavailable');
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/status', {
       headers: { 'Content-Type': 'application/json' },
     });
