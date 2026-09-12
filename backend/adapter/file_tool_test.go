@@ -124,7 +124,10 @@ func TestFileTool_WriteActions(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root")
 	os.MkdirAll(root, 0755)
-	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true, Roots: []string{root}, AllowDelete: true})
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{
+		Enabled: true, Roots: []string{root},
+		AllowWrite: true, AllowAppend: true, AllowDelete: true, AllowMkdir: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,5 +191,121 @@ func TestFileTool_DeleteBlockedWhenDisabled(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("delete should be blocked when AllowDelete is false")
+	}
+}
+
+func TestFileTool_MutationsDisabledByDefault(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{Enabled: true, Roots: []string{root}})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	cases := []struct {
+		action string
+		args   string
+	}{
+		{"write", `{"path":"new.txt","action":"write","content":"hi"}`},
+		{"append", `{"path":"f.txt","action":"append","content":"hi"}`},
+		{"mkdir", `{"path":"newdir","action":"mkdir"}`},
+		{"delete", `{"path":"f.txt","action":"delete"}`},
+	}
+	for _, tc := range cases {
+		if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+			ToolName: magi.FileToolName, ArgumentsJSON: tc.args,
+		}); err == nil || !strings.Contains(err.Error(), "disabled") {
+			t.Fatalf("%s must be disabled by default, got %v", tc.action, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "new.txt")); !os.IsNotExist(err) {
+		t.Fatal("write must not create a file when disabled")
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.txt")); err != nil {
+		t.Fatal("delete must not remove a file when disabled")
+	}
+}
+
+func TestFileTool_MkdirCreatesNestedPath(t *testing.T) {
+	root := t.TempDir()
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{
+		Enabled: true, Roots: []string{root}, AllowMkdir: true,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// a/b/c has no existing intermediate directories; resolveInRoots must still
+	// contain it inside the root rather than failing before MkdirAll runs.
+	if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.FileToolName, ArgumentsJSON: `{"path":"a/b/c","action":"mkdir"}`,
+	}); err != nil {
+		t.Fatalf("nested mkdir: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "a", "b", "c"))
+	if err != nil || !info.IsDir() {
+		t.Fatalf("nested directory not created: %v", err)
+	}
+}
+
+func TestFileTool_NestedTraversalStillBlocked(t *testing.T) {
+	root := t.TempDir()
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{
+		Enabled: true, Roots: []string{root}, AllowWrite: true, AllowMkdir: true,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, args := range []string{
+		`{"path":"../escape/x","action":"mkdir"}`,
+		`{"path":"a/../../escape.txt","action":"write","content":"x"}`,
+	} {
+		if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+			ToolName: magi.FileToolName, ArgumentsJSON: args,
+		}); err == nil || !strings.Contains(err.Error(), "outside the configured roots") {
+			t.Fatalf("nested traversal must stay blocked, got %v", err)
+		}
+	}
+}
+
+// TestFileTool_MkdirThroughSymlinkedAncestorBlocked covers the case where an
+// existing ancestor INSIDE the root is a symlink pointing outside it: the
+// deepest-existing-ancestor resolution must reject it rather than re-append the
+// tail under the symlink target.
+func TestFileTool_MkdirThroughSymlinkedAncestorBlocked(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	outside := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	exec, err := magi.NewFileToolExecutor(magi.FileToolConfig{
+		Enabled: true, Roots: []string{root}, AllowMkdir: true, AllowWrite: true,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, args := range []string{
+		`{"path":"link/a/b","action":"mkdir"}`,
+		`{"path":"link/escape.txt","action":"write","content":"x"}`,
+	} {
+		if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+			ToolName: magi.FileToolName, ArgumentsJSON: args,
+		}); err == nil || !strings.Contains(err.Error(), "outside the configured roots") {
+			t.Fatalf("%s must be blocked, got %v", args, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outside, "a")); !os.IsNotExist(err) {
+		t.Fatal("mkdir must not create directories outside the root via a symlinked ancestor")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "escape.txt")); !os.IsNotExist(err) {
+		t.Fatal("write must not create files outside the root via a symlinked ancestor")
 	}
 }

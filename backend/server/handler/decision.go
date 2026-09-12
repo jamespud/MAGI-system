@@ -117,7 +117,17 @@ func (h *DecisionHandler) Fork(ctx context.Context, c *app.RequestContext) {
 func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	case_, err := h.svc.Get(ctx, id)
-	if err == nil && case_ != nil && !AuthorizeCase(ctx, case_.UserID) {
+	// Fail closed: a lookup error must not skip the ownership check and let the
+	// mutation through.
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if case_ == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, case_.UserID) {
 		Forbidden(c)
 		return
 	}
@@ -135,7 +145,17 @@ func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 func (h *DecisionHandler) Pause(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	case_, err := h.svc.Get(ctx, id)
-	if err == nil && case_ != nil && !AuthorizeCase(ctx, case_.UserID) {
+	// Fail closed: a lookup error must not skip the ownership check and let the
+	// mutation through.
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if case_ == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, case_.UserID) {
 		Forbidden(c)
 		return
 	}
@@ -149,7 +169,17 @@ func (h *DecisionHandler) Pause(ctx context.Context, c *app.RequestContext) {
 func (h *DecisionHandler) Resume(ctx context.Context, c *app.RequestContext) {
 	id := c.Param("id")
 	case_, err := h.svc.Get(ctx, id)
-	if err == nil && case_ != nil && !AuthorizeCase(ctx, case_.UserID) {
+	// Fail closed: a lookup error must not skip the ownership check and let the
+	// mutation through.
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if case_ == nil {
+		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "case not found"})
+		return
+	}
+	if !AuthorizeCase(ctx, case_.UserID) {
 		Forbidden(c)
 		return
 	}

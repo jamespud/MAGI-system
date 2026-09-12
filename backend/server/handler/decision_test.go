@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -54,6 +55,13 @@ type cancelRejectedCaseLookup struct{ stubCaseLookup }
 
 func (cancelRejectedCaseLookup) UpdateStatusIfCurrent(context.Context, string, []entity.CaseStatus, entity.CaseStatus) (bool, error) {
 	return false, nil
+}
+
+// erroringCaseLookup simulates a database failure during the ownership lookup.
+type erroringCaseLookup struct{ stubCaseLookup }
+
+func (erroringCaseLookup) Get(context.Context, string) (*entity.DecisionCase, error) {
+	return nil, errors.New("db unavailable")
 }
 
 func (s stubCaseLookup) Create(ctx context.Context, c *entity.DecisionCase) error { return nil }
@@ -194,6 +202,33 @@ func TestDecisionHandler_PauseRejectsResolvedCase(t *testing.T) {
 	w := ut.PerformRequest(r.Engine, "POST", "/cases/c1/pause", nil)
 	if w.Result().StatusCode() != 400 {
 		t.Fatalf("expected 400 for resolved case, got %d", w.Result().StatusCode())
+	}
+}
+
+// TestDecisionHandler_MutationsFailClosedWhenCaseLookupErrors proves that a
+// failed ownership lookup aborts Cancel/Pause/Resume instead of skipping the
+// authorize check and mutating another tenant's case.
+func TestDecisionHandler_MutationsFailClosedWhenCaseLookupErrors(t *testing.T) {
+	rm := newFakeRunManager()
+	rm.started["c1"] = true
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithRunManager(rm),
+		decision.WithCaseRepo(erroringCaseLookup{}))
+	h := handler.NewDecisionHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.POST("/cases/:id/cancel", h.Cancel)
+	r.POST("/cases/:id/pause", h.Pause)
+	r.POST("/cases/:id/resume", h.Resume)
+
+	for _, path := range []string{"/cases/c1/cancel", "/cases/c1/pause", "/cases/c1/resume"} {
+		w := ut.PerformRequest(r.Engine, "POST", path, nil)
+		if got := w.Result().StatusCode(); got != 500 {
+			t.Fatalf("%s: expected 500 when case lookup fails, got %d body=%s", path, got, string(w.Result().Body()))
+		}
+	}
+	if rm.cancelled["c1"] {
+		t.Fatal("cancel must not run when the ownership lookup fails")
 	}
 }
 

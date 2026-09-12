@@ -243,12 +243,17 @@ type FeedbackToolConfig struct {
 	Enabled *bool `yaml:"enabled"`
 }
 
-// FileToolConfig configures the built-in read-only file query tool.
+// FileToolConfig configures the built-in file query tool. Read and list are
+// always available; each mutation is opt-in and defaults to false.
 type FileToolConfig struct {
 	Enabled      bool     `yaml:"enabled"`
 	Roots        []string `yaml:"roots"`
 	MaxFileBytes int64    `yaml:"max_file_bytes"`
 	MaxListItems int      `yaml:"max_list_items"`
+	AllowWrite   bool     `yaml:"allow_write"`
+	AllowAppend  bool     `yaml:"allow_append"`
+	AllowDelete  bool     `yaml:"allow_delete"`
+	AllowMkdir   bool     `yaml:"allow_mkdir"`
 }
 
 // RepoToolConfig configures the built-in read-only repository query tool.

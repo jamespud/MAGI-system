@@ -347,7 +347,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Self-improving harness (human-in-the-loop)** - analyze a failed case into a categorized, rule-based improvement suggestion; an admin confirms before a proposed prompt change is written to the versioned registry.
 - **Automated regression gate** - schedule periodic re-runs of the built-in decision sanity suite (`benchmark.auto_interval_seconds`); regression failures are counted and alerted.
 - **Docker sandbox** - optional container runtime (`code_runner.docker`) that runs code in a throwaway, network-isolated container with memory/CPU/PID/time limits on top of the shared guardrails.
-- **Read-only file tool** - `file_query` reads files and lists directories inside allow-listed roots with traversal rejection and size/item bounds (`file_tool` config).
+- **File tool (read by default)** - `file_query` reads files and lists directories inside allow-listed roots with traversal rejection and size/item bounds; writes, appends, deletes and mkdir are separate opt-in flags that default to off (`file_tool` config).
 - **Read-only repo tool** - `repo_query` greps and lists files inside allow-listed repository roots with extension filtering and result bounds (`repo_tool` config).
 - **Restricted URL fetch** - `web_fetch` fetches allow-listed domains and returns readable text with size/timeout bounds and SSRF protection (`web_tool` config).
 - **Dynamic sub-investigation** - the `delegate` tool spawns an independent subagent to investigate a sub-question and returns its evidence for citation (`delegate_tool` config).
@@ -413,7 +413,7 @@ limits: { max_concurrent_runs_per_user: 3 }
 code_runner: { enabled: true, timeout_seconds: 30, max_code_chars: 4000, ... }
 code_runner.docker: { enabled: true, image: "python:3.12-slim", memory_mb: 512, cpus: "1.0", runtime: "runsc" }
 db_tool: { enabled: true, driver: "mysql", dsn: "...", max_rows: 50 }
-file_tool: { enabled: true, roots: ["/var/lib/magi"] }
+file_tool: { enabled: true, roots: ["/var/lib/magi"], allow_write: false }
 repo_tool: { enabled: true, roots: ["/srv/app"] }
 web_tool: { enabled: true, allowed_domains: ["docs.example.com"] }
 delegate_tool: { enabled: true }

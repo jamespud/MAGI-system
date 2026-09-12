@@ -11,7 +11,9 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
-// FileToolName is the built-in read-only file query tool.
+// FileToolName is the built-in file query tool. Reads are always allowed within
+// the configured roots; every mutation (write/append/delete/mkdir) is opt-in
+// and disabled by default.
 const FileToolName = "file_query"
 
 const (
@@ -22,23 +24,32 @@ const (
 // fileArgsSchema is the JSON Schema for file_query arguments.
 const fileArgsSchema = `{"type":"object","properties":{"path":{"type":"string"},"action":{"type":"string","enum":["read","list","write","append","delete","mkdir"]},"content":{"type":"string"}},"required":["path","action"],"additionalProperties":false}`
 
-// FileToolConfig bounds the read-only file tool to configured roots.
+// FileToolConfig bounds the file tool to configured roots. Read and list are
+// always available; mutations are gated individually and default to off so an
+// operator enabling "file query" does not silently grant write access.
 type FileToolConfig struct {
 	Enabled      bool
 	Roots        []string
 	MaxFileBytes int64
 	MaxListItems int
+	AllowWrite   bool
+	AllowAppend  bool
 	AllowDelete  bool
+	AllowMkdir   bool
 }
 
-// FileToolExecutor reads or lists files inside configured allow-listed roots.
-// Paths are resolved and containment-checked so `..` traversal cannot escape
-// the roots; reads are size-bounded and lists are item-bounded.
+// FileToolExecutor reads, lists, or (when explicitly enabled) mutates files
+// inside configured allow-listed roots. Paths are resolved and
+// containment-checked so `..` traversal cannot escape the roots; reads are
+// size-bounded and lists are item-bounded.
 type FileToolExecutor struct {
 	roots        []string
 	maxFileBytes int64
 	maxListItems int
+	allowWrite   bool
+	allowAppend  bool
 	allowDelete  bool
+	allowMkdir   bool
 }
 
 // NewFileToolExecutor normalizes and validates the allow-listed roots.
@@ -69,7 +80,15 @@ func NewFileToolExecutor(cfg FileToolConfig) (port.ToolExecutorPort, error) {
 	if maxItems <= 0 {
 		maxItems = defaultFileMaxItems
 	}
-	return &FileToolExecutor{roots: roots, maxFileBytes: maxBytes, maxListItems: maxItems, allowDelete: cfg.AllowDelete}, nil
+	return &FileToolExecutor{
+		roots:        roots,
+		maxFileBytes: maxBytes,
+		maxListItems: maxItems,
+		allowWrite:   cfg.AllowWrite,
+		allowAppend:  cfg.AllowAppend,
+		allowDelete:  cfg.AllowDelete,
+		allowMkdir:   cfg.AllowMkdir,
+	}, nil
 }
 
 func (e *FileToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
@@ -94,12 +113,24 @@ func (e *FileToolExecutor) Execute(ctx context.Context, req port.ToolExecutionRe
 	case "list":
 		return e.list(ctx, resolved)
 	case "write":
+		if !e.allowWrite {
+			return nil, fmt.Errorf("file_query: write is disabled (allow_write=false)")
+		}
 		return e.write(ctx, resolved, args.Content)
 	case "append":
+		if !e.allowAppend {
+			return nil, fmt.Errorf("file_query: append is disabled (allow_append=false)")
+		}
 		return e.append(ctx, resolved, args.Content)
 	case "delete":
+		if !e.allowDelete {
+			return nil, fmt.Errorf("file_query: delete is disabled (allow_delete=false)")
+		}
 		return e.delete(ctx, resolved)
 	case "mkdir":
+		if !e.allowMkdir {
+			return nil, fmt.Errorf("file_query: mkdir is disabled (allow_mkdir=false)")
+		}
 		return e.mkdir(ctx, resolved)
 	default:
 		return nil, fmt.Errorf("file_query: unknown action %q", args.Action)
@@ -121,16 +152,12 @@ func resolveInRoots(roots []string, path string) (string, error) {
 		}
 	}
 	for _, candidate := range candidates {
-		// Resolve symlinks on the deepest existing ancestor so writes/mkdir
-		// to not-yet-existing paths are still containment-checked.
-		real, err := filepath.EvalSymlinks(candidate)
-		if err != nil {
-			dir := filepath.Dir(candidate)
-			realDir, derr := filepath.EvalSymlinks(dir)
-			if derr != nil {
-				continue
-			}
-			real = filepath.Join(realDir, filepath.Base(candidate))
+		// Resolve symlinks on the deepest existing ancestor and re-append the
+		// not-yet-existing tail, so mkdir/write to nested new paths are still
+		// containment-checked (EvalSymlinks alone fails on a missing path).
+		real, ok := resolveDeepestExisting(candidate)
+		if !ok {
+			continue
 		}
 		for _, root := range roots {
 			if withinRoot(root, real) {
@@ -139,6 +166,35 @@ func resolveInRoots(roots []string, path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("path %q is outside the configured roots", path)
+}
+
+// resolveDeepestExisting resolves symlinks on the deepest existing ancestor of
+// candidate and re-joins the remaining (non-existent) path segments. The
+// returned path is fully symlink-resolved on its existing prefix, so a
+// containment check against it cannot be fooled by a symlinked ancestor.
+func resolveDeepestExisting(candidate string) (string, bool) {
+	var tail []string
+	current := filepath.Clean(candidate)
+	for {
+		real, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			if len(tail) == 0 {
+				return real, true
+			}
+			parts := make([]string, 0, len(tail)+1)
+			parts = append(parts, real)
+			for i := len(tail) - 1; i >= 0; i-- {
+				parts = append(parts, tail[i])
+			}
+			return filepath.Join(parts...), true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		tail = append(tail, filepath.Base(current))
+		current = parent
+	}
 }
 
 func withinRoot(root, candidate string) bool {
@@ -224,9 +280,6 @@ func (e *FileToolExecutor) append(ctx context.Context, path, content string) (*p
 }
 
 func (e *FileToolExecutor) delete(ctx context.Context, path string) (*port.ToolExecutionResult, error) {
-	if !e.allowDelete {
-		return nil, fmt.Errorf("file_query: delete is disabled (allow_delete=false)")
-	}
 	if err := os.Remove(path); err != nil {
 		return nil, fmt.Errorf("file_query: delete %s: %w", path, err)
 	}

@@ -106,3 +106,61 @@ func TestWebFetchTool_RequiresEnabledAndDomains(t *testing.T) {
 		t.Fatal("expected missing domains error")
 	}
 }
+
+func TestWebFetchTool_FollowsAllowedRedirect(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/b", http.StatusFound)
+	})
+	mux.HandleFunc("/b", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("final page"))
+	})
+	exec, err := magi.NewWebFetchToolExecutor(magi.WebFetchToolConfig{
+		Enabled: true, AllowedDomains: []string{"127.0.0.1"}, TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.WebFetchToolName, ArgumentsJSON: `{"url":"` + srv.URL + `/a"}`,
+	})
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	var out struct {
+		URL     string `json:"url"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Content != "final page" {
+		t.Fatalf("content = %q", out.Content)
+	}
+	if !strings.HasSuffix(out.URL, "/b") {
+		t.Fatalf("url = %q, want the post-redirect URL", out.URL)
+	}
+}
+
+func TestWebFetchTool_RejectsRedirectToNonAllowedHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer srv.Close()
+	exec, err := magi.NewWebFetchToolExecutor(magi.WebFetchToolConfig{
+		Enabled: true, AllowedDomains: []string{"127.0.0.1"}, TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// The redirect target is a non-allowlisted cloud metadata address; the hop
+	// must be rejected before any connection is attempted.
+	if _, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+		ToolName: magi.WebFetchToolName, ArgumentsJSON: `{"url":"` + srv.URL + `/start"}`,
+	}); err == nil || !strings.Contains(err.Error(), "not in the allowed domains") {
+		t.Fatalf("redirect to metadata endpoint must be blocked, got %v", err)
+	}
+}

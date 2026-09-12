@@ -449,6 +449,8 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 		fileTool, err := magi.NewFileToolExecutor(magi.FileToolConfig{
 			Enabled: cfg.FileTool.Enabled, Roots: cfg.FileTool.Roots,
 			MaxFileBytes: cfg.FileTool.MaxFileBytes, MaxListItems: cfg.FileTool.MaxListItems,
+			AllowWrite: cfg.FileTool.AllowWrite, AllowAppend: cfg.FileTool.AllowAppend,
+			AllowDelete: cfg.FileTool.AllowDelete, AllowMkdir: cfg.FileTool.AllowMkdir,
 		})
 		if err != nil {
 			return nil, err
