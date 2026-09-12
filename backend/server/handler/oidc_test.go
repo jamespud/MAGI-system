@@ -39,7 +39,9 @@ func (m *memRepo) FindByEmail(ctx context.Context, email string) (*entity.User, 
 			return u, nil
 		}
 	}
-	return nil, errNotFound
+	// Model the adapter contract: missing accounts use the canonical sentinel so
+	// callers can distinguish them from a storage failure.
+	return nil, port.ErrUserNotFound
 }
 func (m *memRepo) List(ctx context.Context) ([]*entity.User, error) { return nil, nil }
 func (m *memRepo) Update(ctx context.Context, u *entity.User) error { return nil }

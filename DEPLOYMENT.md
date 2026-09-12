@@ -148,7 +148,9 @@ never a role. Every request re-resolves the caller's current role/status from
 the user store (through a short-TTL in-process cache), so a permission change
 takes effect immediately: `PATCH /admin/users/:id` with `role` or `status`, and
 `POST /admin/users/:id/revoke-sessions`, both bump `auth_version` and invalidate
-existing cookies. Profile-only edits (name/email) deliberately do not. A
+existing cookies. Profile-only edits (name/email) deliberately do not bump the
+version (no logout), but they still evict the cache so the new name is visible
+immediately. A
 disabled or deleted account is rejected, and if the user store cannot be read
 the request fails closed with `503` rather than falling back to the cookie's
 old authority. Changing the cookie payload layout is a schema version bump, so

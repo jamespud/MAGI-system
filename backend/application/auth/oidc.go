@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 // OIDCConfig configures the optional OpenID Connect authorization-code login.
@@ -183,8 +185,16 @@ func (c *OIDCClient) Provision(ctx context.Context, identity *OIDCIdentity) (*en
 	if identity == nil || identity.Email == "" {
 		return nil, fmt.Errorf("oidc: identity email is required")
 	}
-	if user, err := c.users.FindByEmail(ctx, identity.Email); err == nil && user != nil {
-		return user, nil
+	// Distinguish "no such account" from "could not read the account store": a
+	// storage failure must not fall through to provisioning a new account.
+	existing, err := c.users.FindByEmail(ctx, identity.Email)
+	switch {
+	case err == nil && existing != nil:
+		return existing, nil
+	case err == nil, errors.Is(err, port.ErrUserNotFound):
+		// No local account yet; fall through to provisioning.
+	default:
+		return nil, fmt.Errorf("oidc: lookup user %q: %w", identity.Email, err)
 	}
 	if !c.cfg.SelfRegistration {
 		return nil, fmt.Errorf("oidc: no local account for %q and self-registration is disabled", identity.Email)

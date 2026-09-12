@@ -46,6 +46,11 @@ type SessionAuthorizer struct {
 
 	mu    sync.Mutex
 	cache map[int64]authState
+	// gen bumps on every Invalidate. A lookup records the generation before it
+	// reads the store and refuses to publish its result if the generation moved
+	// meanwhile, so a read that raced a permission change cannot restore the
+	// pre-change state into the cache.
+	gen map[int64]uint64
 }
 
 // NewSessionAuthorizer builds an authorizer over the user repository. A
@@ -54,7 +59,13 @@ func NewSessionAuthorizer(store port.UserRepository, ttl time.Duration) *Session
 	if ttl <= 0 {
 		ttl = DefaultAuthStateTTL
 	}
-	return &SessionAuthorizer{store: store, ttl: ttl, now: time.Now, cache: make(map[int64]authState)}
+	return &SessionAuthorizer{
+		store: store,
+		ttl:   ttl,
+		now:   time.Now,
+		cache: make(map[int64]authState),
+		gen:   make(map[int64]uint64),
+	}
 }
 
 // Resolve returns the principal for a session that claims userID at
@@ -89,6 +100,7 @@ func (a *SessionAuthorizer) Invalidate(userID int64) {
 	}
 	a.mu.Lock()
 	delete(a.cache, userID)
+	a.gen[userID]++
 	a.mu.Unlock()
 }
 
@@ -99,41 +111,60 @@ func (a *SessionAuthorizer) InvalidateAll() {
 	}
 	a.mu.Lock()
 	a.cache = make(map[int64]authState)
+	a.gen = make(map[int64]uint64)
 	a.mu.Unlock()
 }
+
+// stateReadRetries bounds how many times a lookup will re-read the store when a
+// concurrent invalidation invalidated its result. Exhausting it fails closed
+// rather than returning a value that may predate the change.
+const stateReadRetries = 4
 
 // state returns the cached or freshly loaded authorization state, or nil when
 // the account does not exist. Storage failures are surfaced (never cached) so
 // the caller can fail closed.
 func (a *SessionAuthorizer) state(ctx context.Context, userID int64) (*authState, error) {
-	now := a.now()
-	a.mu.Lock()
-	if cached, ok := a.cache[userID]; ok && now.Before(cached.expiresAt) {
+	for attempt := 0; ; attempt++ {
+		now := a.now()
+		a.mu.Lock()
+		if cached, ok := a.cache[userID]; ok && now.Before(cached.expiresAt) {
+			a.mu.Unlock()
+			state := cached
+			return &state, nil
+		}
+		gen := a.gen[userID]
 		a.mu.Unlock()
-		state := cached
-		return &state, nil
-	}
-	a.mu.Unlock()
 
-	u, err := a.store.GetByID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, port.ErrUserNotFound) {
+		u, err := a.store.GetByID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, port.ErrUserNotFound) {
+				return nil, nil
+			}
+			return nil, ErrAuthStateUnavailable
+		}
+		if u == nil {
 			return nil, nil
 		}
-		return nil, ErrAuthStateUnavailable
+
+		state := authState{
+			name:        u.Name,
+			role:        u.Role,
+			active:      u.IsActive(),
+			authVersion: u.AuthVersion,
+			expiresAt:   now.Add(a.ttl),
+		}
+		a.mu.Lock()
+		if a.gen[userID] != gen {
+			// A permission change landed while this read was in flight, so the
+			// value may predate it. Never publish it: re-read instead.
+			a.mu.Unlock()
+			if attempt >= stateReadRetries {
+				return nil, ErrAuthStateUnavailable
+			}
+			continue
+		}
+		a.cache[userID] = state
+		a.mu.Unlock()
+		return &state, nil
 	}
-	if u == nil {
-		return nil, nil
-	}
-	state := authState{
-		name:        u.Name,
-		role:        u.Role,
-		active:      u.IsActive(),
-		authVersion: u.AuthVersion,
-		expiresAt:   now.Add(a.ttl),
-	}
-	a.mu.Lock()
-	a.cache[userID] = state
-	a.mu.Unlock()
-	return &state, nil
 }

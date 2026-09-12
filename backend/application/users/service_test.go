@@ -7,6 +7,7 @@ import (
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/users"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 type memUserRepo struct {
@@ -26,7 +27,7 @@ func (r *memUserRepo) GetByID(ctx context.Context, id int64) (*entity.User, erro
 	if u, ok := r.byID[id]; ok {
 		return u, nil
 	}
-	return nil, errNotFound
+	return nil, port.ErrUserNotFound
 }
 func (r *memUserRepo) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
 	for _, u := range r.byID {
@@ -34,7 +35,7 @@ func (r *memUserRepo) FindByEmail(ctx context.Context, email string) (*entity.Us
 			return u, nil
 		}
 	}
-	return nil, errNotFound
+	return nil, port.ErrUserNotFound
 }
 func (r *memUserRepo) List(ctx context.Context) ([]*entity.User, error) {
 	var out []*entity.User
@@ -63,7 +64,7 @@ func (r *memKeyRepo) GetByID(ctx context.Context, id string) (*entity.ApiKey, er
 	if k, ok := r.byID[id]; ok {
 		return k, nil
 	}
-	return nil, errNotFound
+	return nil, port.ErrUserNotFound
 }
 func (r *memKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*entity.ApiKey, error) {
 	var out []*entity.ApiKey
@@ -80,7 +81,7 @@ func (r *memKeyRepo) FindByKeyHash(ctx context.Context, hash string) (*entity.Ap
 			return k, nil
 		}
 	}
-	return nil, errNotFound
+	return nil, port.ErrUserNotFound
 }
 func (r *memKeyRepo) Update(ctx context.Context, k *entity.ApiKey) error {
 	r.byID[k.ID] = k
@@ -90,12 +91,6 @@ func (r *memKeyRepo) Delete(ctx context.Context, id string) error {
 	delete(r.byID, id)
 	return nil
 }
-
-var errNotFound = &notFoundError{}
-
-type notFoundError struct{}
-
-func (*notFoundError) Error() string { return "not found" }
 
 func TestUsersService_CreateUserAndAuthenticate(t *testing.T) {
 	urepo := newMemUserRepo()

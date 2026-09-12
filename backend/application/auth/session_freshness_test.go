@@ -203,6 +203,11 @@ func TestSessionFreshness_ProfileEditKeepsSession(t *testing.T) {
 	token := h.cookie(t, u)
 	before := h.reload(t, u.ID).AuthVersion
 
+	// Warm the cache so the rename must evict for the new name to be visible.
+	if p, err := h.authenticate(t, token); err != nil || p.Name != "alice" {
+		t.Fatalf("warm session = %+v err = %v", p, err)
+	}
+
 	updated, err := h.svc.UpdateUser(context.Background(), entity.RoleAdmin, u.ID, users.UserPatch{Name: ptr("Alice Renamed")})
 	if err != nil {
 		t.Fatalf("profile update: %v", err)
@@ -285,5 +290,80 @@ func TestSessionFreshness_RejectsMalformedAndExpiredCookie(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	if _, err := h.authenticate(t, tok); !errors.Is(err, auth.ErrSessionUnauthorized) {
 		t.Fatalf("expired cookie = %v, want ErrSessionUnauthorized", err)
+	}
+}
+
+// gatedUsers blocks the first store lookup *after* it has read the row, so a
+// test can deterministically interleave a permission change with an in-flight
+// authorization read.
+type gatedUsers struct {
+	port.UserRepository
+	read    chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedUsers) GetByID(ctx context.Context, id int64) (*entity.User, error) {
+	u, err := g.UserRepository.GetByID(ctx, id)
+	g.once.Do(func() { close(g.read) })
+	<-g.release
+	return u, err
+}
+
+// TestSessionFreshness_InvalidateDuringInflightReadIsNotRefilled pins the
+// linearization point: a lookup that read the pre-change row must not restore
+// it into the cache after Invalidate ran, or a revoked cookie would keep
+// working for a full TTL.
+func TestSessionFreshness_InvalidateDuringInflightReadIsNotRefilled(t *testing.T) {
+	db := openUserDB(t)
+	repo := magi.NewUserRepository(db)
+	gated := &gatedUsers{
+		UserRepository: repo,
+		read:           make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	authorizer := auth.NewSessionAuthorizer(gated, auth.DefaultAuthStateTTL)
+	codec, err := auth.NewSessionCodec(testSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("codec: %v", err)
+	}
+	authSvc := auth.NewService(true, nil).WithSession(codec).WithSessionAuthorizer(authorizer)
+	userSvc := users.NewServiceWithOptions(repo, magi.NewApiKeyRepository(db), users.WithSessionInvalidator(authorizer))
+
+	u := &entity.User{Name: "alice", Email: "alice@example.com", Role: entity.RoleAdmin}
+	if err := repo.Create(context.Background(), u); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	token, err := codec.Encode(u.ID, u.AuthVersion)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	type result struct {
+		p   *auth.Principal
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		p, err := authSvc.AuthenticateSession(context.Background(), token)
+		done <- result{p: p, err: err}
+	}()
+
+	// The in-flight lookup has now read the pre-change (admin) row.
+	<-gated.read
+	// The permission change completes and invalidates while that read is parked.
+	if _, err := userSvc.UpdateUser(context.Background(), entity.RoleAdmin, u.ID, users.UserPatch{Role: ptr(entity.RoleUser)}); err != nil {
+		t.Fatalf("demote: %v", err)
+	}
+	close(gated.release)
+
+	got := <-done
+	if !errors.Is(got.err, auth.ErrSessionUnauthorized) {
+		t.Fatalf("stale in-flight read authorized a revoked cookie: p=%+v err=%v", got.p, got.err)
+	}
+	// If the stale value had been refilled, this second call would be served
+	// from cache and wrongly succeed.
+	if p, err := authSvc.AuthenticateSession(context.Background(), token); !errors.Is(err, auth.ErrSessionUnauthorized) {
+		t.Fatalf("stale state was refilled into the cache: p=%+v err=%v", p, err)
 	}
 }

@@ -22,21 +22,27 @@ type UserRepository interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// UserMutation is a fully normalized account patch applied in ONE statement.
+// Nil fields are left unchanged. When BumpAuthVersion is set, auth_version is
+// incremented by the same UPDATE, so no reader can observe the new
+// authorization facts paired with the previous version.
+type UserMutation struct {
+	Name            *string
+	Email           *string
+	Role            *string
+	Status          *string
+	BumpAuthVersion bool
+}
+
 // AuthUserWriter applies account mutations while maintaining the session
-// authorization version. Each versioned mutation must bump auth_version in the
-// same statement that applies the change, so a concurrent read can never
-// observe the new role/status with the old version. It is deliberately
-// separate from UserRepository so read-only callers and fakes are unaffected.
+// authorization version. It is deliberately separate from UserRepository so
+// read-only callers and fakes are unaffected.
 type AuthUserWriter interface {
-	// SetUserRole changes the role and returns the new auth_version.
-	SetUserRole(ctx context.Context, id int64, role string) (int64, error)
-	// SetUserStatus changes the account status and returns the new auth_version.
-	SetUserStatus(ctx context.Context, id int64, status string) (int64, error)
+	// ApplyUserMutation applies every populated field of m atomically and
+	// returns the stored user afterwards.
+	ApplyUserMutation(ctx context.Context, id int64, m UserMutation) (*entity.User, error)
 	// BumpAuthVersion invalidates every existing session for the user.
 	BumpAuthVersion(ctx context.Context, id int64) (int64, error)
-	// UpdateUserProfile changes non-authorization profile fields WITHOUT
-	// touching auth_version (name/email are not authorization facts).
-	UpdateUserProfile(ctx context.Context, id int64, name, email string) error
 }
 
 // ApiKeyRepository persists DB-backed API keys (hash-only).

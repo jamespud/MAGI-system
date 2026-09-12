@@ -124,8 +124,16 @@ func (s *Service) SelfRegister(ctx context.Context, name, email string) (*entity
 	}
 	email = strings.TrimSpace(email)
 	if email != "" {
-		if existing, err := s.users.FindByEmail(ctx, email); err == nil && existing != nil {
+		existing, err := s.users.FindByEmail(ctx, email)
+		switch {
+		case err == nil && existing != nil:
 			return nil, nil, fmt.Errorf("users: email already registered")
+		case err == nil, errors.Is(err, port.ErrUserNotFound):
+			// No account uses this email; continue.
+		default:
+			// A lookup failure is not "not registered": do not silently mint a
+			// second account for an email we could not check.
+			return nil, nil, fmt.Errorf("users: lookup email: %w", err)
 		}
 	}
 	u := &entity.User{Name: name, Email: email, Role: entity.RoleUser}
@@ -268,18 +276,18 @@ func (s *Service) DeleteUser(ctx context.Context, actorRole string, userID int64
 	return nil
 }
 
-// UpdateUser applies an admin account patch. Role and status changes bump
-// auth_version and evict the session cache, so existing cookies stop being
-// honored immediately; profile (name/email) edits leave sessions intact.
+// UpdateUser applies an admin account patch. The whole patch is validated
+// before anything is written and is then applied in a single UPDATE, so an
+// invalid field can never leave a partially applied change behind. A role or
+// status change bumps auth_version (existing cookies stop being honored);
+// profile edits leave sessions intact but still evict the cache so the display
+// name refreshes immediately.
 func (s *Service) UpdateUser(ctx context.Context, actorRole string, userID int64, patch UserPatch) (*entity.User, error) {
 	if !isAdmin(actorRole) {
 		return nil, ErrForbidden
 	}
-	current, err := s.users.GetByID(ctx, userID)
+	current, err := s.loadUser(ctx, userID)
 	if err != nil {
-		if errors.Is(err, port.ErrUserNotFound) {
-			return nil, ErrNotFound
-		}
 		return nil, err
 	}
 	writer, ok := s.users.(port.AuthUserWriter)
@@ -287,6 +295,9 @@ func (s *Service) UpdateUser(ctx context.Context, actorRole string, userID int64
 		return nil, fmt.Errorf("users: repository does not support versioned updates")
 	}
 
+	// Validate and normalize every field first: no writes happen until the
+	// whole patch is known-good.
+	var m port.UserMutation
 	authorizationChanged := false
 	if patch.Role != nil {
 		role := strings.TrimSpace(*patch.Role)
@@ -294,9 +305,7 @@ func (s *Service) UpdateUser(ctx context.Context, actorRole string, userID int64
 			return nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
 		}
 		if role != current.Role {
-			if _, err := writer.SetUserRole(ctx, userID, role); err != nil {
-				return nil, err
-			}
+			m.Role = &role
 			authorizationChanged = true
 		}
 	}
@@ -306,32 +315,35 @@ func (s *Service) UpdateUser(ctx context.Context, actorRole string, userID int64
 			return nil, fmt.Errorf("users: status must be %q or %q", entity.UserStatusActive, entity.UserStatusDisabled)
 		}
 		if status != current.Status {
-			if _, err := writer.SetUserStatus(ctx, userID, status); err != nil {
-				return nil, err
-			}
+			m.Status = &status
 			authorizationChanged = true
 		}
 	}
-	if patch.Name != nil || patch.Email != nil {
-		name := current.Name
-		if patch.Name != nil {
-			name = strings.TrimSpace(*patch.Name)
-		}
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
 		if name == "" {
 			return nil, fmt.Errorf("users: name is required")
 		}
-		email := current.Email
-		if patch.Email != nil {
-			email = strings.TrimSpace(*patch.Email)
-		}
-		if err := writer.UpdateUserProfile(ctx, userID, name, email); err != nil {
-			return nil, err
-		}
+		m.Name = &name
 	}
-	if authorizationChanged {
-		s.invalidate(userID)
+	if patch.Email != nil {
+		email := strings.TrimSpace(*patch.Email)
+		m.Email = &email
 	}
-	return s.users.GetByID(ctx, userID)
+	m.BumpAuthVersion = authorizationChanged
+
+	updated, err := writer.ApplyUserMutation(ctx, userID, m)
+	if err != nil {
+		if errors.Is(err, port.ErrUserNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	// Evict only after a successful write. A profile-only patch evicts too (so
+	// a renamed user is not shown with the old name for a TTL) but does not
+	// bump auth_version, so no session is logged out.
+	s.invalidate(userID)
+	return updated, nil
 }
 
 // RevokeSessions invalidates every existing session for a user by bumping
@@ -352,6 +364,19 @@ func (s *Service) RevokeSessions(ctx context.Context, actorRole string, userID i
 	}
 	s.invalidate(userID)
 	return nil
+}
+
+// loadUser maps a missing account to ErrNotFound without hiding storage
+// failures.
+func (s *Service) loadUser(ctx context.Context, userID int64) (*entity.User, error) {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, port.ErrUserNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return u, nil
 }
 
 func (s *Service) invalidate(userID int64) {

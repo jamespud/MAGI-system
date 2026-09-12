@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 type memOIDCUsers struct {
@@ -17,32 +19,35 @@ type memOIDCUsers struct {
 	byID    map[int64]*entity.User
 	byEmail map[string]*entity.User
 	next    int64
+	// lookupErr, when set, simulates a storage failure on lookup.
+	lookupErr error
+	created   int
 }
 
 func (m *memOIDCUsers) FindByEmail(ctx context.Context, email string) (*entity.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.lookupErr != nil {
+		return nil, m.lookupErr
+	}
 	if u, ok := m.byEmail[email]; ok {
 		return u, nil
 	}
-	return nil, errNotFound
+	// Model the adapter contract: a missing account is reported with the
+	// canonical sentinel so callers can tell it apart from a storage failure.
+	return nil, port.ErrUserNotFound
 }
 
 func (m *memOIDCUsers) Create(ctx context.Context, u *entity.User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.created++
 	u.ID = m.next
 	m.next++
 	m.byID[u.ID] = u
 	m.byEmail[u.Email] = u
 	return nil
 }
-
-var errNotFound = &notFoundError{}
-
-type notFoundError struct{}
-
-func (*notFoundError) Error() string { return "not found" }
 
 func newOIDCIssuer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
@@ -122,6 +127,31 @@ func TestOIDCClient_ProvisionMatchesAndCreates(t *testing.T) {
 	}
 	if matched.ID != created.ID {
 		t.Fatalf("expected same account, got %d vs %d", matched.ID, created.ID)
+	}
+}
+
+// TestOIDCClient_ProvisionFailsClosedOnLookupError pins that a storage failure
+// while matching the identity is NOT treated as "no such account": with
+// self-registration enabled the old behavior would silently create a second
+// account for an email it could not actually check.
+func TestOIDCClient_ProvisionFailsClosedOnLookupError(t *testing.T) {
+	boom := errors.New("db timeout")
+	store := &memOIDCUsers{
+		byID: map[int64]*entity.User{}, byEmail: map[string]*entity.User{}, next: 1,
+		lookupErr: boom,
+	}
+	client, err := NewOIDCClient(OIDCConfig{
+		Enabled: true, Issuer: "https://issuer", ClientID: "cid",
+		RedirectURL: "http://localhost/cb", SelfRegistration: true,
+	}, store)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := client.Provision(context.Background(), &OIDCIdentity{Sub: "s", Email: "new@example.com"}); !errors.Is(err, boom) {
+		t.Fatalf("provision err = %v, want the lookup failure surfaced", err)
+	}
+	if store.created != 0 {
+		t.Fatalf("provisioned %d accounts despite an unreadable user store", store.created)
 	}
 }
 

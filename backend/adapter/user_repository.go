@@ -99,24 +99,48 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// SetUserRole changes the role and bumps auth_version in one statement.
-func (r *userRepo) SetUserRole(ctx context.Context, id int64, role string) (int64, error) {
-	return r.mutate(ctx, id, map[string]any{"role": role})
-}
-
-// SetUserStatus changes active/disabled and bumps auth_version in one statement.
-func (r *userRepo) SetUserStatus(ctx context.Context, id int64, status string) (int64, error) {
-	return r.mutate(ctx, id, map[string]any{"status": status})
-}
-
 // BumpAuthVersion invalidates every existing session for the user.
 func (r *userRepo) BumpAuthVersion(ctx context.Context, id int64) (int64, error) {
 	return r.mutate(ctx, id, nil)
 }
 
-// mutate applies extra column updates together with an atomic auth_version
-// increment, so no reader can observe the new authorization facts paired with
-// the previous version.
+// ApplyUserMutation writes every populated field plus (optionally) an atomic
+// auth_version increment in a single UPDATE, so a multi-field admin patch can
+// never be partially applied.
+func (r *userRepo) ApplyUserMutation(ctx context.Context, id int64, m port.UserMutation) (*entity.User, error) {
+	updates := map[string]any{"updated_at": time.Now()}
+	if m.Name != nil {
+		updates["name"] = *m.Name
+	}
+	if m.Email != nil {
+		updates["email"] = *m.Email
+	}
+	if m.Role != nil {
+		updates["role"] = *m.Role
+	}
+	if m.Status != nil {
+		updates["status"] = *m.Status
+	}
+	if m.BumpAuthVersion {
+		updates["auth_version"] = gorm.Expr("auth_version + 1")
+	}
+	res := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", id).Updates(updates)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		// MySQL reports 0 affected rows when nothing actually changed, so fall
+		// back to an existence check rather than reporting a false not-found.
+		if _, err := r.GetByID(ctx, id); err != nil {
+			return nil, err
+		}
+	}
+	return r.GetByID(ctx, id)
+}
+
+// mutate applies an atomic auth_version increment together with any extra
+// columns, so no reader can observe new authorization facts paired with the
+// previous version.
 func (r *userRepo) mutate(ctx context.Context, id int64, extra map[string]any) (int64, error) {
 	updates := map[string]any{
 		"auth_version": gorm.Expr("auth_version + 1"),
@@ -140,25 +164,6 @@ func (r *userRepo) mutate(ctx context.Context, id int64, extra map[string]any) (
 		return 0, err
 	}
 	return m.AuthVersion, nil
-}
-
-// UpdateUserProfile changes name/email without touching auth_version: profile
-// edits must not log the user out of their existing sessions.
-func (r *userRepo) UpdateUserProfile(ctx context.Context, id int64, name, email string) error {
-	res := r.db.WithContext(ctx).Model(&UserModel{}).Where("id = ?", id).Updates(map[string]any{
-		"name": name, "email": email, "updated_at": time.Now(),
-	})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		// MySQL reports 0 affected rows when the values are unchanged, so
-		// confirm the row still exists instead of reporting a false not-found.
-		if _, err := r.GetByID(ctx, id); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func userFromModel(m *UserModel) *entity.User {
