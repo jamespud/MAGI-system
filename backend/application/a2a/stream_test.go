@@ -370,6 +370,9 @@ func TestRunManager_RetryDoesNotCloseA2AStreamBeforeSuccess(t *testing.T) {
 		JobRepo: jobs, CaseRepo: aggregate.CaseRepo(), WorkerID: "retry-stream-worker",
 		MaxAttempts: 2, RetryBase: 100 * time.Millisecond,
 	})
+	// The assertion below watches the stream, which can observe completion
+	// before the worker has settled its job — so join the worker explicitly.
+	t.Cleanup(rm.Shutdown)
 	case_, err := aggregate.CaseRepo().Get(context.Background(), "case-retry-stream")
 	if err != nil {
 		t.Fatal(err)

@@ -79,6 +79,10 @@ func newAuditHarness(t *testing.T) (*testHarness, *memAuditRepo, context.Context
 	orch := newBlockingOrch()
 	repo := magi.NewA2ASubmissionRepository(db)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	// Join the fire-and-forget worker before the test's temp dir is cleaned:
+	// RunManager.Start returns immediately, so an unjoined worker can still be
+	// settling (writing the job row) after the test body finished.
+	t.Cleanup(rm.Shutdown)
 	parser := a2aapp.NewInputParser(65536, 16)
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3)
@@ -159,6 +163,7 @@ func newTestHarness(t *testing.T) *testHarness {
 	orch := newBlockingOrch()
 	repo := magi.NewA2ASubmissionRepository(db)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	t.Cleanup(rm.Shutdown)
 	parser := a2aapp.NewInputParser(65536, 16)
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3)
@@ -317,6 +322,7 @@ func TestHandler_CancelTaskFansOutDurableEvent(t *testing.T) {
 	orch := newBlockingOrch()
 	repo := magi.NewA2ASubmissionRepository(db)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	t.Cleanup(rm.Shutdown)
 	parser := a2aapp.NewInputParser(65536, 16)
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3)
@@ -405,6 +411,7 @@ func TestHandler_SubscribeToTaskDelegatesToStream(t *testing.T) {
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	stream := a2aapp.NewDurableStreamProjector(repo, broker, broker, proj, 8, 10*time.Millisecond)
 	rm := decision.NewRunManager(newBlockingOrch())
+	t.Cleanup(rm.Shutdown)
 	svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), repo, rm, proj, 3)
 	handler := a2aapp.NewHandler(svc, repo, proj, a2aapp.CursorCodec{MaxPageSize: 100}, rm, stream)
 
@@ -475,6 +482,7 @@ func TestHandler_SendStreamingMessageInvalidInputAudits400(t *testing.T) {
 	stream := a2aapp.NewDurableStreamProjector(repo, broker, broker, proj, 8, time.Hour)
 	jobs := newFakeJobRepo()
 	rm := decision.NewRunManager(newBlockingOrch(), decision.RunManagerDeps{JobRepo: jobs})
+	t.Cleanup(rm.Shutdown)
 	svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), repo, rm, proj, 3)
 	auditRepo := &memAuditRepo{}
 	handler := a2aapp.NewHandler(svc, repo, proj, a2aapp.CursorCodec{MaxPageSize: 100}, rm, stream,

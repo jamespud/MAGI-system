@@ -245,11 +245,14 @@ func (f fakeBudgetChecker) CheckBudget(ctx context.Context, userID int64) (*deci
 	return nil, nil
 }
 
-func newSubmissionSvc(db *gorm.DB, jobs *fakeJobRepo, orch *blockingOrch, budget decision.BudgetChecker, maxConcurrent int) (*a2aapp.SubmissionService, a2aapp.SubmissionRepository) {
+func newSubmissionSvc(t *testing.T, db *gorm.DB, jobs *fakeJobRepo, orch *blockingOrch, budget decision.BudgetChecker, maxConcurrent int) (*a2aapp.SubmissionService, a2aapp.SubmissionRepository) {
+	t.Helper()
 	repo := magi.NewA2ASubmissionRepository(db)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, MaxConcurrentRunsPerUser: maxConcurrent, BudgetChecker: budget,
 	})
+	// Join the fire-and-forget worker before the harness temp dir is cleaned.
+	t.Cleanup(rm.Shutdown)
 	parser := a2aapp.NewInputParser(65536, 16)
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3)
@@ -299,7 +302,7 @@ func TestSubmissionService_SubmitStartsNewTask(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	orch := newBlockingOrch()
-	svc, repo := newSubmissionSvc(db, jobs, orch, fakeBudgetChecker{}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, orch, fakeBudgetChecker{}, 0)
 
 	task, err := svc.Submit(context.Background(), 7, submissionReq("msg-1"))
 	if err != nil {
@@ -326,7 +329,7 @@ func TestSubmissionService_SubmitReplaysEqualHash(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	orch := newBlockingOrch()
-	svc, _ := newSubmissionSvc(db, jobs, orch, fakeBudgetChecker{}, 0)
+	svc, _ := newSubmissionSvc(t, db, jobs, orch, fakeBudgetChecker{}, 0)
 
 	first, err := svc.Submit(context.Background(), 7, submissionReq("msg-1"))
 	if err != nil {
@@ -355,7 +358,7 @@ func TestSubmissionService_SubmitReplaysEqualHash(t *testing.T) {
 func TestSubmissionService_SubmitAlreadyCompletedCaseStarts(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
 
 	parsed, err := (a2aapp.NewInputParser(65536, 16)).Parse(submissionReq("msg-1"))
 	if err != nil {
@@ -392,7 +395,7 @@ func TestSubmissionService_SubmitAlreadyCompletedCaseStarts(t *testing.T) {
 func TestSubmissionService_SubmitBudgetRejectionRejects(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{exceeded: true}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{exceeded: true}, 0)
 
 	task, err := svc.Submit(context.Background(), 7, submissionReq("msg-1"))
 	if err != nil {
@@ -414,7 +417,7 @@ func TestSubmissionService_SubmitRateLimitRejects(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	jobs.activeCount = 1
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 1)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 1)
 
 	task, err := svc.Submit(context.Background(), 7, submissionReq("msg-1"))
 	if err != nil {
@@ -433,7 +436,7 @@ func TestSubmissionService_SubmitTransientStartFailureLeavesClaim(t *testing.T) 
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	jobs.enqueueErr = errors.New("database unavailable")
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
 
 	task, err := svc.Submit(context.Background(), 7, submissionReq("msg-1"))
 	if err != nil {
@@ -451,7 +454,7 @@ func TestSubmissionService_SubmitTransientStartFailureLeavesClaim(t *testing.T) 
 func TestSubmissionService_RecoverStartsPreparedBindings(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
 
 	cmd := a2aapp.PrepareCommand{
 		SubmissionID: "sub-1", MessageID: "msg-1", RequestHash: "hash", TaskID: "case-1",
@@ -480,7 +483,7 @@ func TestSubmissionService_RecoverLeavesClaimForRecovery(t *testing.T) {
 	db := openSubmissionDB(t)
 	jobs := newFakeJobRepo()
 	jobs.enqueueErr = errors.New("database unavailable")
-	svc, repo := newSubmissionSvc(db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
+	svc, repo := newSubmissionSvc(t, db, jobs, newBlockingOrch(), fakeBudgetChecker{}, 0)
 
 	cmd := a2aapp.PrepareCommand{
 		SubmissionID: "sub-1", MessageID: "msg-1", RequestHash: "hash", TaskID: "case-1",
@@ -537,6 +540,7 @@ func TestSubmissionService_RecoverSettlesExistingTerminalJobsOnce(t *testing.T) 
 			}
 			jobs := &countingDecisionJobRepo{DecisionJobRepository: magi.NewDecisionJobRepository(db)}
 			rm := decision.NewRunManager(newBlockingOrch(), decision.RunManagerDeps{JobRepo: jobs})
+			t.Cleanup(rm.Shutdown)
 			countedRepo := &countingSubmissionRepo{SubmissionRepository: baseRepo}
 			proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 			svc := a2aapp.NewSubmissionService(a2aapp.NewInputParser(65536, 16), countedRepo, rm, proj, 3)
@@ -616,6 +620,8 @@ func TestSubmissionService_ConcurrentRecoverCannotRejectStartedBinding(t *testin
 	rmB := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, MaxConcurrentRunsPerUser: 1,
 	})
+	t.Cleanup(rmA.Shutdown)
+	t.Cleanup(rmB.Shutdown)
 	svcA := a2aapp.NewSubmissionService(parser, baseRepo, rmA, proj, 3)
 	svcB := a2aapp.NewSubmissionService(parser, baseRepo, rmB, proj, 3)
 
@@ -708,6 +714,7 @@ func TestSubmissionService_RunRecoveryReclaimsExpiredClaim(t *testing.T) {
 	orch := newBlockingOrch()
 	repo := magi.NewA2ASubmissionRepository(db)
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{JobRepo: jobs})
+	t.Cleanup(rm.Shutdown)
 	parser := a2aapp.NewInputParser(65536, 16)
 	proj := a2aapp.NewTaskProjector(redact.New("sk-secret"))
 	svc := a2aapp.NewSubmissionService(parser, repo, rm, proj, 3,
