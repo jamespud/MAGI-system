@@ -146,8 +146,12 @@ func (e *DBQueryToolExecutor) Execute(ctx context.Context, req port.ToolExecutio
 	}
 
 	results := make([]map[string]any, 0, e.maxRows)
+	truncated := false
 	for rows.Next() {
+		// Read one row past the cap: the extra row proves more exist, so a
+		// result set of exactly maxRows is not misreported as truncated.
 		if len(results) >= e.maxRows {
+			truncated = true
 			break
 		}
 		values := make([]any, len(columns))
@@ -182,7 +186,7 @@ func (e *DBQueryToolExecutor) Execute(ctx context.Context, req port.ToolExecutio
 	out := map[string]any{
 		"columns":   columns,
 		"rows":      results,
-		"truncated": len(results) == e.maxRows,
+		"truncated": truncated,
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {

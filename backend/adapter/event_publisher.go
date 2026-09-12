@@ -115,25 +115,37 @@ var _ execution.EventRecorder = (*EventPublisherAdapter)(nil)
 
 // InMemoryEventRepo is a test/in-memory EventRepository.
 type InMemoryEventRepo struct {
-	mu     sync.Mutex
-	events map[string][]*entity.MagiEvent
+	mu      sync.Mutex
+	events  map[string][]*entity.MagiEvent
+	nextSeq map[string]uint64
 }
 
 func NewInMemoryEventRepo() *InMemoryEventRepo {
-	return &InMemoryEventRepo{events: make(map[string][]*entity.MagiEvent)}
+	return &InMemoryEventRepo{
+		events:  make(map[string][]*entity.MagiEvent),
+		nextSeq: make(map[string]uint64),
+	}
 }
 
 func (r *InMemoryEventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if e.Seq == 0 {
-		var maxSeq uint64
-		for _, stored := range r.events[e.CaseID] {
-			if stored.Seq > maxSeq {
-				maxSeq = stored.Seq
+		// Per-case counter keeps seq assignment O(1); backfill once if events
+		// were seeded directly.
+		next := r.nextSeq[e.CaseID]
+		if next == 0 {
+			for _, stored := range r.events[e.CaseID] {
+				if stored.Seq > next {
+					next = stored.Seq
+				}
 			}
 		}
-		e.Seq = maxSeq + 1
+		next++
+		e.Seq = next
+		r.nextSeq[e.CaseID] = next
+	} else if e.Seq > r.nextSeq[e.CaseID] {
+		r.nextSeq[e.CaseID] = e.Seq
 	}
 	r.events[e.CaseID] = append(r.events[e.CaseID], e)
 	return nil

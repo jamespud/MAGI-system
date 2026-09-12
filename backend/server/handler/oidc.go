@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"sync"
 	"time"
 
@@ -20,11 +21,20 @@ import (
 
 const sessionCookieName = "magi_session"
 
+const (
+	oidcStateTTL      = 10 * time.Minute
+	oidcStatePruneGap = time.Minute
+	// oidcStateMaxEntries caps pending authorization requests so the public
+	// login endpoint cannot grow the map without bound.
+	oidcStateMaxEntries = 10000
+)
+
 // oidcStateStore keeps one-time authorization states in memory (single
 // instance; multi-replica deployments should back this with shared state).
 type oidcStateStore struct {
-	mu     sync.Mutex
-	states map[string]time.Time
+	mu        sync.Mutex
+	states    map[string]time.Time
+	lastPrune time.Time
 }
 
 func (s *oidcStateStore) issue() (string, error) {
@@ -33,13 +43,32 @@ func (s *oidcStateStore) issue() (string, error) {
 		return "", err
 	}
 	state := base64.RawURLEncoding.EncodeToString(buf)
+	now := time.Now()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.states == nil {
 		s.states = map[string]time.Time{}
 	}
-	s.states[state] = time.Now().Add(10 * time.Minute)
-	s.mu.Unlock()
+	s.pruneLocked(now)
+	if len(s.states) >= oidcStateMaxEntries {
+		return "", errors.New("oidc: too many pending authorization requests")
+	}
+	s.states[state] = now.Add(oidcStateTTL)
 	return state, nil
+}
+
+// pruneLocked drops expired states. It runs at most once per oidcStatePruneGap
+// so the sweep cost is bounded even under a flood of login requests.
+func (s *oidcStateStore) pruneLocked(now time.Time) {
+	if !s.lastPrune.IsZero() && now.Sub(s.lastPrune) < oidcStatePruneGap {
+		return
+	}
+	s.lastPrune = now
+	for k, exp := range s.states {
+		if !now.Before(exp) {
+			delete(s.states, k)
+		}
+	}
 }
 
 func (s *oidcStateStore) consume(state string) bool {

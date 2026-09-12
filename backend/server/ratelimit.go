@@ -28,7 +28,7 @@ type rateWindow struct {
 	reset time.Time
 }
 
-// RateLimiter is an in-memory, per-key sliding window limiter. It is
+// RateLimiter is an in-memory, per-key fixed-window limiter. It is
 // intentionally single-instance (per-process); for a multi-instance limit,
 // the DB-backed run concurrency and tool quotas already provide cross-replica
 // governance. The map is pruned opportunistically to bound memory.
@@ -96,12 +96,17 @@ func (l *RateLimiter) Allow(userID int64, ip string) (ok bool, retryAfter int) {
 // function because Go does not allow type parameters on methods.
 func allowWindow[K comparable](m map[K]*rateWindow, key K, budget int, now time.Time) (bool, int) {
 	w := m[key]
-	if w == nil || now.Sub(w.reset) >= time.Minute {
+	// The window is over once now reaches reset. Comparing against the reset
+	// instant (not reset + one minute) keeps a saturated window to a single
+	// minute instead of spilling into a second one.
+	if w == nil || !now.Before(w.reset) {
 		w = &rateWindow{count: 0, reset: now.Add(time.Minute)}
 		m[key] = w
 	}
 	if w.count >= budget {
-		return false, int(time.Until(w.reset).Seconds()) + 1
+		// Derive Retry-After from the same clock the window uses so the value
+		// stays correct under a test/injected clock.
+		return false, int(w.reset.Sub(now).Seconds()) + 1
 	}
 	w.count++
 	return true, 0

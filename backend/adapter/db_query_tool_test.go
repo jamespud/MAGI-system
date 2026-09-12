@@ -64,6 +64,59 @@ func TestDBQueryToolExecutorRunsSelect(t *testing.T) {
 	}
 }
 
+func TestDBQueryToolExecutorTruncationBoundary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "boundary.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO t (id) VALUES (1)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	exec, err := magi.NewDBQueryToolExecutor(magi.DBQueryToolConfig{
+		Enabled: true, Driver: "sqlite3", DSN: path,
+		MaxRows: 1, MaxQueryChars: 1000, TimeoutSeconds: 5,
+	})
+	if err != nil {
+		t.Fatalf("build executor: %v", err)
+	}
+	defer exec.Close()
+
+	run := func() (int, bool) {
+		t.Helper()
+		res, err := exec.Execute(context.Background(), port.ToolExecutionRequest{
+			ToolName: magi.DBQueryToolName, ArgumentsJSON: `{"query":"SELECT id FROM t ORDER BY id"}`,
+		})
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		var out struct {
+			Rows      []map[string]any `json:"rows"`
+			Truncated bool             `json:"truncated"`
+		}
+		if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return len(out.Rows), out.Truncated
+	}
+
+	if n, trunc := run(); n != 1 || trunc {
+		t.Fatalf("exactly maxRows: rows=%d truncated=%v, want 1/false", n, trunc)
+	}
+	if _, err := db.Exec(`INSERT INTO t (id) VALUES (2)`); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if n, trunc := run(); n != 1 || !trunc {
+		t.Fatalf("over maxRows: rows=%d truncated=%v, want 1/true", n, trunc)
+	}
+}
+
 func TestDBQueryToolExecutorRejectsWrites(t *testing.T) {
 	exec := newDBQueryFixture(t)
 	for _, query := range []string{

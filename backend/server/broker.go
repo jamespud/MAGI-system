@@ -19,6 +19,7 @@ type EventBroker struct {
 	mu          sync.Mutex
 	subscribers map[string][]chan *entity.MagiEvent
 	stored      map[string][]*entity.MagiEvent
+	nextSeq     map[string]uint64
 	bufferSize  int
 	dropped     atomic.Int64
 }
@@ -36,22 +37,39 @@ func NewEventBrokerWithBuffer(bufferSize int) *EventBroker {
 	return &EventBroker{
 		subscribers: make(map[string][]chan *entity.MagiEvent),
 		stored:      make(map[string][]*entity.MagiEvent),
+		nextSeq:     make(map[string]uint64),
 		bufferSize:  bufferSize,
+	}
+}
+
+// assignSeqLocked stamps e with the next per-case sequence number. It keeps an
+// in-memory counter per case so assigning a sequence is O(1) instead of
+// scanning the case's whole history on every publish. Callers must hold b.mu.
+func (b *EventBroker) assignSeqLocked(e *entity.MagiEvent) {
+	if e.Seq == 0 {
+		next := b.nextSeq[e.CaseID]
+		if next == 0 {
+			// Backfill once if events were seeded directly into stored.
+			for _, stored := range b.stored[e.CaseID] {
+				if stored.Seq > next {
+					next = stored.Seq
+				}
+			}
+		}
+		next++
+		e.Seq = next
+		b.nextSeq[e.CaseID] = next
+		return
+	}
+	if e.Seq > b.nextSeq[e.CaseID] {
+		b.nextSeq[e.CaseID] = e.Seq
 	}
 }
 
 func (b *EventBroker) Publish(ctx context.Context, e entity.MagiEvent) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if e.Seq == 0 {
-		var maxSeq uint64
-		for _, stored := range b.stored[e.CaseID] {
-			if stored.Seq > maxSeq {
-				maxSeq = stored.Seq
-			}
-		}
-		e.Seq = maxSeq + 1
-	}
+	b.assignSeqLocked(&e)
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], &e)
 	b.publishLiveLocked(e)
 	return nil
@@ -130,15 +148,7 @@ func (b *EventBroker) Unsubscribe(caseID string, ch chan *entity.MagiEvent) {
 func (b *EventBroker) Create(ctx context.Context, e *entity.MagiEvent) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if e.Seq == 0 {
-		var maxSeq uint64
-		for _, stored := range b.stored[e.CaseID] {
-			if stored.Seq > maxSeq {
-				maxSeq = stored.Seq
-			}
-		}
-		e.Seq = maxSeq + 1
-	}
+	b.assignSeqLocked(e)
 	b.stored[e.CaseID] = append(b.stored[e.CaseID], e)
 	return nil
 }
