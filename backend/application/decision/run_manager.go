@@ -47,6 +47,21 @@ type BudgetChecker interface {
 	CheckBudget(ctx context.Context, userID int64) (*BudgetExceededInfo, error)
 }
 
+// settlementTimeout bounds every detached durable write. Settlements must not
+// be aborted by the originating request/attempt cancellation, but neither may
+// they block a worker forever if the store stalls.
+const settlementTimeout = 10 * time.Second
+
+// detachedContext returns a context that ignores parent cancellation (so a
+// request or attempt cancel cannot abort a durable settlement) but still has a
+// deadline (so a stuck DB call cannot block the worker indefinitely).
+func detachedContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), settlementTimeout)
+}
+
 type runHandle struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -328,7 +343,18 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				return
 			}
 			if m.cleaner != nil {
-				_ = m.cleaner.CleanupCaseArtifacts(context.Background(), c.ID)
+				// Cleanup is a correctness barrier for the retry: a partial
+				// cleanup would leave attempt N-1 artifacts (votes, evidence,
+				// claims) mixed with attempt N, so a failure aborts the retry
+				// rather than being silently ignored.
+				cleanupCtx, cancelCleanup := detachedContext(ctx)
+				cleanupErr := m.cleaner.CleanupCaseArtifacts(cleanupCtx, c.ID)
+				cancelCleanup()
+				if cleanupErr != nil {
+					log.Printf("run manager: retry cleanup for case %s failed, aborting retry: %v", c.ID, cleanupErr)
+					_ = m.markJobFailed(claimed.ID, "retry cleanup failed", nil)
+					return
+				}
 			}
 		}
 		attemptCtx, attemptCancel := context.WithCancelCause(ctx)
@@ -349,7 +375,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				finishMetrics(false)
 				return
 			}
-			if err := m.jobRepo.MarkSucceeded(context.Background(), claimed.ID, m.workerID); err != nil {
+			if err := m.markJobSucceeded(claimed.ID); err != nil {
 				attemptCancel(port.ErrLeaseLost)
 				finishMetrics(false)
 			} else {
@@ -367,7 +393,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 		if claimed.Attempt < claimed.MaxAttempts {
 			retryAt := time.Now().Add(m.retryDelay(claimed.Attempt))
-			if err := m.jobRepo.MarkFailed(context.Background(), claimed.ID, m.workerID, runErr.Error(), &retryAt); err != nil {
+			if err := m.markJobFailed(claimed.ID, runErr.Error(), &retryAt); err != nil {
 				if errors.Is(err, port.ErrLeaseLost) {
 					attemptCancel(port.ErrLeaseLost)
 				}
@@ -396,7 +422,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			m.settleTerminalCaseJob(claimed, c, runErr.Error(), attemptCancel)
 			return
 		}
-		committed, err := m.jobRepo.CommitFinalFailure(context.Background(), claimed.ID, m.workerID, c.ID, statuses, runErr.Error(), &event)
+		committed, err := m.commitFinalFailure(claimed.ID, c.ID, statuses, runErr.Error(), &event)
 		if err != nil {
 			return
 		}
@@ -405,11 +431,69 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		c.Status = entity.CaseStatusFailed
-		if m.liveEvents != nil {
-			_ = m.liveEvents.PublishLive(context.Background(), event)
-		}
+		m.publishLive(event)
 		return
 	}
+}
+
+// The helpers below wrap every durable settlement write in a detached, bounded
+// context. They replace context.Background() call sites so a queued settlement
+// cannot hang a worker while still surviving caller cancellation.
+func (m *RunManager) markJobSucceeded(jobID string) error {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.MarkSucceeded(ctx, jobID, m.workerID)
+}
+
+func (m *RunManager) markJobFailed(jobID, reason string, retryAt *time.Time) error {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.MarkFailed(ctx, jobID, m.workerID, reason, retryAt)
+}
+
+func (m *RunManager) markJobPaused(jobID string) error {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.MarkPaused(ctx, jobID)
+}
+
+func (m *RunManager) cancelJob(jobID string) error {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.Cancel(ctx, jobID)
+}
+
+func (m *RunManager) getJobByCase(caseID string) (*entity.DecisionJob, error) {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.GetByCase(ctx, caseID)
+}
+
+func (m *RunManager) resumeJob(jobID string) error {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.ResumeQueued(ctx, jobID)
+}
+
+func (m *RunManager) commitFinalFailure(jobID, caseID string, statuses []entity.CaseStatus, reason string, event *entity.MagiEvent) (bool, error) {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.jobRepo.CommitFinalFailure(ctx, jobID, m.workerID, caseID, statuses, reason, event)
+}
+
+func (m *RunManager) getCaseByID(caseID string) (*entity.DecisionCase, error) {
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	return m.caseRepo.Get(ctx, caseID)
+}
+
+func (m *RunManager) publishLive(event entity.MagiEvent) {
+	if m.liveEvents == nil {
+		return
+	}
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
+	_ = m.liveEvents.PublishLive(ctx, event)
 }
 
 // settleTerminalCaseJob closes a still-running owner claim when the Case has
@@ -419,9 +503,9 @@ func (m *RunManager) settleTerminalCaseJob(job *entity.DecisionJob, c *entity.De
 	var err error
 	switch c.Status {
 	case entity.CaseStatusFailed, entity.CaseStatusCancelled, entity.CaseStatusTimedOut:
-		err = m.jobRepo.MarkFailed(context.Background(), job.ID, m.workerID, lastError, nil)
+		err = m.markJobFailed(job.ID, lastError, nil)
 	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
-		err = m.jobRepo.MarkSucceeded(context.Background(), job.ID, m.workerID)
+		err = m.markJobSucceeded(job.ID)
 	default:
 		onLeaseLost(port.ErrLeaseLost)
 		return
@@ -444,7 +528,7 @@ func (m *RunManager) settleClaimedCaseIfTerminal(c *entity.DecisionCase, claimed
 		m.settleTerminalCaseJob(claimed, c, "terminal case settlement", func(error) {})
 		return true
 	case entity.CaseStatusCancelled:
-		if err := m.jobRepo.Cancel(context.Background(), claimed.ID); err != nil && !errors.Is(err, port.ErrLeaseLost) {
+		if err := m.cancelJob(claimed.ID); err != nil && !errors.Is(err, port.ErrLeaseLost) {
 			log.Printf("run manager: settle cancelled job %s: %v", claimed.ID, err)
 		}
 		return true
@@ -457,9 +541,9 @@ func (m *RunManager) releaseRejectedRetryClaim(job *entity.DecisionJob) {
 	if job == nil {
 		return
 	}
-	err := m.jobRepo.MarkFailed(context.Background(), job.ID, m.workerID, "retry reset fenced", nil)
+	err := m.markJobFailed(job.ID, "retry reset fenced", nil)
 	if err != nil && !errors.Is(err, port.ErrLeaseLost) {
-		_ = m.jobRepo.Cancel(context.Background(), job.ID)
+		_ = m.cancelJob(job.ID)
 	}
 }
 
@@ -697,10 +781,10 @@ func (m *RunManager) CancelLocal(caseID string) bool {
 func (m *RunManager) Cancel(caseID string) bool {
 	local := m.CancelLocal(caseID)
 	if m.jobRepo != nil {
-		job, err := m.jobRepo.GetByCase(context.Background(), caseID)
+		job, err := m.getJobByCase(caseID)
 		if err == nil && job != nil &&
 			(job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
-			_ = m.jobRepo.Cancel(context.Background(), job.ID)
+			_ = m.cancelJob(job.ID)
 			return true
 		}
 	}
@@ -738,10 +822,10 @@ func (m *RunManager) Pause(caseID string) bool {
 	m.mu.Unlock()
 	parked := false
 	if m.jobRepo != nil {
-		job, err := m.jobRepo.GetByCase(context.Background(), caseID)
+		job, err := m.getJobByCase(caseID)
 		if err == nil && job != nil &&
 			(job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
-			if m.jobRepo.MarkPaused(context.Background(), job.ID) == nil {
+			if m.markJobPaused(job.ID) == nil {
 				parked = true
 			}
 		}
@@ -759,11 +843,11 @@ func (m *RunManager) Resume(caseID string) bool {
 	if m.jobRepo == nil {
 		return false
 	}
-	job, err := m.jobRepo.GetByCase(context.Background(), caseID)
+	job, err := m.getJobByCase(caseID)
 	if err != nil || job == nil || job.Status != entity.DecisionJobPaused {
 		return false
 	}
-	if err := m.jobRepo.ResumeQueued(context.Background(), job.ID); err != nil {
+	if err := m.resumeJob(job.ID); err != nil {
 		return false
 	}
 	m.mu.Lock()
@@ -785,7 +869,7 @@ func (m *RunManager) Resume(caseID string) bool {
 	if m.caseRepo == nil {
 		return true
 	}
-	c, err := m.caseRepo.Get(context.Background(), caseID)
+	c, err := m.getCaseByID(caseID)
 	if err != nil || c == nil {
 		return true
 	}
@@ -801,10 +885,10 @@ func (m *RunManager) cancelWorkerJob(caseID, jobID string) {
 	wasPaused := m.paused[caseID]
 	m.mu.Unlock()
 	if wasPaused {
-		_ = m.jobRepo.MarkPaused(context.Background(), jobID)
+		_ = m.markJobPaused(jobID)
 		return
 	}
-	_ = m.jobRepo.Cancel(context.Background(), jobID)
+	_ = m.cancelJob(jobID)
 }
 
 func (m *RunManager) IsRunning(caseID string) bool {

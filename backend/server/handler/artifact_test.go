@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/server/dto"
 	"github.com/jamespud/magi/backend/server/handler"
 )
 
@@ -185,5 +187,84 @@ func TestArtifactHandler_AgentsReturnsArrays(t *testing.T) {
 	}
 	if !contains(body, `"claims"`) || !contains(body, "claim text") {
 		t.Fatalf("response missing claims array: %s", body)
+	}
+}
+
+// TestArtifactHandler_AgentsSnapshotUsesLatestRoundOnly guards against splicing
+// one round's status/round with another round's tool calls. The newer run is
+// inserted first on purpose: the previous implementation took status/round from
+// whichever row came last while joining tools to the latest run.
+func TestArtifactHandler_AgentsSnapshotUsesLatestRoundOnly(t *testing.T) {
+	runRepo := &memAgentRunRepo{items: []*entity.AgentRun{
+		{ID: "run-m2", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 2, Status: entity.AgentRunStatusRunning, StartedAt: time.Now()},
+		{ID: "run-m1", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 1, Status: entity.AgentRunStatusCompleted, StartedAt: time.Now().Add(-time.Minute)},
+	}}
+	tcRepo := &memToolCallRepo{items: []*entity.ToolCall{
+		{ID: "tc-old", CaseID: "c1", AgentRunID: "run-m1", ToolCallID: "call-old", ToolName: "old-tool", Arguments: "{}", Valid: true, CreatedAt: time.Now()},
+		{ID: "tc-new", CaseID: "c1", AgentRunID: "run-m2", ToolCallID: "call-new", ToolName: "new-tool", Arguments: "{}", Valid: true, CreatedAt: time.Now()},
+	}}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithAgentRunRepo(runRepo),
+		decision.WithToolCallRepo(tcRepo))
+	h := handler.NewArtifactHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.GET("/cases/:id/agents", h.Agents)
+
+	w := ut.PerformRequest(r.Engine, "GET", "/cases/c1/agents", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("status: %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+	var out map[string]dto.AgentSnapshotDTO
+	if err := json.Unmarshal(w.Result().Body(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	snap, ok := out["melchior"]
+	if !ok {
+		t.Fatalf("missing melchior snapshot: %s", string(w.Result().Body()))
+	}
+	if snap.Round != 2 || snap.Status != string(entity.AgentRunStatusRunning) {
+		t.Fatalf("snapshot mixed rounds: round=%d status=%s, want round 2/running", snap.Round, snap.Status)
+	}
+	if len(snap.ToolCalls) != 1 || snap.ToolCalls[0].ToolCallID != "call-new" {
+		t.Fatalf("tool calls = %+v, want only the latest round's call", snap.ToolCalls)
+	}
+}
+
+// TestArtifactHandler_AgentsSnapshotTieBreaksDeterministically pins the full
+// ordering: when a crash/retry leaves two runs with the same round and start
+// time, the larger id wins regardless of row order.
+func TestArtifactHandler_AgentsSnapshotTieBreaksDeterministically(t *testing.T) {
+	started := time.Now()
+	runRepo := &memAgentRunRepo{items: []*entity.AgentRun{
+		{ID: "run-a", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 1, Status: entity.AgentRunStatusCompleted, StartedAt: started},
+		{ID: "run-b", CaseID: "c1", MagiCode: entity.MagiCode("melchior"), Round: 1, Status: entity.AgentRunStatusRunning, StartedAt: started},
+	}}
+	tcRepo := &memToolCallRepo{items: []*entity.ToolCall{
+		{ID: "tc-a", CaseID: "c1", AgentRunID: "run-a", ToolCallID: "call-a", ToolName: "tool-a", Arguments: "{}", Valid: true, CreatedAt: started},
+		{ID: "tc-b", CaseID: "c1", AgentRunID: "run-b", ToolCallID: "call-b", ToolName: "tool-b", Arguments: "{}", Valid: true, CreatedAt: started},
+	}}
+	svc := decision.NewService(nil, decision.ServiceConfig{},
+		decision.WithAgentRunRepo(runRepo),
+		decision.WithToolCallRepo(tcRepo))
+	h := handler.NewArtifactHandler(svc)
+
+	r := hzserver.Default(hzserver.WithHostPorts("127.0.0.1:0"))
+	r.GET("/cases/:id/agents", h.Agents)
+
+	w := ut.PerformRequest(r.Engine, "GET", "/cases/c1/agents", nil)
+	if w.Result().StatusCode() != 200 {
+		t.Fatalf("status: %d body=%s", w.Result().StatusCode(), string(w.Result().Body()))
+	}
+	var out map[string]dto.AgentSnapshotDTO
+	if err := json.Unmarshal(w.Result().Body(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	snap := out["melchior"]
+	if len(snap.ToolCalls) != 1 || snap.ToolCalls[0].ToolCallID != "call-b" {
+		t.Fatalf("tool calls = %+v, want the larger-id run (call-b)", snap.ToolCalls)
+	}
+	if snap.Status != string(entity.AgentRunStatusRunning) {
+		t.Fatalf("status = %s, want the larger-id run's status", snap.Status)
 	}
 }

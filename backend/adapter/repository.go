@@ -408,7 +408,11 @@ func (r *agentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, er
 }
 func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.AgentRun, error) {
 	var models []AgentRunModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Find(&models).Error; err != nil {
+	// Deterministic order so callers that pick the latest round (snapshot
+	// aggregation) never depend on an unspecified row order. The trailing id
+	// breaks ties for same-round retry/crash runs.
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).
+		Order("magi_code asc, round asc, started_at asc, id asc").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.AgentRun, len(models))
