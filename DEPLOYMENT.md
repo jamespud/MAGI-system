@@ -247,6 +247,23 @@ event schema so an incomplete expand/backfill/contract migration cannot be
 silently bypassed. Earlier migration files are baseline SQL snapshots and may
 drift from the GORM models.
 
+**Known limitations** (both verified against MySQL 8 by the `MySQL migration
+compatibility` CI job):
+
+- The older baseline snapshots (`magi_s6`, `s7`, `s8`, `s10`, `s11`) cannot be
+  executed against MySQL 8 at all: they declare `DEFAULT ''` on TEXT columns,
+  which MySQL rejects with `ERROR 1101 (BLOB, TEXT, GEOMETRY or JSON column
+  can't have a default value)`. Treat them as a description of the historical
+  shape rather than runnable migrations. On a modern MySQL the only working
+  fresh-install path is AutoMigrate plus the startup event-table helper, and the
+  only operator-applied file is S16 (plus the repair resumer for an interrupted
+  rollout).
+- Atlas snapshots and the GORM models overlap — the same tables are described in
+  both places, so AutoMigrate may add columns/indexes to a table an Atlas file
+  first created. The startup verifier pins the one contract that matters today
+  (the event sequence); converging the two schema sources is a separate
+  follow-up, not part of this CI change.
+
 #### Forward-only event sequence rollout (S16)
 
 S16 makes `magi_event.seq` NOT NULL and adds `uq_magi_event_case_seq`. After it

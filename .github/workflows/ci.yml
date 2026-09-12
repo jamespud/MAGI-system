@@ -149,3 +149,55 @@ jobs:
 
       - name: Race across execution/model/tool kernels
         run: go test -race ./domain/execution/... ./domain/modelruntime/... ./domain/toolruntime/...
+
+  # Separate from the backend gate on purpose: this job answers a different
+  # question ("does the production database lifecycle hold on real MySQL?")
+  # and fails for different reasons. It activates the MySQL-gated suites that
+  # only run when MAGI_TEST_MYSQL_DSN is set, plus the schema lifecycle
+  # scenarios in bootstrap/mysql_migration_test.go.
+  mysql-migration:
+    name: MySQL migration compatibility
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # root@'%' so the runner (outside the service container) can connect
+          # and so the scenarios may CREATE/DROP their own throwaway schemas.
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: magi_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=20s
+    env:
+      # SQLite cannot prove ALTER TABLE on a populated table, MySQL index
+      # introspection, or InnoDB row-lock behaviour, so these suites are off by
+      # default and CI is the only place they run.
+      MAGI_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/magi_test?charset=utf8mb4&parseTime=True
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Schema lifecycle (fresh, upgrade, idempotent, S16 upgrade + repair)
+        run: go test -p 1 -count=1 -v ./bootstrap/ -run 'TestMySQLMigration_|TestVerifyEventSequenceContract_MySQL'
+
+      - name: MySQL-backed runtime invariants
+        run: go test -p 1 -count=1 -v ./adapter/ -run 'MySQL'
