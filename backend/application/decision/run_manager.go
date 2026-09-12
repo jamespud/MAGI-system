@@ -352,7 +352,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				cancelCleanup()
 				if cleanupErr != nil {
 					log.Printf("run manager: retry cleanup for case %s failed, aborting retry: %v", c.ID, cleanupErr)
-					_ = m.markJobFailed(claimed.ID, "retry cleanup failed", nil)
+					m.settleRetryCleanupFailure(claimed, c, cleanupErr)
 					return
 				}
 			}
@@ -494,6 +494,35 @@ func (m *RunManager) publishLive(event entity.MagiEvent) {
 	ctx, cancel := detachedContext(context.Background())
 	defer cancel()
 	_ = m.liveEvents.PublishLive(ctx, event)
+}
+
+// settleRetryCleanupFailure settles a retry that was aborted because the
+// previous attempt's artifacts could not be removed. resetCaseForRetry has
+// already moved the persisted Case to DRAFT, so settling only the Job would
+// leave Case=DRAFT next to Job=FAILED. CommitFinalFailure CASes the Case
+// (DRAFT -> FAILED) and fences the Job in one transaction, and records the
+// CASE_FAILED event, so the abort is a single atomic terminal settlement.
+func (m *RunManager) settleRetryCleanupFailure(claimed *entity.DecisionJob, c *entity.DecisionCase, cause error) {
+	event := entity.NewEvent(c.ID, "", nil, entity.EventCaseFailed, map[string]any{
+		"status": string(entity.CaseStatusFailed),
+		"reason": "retry cleanup failed",
+	})
+	statuses := []entity.CaseStatus{c.Status}
+	if c.Status == entity.CaseStatusDraft {
+		statuses = append(statuses, "")
+	}
+	committed, err := m.commitFinalFailure(claimed.ID, c.ID, statuses, "retry cleanup failed: "+cause.Error(), &event)
+	if err != nil {
+		log.Printf("run manager: settle retry cleanup failure for case %s: %v", c.ID, err)
+		return
+	}
+	if !committed {
+		// Another replica moved the Case first; the job fence is the loser, so
+		// its settlement belongs to whichever write won.
+		return
+	}
+	c.Status = entity.CaseStatusFailed
+	m.publishLive(event)
 }
 
 // settleTerminalCaseJob closes a still-running owner claim when the Case has

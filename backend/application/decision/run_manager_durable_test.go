@@ -114,7 +114,13 @@ func openJobDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	// EventModel/EventCursorModel are needed because CommitFinalFailure (used by
+	// the retry-cleanup-failure path) writes the case event and bumps the
+	// per-case sequence cursor in the same transaction.
+	if err := db.AutoMigrate(
+		&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{},
+		&magi.EventModel{}, &magi.EventCursorModel{},
+	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db

@@ -77,8 +77,8 @@ func TestRunManager_RetryAbortsWhenCleanupFails(t *testing.T) {
 	orch := &durableRetryOrchestrator{}
 	cleaner := &failingCleaner{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, WorkerID: "worker-bad-clean", MaxAttempts: 3, RetryBase: 10 * time.Millisecond,
-		Cleaner: cleaner,
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-bad-clean",
+		MaxAttempts: 3, RetryBase: 10 * time.Millisecond, Cleaner: cleaner,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-bad-clean"}); err != nil {
 		t.Fatalf("start: %v", err)
@@ -94,6 +94,16 @@ func TestRunManager_RetryAbortsWhenCleanupFails(t *testing.T) {
 	}
 	if job.WorkerID != "" {
 		t.Fatalf("worker id = %q, want it cleared on settlement", job.WorkerID)
+	}
+	// resetCaseForRetry already moved the persisted Case to DRAFT before the
+	// cleanup failed, so the abort must settle Case + Job together rather than
+	// leaving Case=DRAFT next to Job=FAILED.
+	cs, err := repo.CaseRepo().Get(context.Background(), "case-bad-clean")
+	if err != nil {
+		t.Fatalf("reload case: %v", err)
+	}
+	if cs.Status != entity.CaseStatusFailed {
+		t.Fatalf("case status = %s, want %s (must not be left DRAFT)", cs.Status, entity.CaseStatusFailed)
 	}
 	if got := atomic.LoadInt32(&orch.calls); got != 1 {
 		t.Fatalf("orchestrator calls = %d, want 1 (retry must not run after a failed cleanup)", got)
