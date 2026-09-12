@@ -24,7 +24,7 @@ func openA2AMySQL(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("MAGI_TEST_MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("MAGI_TEST_MYSQL_DSN not set; skipping MySQL integration test")
+		t.Skip("MAGI_TEST_MYSQL_DSN not set; skipping MySQL integration tests — a green run without it does NOT mean MySQL was verified")
 	}
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {

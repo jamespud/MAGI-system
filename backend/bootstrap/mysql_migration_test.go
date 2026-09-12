@@ -38,7 +38,7 @@ func requireMySQLBaseDSN(t *testing.T) string {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("MAGI_TEST_MYSQL_DSN"))
 	if dsn == "" {
-		t.Skip("MAGI_TEST_MYSQL_DSN not set; skipping MySQL migration test")
+		t.Skip("MAGI_TEST_MYSQL_DSN not set; skipping MySQL integration tests — a green run without it does NOT mean MySQL was verified")
 	}
 	return dsn
 }
