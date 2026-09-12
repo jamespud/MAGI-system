@@ -386,7 +386,23 @@ func TestMySQLDecisionJobAdmissionAcrossReplicas(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	ctx := context.Background()
-	userID := int64(7)
+	// A user id no other MySQL test touches, plus a pre-clean of this test's own
+	// leftovers: the admission limit is per user, so a queued job left behind by
+	// an earlier run against the same schema would change the outcome and make
+	// the suite non-reproducible outside a pristine database.
+	userID := int64(907)
+	clear := func(query string, args ...any) {
+		t.Helper()
+		if err := db.Exec(query, args...).Error; err != nil {
+			t.Fatalf("clear leftovers (%s): %v", query, err)
+		}
+	}
+	// By fixed case id (a previous revision of this test seeded them under a
+	// different user id) and by this user.
+	clear("DELETE FROM decision_job WHERE case_id IN ('case-admit-a','case-admit-b')")
+	clear("DELETE FROM decision_case WHERE id IN ('case-admit-a','case-admit-b')")
+	clear("DELETE FROM decision_job WHERE case_id IN (SELECT id FROM decision_case WHERE user_id = ?)", userID)
+	clear("DELETE FROM decision_case WHERE user_id = ?", userID)
 	for _, id := range []string{"case-admit-a", "case-admit-b"} {
 		if err := db.Create(&magi.CaseModel{ID: id, UserID: userID, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
 			t.Fatalf("seed %s: %v", id, err)
