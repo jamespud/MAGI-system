@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,8 +19,18 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/validation"
+)
+
+var (
+	// errNotConnected is raised before anything is sent, so a call that fails
+	// this way is safe to repeat regardless of the tool's effect class.
+	errNotConnected = errors.New("not connected")
+
+	baseRetryDelay = 200 * time.Millisecond
+	maxRetryDelay  = 2 * time.Second
 )
 
 // ServerConfig describes one external MCP server to connect to.
@@ -32,7 +43,16 @@ type ServerConfig struct {
 	Env            map[string]string
 	Headers        map[string]string // http: extra headers (auth, tenant, etc.)
 	TimeoutSeconds int
-	RetryAttempts  int // reconnect attempts on a failed call (default 2)
+	// RetryAttempts bounds transport reconnects for one call. 0 disables the
+	// retry; the call is still attempted once. It never authorises re-running a
+	// tool whose effect class is not retry-safe.
+	RetryAttempts int
+	// EffectOverrides classifies individual tools by MCP tool name (not the
+	// namespaced mcp_<server>_<tool> form) for servers that ship no annotations.
+	// An override can classify an unannotated tool and can always be more
+	// conservative, but it can never claim a tool is safer than the server's own
+	// annotation says.
+	EffectOverrides map[string]string
 }
 
 // Adapter connects to configured MCP servers and exposes their tools through
@@ -141,8 +161,11 @@ func (a *Adapter) List(ctx context.Context, bindings []entity.ToolBinding) ([]po
 	return out, nil
 }
 
-// Execute routes a tool call to the MCP server named in the binding. A
-// connection-level failure triggers one reconnect + retry with backoff.
+// Execute routes a tool call to the MCP server named in the binding.
+//
+// A transport failure is retried only when the tool's effect class makes a
+// second invocation safe; see callWithTransportRetry. Everything else is left
+// to the execution kernel, which owns retry semantics.
 func (a *Adapter) Execute(ctx context.Context, req port.ToolExecutionRequest) (*port.ToolExecutionResult, error) {
 	if a == nil {
 		return nil, fmt.Errorf("mcp: adapter not configured")
@@ -162,21 +185,9 @@ func (a *Adapter) Execute(ctx context.Context, req port.ToolExecutionRequest) (*
 			return nil, fmt.Errorf("mcp server %q: parse arguments: %w", s.cfg.Name, err)
 		}
 	}
-	res, err := s.call(ctx, mcpgo.CallToolRequest{
-		Params: mcpgo.CallToolParams{Name: req.Binding.ToolName, Arguments: args},
-		Header: s.requestHeaders(),
-	})
+	res, err := s.callWithTransportRetry(ctx, req, args)
 	if err != nil {
-		// Connection-level failure: reconnect once and retry the call.
-		if rerr := s.reconnect(ctx); rerr == nil {
-			res, err = s.call(ctx, mcpgo.CallToolRequest{
-				Params: mcpgo.CallToolParams{Name: req.Binding.ToolName, Arguments: args},
-				Header: s.requestHeaders(),
-			})
-		}
-		if err != nil {
-			return nil, fmt.Errorf("mcp server %q tool %q: %w", s.cfg.Name, req.Binding.ToolName, err)
-		}
+		return nil, fmt.Errorf("mcp server %q tool %q: %w", s.cfg.Name, req.Binding.ToolName, err)
 	}
 	out, err := renderResult(res)
 	if err != nil {
@@ -273,14 +284,10 @@ func (s *server) connectLocked(ctx context.Context) error {
 	var lastErr error
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
-			delay := 200 * time.Millisecond * time.Duration(1<<(i-1))
-			if delay > 2*time.Second {
-				delay = 2 * time.Second
-			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(delay):
+			case <-time.After(retryDelay(i)):
 			}
 		}
 		c, err := s.dial(s.cfg)
@@ -328,11 +335,12 @@ func (s *server) connectLocked(ctx context.Context) error {
 				continue
 			}
 			s.tools = append(s.tools, port.ToolDefinition{
-				Name:       ToolName(s.cfg.Name, t.Name),
-				Desc:       t.Description,
-				ArgsSchema: normalized,
-				Source:     entity.ToolSourceMCP,
-				Binding:    entity.ToolBinding{Source: entity.ToolSourceMCP, Server: s.cfg.Name, ToolName: t.Name},
+				Name:        ToolName(s.cfg.Name, t.Name),
+				Desc:        t.Description,
+				ArgsSchema:  normalized,
+				Source:      entity.ToolSourceMCP,
+				Binding:     entity.ToolBinding{Source: entity.ToolSourceMCP, Server: s.cfg.Name, ToolName: t.Name},
+				EffectClass: s.effectClass(t.Name, t.Annotations),
 			})
 		}
 		return nil
@@ -345,7 +353,7 @@ func (s *server) call(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.Ca
 	client := s.client
 	s.mu.Unlock()
 	if client == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, errNotConnected
 	}
 	callCtx := ctx
 	var cancel context.CancelFunc
@@ -354,6 +362,150 @@ func (s *server) call(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.Ca
 		defer cancel()
 	}
 	return client.CallTool(callCtx, req)
+}
+
+// effectClass resolves one tool's side-effect semantics from the server's own
+// annotations, then applies the operator override.
+func (s *server) effectClass(tool string, annotations mcpgo.ToolAnnotation) port.ToolEffectClass {
+	return mergeEffectClass(s.cfg.Name, tool, effectClassFromAnnotations(annotations), s.cfg.EffectOverrides[tool])
+}
+
+// effectClassFromAnnotations maps the MCP tool-hint annotations onto MAGI's
+// effect classes. The protocol defaults are already pessimistic — an unannotated
+// tool may be destructive and is not idempotent — so a hint has to be present
+// and explicit before a call is treated as safe to repeat.
+func effectClassFromAnnotations(a mcpgo.ToolAnnotation) port.ToolEffectClass {
+	if a.ReadOnlyHint != nil && *a.ReadOnlyHint {
+		return port.ToolEffectReadOnly
+	}
+	if a.DestructiveHint != nil && *a.DestructiveHint {
+		return port.ToolEffectNonIdempotent
+	}
+	if a.IdempotentHint != nil && *a.IdempotentHint {
+		return port.ToolEffectIdempotent
+	}
+	return port.ToolEffectUnknown
+}
+
+// mergeEffectClass applies a configured override. An override may classify a
+// tool the server did not annotate, and may always be more conservative, but it
+// can never claim a tool is safer than the server's own annotation says: a
+// destructive tool stays destructive no matter what the config asks for.
+func mergeEffectClass(server, tool string, annotation port.ToolEffectClass, override string) port.ToolEffectClass {
+	if override == "" {
+		return annotation
+	}
+	parsed, err := port.ParseToolEffectClass(override)
+	if err != nil {
+		log.Printf("mcp server %q tool %q: ignoring effect override: %v", server, tool, err)
+		return annotation
+	}
+	if annotation == "" || annotation == port.ToolEffectUnknown {
+		return parsed
+	}
+	if effectRank(parsed) < effectRank(annotation) {
+		log.Printf("mcp server %q tool %q: effect override %q is less conservative than the server annotation %q; keeping %q",
+			server, tool, parsed, annotation, annotation)
+		return annotation
+	}
+	return parsed
+}
+
+// effectRank orders effect classes by how much re-invocation risk they carry.
+func effectRank(effect port.ToolEffectClass) int {
+	switch effect {
+	case port.ToolEffectReadOnly:
+		return 0
+	case port.ToolEffectIdempotent:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// callWithTransportRetry separates transport retry from semantic retry.
+//
+// A transport failure means no definitive response arrived: the server may or
+// may not have executed the call. Re-issuing the call is therefore only allowed
+// for tools that tolerate a repeat (read_only/idempotent). For every other tool
+// the call is made exactly once and the failure is reported as
+// execution.ErrExternalOutcomeUnknown, so the kernel records an UNKNOWN outcome
+// instead of a plain failure it would happily re-execute later.
+//
+// A JSON-RPC error response is definitive and is never retried here: re-running
+// it would be a semantic retry, which belongs to the kernel.
+func (s *server) callWithTransportRetry(ctx context.Context, req port.ToolExecutionRequest, args map[string]any) (*mcpgo.CallToolResult, error) {
+	attempts := s.cfg.RetryAttempts + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	if !retrySafe(req.EffectClass) {
+		attempts = 1
+	}
+	call := func() (*mcpgo.CallToolResult, error) {
+		return s.call(ctx, mcpgo.CallToolRequest{
+			Params: mcpgo.CallToolParams{Name: req.Binding.ToolName, Arguments: args},
+			Header: s.requestHeaders(),
+		})
+	}
+
+	res, err := call()
+	for attempt := 1; attempt < attempts && err != nil; attempt++ {
+		if !isRetryableFailure(err) {
+			break
+		}
+		if delay := retryDelay(attempt); delay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		if rerr := s.reconnect(ctx); rerr != nil {
+			break
+		}
+		res, err = call()
+	}
+	if err != nil && isTransportFailure(err) {
+		return nil, fmt.Errorf("%w: %w", execution.ErrExternalOutcomeUnknown, err)
+	}
+	return res, err
+}
+
+// retrySafe reports whether a tool may be invoked a second time after a failure
+// whose outcome could not be observed.
+func retrySafe(effect port.ToolEffectClass) bool {
+	return effect == port.ToolEffectReadOnly || effect == port.ToolEffectIdempotent
+}
+
+// isRetryableFailure reports whether re-issuing the call is a pure transport
+// retry. A tool that was never sent (errNotConnected) cannot have run, and a
+// transport failure may have run without answering; a JSON-RPC error response
+// is a definitive result and is not retryable here.
+func isRetryableFailure(err error) bool {
+	return errors.Is(err, errNotConnected) || isTransportFailure(err)
+}
+
+// isTransportFailure reports whether the client failed below the protocol, i.e.
+// without receiving a definitive response.
+func isTransportFailure(err error) bool {
+	var transportErr *transport.Error
+	return errors.As(err, &transportErr)
+}
+
+// retryDelay is the exponential backoff shared by connection setup and call
+// retries.
+func retryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		return 0
+	}
+	if attempt > 16 {
+		return maxRetryDelay
+	}
+	if delay := baseRetryDelay << (attempt - 1); delay < maxRetryDelay {
+		return delay
+	}
+	return maxRetryDelay
 }
 
 func renderResult(res *mcpgo.CallToolResult) (string, error) {

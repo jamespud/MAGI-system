@@ -208,6 +208,7 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 			ArgumentsJSON:  req.ArgumentsJSON,
 			UserID:         req.UserID,
 			Binding:        req.Definition.Binding,
+			EffectClass:    req.Definition.EffectClass,
 			ExpectedSchema: req.ExpectedSchema,
 			RunID:          req.Identity.RunID,
 			StepID:         req.Identity.StepID,

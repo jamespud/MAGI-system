@@ -12,6 +12,7 @@ import (
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 // Config is the root YAML configuration for MAGI server.
@@ -223,6 +224,12 @@ type MCPServerConfig struct {
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
 	Headers        map[string]string `yaml:"headers"`
 	RetryAttempts  int               `yaml:"retry_attempts"`
+	// EffectOverrides classifies individual tools by MCP tool name for servers
+	// that ship no annotations (read_only | idempotent | non_idempotent |
+	// unknown). It can classify a tool the server did not annotate and can
+	// always be more conservative, but it can never claim a tool is safer than
+	// the server's own annotation says.
+	EffectOverrides map[string]string `yaml:"effect_overrides"`
 }
 
 type SearchConfig struct {
@@ -1268,6 +1275,17 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("mcp: duplicate server name %q", s.Name)
 		}
 		seenMCP[s.Name] = true
+		if s.RetryAttempts < 0 {
+			return fmt.Errorf("mcp: server %q: retry_attempts cannot be negative", s.Name)
+		}
+		for tool, effect := range s.EffectOverrides {
+			if strings.TrimSpace(tool) == "" {
+				return fmt.Errorf("mcp: server %q: effect_overrides keys must be tool names", s.Name)
+			}
+			if _, err := port.ParseToolEffectClass(effect); err != nil {
+				return fmt.Errorf("mcp: server %q tool %q: %w", s.Name, tool, err)
+			}
+		}
 		switch s.Transport {
 		case "stdio":
 			if s.Command == "" {
@@ -1276,9 +1294,6 @@ func (c *Config) Validate() error {
 		case "http":
 			if s.URL == "" {
 				return fmt.Errorf("mcp: server %q: http transport requires url", s.Name)
-			}
-			if s.RetryAttempts < 0 {
-				return fmt.Errorf("mcp: server %q: retry_attempts cannot be negative", s.Name)
 			}
 		default:
 			return fmt.Errorf("mcp: server %q: transport must be \"stdio\" or \"http\"", s.Name)

@@ -538,6 +538,7 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 		cfgs = append(cfgs, mcpadapter.ServerConfig{
 			Name: s.Name, Transport: s.Transport, Command: s.Command, Args: s.Args, URL: s.URL,
 			Env: s.Env, TimeoutSeconds: s.TimeoutSeconds, Headers: s.Headers, RetryAttempts: s.RetryAttempts,
+			EffectOverrides: s.EffectOverrides,
 		})
 	}
 	return mcpadapter.New(cfgs)
