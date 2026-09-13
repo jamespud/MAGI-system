@@ -2,8 +2,12 @@ package magi_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -19,10 +23,19 @@ func TestRuntimeInvocation_LongIDsOnMySQL(t *testing.T) {
 	repo := magi.NewRuntimeInvocationRepository(db)
 	ctx := context.Background()
 
-	caseID := "case-" + strings.Repeat("a", 36)               // 41 chars, same shape as case-<uuid>
+	// Unique per run: a fixed ID left the row behind, so a second run of this
+	// test saw a stale "running" invocation and began no attempt at all — the
+	// same re-runnability defect fixed for the admission test in 670896f.
+	caseID := "case-" + uuid.NewString()                      // 41 chars, same shape as case-<uuid>
 	longRunID := caseID + "-balthasar-a1-r1-investigate"      // 69
 	longAttemptID := caseID + "-casper-r1-investigate-retry1" // 70
-	invocationID := strings.Repeat("d", 64)
+	sum := sha256.Sum256([]byte(caseID))
+	invocationID := hex.EncodeToString(sum[:]) // 64 chars, the invocation_id column width
+
+	t.Cleanup(func() {
+		db.Exec("DELETE FROM runtime_invocation_attempt WHERE invocation_id = ?", invocationID)
+		db.Exec("DELETE FROM runtime_invocation WHERE invocation_id = ?", invocationID)
+	})
 
 	if _, err := repo.Ensure(ctx, &entity.RuntimeInvocation{
 		InvocationID: invocationID, RunID: longRunID, StepID: strings.Repeat("e", 64),
