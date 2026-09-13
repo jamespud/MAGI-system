@@ -1,6 +1,33 @@
 package execution
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestAttemptKeyScopesRunAttemptToInvocation pins the contract the attempt table
+// relies on: callers pass a RUN-attempt identity (stable across a run's
+// invocations so a retry fences the whole attempt), and the kernel scopes it per
+// invocation. Without the scoping, the second invocation of a run attempt
+// collides on runtime_invocation_attempt's primary key.
+func TestAttemptKeyScopesRunAttemptToInvocation(t *testing.T) {
+	runAttempt := "case-4f0c1e6a-0000-4000-8000-000000000000-balthasar-a2-r1-investigate"
+	first := attemptKey("inv-digest-a", runAttempt)
+	second := attemptKey("inv-digest-b", runAttempt)
+
+	if first == second {
+		t.Fatalf("different invocations share attempt key %q", first)
+	}
+	for _, key := range []string{first, second} {
+		if !strings.HasPrefix(key, runAttempt+":inv-digest-") {
+			t.Fatalf("attempt key %q is not scoped to its run attempt and invocation", key)
+		}
+	}
+	// An empty identity stays empty so validation still rejects it.
+	if got := attemptKey("", ""); got != "" {
+		t.Fatalf("attemptKey(\"\", \"\") = %q, want empty", got)
+	}
+}
 
 func TestStepIDStableAcrossAttempts(t *testing.T) {
 	first := NewStepID("run-123", 7)

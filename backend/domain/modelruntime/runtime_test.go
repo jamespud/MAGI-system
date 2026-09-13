@@ -306,8 +306,12 @@ func TestModelRuntimeRetryUsesNewAttemptID(t *testing.T) {
 	if response.Content != "response A" {
 		t.Fatalf("retry response = %q, want response A", response.Content)
 	}
-	if got := repo.attemptsFor(identity.InvocationID); !reflect.DeepEqual(got, []string{"attempt-1", "attempt-2"}) {
-		t.Fatalf("attempt IDs = %v, want distinct physical attempts", got)
+	// Attempt ids are scoped to the invocation (see execution.attemptKey), so
+	// compare against the composed form the kernel persists; the intent is still
+	// two distinct attempts for the same invocation.
+	want := []string{"attempt-1:" + identity.InvocationID, "attempt-2:" + identity.InvocationID}
+	if got := repo.attemptsFor(identity.InvocationID); !reflect.DeepEqual(got, want) {
+		t.Fatalf("attempt IDs = %v, want %v (distinct, invocation-scoped attempts)", got, want)
 	}
 }
 

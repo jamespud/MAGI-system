@@ -81,6 +81,15 @@ func (k *Kernel) execute(ctx context.Context, req Request, matcher InputMatcher,
 	if err := k.validate(req, fn); err != nil {
 		return nil, err
 	}
+	// The caller's AttemptID identifies the RUN attempt: it is deliberately
+	// stable across every invocation of one run so a retry fences the whole
+	// attempt. The attempt table, however, stores one row per invocation
+	// (finishAttempt matches on attempt_id AND invocation_id), so the calling
+	// identity must be scoped per invocation here — otherwise the second
+	// invocation of a run attempt collides on the attempt primary key. Everything
+	// below uses the scoped id, so the persisted row, ownership errors and the
+	// recorded invocation all agree.
+	req.Identity.AttemptID = attemptKey(req.Identity.InvocationID, req.Identity.AttemptID)
 
 	invocation, err := k.invocations.Ensure(ctx, &entity.RuntimeInvocation{
 		InvocationID:   req.Identity.InvocationID,
@@ -160,6 +169,14 @@ func (k *Kernel) execute(ctx context.Context, req Request, matcher InputMatcher,
 		return nil, recorderError("record succeeded attempt", err)
 	}
 	return &Result{Output: append([]byte(nil), output...)}, nil
+}
+
+// attemptKey scopes a run-attempt identity to one invocation.
+func attemptKey(invocationID, attemptID string) string {
+	if invocationID == "" || attemptID == "" {
+		return attemptID
+	}
+	return attemptID + ":" + invocationID
 }
 
 func (k *Kernel) validate(req Request, fn ExecuteFunc) error {

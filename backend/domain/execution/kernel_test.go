@@ -165,7 +165,11 @@ func TestKernelRetryUsesNewAttemptButSameInvocation(t *testing.T) {
 	if invocation.InvocationID != "invocation-1" || len(attempts) != 2 {
 		t.Fatalf("invocation=%+v attempts=%+v, want one logical invocation and two attempts", invocation, attempts)
 	}
-	if attempts[0].InvocationID != attempts[1].InvocationID || attempts[0].AttemptID != "attempt-1" || attempts[1].AttemptID != "attempt-2" {
+	// The caller supplies the run-attempt identity; the kernel scopes it to the
+	// invocation so one run attempt can hold an attempt per invocation (see
+	// attemptKey). The intent is unchanged: stable invocation, distinct attempts
+	// across the retry.
+	if attempts[0].InvocationID != attempts[1].InvocationID || attempts[0].AttemptID != "attempt-1:invocation-1" || attempts[1].AttemptID != "attempt-2:invocation-1" {
 		t.Fatalf("attempt identities = %+v, want stable invocation and distinct attempts", attempts)
 	}
 }
@@ -327,8 +331,8 @@ func TestKernelRecorderTracksDurableTransitions(t *testing.T) {
 		t.Fatalf("records = %+v, want running then succeeded", records)
 	}
 	for _, record := range records {
-		if record.Identity.InvocationID != "invocation-1" || record.Identity.AttemptID != "attempt-1" {
-			t.Fatalf("record identity = %+v, want invocation-1/attempt-1", record.Identity)
+		if record.Identity.InvocationID != "invocation-1" || record.Identity.AttemptID != "attempt-1:invocation-1" {
+			t.Fatalf("record identity = %+v, want invocation-1/attempt-1 scoped to the invocation", record.Identity)
 		}
 	}
 }
