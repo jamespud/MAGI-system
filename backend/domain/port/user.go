@@ -22,6 +22,11 @@ type UserRepository interface {
 	Create(ctx context.Context, u *entity.User) error
 	GetByID(ctx context.Context, id int64) (*entity.User, error)
 	FindByEmail(ctx context.Context, email string) (*entity.User, error)
+	// FindByOIDCSubject resolves the account bound to an identity-provider
+	// subject. Email is mutable at the provider, so this is the stable link.
+	FindByOIDCSubject(ctx context.Context, subject string) (*entity.User, error)
+	// SetOIDCSubject binds an existing (legacy) account to a subject once.
+	SetOIDCSubject(ctx context.Context, userID int64, subject string) error
 	List(ctx context.Context) ([]*entity.User, error)
 	Update(ctx context.Context, u *entity.User) error
 	Delete(ctx context.Context, id int64) error

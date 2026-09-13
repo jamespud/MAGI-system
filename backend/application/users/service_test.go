@@ -2,6 +2,7 @@ package users_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jamespud/magi/backend/application/auth"
@@ -43,6 +44,22 @@ func (r *memUserRepo) List(ctx context.Context) ([]*entity.User, error) {
 		out = append(out, u)
 	}
 	return out, nil
+}
+func (r *memUserRepo) FindByOIDCSubject(ctx context.Context, sub string) (*entity.User, error) {
+	for _, u := range r.byID {
+		if u.OIDCSubject != "" && u.OIDCSubject == sub {
+			return u, nil
+		}
+	}
+	return nil, port.ErrUserNotFound
+}
+func (r *memUserRepo) SetOIDCSubject(ctx context.Context, userID int64, sub string) error {
+	u, ok := r.byID[userID]
+	if !ok {
+		return port.ErrUserNotFound
+	}
+	u.OIDCSubject = sub
+	return nil
 }
 func (r *memUserRepo) Update(ctx context.Context, u *entity.User) error { return nil }
 func (r *memUserRepo) Delete(ctx context.Context, id int64) error {
@@ -90,6 +107,23 @@ func (r *memKeyRepo) Update(ctx context.Context, k *entity.ApiKey) error {
 func (r *memKeyRepo) Delete(ctx context.Context, id string) error {
 	delete(r.byID, id)
 	return nil
+}
+
+// The email column is not unique yet, so the application layer must reject a
+// second account for the same address: OIDC binds accounts by email, and two
+// matching rows would make that binding ambiguous.
+func TestCreateUserWithEmail_RejectsDuplicateEmail(t *testing.T) {
+	urepo := newMemUserRepo()
+	svc := users.NewService(urepo, newMemKeyRepo())
+	ctx := context.Background()
+
+	if _, _, err := svc.CreateUserWithEmail(ctx, entity.RoleAdmin, "alice", "dup@example.com", entity.RoleUser); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, _, err := svc.CreateUserWithEmail(ctx, entity.RoleAdmin, "bob", "dup@example.com", entity.RoleUser)
+	if !errors.Is(err, users.ErrEmailTaken) {
+		t.Fatalf("duplicate email err = %v, want ErrEmailTaken", err)
+	}
 }
 
 func TestUsersService_CreateUserAndAuthenticate(t *testing.T) {

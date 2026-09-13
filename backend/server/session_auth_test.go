@@ -35,9 +35,13 @@ func (s stubUsers) GetByID(context.Context, int64) (*entity.User, error) {
 func (s stubUsers) FindByEmail(context.Context, string) (*entity.User, error) {
 	return nil, port.ErrUserNotFound
 }
-func (s stubUsers) List(context.Context) ([]*entity.User, error) { return nil, nil }
-func (s stubUsers) Update(context.Context, *entity.User) error   { return nil }
-func (s stubUsers) Delete(context.Context, int64) error          { return nil }
+func (s stubUsers) FindByOIDCSubject(context.Context, string) (*entity.User, error) {
+	return nil, port.ErrUserNotFound
+}
+func (s stubUsers) SetOIDCSubject(context.Context, int64, string) error { return nil }
+func (s stubUsers) List(context.Context) ([]*entity.User, error)        { return nil, nil }
+func (s stubUsers) Update(context.Context, *entity.User) error          { return nil }
+func (s stubUsers) Delete(context.Context, int64) error                 { return nil }
 
 func sessionServer(t *testing.T, repo port.UserRepository, codec *auth.SessionCodec) *hzserver.Hertz {
 	t.Helper()

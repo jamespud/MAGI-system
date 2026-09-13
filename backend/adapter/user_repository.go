@@ -29,6 +29,7 @@ func (r *userRepo) Create(ctx context.Context, u *entity.User) error {
 	}
 	m := UserModel{
 		Name: u.Name, Email: u.Email, Role: u.Role, Status: u.Status,
+		OIDCSubject: nullableUserSubject(u.OIDCSubject),
 		AuthVersion: u.AuthVersion, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
@@ -167,10 +168,54 @@ func (r *userRepo) mutate(ctx context.Context, id int64, extra map[string]any) (
 }
 
 func userFromModel(m *UserModel) *entity.User {
-	return &entity.User{
+	u := &entity.User{
 		ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role, Status: m.Status,
 		AuthVersion: m.AuthVersion, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
+	if m.OIDCSubject != nil {
+		u.OIDCSubject = *m.OIDCSubject
+	}
+	return u
+}
+
+func nullableUserSubject(subject string) *string {
+	if subject == "" {
+		return nil
+	}
+	return &subject
+}
+
+// FindByOIDCSubject resolves the account bound to an OIDC subject.
+func (r *userRepo) FindByOIDCSubject(ctx context.Context, subject string) (*entity.User, error) {
+	if subject == "" {
+		return nil, port.ErrUserNotFound
+	}
+	var m UserModel
+	if err := r.db.WithContext(ctx).Where("oidc_sub = ?", subject).First(&m).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, port.ErrUserNotFound
+		}
+		return nil, err
+	}
+	return userFromModel(&m), nil
+}
+
+// SetOIDCSubject binds a legacy account to a subject. It never clears an
+// existing binding, so a racing login cannot steal an account.
+func (r *userRepo) SetOIDCSubject(ctx context.Context, userID int64, subject string) error {
+	if subject == "" {
+		return errors.New("user repository: subject is required")
+	}
+	res := r.db.WithContext(ctx).Model(&UserModel{}).
+		Where("id = ? AND (oidc_sub IS NULL OR oidc_sub = '')", userID).
+		Update("oidc_sub", subject)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("user repository: account is already bound to a subject")
+	}
+	return nil
 }
 
 type apiKeyRepo struct{ db *gorm.DB }

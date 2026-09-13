@@ -44,6 +44,22 @@ func (m *memRepo) FindByEmail(ctx context.Context, email string) (*entity.User, 
 	return nil, port.ErrUserNotFound
 }
 func (m *memRepo) List(ctx context.Context) ([]*entity.User, error) { return nil, nil }
+func (m *memRepo) FindByOIDCSubject(ctx context.Context, sub string) (*entity.User, error) {
+	for _, u := range m.users {
+		if u.OIDCSubject != "" && u.OIDCSubject == sub {
+			return u, nil
+		}
+	}
+	return nil, port.ErrUserNotFound
+}
+func (m *memRepo) SetOIDCSubject(ctx context.Context, userID int64, sub string) error {
+	u, ok := m.users[userID]
+	if !ok {
+		return port.ErrUserNotFound
+	}
+	u.OIDCSubject = sub
+	return nil
+}
 func (m *memRepo) Update(ctx context.Context, u *entity.User) error { return nil }
 func (m *memRepo) Delete(ctx context.Context, id int64) error       { return nil }
 
@@ -86,7 +102,9 @@ func newIssuer(t *testing.T) *httptest.Server {
 		case "/token":
 			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
 		case "/userinfo":
-			_ = json.NewEncoder(w).Encode(map[string]string{"sub": "s", "email": "oidc@example.com", "name": "OIDC User"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sub": "s", "email": "oidc@example.com", "name": "OIDC User", "email_verified": true,
+			})
 		default:
 			http.NotFound(w, r)
 		}

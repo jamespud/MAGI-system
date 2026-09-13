@@ -21,6 +21,10 @@ var ErrForbidden = errors.New("forbidden")
 // ErrNotFound is returned when a user or key does not exist.
 var ErrNotFound = errors.New("not found")
 
+// ErrEmailTaken is returned when an account already uses the email. The column
+// is not unique yet (legacy duplicates may exist), so the guard lives here.
+var ErrEmailTaken = errors.New("users: email already registered")
+
 // IssuedKey carries a freshly issued API key. Plaintext is shown exactly once.
 type IssuedKey struct {
 	ID        string
@@ -84,6 +88,23 @@ func (s *Service) CreateUser(ctx context.Context, actorRole, name, role string) 
 	return s.CreateUserWithEmail(ctx, actorRole, name, "", role)
 }
 
+// ensureEmailFree rejects an email an existing account already uses. A lookup
+// failure is surfaced rather than treated as "free": minting a second account
+// for an email we could not check is the ambiguity this guards against.
+func (s *Service) ensureEmailFree(ctx context.Context, email string) error {
+	if email == "" {
+		return nil
+	}
+	switch existing, err := s.users.FindByEmail(ctx, email); {
+	case err == nil && existing != nil:
+		return ErrEmailTaken
+	case err == nil, errors.Is(err, port.ErrUserNotFound):
+		return nil
+	default:
+		return fmt.Errorf("users: lookup email: %w", err)
+	}
+}
+
 // CreateUserWithEmail creates an account (optionally with an identity email
 // used by OIDC matching) and issues its bootstrap key.
 func (s *Service) CreateUserWithEmail(ctx context.Context, actorRole, name, email, role string) (*entity.User, *IssuedKey, error) {
@@ -100,7 +121,11 @@ func (s *Service) CreateUserWithEmail(ctx context.Context, actorRole, name, emai
 	if !entity.IsValidRole(role) {
 		return nil, nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
 	}
-	u := &entity.User{Name: name, Email: strings.TrimSpace(email), Role: role}
+	email = strings.TrimSpace(email)
+	if err := s.ensureEmailFree(ctx, email); err != nil {
+		return nil, nil, err
+	}
+	u := &entity.User{Name: name, Email: email, Role: role}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, nil, fmt.Errorf("users: create user: %w", err)
 	}
@@ -123,18 +148,8 @@ func (s *Service) SelfRegister(ctx context.Context, name, email string) (*entity
 		return nil, nil, fmt.Errorf("users: name is required")
 	}
 	email = strings.TrimSpace(email)
-	if email != "" {
-		existing, err := s.users.FindByEmail(ctx, email)
-		switch {
-		case err == nil && existing != nil:
-			return nil, nil, fmt.Errorf("users: email already registered")
-		case err == nil, errors.Is(err, port.ErrUserNotFound):
-			// No account uses this email; continue.
-		default:
-			// A lookup failure is not "not registered": do not silently mint a
-			// second account for an email we could not check.
-			return nil, nil, fmt.Errorf("users: lookup email: %w", err)
-		}
+	if err := s.ensureEmailFree(ctx, email); err != nil {
+		return nil, nil, err
 	}
 	u := &entity.User{Name: name, Email: email, Role: entity.RoleUser}
 	if err := s.users.Create(ctx, u); err != nil {

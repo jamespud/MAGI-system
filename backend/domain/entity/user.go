@@ -13,6 +13,9 @@ type User struct {
 	// Status is "" (legacy rows created before the column existed) | "active" |
 	// "disabled".
 	Status string
+	// OIDCSubject is the immutable identity-provider subject (OIDC "sub"). Email
+	// is mutable at the provider, so account binding must key on this value.
+	OIDCSubject string
 	// AuthVersion is bumped whenever a change alters what an existing session is
 	// allowed to do: role change, disable/re-enable, or an explicit revoke-all.
 	// Profile edits (name/email) deliberately do NOT bump it. Sessions embed the

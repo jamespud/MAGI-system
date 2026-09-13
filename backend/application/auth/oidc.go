@@ -29,14 +29,20 @@ type OIDCConfig struct {
 
 // OIDCIdentity is the authenticated identity from the provider.
 type OIDCIdentity struct {
-	Sub   string
-	Email string
-	Name  string
+	Sub           string
+	Email         string
+	Name          string
+	EmailVerified bool
 }
 
 // OIDCUserStore resolves or provisions a local account for an identity.
 type OIDCUserStore interface {
 	FindByEmail(ctx context.Context, email string) (*entity.User, error)
+	// FindByOIDCSubject resolves the account bound to the provider subject. The
+	// subject is immutable at the provider, so it is the account's stable link.
+	FindByOIDCSubject(ctx context.Context, subject string) (*entity.User, error)
+	// SetOIDCSubject binds a legacy (email-only) account to a subject once.
+	SetOIDCSubject(ctx context.Context, userID int64, subject string) error
 	Create(ctx context.Context, u *entity.User) error
 }
 
@@ -166,9 +172,10 @@ func (c *OIDCClient) Exchange(ctx context.Context, code string) (*OIDCIdentity, 
 		return nil, fmt.Errorf("oidc: userinfo status %d", uiResp.StatusCode)
 	}
 	var identity struct {
-		Sub   string `json:"sub"`
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Sub           string `json:"sub"`
+		Email         string `json:"email"`
+		Name          string `json:"name"`
+		EmailVerified bool   `json:"email_verified"`
 	}
 	if err := json.NewDecoder(uiResp.Body).Decode(&identity); err != nil {
 		return nil, fmt.Errorf("oidc: userinfo decode: %w", err)
@@ -176,25 +183,58 @@ func (c *OIDCClient) Exchange(ctx context.Context, code string) (*OIDCIdentity, 
 	if identity.Sub == "" {
 		return nil, fmt.Errorf("oidc: userinfo missing sub")
 	}
-	return &OIDCIdentity{Sub: identity.Sub, Email: identity.Email, Name: identity.Name}, nil
+	return &OIDCIdentity{
+		Sub: identity.Sub, Email: identity.Email, Name: identity.Name,
+		EmailVerified: identity.EmailVerified,
+	}, nil
 }
 
 // Provision resolves a local account for the identity, auto-provisioning a
 // user-role account when self-registration is enabled.
 func (c *OIDCClient) Provision(ctx context.Context, identity *OIDCIdentity) (*entity.User, error) {
-	if identity == nil || identity.Email == "" {
-		return nil, fmt.Errorf("oidc: identity email is required")
+	if identity == nil || identity.Sub == "" {
+		return nil, fmt.Errorf("oidc: identity subject is required")
 	}
-	// Distinguish "no such account" from "could not read the account store": a
-	// storage failure must not fall through to provisioning a new account.
-	existing, err := c.users.FindByEmail(ctx, identity.Email)
+	if !identity.EmailVerified {
+		// Email drives account discovery and provisioning, so an unverified
+		// address must never grant access to an existing account.
+		return nil, fmt.Errorf("oidc: provider did not verify the account email")
+	}
+
+	// 1) The immutable binding wins: a subject match is authoritative even if the
+	//    provider's email for that account changed.
+	bySubject, err := c.users.FindByOIDCSubject(ctx, identity.Sub)
 	switch {
-	case err == nil && existing != nil:
-		return existing, nil
+	case err == nil && bySubject != nil:
+		return bySubject, nil
 	case err == nil, errors.Is(err, port.ErrUserNotFound):
-		// No local account yet; fall through to provisioning.
+		// continue
 	default:
-		return nil, fmt.Errorf("oidc: lookup user %q: %w", identity.Email, err)
+		return nil, fmt.Errorf("oidc: lookup subject %q: %w", identity.Sub, err)
+	}
+
+	// 2) Legacy accounts predate the subject column. Adopt them once, but only
+	//    when the verified email matches exactly; a different subject claiming
+	//    the same email must not inherit the account.
+	if identity.Email != "" {
+		existing, derr := c.users.FindByEmail(ctx, identity.Email)
+		switch {
+		case derr == nil && existing != nil:
+			if existing.OIDCSubject != "" && existing.OIDCSubject != identity.Sub {
+				return nil, fmt.Errorf("oidc: account for %q is already bound to another subject", identity.Email)
+			}
+			if existing.OIDCSubject == "" {
+				if err := c.users.SetOIDCSubject(ctx, existing.ID, identity.Sub); err != nil {
+					return nil, fmt.Errorf("oidc: bind subject: %w", err)
+				}
+				existing.OIDCSubject = identity.Sub
+			}
+			return existing, nil
+		case derr == nil, errors.Is(derr, port.ErrUserNotFound):
+			// No local account yet; fall through to provisioning.
+		default:
+			return nil, fmt.Errorf("oidc: lookup user %q: %w", identity.Email, derr)
+		}
 	}
 	if !c.cfg.SelfRegistration {
 		return nil, fmt.Errorf("oidc: no local account for %q and self-registration is disabled", identity.Email)
@@ -203,7 +243,7 @@ func (c *OIDCClient) Provision(ctx context.Context, identity *OIDCIdentity) (*en
 	if name == "" {
 		name = identity.Email
 	}
-	user := &entity.User{Name: name, Email: identity.Email, Role: entity.RoleUser}
+	user := &entity.User{Name: name, Email: identity.Email, Role: entity.RoleUser, OIDCSubject: identity.Sub}
 	if err := c.users.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("oidc: provision user: %w", err)
 	}
