@@ -15,6 +15,7 @@ import (
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // This file covers the production MySQL database lifecycle that the SQLite
@@ -30,7 +31,57 @@ import (
 const (
 	s16MigrationPath = "../../docker/atlas/migrations/magi_s16_event_sequence.sql"
 	s16ResumePath    = "../../docker/atlas/repair/magi_s16_event_sequence_resume.sql"
+	s23MigrationPath = "../../docker/atlas/migrations/magi_s23_runtime_identity_length.sql"
 )
+
+// preS23RuntimeInvocationDDL is the runtime kernel shape as published in S21
+// before the identity columns were widened: run_id and attempt_id were
+// varchar(64), which is why every run on MySQL failed with error 1406.
+const preS23RuntimeInvocationDDL = `
+CREATE TABLE runtime_invocation (
+    invocation_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    run_id VARCHAR(64) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    kind VARCHAR(32) NOT NULL,
+    logical_ordinal INT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    attempt_count INT NOT NULL DEFAULT 0,
+    operation_name VARCHAR(128) NOT NULL DEFAULT '',
+    retry_safety VARCHAR(32) NOT NULL,
+    idempotency_key VARCHAR(128) NULL,
+    input_digest VARCHAR(64) NOT NULL DEFAULT '',
+    input_json MEDIUMTEXT NOT NULL,
+    output_json MEDIUMTEXT NULL,
+    error TEXT NULL,
+    started_at DATETIME(3) NULL,
+    completed_at DATETIME(3) NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_runtime_run_step (run_id, step_id),
+    KEY idx_runtime_run_status (run_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+
+const preS23RuntimeAttemptDDL = `
+CREATE TABLE runtime_invocation_attempt (
+    attempt_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    invocation_id VARCHAR(64) NOT NULL,
+    attempt_no INT NOT NULL,
+    worker_id VARCHAR(128) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL,
+    started_at DATETIME(3) NULL,
+    completed_at DATETIME(3) NULL,
+    error TEXT NULL,
+    UNIQUE KEY uk_runtime_invocation_attempt_no (invocation_id, attempt_no),
+    KEY idx_runtime_attempt_invocation (invocation_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+
+func seedPreS23RuntimeTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, stmt := range []string{preS23RuntimeInvocationDDL, preS23RuntimeAttemptDDL} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("seed pre-S23 runtime tables: %v", err)
+		}
+	}
+}
 
 var mysqlSchemaSeq atomic.Int64
 
@@ -479,4 +530,111 @@ func TestMySQLMigration_S16ResumeFromPartialFailure(t *testing.T) {
 
 	db := provideDBForTest(t, dsn)
 	assertLegacyEventsSequenced(t, db)
+}
+
+// --- S23: runtime identity column width --------------------------------------
+
+// mysqlColumnWidth reads a column's declared character maximum length.
+func mysqlColumnWidth(t *testing.T, db *gorm.DB, table, column string) int64 {
+	t.Helper()
+	var row struct {
+		MaxLen *int64 `gorm:"column:max_len"`
+	}
+	if err := db.Raw(`SELECT CHARACTER_MAXIMUM_LENGTH AS max_len
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+		table, column).Scan(&row).Error; err != nil {
+		t.Fatalf("read width of %s.%s: %v", table, column, err)
+	}
+	if row.MaxLen == nil {
+		t.Fatalf("%s.%s not found", table, column)
+	}
+	return *row.MaxLen
+}
+
+func insertInvocationWithRunID(db *gorm.DB, invocationID, runID string) error {
+	return db.Exec(`INSERT INTO runtime_invocation
+		(invocation_id, run_id, step_id, kind, logical_ordinal, status, attempt_count, operation_name, retry_safety, input_digest, input_json, updated_at)
+		VALUES (?, ?, ?, 'model', 1, 'pending', 0, 'op', 'unsafe', 'digest', '{}', NOW())`,
+		invocationID, runID, "step-"+invocationID).Error
+}
+
+// narrowRuntimeIdentityColumns rewrites the three identity columns back to the
+// width S21 originally published, reproducing the shape an existing database has
+// before the widening.
+func narrowRuntimeIdentityColumns(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		"ALTER TABLE runtime_invocation MODIFY run_id VARCHAR(64) NOT NULL",
+		"ALTER TABLE runtime_invocation_attempt MODIFY attempt_id VARCHAR(64) NOT NULL",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			t.Fatalf("narrow (%s): %v", stmt, err)
+		}
+	}
+}
+
+// assertRuntimeIdentityWidths pins the identity column widths. step_id stays 64
+// on purpose: it is a fixed-length sha256 digest, not a generated path.
+func assertRuntimeIdentityWidths(t *testing.T, db *gorm.DB, runID, stepID, attemptID int64) {
+	t.Helper()
+	for _, col := range []struct {
+		table, column string
+		want          int64
+	}{
+		{"runtime_invocation", "run_id", runID},
+		{"runtime_invocation", "step_id", stepID},
+		{"runtime_invocation_attempt", "attempt_id", attemptID},
+	} {
+		if got := mysqlColumnWidth(t, db, col.table, col.column); got != col.want {
+			t.Fatalf("%s.%s width = %d, want %d", col.table, col.column, got, col.want)
+		}
+	}
+}
+
+// TestMySQLMigration_S23WidensRuntimeIdentityColumns covers the production bug
+// the E2E stack exposed: run identifiers are built as
+// "case-<uuid>-<role>-a<attempt>-r<round>-<phase>" and reach 69 characters, while
+// the runtime identity columns were varchar(64), so every run on MySQL died with
+// error 1406. It proves both upgrade paths an existing database can take — the
+// startup AutoMigrate and the explicit forward-only migration — and pins the
+// boundary at the declared limit so a future silent narrowing is caught.
+func TestMySQLMigration_S23WidensRuntimeIdentityColumns(t *testing.T) {
+	dsn := newMySQLSchema(t)
+	admin := openSchema(t, dsn)
+	seedPreS23RuntimeTables(t, admin)
+	assertRuntimeIdentityWidths(t, admin, 64, 64, 64)
+
+	// Path 1: a database that already has the narrow columns is widened by the
+	// normal startup path.
+	started := provideDBForTest(t, dsn)
+	assertRuntimeIdentityWidths(t, started, validation.MaxInvocationRunIDBytes, 64, validation.MaxInvocationRunIDBytes)
+
+	// Path 2: the explicit forward-only migration does the same for an operator
+	// who applies Atlas files instead of relying on startup.
+	narrowRuntimeIdentityColumns(t, admin)
+	assertRuntimeIdentityWidths(t, admin, 64, 64, 64)
+	applyMySQLScript(t, admin, s23MigrationPath)
+	assertRuntimeIdentityWidths(t, admin, validation.MaxInvocationRunIDBytes, 64, validation.MaxInvocationRunIDBytes)
+
+	// A real production identity: 41-char case id + balthasar + attempt + round
+	// + phase = 69 characters, which is what the dispatcher builds.
+	caseID := "case-" + strings.Repeat("c", 36)
+	productionRunID := caseID + "-balthasar-a2-r1-investigate"
+	if len(productionRunID) != 69 {
+		t.Fatalf("fixture run id is %d chars, want the 69-char production shape", len(productionRunID))
+	}
+	if err := insertInvocationWithRunID(admin, "inv-production", productionRunID); err != nil {
+		t.Fatalf("insert with %d-char run id: %v", len(productionRunID), err)
+	}
+
+	// Boundary: exactly the declared limit fits, one more does not.
+	atLimit := strings.Repeat("x", validation.MaxInvocationRunIDBytes)
+	if err := insertInvocationWithRunID(admin, "inv-at-limit", atLimit); err != nil {
+		t.Fatalf("insert with %d-char run id (the declared limit): %v", len(atLimit), err)
+	}
+	overLimit := strings.Repeat("x", validation.MaxInvocationRunIDBytes+1)
+	if err := insertInvocationWithRunID(admin, "inv-over-limit", overLimit); err == nil {
+		t.Fatalf("insert with %d-char run id must be rejected by the schema", len(overLimit))
+	}
 }
