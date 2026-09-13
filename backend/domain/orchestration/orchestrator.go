@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -34,6 +35,7 @@ type Orchestrator struct {
 	configs      []*entity.MagiConfig
 	blueprint    *entity.FSMBlueprint
 	actions      map[string]ActionHandler
+	metrics      *metrics.Registry
 }
 
 type OrchestratorDeps struct {
@@ -52,6 +54,7 @@ type OrchestratorDeps struct {
 	Policy               consensus.ConsensusPolicy
 	FailPolicy           FailurePolicy
 	Blueprint            *entity.FSMBlueprint
+	Metrics              *metrics.Registry
 }
 
 func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
@@ -74,6 +77,7 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		lastAgentErr: nil,
 		configs:      d.Configs,
 		blueprint:    d.Blueprint,
+		metrics:      d.Metrics,
 	}
 	o.actions = o.buildActionRegistry()
 	return o
@@ -378,7 +382,9 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		for _, tb := range cfg.Tools {
 			run.Environment.Tools = append(run.Environment.Tools, string(tb.Source)+":"+tb.ToolName)
 		}
-		_ = o.repo.AgentRunRepo().Create(ctx, run)
+		o.persistArtifact(ctx, metrics.ArtifactAgentRun, case_.ID, func() error {
+			return o.repo.AgentRunRepo().Create(ctx, run)
+		})
 
 		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
 		// persist copies so the ledger is left untouched for any later use.
@@ -392,7 +398,9 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.ID = newID
 				cp.CaseID = case_.ID
 				cp.AgentRunID = run.ID
-				_ = o.repo.EvidenceRepo().Create(ctx, &cp)
+				o.persistArtifact(ctx, metrics.ArtifactEvidence, case_.ID, func() error {
+					return o.repo.EvidenceRepo().Create(ctx, &cp)
+				})
 			}
 			claims := r.Ledger.ListClaims()
 			for _, cl := range claims {
@@ -406,7 +414,9 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.AgentRunID = run.ID
 				cp.Supports = remapRefs(cl.Supports, remap.EvidenceMap())
 				cp.Contradicts = remapRefs(cl.Contradicts, remap.ClaimMap())
-				_ = o.repo.ClaimRepo().Create(ctx, &cp)
+				o.persistArtifact(ctx, metrics.ArtifactClaim, case_.ID, func() error {
+					return o.repo.ClaimRepo().Create(ctx, &cp)
+				})
 			}
 		}
 		// Persist tool-call records from the run trace. The PK is a namespaced
@@ -436,7 +446,9 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						DurationMs: tc.Duration.Milliseconds(),
 						CreatedAt:  now,
 					}
-					_ = o.repo.ToolCallRepo().Create(ctx, toolCall)
+					o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, func() error {
+						return o.repo.ToolCallRepo().Create(ctx, toolCall)
+					})
 				}
 			}
 		}
@@ -459,9 +471,25 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		v.ID = "vote-" + executionRunID(case_.ID, codeOf(cfg), case_.ExecutionAttempt, round, phase)
 		v.CaseID = case_.ID
 		v.Round = round
-		_ = o.repo.VoteRepo().Create(ctx, v)
+		o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, func() error {
+			return o.repo.VoteRepo().Create(ctx, v)
+		})
 	}
 	return remap
+}
+
+// persistArtifact runs one durable artifact write. Failures are counted and
+// logged rather than silently dropped: a missing vote/evidence/tool-call row is
+// an audit hole, and the stock-mcp incident showed it can show up as a complete
+// case with no trace of the tool call.
+func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.ArtifactKind, caseID string, write func() error) {
+	if write == nil {
+		return
+	}
+	if err := write(); err != nil {
+		log.Printf("orchestrator: persist %s for case %s failed: %v", kind, caseID, err)
+		o.metrics.IncArtifactPersistFailure(kind)
+	}
 }
 
 func (o *Orchestrator) configAt(i int) *entity.MagiConfig {

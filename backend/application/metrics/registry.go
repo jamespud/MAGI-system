@@ -37,6 +37,8 @@ type Registry struct {
 	BenchmarkAutoRuns       atomic.Int64
 	BenchmarkRegressionFail atomic.Int64
 
+	artifactPersistFailures [lenArtifactKinds]atomic.Int64
+
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
 	RunDurationBuckets [8]atomic.Int64 // 7 bounded buckets + +Inf
@@ -132,6 +134,57 @@ const (
 const lenA2AProjectionKinds = 2
 
 var a2aProjectionKinds = [...]A2AProjectionKind{A2AProjectionArtifact, A2AProjectionStatus}
+
+// ArtifactKind is a fixed label value for durable artifact writes. The kinds
+// mirror the writes in orchestration.persistArtifacts plus the two best-effort
+// side writes, so a dropped audit row is visible instead of silent.
+type ArtifactKind string
+
+const (
+	ArtifactAgentRun         ArtifactKind = "agent_run"
+	ArtifactEvidence         ArtifactKind = "evidence"
+	ArtifactClaim            ArtifactKind = "claim"
+	ArtifactToolCall         ArtifactKind = "tool_call"
+	ArtifactVote             ArtifactKind = "vote"
+	ArtifactDebateRound      ArtifactKind = "debate_round"
+	ArtifactReflection       ArtifactKind = "reflection"
+	ArtifactTaskSnapshot     ArtifactKind = "task_snapshot"
+	ArtifactMemoryProjection ArtifactKind = "memory_projection"
+)
+
+const lenArtifactKinds = 9
+
+var artifactKinds = [...]ArtifactKind{
+	ArtifactAgentRun, ArtifactEvidence, ArtifactClaim, ArtifactToolCall, ArtifactVote,
+	ArtifactDebateRound, ArtifactReflection, ArtifactTaskSnapshot, ArtifactMemoryProjection,
+}
+
+// IncArtifactPersistFailure records a durable write that failed and was
+// tolerated. The kind must be one of the fixed constants above.
+func (r *Registry) IncArtifactPersistFailure(kind ArtifactKind) {
+	if r == nil {
+		return
+	}
+	for i, k := range artifactKinds {
+		if k == kind {
+			r.artifactPersistFailures[i].Add(1)
+			return
+		}
+	}
+}
+
+// ArtifactPersistFailures returns the current count for a fixed kind.
+func (r *Registry) ArtifactPersistFailures(kind ArtifactKind) int64 {
+	if r == nil {
+		return 0
+	}
+	for i, k := range artifactKinds {
+		if k == kind {
+			return r.artifactPersistFailures[i].Load()
+		}
+	}
+	return 0
+}
 
 // IncA2ARequest records one A2A protocol request by its fixed operation and
 // result labels.
@@ -448,6 +501,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_tool_calls_total counter\nmagi_tool_calls_total %d\n", r.ToolCalls.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_call_failures_total counter\nmagi_tool_call_failures_total %d\n", r.ToolCallFailures.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_output_clipped_total counter\nmagi_tool_output_clipped_total %d\n", r.ToolOutputClipped.Load())
+	fmt.Fprintln(w, "# TYPE magi_artifact_persist_failures_total counter")
+	for i, kind := range artifactKinds {
+		fmt.Fprintf(w, "magi_artifact_persist_failures_total{kind=%q} %d\n", kind, r.artifactPersistFailures[i].Load())
+	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_memory_retrieval_failures_total counter\nmagi_memory_retrieval_failures_total %d\n", r.MemoryRetrievalFailures.Load())

@@ -635,6 +635,7 @@ func provideOrchestrator(
 	plugs *plugins.Service,
 	policyRepo port.ConsensusPolicyRepository,
 	blueprintRepo port.FSMBlueprintRepository,
+	reg *metrics.Registry,
 ) *orchestration.Orchestrator {
 	policy := consensus.DefaultConsensusPolicy()
 	if stored, err := policyRepo.Get(context.Background()); err == nil && stored != nil {
@@ -659,6 +660,7 @@ func provideOrchestrator(
 		Policy:               policy,
 		Blueprint:            &blueprint,
 		ToolBindingsProvider: plugs,
+		Metrics:              reg,
 	})
 }
 

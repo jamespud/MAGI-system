@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/jamespud/magi/backend/application/decision"
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -486,6 +487,33 @@ func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
 	}
 }
 
+// A tolerated artifact write failure must be counted instead of vanishing: the
+// stock-mcp incident produced complete-looking cases whose tool-call/evidence
+// rows never persisted.
+func TestOrchestrate_CountsToleratedPersistFailure(t *testing.T) {
+	reg := metrics.New()
+	repo := newStubRepo()
+	repo.evidenceErr = errors.New("data too long for column 'observation'")
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: newMockMagiRuntime(),
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Repo:      repo,
+		Metrics:   reg,
+	})
+
+	if _, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-persist", Question: "q", MaxDebateRounds: 1}); err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if got := reg.ArtifactPersistFailures(metrics.ArtifactEvidence); got == 0 {
+		t.Fatal("evidence persist failure was not counted")
+	}
+}
+
 func TestOrchestrate_FailurePolicy(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // melchior fails
@@ -669,6 +697,7 @@ type stubRepo struct {
 	votes       []*entity.Vote
 	resolutions []*entity.Resolution
 	toolCalls   []*entity.ToolCall
+	evidenceErr error
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
@@ -742,6 +771,9 @@ func (r *stubAgentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (in
 type stubEvidenceRepo struct{ s *stubRepo }
 
 func (r *stubEvidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	if r.s.evidenceErr != nil {
+		return r.s.evidenceErr
+	}
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	r.s.evidence = append(r.s.evidence, e)
