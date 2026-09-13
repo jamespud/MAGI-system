@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/application/redact"
@@ -23,6 +25,44 @@ var (
 	ErrToolQuotaExceeded    = errors.New("tool runtime: quota exceeded")
 	ErrToolArgumentsInvalid = errors.New("tool runtime: arguments invalid")
 )
+
+// defaultToolOutputMaxBytes bounds one tool result before it is persisted and
+// fed back to the model. It stays well below MySQL TEXT (65535 bytes) so the
+// JSON envelope and the agent loop's untrusted-data wrapper cannot overflow the
+// column that stores magi_tool_call.result.
+const defaultToolOutputMaxBytes = 32 * 1024
+
+// outputTruncationMarker renders the suffix appended to a clipped output. It is
+// derived from the limit so the message can never drift from the constant.
+func outputTruncationMarker(max int) string {
+	return "\n[output truncated: exceeded " + strconv.Itoa(max) + " bytes]"
+}
+
+// clipToolOutput shortens an oversized result in place and reports whether it
+// changed anything. Structured payloads that do not fit are dropped: the
+// persisted envelope must stay bounded too.
+func clipToolOutput(in *port.ToolExecutionResult, max int) bool {
+	if in == nil || max <= 0 || len(in.Output) <= max {
+		return false
+	}
+	cut := max
+	for cut > 0 && !utf8.ValidString(in.Output[:cut]) {
+		cut--
+	}
+	in.Output = in.Output[:cut] + outputTruncationMarker(max)
+	if in.Structured != nil {
+		if raw, err := json.Marshal(in.Structured); err != nil || len(raw) > max {
+			in.Structured = nil
+		}
+	}
+	return true
+}
+
+func (r *Runtime) clipToolResult(in *port.ToolExecutionResult) {
+	if clipToolOutput(in, defaultToolOutputMaxBytes) {
+		r.metrics.IncToolOutputClipped()
+	}
+}
 
 type Deps struct {
 	Kernel    *execution.Kernel
@@ -137,6 +177,9 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 		if executed == nil {
 			return nil, errors.New("tool executor returned nil result")
 		}
+		// Clamp before the kernel persists the output, so the stored invocation
+		// and the value returned to the agent loop stay bounded together.
+		r.clipToolResult(executed)
 		return encodeToolResult(executed), nil
 	})
 	if kernelErr != nil {

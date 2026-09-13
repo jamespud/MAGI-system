@@ -20,14 +20,15 @@ const lenA2ADurationBounds = 7
 // accounting. All methods are nil-safe so dependencies can pass an optional
 // registry.
 type Registry struct {
-	CasesCreated     atomic.Int64
-	RunsActive       atomic.Int64
-	RunsCompleted    atomic.Int64
-	RunsFailed       atomic.Int64
-	ToolCalls        atomic.Int64
-	ToolCallFailures atomic.Int64
-	TokensTotal      atomic.Int64
-	RequestsTotal    atomic.Int64
+	CasesCreated      atomic.Int64
+	RunsActive        atomic.Int64
+	RunsCompleted     atomic.Int64
+	RunsFailed        atomic.Int64
+	ToolCalls         atomic.Int64
+	ToolCallFailures  atomic.Int64
+	ToolOutputClipped atomic.Int64
+	TokensTotal       atomic.Int64
+	RequestsTotal     atomic.Int64
 
 	MemoryRetrievalFailures atomic.Int64
 	ModelFailovers          atomic.Int64
@@ -403,6 +404,16 @@ func (r *Registry) IncToolCall(ok bool) {
 	}
 }
 
+// IncToolOutputClipped counts tool results that were shortened before being
+// persisted, so a provider returning oversized payloads is visible in metrics
+// instead of only showing up as a missing audit row.
+func (r *Registry) IncToolOutputClipped() {
+	if r == nil {
+		return
+	}
+	r.ToolOutputClipped.Add(1)
+}
+
 // RecordRunDuration records one run duration in milliseconds.
 func (r *Registry) RecordRunDuration(ms int64) {
 	if r == nil {
@@ -436,6 +447,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_runs_failed_total counter\nmagi_runs_failed_total %d\n", r.RunsFailed.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_calls_total counter\nmagi_tool_calls_total %d\n", r.ToolCalls.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_call_failures_total counter\nmagi_tool_call_failures_total %d\n", r.ToolCallFailures.Load())
+	fmt.Fprintf(w, "# TYPE magi_tool_output_clipped_total counter\nmagi_tool_output_clipped_total %d\n", r.ToolOutputClipped.Load())
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_memory_retrieval_failures_total counter\nmagi_memory_retrieval_failures_total %d\n", r.MemoryRetrievalFailures.Load())
