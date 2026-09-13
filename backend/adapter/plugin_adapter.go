@@ -70,7 +70,7 @@ func (a *PluginAdapter) List(ctx context.Context, bindings []entity.ToolBinding)
 			if t == nil || t.ID != b.ToolID || t.GetName() == "" {
 				continue
 			}
-			name := t.GetName()
+			name := pluginToolName(b.PluginID, t.GetName())
 			def := port.ToolDefinition{
 				Name:       name,
 				Desc:       t.GetDesc(),
