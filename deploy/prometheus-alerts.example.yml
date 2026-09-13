@@ -60,3 +60,36 @@ groups:
           severity: critical
         annotations:
           summary: "Spending more than $5/hour on model calls"
+      - alert: MagiArtifactPersistFailures
+        expr: increase(magi_artifact_persist_failures_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Durable artifact writes failed and were tolerated ({{ $labels.kind }})"
+          description: "A vote/evidence/tool-call row did not persist; the case may look complete while its audit trail has holes."
+      - alert: MagiToolOutputClipped
+        expr: increase(magi_tool_output_clipped_total[1h]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "A tool returned more than the persistable output limit and was truncated"
+      - alert: MagiMemoryRetrievalFailures
+        expr: increase(magi_memory_retrieval_failures_total[15m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG retrieval is failing"
+      - alert: MagiA2AProjectionErrors
+        expr: increase(magi_a2a_projection_errors_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A2A task projection is dropping artifacts or status ({{ $labels.kind }})"
+      - alert: MagiProtectionDisabled
+        expr: magi_config_protection_disabled == 1
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "A protective mechanism is disabled ({{ $labels.name }})"
+          description: "See docs/reliability-hazard-audit.md §4.1: a zero/absent value silently disables this guard."

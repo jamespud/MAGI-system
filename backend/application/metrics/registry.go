@@ -38,6 +38,7 @@ type Registry struct {
 	BenchmarkRegressionFail atomic.Int64
 
 	artifactPersistFailures [lenArtifactKinds]atomic.Int64
+	protectionDisabled      [lenProtectionNames]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -184,6 +185,52 @@ func (r *Registry) ArtifactPersistFailures(kind ArtifactKind) int64 {
 		}
 	}
 	return 0
+}
+
+// ProtectionName is a fixed label value for the "protection disabled" gauge.
+// Emitting the state (rather than only logging it) is what makes a silently
+// disabled budget/quota/auth visible to alerting.
+type ProtectionName string
+
+const (
+	ProtectionAuth          ProtectionName = "auth"
+	ProtectionBudget        ProtectionName = "budget"
+	ProtectionToolQuota     ProtectionName = "tool_quota"
+	ProtectionHTTPRateLimit ProtectionName = "http_rate_limit"
+	ProtectionBenchmarkGate ProtectionName = "benchmark_regression_gate"
+)
+
+const lenProtectionNames = 5
+
+var protectionNames = [...]ProtectionName{
+	ProtectionAuth, ProtectionBudget, ProtectionToolQuota, ProtectionHTTPRateLimit, ProtectionBenchmarkGate,
+}
+
+// SetProtectionDisabled marks one protective mechanism as disabled.
+func (r *Registry) SetProtectionDisabled(name ProtectionName) {
+	if r == nil {
+		return
+	}
+	for i, n := range protectionNames {
+		if n == name {
+			r.protectionDisabled[i].Store(1)
+			return
+		}
+	}
+}
+
+// DisabledProtections lists the protections currently marked as disabled.
+func (r *Registry) DisabledProtections() []ProtectionName {
+	if r == nil {
+		return nil
+	}
+	var out []ProtectionName
+	for i, n := range protectionNames {
+		if r.protectionDisabled[i].Load() == 1 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // IncA2ARequest records one A2A protocol request by its fixed operation and
@@ -504,6 +551,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintln(w, "# TYPE magi_artifact_persist_failures_total counter")
 	for i, kind := range artifactKinds {
 		fmt.Fprintf(w, "magi_artifact_persist_failures_total{kind=%q} %d\n", kind, r.artifactPersistFailures[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_config_protection_disabled gauge")
+	for i, name := range protectionNames {
+		fmt.Fprintf(w, "magi_config_protection_disabled{name=%q} %d\n", name, r.protectionDisabled[i].Load())
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())

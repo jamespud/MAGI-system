@@ -274,6 +274,7 @@ var Module = fx.Options(
 	}),
 	fx.Invoke(registerLifecycle),
 	fx.Invoke(registerScheduler),
+	fx.Invoke(recordDisabledProtections),
 	fx.Invoke(registerTracingShutdown),
 	fx.Invoke(func(a *mcpadapter.Adapter, lc fx.Lifecycle) {
 		lc.Append(fx.Hook{OnStop: func(context.Context) error { return a.Close() }})
@@ -744,6 +745,45 @@ func provideBudgetChecker(adminSvc *admin.Service, cfg *Config) decision.BudgetC
 		return nil
 	}
 	return &usageBudgetChecker{admin: adminSvc, maxTok: cfg.Limits.MaxTokensPerUser, maxCost: cfg.Limits.MaxCostUSDPerUser}
+}
+
+// recordDisabledProtections publishes which protective mechanisms are off and
+// logs one line, so a configuration that relies on "0 means unlimited/disabled"
+// can never pass unnoticed (see docs/reliability-hazard-audit.md §4.1).
+func recordDisabledProtections(cfg *Config, reg *metrics.Registry) {
+	var off []string
+	mark := func(name metrics.ProtectionName, disabled bool, detail string) {
+		if disabled {
+			reg.SetProtectionDisabled(name)
+			off = append(off, detail)
+		}
+	}
+	mark(metrics.ProtectionAuth, !cfg.Auth.Enabled, "auth.enabled=false (API is open)")
+	mark(metrics.ProtectionBudget,
+		cfg.Limits.MaxTokensPerUser <= 0 && cfg.Limits.MaxCostUSDPerUser <= 0,
+		"limits.max_tokens_per_user/max_cost_usd_per_user unset (no spend cap)")
+	mark(metrics.ProtectionToolQuota, !toolQuotaEnabled(cfg),
+		"tool_quota.default_per_minute=0 (no tool rate limit)")
+	mark(metrics.ProtectionHTTPRateLimit,
+		!cfg.HTTPRateLimit.Enabled || (cfg.HTTPRateLimit.PerUserPerMinute <= 0 && cfg.HTTPRateLimit.PerIPPerMinute <= 0),
+		"http_rate_limit disabled")
+	mark(metrics.ProtectionBenchmarkGate, cfg.Benchmark.RegressionThreshold <= 0,
+		"benchmark.regression_threshold=0 (accuracy gate off)")
+	if len(off) > 0 {
+		log.Printf("SECURITY: protective mechanisms disabled: %s", strings.Join(off, "; "))
+	}
+}
+
+func toolQuotaEnabled(cfg *Config) bool {
+	if cfg.ToolQuota.DefaultPerMinute > 0 {
+		return true
+	}
+	for _, limit := range cfg.ToolQuota.Tools {
+		if limit > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, eventPub port.EventPublisher, reg *metrics.Registry, cfg *Config, budget decision.BudgetChecker) *decision.RunManager {
