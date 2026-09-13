@@ -545,6 +545,76 @@ func TestOrchestrate_CountsToleratedPersistFailure(t *testing.T) {
 	}
 }
 
+// TerminalCommitter and StatusTransitionCommitter are optional interfaces, so a
+// repository that stops implementing them degrades durability with no compile
+// error. The in-memory fakes this package tests with are exactly that case,
+// which makes the fallback counter the only production-visible signal.
+func TestOrchestrate_CountsCommitFenceFallback(t *testing.T) {
+	reg := metrics.New()
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	repo := newStubRepo()
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  repo.CaseRepo(),
+		Repo:      repo,
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Metrics:   reg,
+	})
+
+	case_ := &entity.DecisionCase{ID: "c-fallback", Question: "q", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if got := reg.CommitFenceFallbacks(metrics.CommitFenceTerminal); got == 0 {
+		t.Fatal("non-atomic terminal commit was not counted")
+	}
+	if got := reg.CommitFenceFallbacks(metrics.CommitFenceStatus); got == 0 {
+		t.Fatal("non-atomic status transition was not counted")
+	}
+}
+
+// The counter must stay at zero when the capability is present: otherwise it
+// would be an alarm that fires on healthy production wiring.
+func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
+	reg := metrics.New()
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve()}
+	baseRepo := newStubRepo()
+	terminalRepo := &terminalCommitSuccessRepo{Repository: baseRepo}
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		CaseRepo:  baseRepo.CaseRepo(),
+		Repo:      terminalRepo,
+		EventPub:  &captureOnlyEventPublisher{},
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Metrics:   reg,
+	})
+
+	case_ := &entity.DecisionCase{ID: "c-fenced", Question: "q", MaxDebateRounds: 1, Status: entity.CaseStatusDraft}
+	if _, err := orch.Orchestrate(context.Background(), case_); err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if !terminalRepo.called {
+		t.Fatal("orchestrator did not use the terminal transaction capability")
+	}
+	if got := reg.CommitFenceFallbacks(metrics.CommitFenceTerminal); got != 0 {
+		t.Fatalf("fenced terminal commit counted as fallback %d times", got)
+	}
+}
+
 func TestOrchestrate_FailurePolicy(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // melchior fails

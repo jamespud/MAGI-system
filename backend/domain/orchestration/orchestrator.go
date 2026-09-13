@@ -198,6 +198,12 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 		return nil
 	}
+	// The repository cannot fence the status write, the Resolution row, and the
+	// completion event in one transaction. That is expected for in-memory
+	// fakes; in production it means an adapter stopped implementing
+	// TerminalCommitter, so count it instead of degrading silently.
+	log.Printf("orchestrator: case %s: repository lacks TerminalCommitter, committing terminal outcome non-atomically", case_.ID)
+	o.metrics.IncCommitFenceFallback(metrics.CommitFenceTerminal)
 	if err := o.confirmCurrentStatus(ctx, case_, expected, target); err != nil {
 		return err
 	}
@@ -271,6 +277,10 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 		}
 		return nil
 	}
+	// Same signal as the terminal path: the transition and its event cannot be
+	// fenced together. Counted rather than logged per transition because
+	// standalone and test repositories use this path routinely.
+	o.metrics.IncCommitFenceFallback(metrics.CommitFenceStatus)
 	if o.caseRepo != nil {
 		if writer, ok := o.caseRepo.(port.ConditionalCaseStatusWriter); ok {
 			updated, err := writer.UpdateStatusIfCurrent(ctx, case_.ID, allowed, to)

@@ -73,6 +73,20 @@ groups:
           severity: info
         annotations:
           summary: "A tool returned more than the persistable output limit and was truncated"
+      - alert: MagiToolErrorClipped
+        expr: increase(magi_tool_error_clipped_total[1h]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "A tool failure message exceeded the persistable error limit and was truncated"
+          description: "Tool errors are untrusted input: a multi-megabyte message would overflow magi_tool_call.err and the tool-call-failed event payload."
+      - alert: MagiCommitFenceFallback
+        expr: increase(magi_commit_fence_fallback_total[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Status transitions are committing without the atomic fence ({{ $labels.op }})"
+          description: "The wired repository no longer implements TerminalCommitter/StatusTransitionCommitter, so the status write, its artifacts, and its event are no longer one transaction."
       - alert: MagiMemoryRetrievalFailures
         expr: increase(magi_memory_retrieval_failures_total[15m]) > 3
         labels:

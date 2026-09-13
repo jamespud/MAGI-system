@@ -41,6 +41,7 @@ type Registry struct {
 	artifactPersistFailures [lenArtifactKinds]atomic.Int64
 	protectionDisabled      [lenProtectionNames]atomic.Int64
 	ragIndexDegraded        [lenRAGIndexes]atomic.Int64
+	commitFenceFallbacks    [lenCommitFenceOps]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -184,6 +185,51 @@ func (r *Registry) ArtifactPersistFailures(kind ArtifactKind) int64 {
 	for i, k := range artifactKinds {
 		if k == kind {
 			return r.artifactPersistFailures[i].Load()
+		}
+	}
+	return 0
+}
+
+// CommitFenceOp is a fixed label for the commit path taken by an FSM status
+// write. Database repositories implement the atomic capabilities; in-memory
+// fakes cannot, so this series has to stay at zero in production.
+type CommitFenceOp string
+
+const (
+	CommitFenceTerminal CommitFenceOp = "terminal"
+	CommitFenceStatus   CommitFenceOp = "status"
+)
+
+const lenCommitFenceOps = 2
+
+var commitFenceOps = [...]CommitFenceOp{CommitFenceTerminal, CommitFenceStatus}
+
+// IncCommitFenceFallback counts status transitions that could not use the
+// single-transaction capability and fell back to the historical sequence of a
+// status write plus a separate event publish. In-memory test repositories need
+// that fallback; counting it is how an adapter that stops implementing
+// TerminalCommitter/StatusTransitionCommitter becomes visible instead of
+// silently degrading durability.
+func (r *Registry) IncCommitFenceFallback(op CommitFenceOp) {
+	if r == nil {
+		return
+	}
+	for i, candidate := range commitFenceOps {
+		if candidate == op {
+			r.commitFenceFallbacks[i].Add(1)
+			return
+		}
+	}
+}
+
+// CommitFenceFallbacks returns the current fallback count for a fixed op.
+func (r *Registry) CommitFenceFallbacks(op CommitFenceOp) int64 {
+	if r == nil {
+		return 0
+	}
+	for i, candidate := range commitFenceOps {
+		if candidate == op {
+			return r.commitFenceFallbacks[i].Load()
 		}
 	}
 	return 0
@@ -613,6 +659,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintln(w, "# TYPE magi_rag_index_degraded_total counter")
 	for i, kind := range ragIndexes {
 		fmt.Fprintf(w, "magi_rag_index_degraded_total{index=%q} %d\n", kind, r.ragIndexDegraded[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_commit_fence_fallback_total counter")
+	for i, op := range commitFenceOps {
+		fmt.Fprintf(w, "magi_commit_fence_fallback_total{op=%q} %d\n", op, r.commitFenceFallbacks[i].Load())
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
