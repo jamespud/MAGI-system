@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -33,6 +34,10 @@ func (s *Service) Create(ctx context.Context, userID int64, name, question, back
 	if name == "" || question == "" {
 		return nil, fmt.Errorf("recurring: name and question are required")
 	}
+	// recurring_case.name is VARCHAR(191); rejecting here avoids a MySQL 1406.
+	if utf8.RuneCountInString(name) > maxRecurringNameLen {
+		return nil, fmt.Errorf("recurring: name exceeds %d characters", maxRecurringNameLen)
+	}
 	if interval <= 0 {
 		return nil, fmt.Errorf("recurring: interval must be positive")
 	}
@@ -42,6 +47,9 @@ func (s *Service) Create(ctx context.Context, userID int64, name, question, back
 	}
 	return rc, nil
 }
+
+// maxRecurringNameLen mirrors recurring_case.name.
+const maxRecurringNameLen = 191
 
 func (s *Service) List(ctx context.Context, userID int64) ([]*entity.RecurringCase, error) {
 	return s.repo.ListByUser(ctx, userID)

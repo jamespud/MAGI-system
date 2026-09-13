@@ -3,6 +3,7 @@ package users_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jamespud/magi/backend/application/auth"
@@ -123,6 +124,21 @@ func TestCreateUserWithEmail_RejectsDuplicateEmail(t *testing.T) {
 	_, _, err := svc.CreateUserWithEmail(ctx, entity.RoleAdmin, "bob", "dup@example.com", entity.RoleUser)
 	if !errors.Is(err, users.ErrEmailTaken) {
 		t.Fatalf("duplicate email err = %v, want ErrEmailTaken", err)
+	}
+}
+
+// users.name / users.email are VARCHAR(191)/(255): oversized values used to
+// surface as a MySQL 1406 (a 500) instead of a validation error.
+func TestCreateUserWithEmail_RejectsOversizedFields(t *testing.T) {
+	svc := users.NewService(newMemUserRepo(), newMemKeyRepo())
+	ctx := context.Background()
+
+	if _, _, err := svc.CreateUserWithEmail(ctx, entity.RoleAdmin, strings.Repeat("n", 192), "a@b.c", entity.RoleUser); err == nil {
+		t.Fatal("oversized name accepted")
+	}
+	longEmail := strings.Repeat("e", 256) + "@b.c" // 260 chars
+	if _, _, err := svc.CreateUserWithEmail(ctx, entity.RoleAdmin, "ok", longEmail, entity.RoleUser); err == nil {
+		t.Fatal("oversized email accepted")
 	}
 }
 

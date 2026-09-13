@@ -3,12 +3,27 @@ package knowledge_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jamespud/magi/backend/application/knowledge"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
+
+// knowledge_docs.title / source_url are VARCHAR(191): oversized values used to
+// surface as a MySQL 1406 (a 500) instead of a validation error.
+func TestKnowledgeCreate_RejectsOversizedTitleAndURL(t *testing.T) {
+	svc := knowledge.NewService(newMemKnowRepo(), &fakeDocIndexer{})
+	ctx := context.Background()
+
+	if _, err := svc.Create(ctx, 1, strings.Repeat("t", 192), "content", "text", ""); err == nil {
+		t.Fatal("oversized title accepted")
+	}
+	if _, err := svc.Create(ctx, 1, "title", "", "url", "https://example.com/"+strings.Repeat("u", 200)); err == nil {
+		t.Fatal("oversized source url accepted")
+	}
+}
 
 type memKnowRepo struct {
 	byID    map[string]*entity.KnowledgeDoc

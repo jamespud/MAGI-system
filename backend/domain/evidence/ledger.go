@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 )
@@ -109,6 +110,15 @@ func (l *EvidenceLedger) Record(toolCallID, toolName, sourceType, sourceURI, obs
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.evCounter++
+	// evidence_record.source_uri is VARCHAR(512). Truncating (rather than
+	// failing) keeps the observation, which is the part agents actually cite.
+	if len(sourceURI) > maxEvidenceSourceURIBytes {
+		cut := maxEvidenceSourceURIBytes
+		for cut > 0 && !utf8.ValidString(sourceURI[:cut]) {
+			cut--
+		}
+		sourceURI = sourceURI[:cut]
+	}
 	ev := &entity.EvidenceRecord{
 		ID: fmt.Sprintf("EV-%03d", l.evCounter), CaseID: l.caseID, AgentRunID: l.agentRunID,
 		ToolCallID: toolCallID, ToolName: toolName, SourceType: entity.EvidenceSourceType(sourceType),
@@ -119,6 +129,9 @@ func (l *EvidenceLedger) Record(toolCallID, toolName, sourceType, sourceURI, obs
 	l.recordOrder = append(l.recordOrder, ev.ID)
 	return ev
 }
+
+// maxEvidenceSourceURIBytes mirrors evidence_record.source_uri.
+const maxEvidenceSourceURIBytes = 512
 
 func (l *EvidenceLedger) RecordClaim(stmt string, supports, contradicts []string) *entity.Claim {
 	l.mu.Lock()

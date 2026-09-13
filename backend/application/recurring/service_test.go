@@ -3,6 +3,7 @@ package recurring_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,15 @@ func TestScheduler_HoldsLeaseAcrossTicks(t *testing.T) {
 
 // A failed last-run write must surface: the template stays due until the write
 // succeeds, so swallowing the error means the next tick fires it again.
+// recurring_case.name is VARCHAR(191): oversized values used to surface as a
+// MySQL 1406 instead of a validation error.
+func TestService_CreateRejectsOversizedName(t *testing.T) {
+	svc := recurring.NewService(newStubRecurringRepo(), &stubCases{}, nil, 1)
+	if _, err := svc.Create(context.Background(), 7, strings.Repeat("n", 192), "q", "", nil, time.Hour); err == nil {
+		t.Fatal("oversized name accepted")
+	}
+}
+
 func TestService_TickSurfacesLastRunFailure(t *testing.T) {
 	repo := newStubRecurringRepo()
 	repo.lastRunErr = errors.New("write failed")
