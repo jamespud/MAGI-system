@@ -71,6 +71,9 @@ services:
       # termination in front of web nginx, MAGI_AUTH_ENABLED=true and a
       # MAGI_AUTH_API_KEYS bootstrap spec; the server fails validation
       # when A2A is enabled without authentication or a public URL.
+      # Defaults to disabled for local development: with it off the API is open.
+      # Production must set MAGI_AUTH_ENABLED=true (see
+      # docs/reliability-hazard-audit.md §4.1 for the other protections).
       MAGI_AUTH_ENABLED: ${MAGI_AUTH_ENABLED:-false}
       MAGI_AUTH_API_KEYS: ${MAGI_AUTH_API_KEYS:-}
       MAGI_A2A_ENABLED: ${MAGI_A2A_ENABLED:-false}

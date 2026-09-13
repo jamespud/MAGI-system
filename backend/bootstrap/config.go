@@ -583,6 +583,44 @@ func applyEnvOverrides(cfg *Config) error {
 	if v := os.Getenv("MAGI_AUTH_STATIC_TOKENS"); v != "" {
 		cfg.Auth.StaticTokens = parseAPIKeys(v)
 	}
+	if v := os.Getenv("MAGI_MAX_CONCURRENT_RUNS_PER_USER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Limits.MaxConcurrentRunsPerUser = n
+		}
+	}
+	if v := os.Getenv("MAGI_MAX_TOKENS_PER_USER"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Limits.MaxTokensPerUser = n
+		}
+	}
+	if v := os.Getenv("MAGI_MAX_COST_USD_PER_USER"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Limits.MaxCostUSDPerUser = f
+		}
+	}
+	if v := os.Getenv("MAGI_TOOL_QUOTA_DEFAULT_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ToolQuota.DefaultPerMinute = n
+		}
+	}
+	if v := os.Getenv("MAGI_HTTP_RATE_LIMIT_ENABLED"); v != "" {
+		cfg.HTTPRateLimit.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("MAGI_HTTP_RATE_LIMIT_PER_USER_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.HTTPRateLimit.PerUserPerMinute = n
+		}
+	}
+	if v := os.Getenv("MAGI_HTTP_RATE_LIMIT_PER_IP_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.HTTPRateLimit.PerIPPerMinute = n
+		}
+	}
+	if v := os.Getenv("MAGI_BENCHMARK_REGRESSION_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Benchmark.RegressionThreshold = f
+		}
+	}
 	if v := os.Getenv("MAGI_EMBEDDING_API_KEY"); v != "" {
 		cfg.Embedding.APIKey = v
 	}

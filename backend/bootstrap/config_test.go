@@ -36,6 +36,42 @@ func TestExampleConfigContainsNoActiveBootstrapCredential(t *testing.T) {
 // TestConfig_StaticTokensAcceptsDeprecatedAPIKeysAlias pins the rename contract:
 // the preferred spelling is auth.static_tokens, the older auth.api_keys still
 // works, and a half-migrated config that sets both uses their union.
+// Protections used to be reachable only by editing the baked YAML, so a Helm
+// deployment could not switch them on at all. These overrides make the safe
+// baseline configurable (docs/reliability-hazard-audit.md §4.1).
+func TestConfig_ProtectionEnvOverrides(t *testing.T) {
+	t.Setenv("MAGI_MAX_CONCURRENT_RUNS_PER_USER", "3")
+	t.Setenv("MAGI_MAX_TOKENS_PER_USER", "5000000")
+	t.Setenv("MAGI_MAX_COST_USD_PER_USER", "20.5")
+	t.Setenv("MAGI_TOOL_QUOTA_DEFAULT_PER_MINUTE", "120")
+	t.Setenv("MAGI_HTTP_RATE_LIMIT_ENABLED", "true")
+	t.Setenv("MAGI_HTTP_RATE_LIMIT_PER_USER_PER_MINUTE", "60")
+	t.Setenv("MAGI_BENCHMARK_REGRESSION_THRESHOLD", "0.7")
+
+	cfg, err := loadA2ATestConfig(t, "")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Limits.MaxConcurrentRunsPerUser != 3 {
+		t.Errorf("max_concurrent_runs_per_user = %d, want 3", cfg.Limits.MaxConcurrentRunsPerUser)
+	}
+	if cfg.Limits.MaxTokensPerUser != 5_000_000 {
+		t.Errorf("max_tokens_per_user = %d, want 5000000", cfg.Limits.MaxTokensPerUser)
+	}
+	if cfg.Limits.MaxCostUSDPerUser != 20.5 {
+		t.Errorf("max_cost_usd_per_user = %v, want 20.5", cfg.Limits.MaxCostUSDPerUser)
+	}
+	if cfg.ToolQuota.DefaultPerMinute != 120 {
+		t.Errorf("tool_quota.default_per_minute = %d, want 120", cfg.ToolQuota.DefaultPerMinute)
+	}
+	if !cfg.HTTPRateLimit.Enabled || cfg.HTTPRateLimit.PerUserPerMinute != 60 {
+		t.Errorf("http_rate_limit = %+v, want enabled at 60/min per user", cfg.HTTPRateLimit)
+	}
+	if cfg.Benchmark.RegressionThreshold != 0.7 {
+		t.Errorf("regression_threshold = %v, want 0.7", cfg.Benchmark.RegressionThreshold)
+	}
+}
+
 func TestConfig_StaticTokensAcceptsDeprecatedAPIKeysAlias(t *testing.T) {
 	cfg, err := loadA2ATestConfig(t, "auth:\n  enabled: true\n  static_tokens:\n    - {user_id: 1, role: admin, name: svc, key: k-new}\n")
 	if err != nil {

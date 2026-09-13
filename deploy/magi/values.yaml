@@ -94,6 +94,19 @@ configuration:
     maxStreamsPerUserPerReplica: "8"
     crossInstancePollInterval: "2s"
 
+  # Protective mechanisms used to be reachable only by editing the baked YAML.
+  # Empty values keep the baked default, so set them explicitly in production
+  # (see docs/reliability-hazard-audit.md §4.1).
+  protections:
+    maxConcurrentRunsPerUser: "3"
+    maxTokensPerUser: ""
+    maxCostUSDPerUser: ""
+    toolQuotaDefaultPerMinute: "60"
+    httpRateLimitEnabled: "false"
+    httpRateLimitPerUserPerMinute: ""
+    httpRateLimitPerIPPerMinute: ""
+    benchmarkRegressionThreshold: ""
+
 # For production, prefer secret.create=false plus an externally managed
 # existingSecret. Never commit real values in Helm values files.
 secret:

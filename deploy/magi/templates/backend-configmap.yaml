@@ -25,3 +25,23 @@ data:
   MAGI_A2A_MAX_PAGE_SIZE: {{ .Values.configuration.a2a.maxPageSize | quote }}
   MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA: {{ .Values.configuration.a2a.maxStreamsPerUserPerReplica | quote }}
   MAGI_A2A_CROSS_INSTANCE_POLL_INTERVAL: {{ .Values.configuration.a2a.crossInstancePollInterval | quote }}
+  {{- with .Values.configuration.protections }}
+  MAGI_MAX_CONCURRENT_RUNS_PER_USER: {{ .maxConcurrentRunsPerUser | quote }}
+  {{- if .maxTokensPerUser }}
+  MAGI_MAX_TOKENS_PER_USER: {{ .maxTokensPerUser | quote }}
+  {{- end }}
+  {{- if .maxCostUSDPerUser }}
+  MAGI_MAX_COST_USD_PER_USER: {{ .maxCostUSDPerUser | quote }}
+  {{- end }}
+  MAGI_TOOL_QUOTA_DEFAULT_PER_MINUTE: {{ .toolQuotaDefaultPerMinute | quote }}
+  MAGI_HTTP_RATE_LIMIT_ENABLED: {{ .httpRateLimitEnabled | quote }}
+  {{- if .httpRateLimitPerUserPerMinute }}
+  MAGI_HTTP_RATE_LIMIT_PER_USER_PER_MINUTE: {{ .httpRateLimitPerUserPerMinute | quote }}
+  {{- end }}
+  {{- if .httpRateLimitPerIPPerMinute }}
+  MAGI_HTTP_RATE_LIMIT_PER_IP_PER_MINUTE: {{ .httpRateLimitPerIPPerMinute | quote }}
+  {{- end }}
+  {{- if .benchmarkRegressionThreshold }}
+  MAGI_BENCHMARK_REGRESSION_THRESHOLD: {{ .benchmarkRegressionThreshold | quote }}
+  {{- end }}
+  {{- end }}
