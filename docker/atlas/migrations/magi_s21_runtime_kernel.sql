@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS runtime_invocation (
     invocation_id VARCHAR(64) NOT NULL PRIMARY KEY,
 
-    run_id VARCHAR(64) NOT NULL,
+    run_id VARCHAR(191) NOT NULL,
     step_id VARCHAR(64) NOT NULL,
 
     kind VARCHAR(32) NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS runtime_invocation (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS runtime_invocation_attempt (
-    attempt_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    attempt_id VARCHAR(191) NOT NULL PRIMARY KEY,
     invocation_id VARCHAR(64) NOT NULL,
     attempt_no INT NOT NULL,
     worker_id VARCHAR(128) NOT NULL DEFAULT '',

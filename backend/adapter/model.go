@@ -244,7 +244,7 @@ func (ToolCallModel) TableName() string { return "magi_tool_call" }
 // tool, or sensor invocation. Physical executions live in the attempt table.
 type RuntimeInvocationModel struct {
 	InvocationID   string  `gorm:"primaryKey;size:64"`
-	RunID          string  `gorm:"size:64;not null;index:idx_runtime_run_step,priority:1;index:idx_runtime_run_status,priority:1"`
+	RunID          string  `gorm:"size:191;not null;index:idx_runtime_run_step,priority:1;index:idx_runtime_run_status,priority:1"`
 	StepID         string  `gorm:"size:64;not null;index:idx_runtime_run_step,priority:2"`
 	Kind           string  `gorm:"size:32;not null"`
 	LogicalOrdinal int     `gorm:"not null"`
@@ -267,7 +267,7 @@ func (RuntimeInvocationModel) TableName() string { return "runtime_invocation" }
 // RuntimeInvocationAttemptModel persists a physical execution attempt without
 // making AttemptID the identity of the logical invocation.
 type RuntimeInvocationAttemptModel struct {
-	AttemptID    string `gorm:"primaryKey;size:64"`
+	AttemptID    string `gorm:"primaryKey;size:191"`
 	InvocationID string `gorm:"size:64;not null;uniqueIndex:uk_runtime_invocation_attempt_no,priority:1;index"`
 	AttemptNo    int    `gorm:"not null;uniqueIndex:uk_runtime_invocation_attempt_no,priority:2"`
 	WorkerID     string `gorm:"size:128;not null;default:''"`
