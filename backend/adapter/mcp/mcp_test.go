@@ -46,12 +46,14 @@ func TestAdapter_ListAndExecute_InProcess(t *testing.T) {
 	srv := fakeServer()
 	a := newWithDial([]ServerConfig{{Name: "fake", Transport: "stdio", Command: "echo"}}, inProcessDial(srv))
 
-	defs, err := a.List(context.Background(), nil)
+	defs, err := a.List(context.Background(), []entity.ToolBinding{
+		{Source: entity.ToolSourceMCP, Server: "fake", ToolName: "echo"},
+	})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(defs) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(defs))
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 bound tool, got %d", len(defs))
 	}
 	var echoDef *port.ToolDefinition
 	for i := range defs {
@@ -112,12 +114,14 @@ func TestAdapter_HTTPTransport(t *testing.T) {
 	defer ts.Close()
 
 	a := New([]ServerConfig{{Name: "fake", Transport: "http", URL: ts.URL, TimeoutSeconds: 10}})
-	defs, err := a.List(context.Background(), nil)
+	defs, err := a.List(context.Background(), []entity.ToolBinding{
+		{Source: entity.ToolSourceMCP, Server: "fake", ToolName: "echo"},
+	})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(defs) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(defs))
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 bound tool, got %d", len(defs))
 	}
 	res, err := a.Execute(context.Background(), port.ToolExecutionRequest{
 		Binding:       entity.ToolBinding{Source: entity.ToolSourceMCP, Server: "fake", ToolName: "echo"},
@@ -137,7 +141,9 @@ func TestAdapter_UnreachableServerSkipped(t *testing.T) {
 	ts.Close()
 
 	a := New([]ServerConfig{{Name: "down", Transport: "http", URL: url}})
-	defs, err := a.List(context.Background(), nil)
+	defs, err := a.List(context.Background(), []entity.ToolBinding{
+		{Source: entity.ToolSourceMCP, Server: "down", ToolName: "x"},
+	})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -150,6 +156,56 @@ func TestAdapter_UnreachableServerSkipped(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected execute error for down server")
 	}
+}
+
+func TestAdapter_List_FiltersByBindings(t *testing.T) {
+	a := newWithDial([]ServerConfig{{Name: "fake", Transport: "stdio", Command: "echo"}}, inProcessDial(fakeServer()))
+
+	t.Run("only the requested tool", func(t *testing.T) {
+		defs, err := a.List(context.Background(), []entity.ToolBinding{
+			{Source: entity.ToolSourceMCP, Server: "fake", ToolName: "echo"},
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(defs) != 1 || defs[0].Name != "mcp_fake_echo" {
+			t.Fatalf("defs = %+v, want only mcp_fake_echo", defs)
+		}
+	})
+
+	t.Run("unknown tool yields nothing", func(t *testing.T) {
+		defs, err := a.List(context.Background(), []entity.ToolBinding{
+			{Source: entity.ToolSourceMCP, Server: "fake", ToolName: "nope"},
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(defs) != 0 {
+			t.Fatalf("defs = %+v, want none", defs)
+		}
+	})
+
+	t.Run("no mcp bindings yields nothing", func(t *testing.T) {
+		defs, err := a.List(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(defs) != 0 {
+			t.Fatalf("defs = %+v, want none", defs)
+		}
+	})
+
+	t.Run("whole server when tool name is empty", func(t *testing.T) {
+		defs, err := a.List(context.Background(), []entity.ToolBinding{
+			{Source: entity.ToolSourceMCP, Server: "fake"},
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(defs) != 2 {
+			t.Fatalf("defs = %+v, want both server tools", defs)
+		}
+	})
 }
 
 func TestToolName_Sanitizes(t *testing.T) {

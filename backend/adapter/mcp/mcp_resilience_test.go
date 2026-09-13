@@ -52,8 +52,10 @@ func TestAdapter_HTTPAuthHeaders(t *testing.T) {
 		Name: "auth", Transport: "http", URL: ts.URL, TimeoutSeconds: 10,
 		Headers: map[string]string{"Authorization": "Bearer test-token"},
 	}})
-	defs, err := a.List(context.Background(), nil)
-	if err != nil || len(defs) == 0 {
+	defs, err := a.List(context.Background(), []entity.ToolBinding{
+		{Source: entity.ToolSourceMCP, Server: "auth", ToolName: "echo"},
+	})
+	if err != nil || len(defs) != 1 {
 		t.Fatalf("list with headers: defs=%d err=%v", len(defs), err)
 	}
 	res, err := a.Execute(context.Background(), port.ToolExecutionRequest{

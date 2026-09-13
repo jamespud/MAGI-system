@@ -94,20 +94,49 @@ func dial(cfg ServerConfig) (*mcpclient.Client, error) {
 	}
 }
 
-// List returns every tool exposed by reachable MCP servers.
-func (a *Adapter) List(ctx context.Context, _ []entity.ToolBinding) ([]port.ToolDefinition, error) {
+// List returns the tools exposed by reachable MCP servers, restricted to the
+// servers and tool names the caller actually bound. Callers pass the user's
+// resolved bindings; an empty binding set therefore yields no tools (fail
+// closed) instead of every configured server's catalog.
+func (a *Adapter) List(ctx context.Context, bindings []entity.ToolBinding) ([]port.ToolDefinition, error) {
 	if a == nil {
 		return nil, nil
 	}
+	wanted := make(map[string]map[string]bool)
+	for _, b := range bindings {
+		if b.Source != entity.ToolSourceMCP || b.Server == "" {
+			continue
+		}
+		if wanted[b.Server] == nil {
+			wanted[b.Server] = make(map[string]bool)
+		}
+		if b.ToolName != "" {
+			wanted[b.Server][b.ToolName] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return nil, nil
+	}
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	var out []port.ToolDefinition
 	for _, name := range a.order {
+		tools, ok := wanted[name]
+		if !ok {
+			continue
+		}
 		s := a.servers[name]
 		if err := s.activate(ctx); err != nil {
 			continue // unreachable server: skip its tools, error surfaces on Execute
 		}
-		out = append(out, s.tools...)
+		for _, def := range s.tools {
+			// An empty tool-name set means "the whole server".
+			if len(tools) > 0 && !tools[def.Binding.ToolName] {
+				continue
+			}
+			out = append(out, def)
+		}
 	}
 	return out, nil
 }
