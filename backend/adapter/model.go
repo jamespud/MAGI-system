@@ -455,6 +455,7 @@ func AllModels() []any {
 		&ToolCallModel{}, &ApprovalModel{},
 		&RuntimeInvocationModel{}, &RuntimeInvocationAttemptModel{},
 		&DatasetModel{}, &DatasetItemModel{}, &BenchmarkRunModel{}, &BenchmarkItemResultModel{},
+		&OIDCStateModel{},
 		&PluginBindingModel{},
 		&RecurringCaseModel{},
 		&JudgeModel{},
@@ -563,6 +564,16 @@ type UserModel struct {
 }
 
 func (UserModel) TableName() string { return "users" }
+
+// OIDCStateModel stores one-time OIDC authorization states. It lives in the
+// database so a callback can land on any replica.
+type OIDCStateModel struct {
+	State      string    `gorm:"primaryKey;size:64"`
+	ExpiresAt  time.Time `gorm:"index"`
+	ConsumedAt *time.Time
+}
+
+func (OIDCStateModel) TableName() string { return "oidc_auth_state" }
 
 // ApiKeyModel persists a DB-backed API key (hash only).
 type ApiKeyModel struct {

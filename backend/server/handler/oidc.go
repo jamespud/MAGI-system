@@ -16,6 +16,7 @@ import (
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/application/users"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -37,12 +38,20 @@ type oidcStateStore struct {
 	lastPrune time.Time
 }
 
-func (s *oidcStateStore) issue() (string, error) {
+// newOIDCState generates an unguessable one-time authorization state.
+func newOIDCState() (string, error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
-	state := base64.RawURLEncoding.EncodeToString(buf)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func (s *oidcStateStore) issue() (string, error) {
+	state, err := newOIDCState()
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -89,12 +98,49 @@ type OIDCHandler struct {
 	users   *users.Service
 	audit   *audit.Service
 	states  *oidcStateStore
+	// shared, when non-nil, makes pending authorization states visible to every
+	// replica. The in-memory store stays as the single-instance fallback.
+	shared port.OIDCStateRepository
 }
 
 // NewOIDCHandler builds the SSO handler. client may be nil when OIDC is
 // disabled (routes are not registered).
 func NewOIDCHandler(client *auth.OIDCClient, session *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service) *OIDCHandler {
-	return &OIDCHandler{client: client, session: session, users: usersSvc, audit: auditSvc, states: &oidcStateStore{}}
+	return NewOIDCHandlerWithStates(client, session, usersSvc, auditSvc, nil)
+}
+
+// NewOIDCHandlerWithStates wires a replica-shared authorization-state store.
+func NewOIDCHandlerWithStates(client *auth.OIDCClient, session *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service, states port.OIDCStateRepository) *OIDCHandler {
+	return &OIDCHandler{
+		client: client, session: session, users: usersSvc, audit: auditSvc,
+		states: &oidcStateStore{}, shared: states,
+	}
+}
+
+// issueState records a one-time authorization state, preferring the shared store.
+func (h *OIDCHandler) issueState(ctx context.Context, state string) error {
+	if h.shared != nil {
+		return h.shared.Issue(ctx, state, time.Now().Add(oidcStateTTL))
+	}
+	h.states.mu.Lock()
+	defer h.states.mu.Unlock()
+	if h.states.states == nil {
+		h.states.states = map[string]time.Time{}
+	}
+	h.states.pruneLocked(time.Now())
+	if len(h.states.states) >= oidcStateMaxEntries {
+		return errors.New("oidc: too many pending authorization requests")
+	}
+	h.states.states[state] = time.Now().Add(oidcStateTTL)
+	return nil
+}
+
+// consumeState validates and single-uses a state, preferring the shared store.
+func (h *OIDCHandler) consumeState(ctx context.Context, state string) (bool, error) {
+	if h.shared != nil {
+		return h.shared.Consume(ctx, state)
+	}
+	return h.states.consume(state), nil
 }
 
 func (h *OIDCHandler) Login(ctx context.Context, c *app.RequestContext) {
@@ -102,8 +148,12 @@ func (h *OIDCHandler) Login(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusNotFound, dto.ErrorResponse{Error: "oidc not enabled"})
 		return
 	}
-	state, err := h.states.issue()
+	state, err := newOIDCState()
 	if err != nil {
+		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
+		return
+	}
+	if err := h.issueState(ctx, state); err != nil {
 		c.JSON(consts.StatusInternalServerError, dto.ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -126,7 +176,14 @@ func (h *OIDCHandler) Callback(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "state and code are required"})
 		return
 	}
-	if !h.states.consume(state) {
+	ok, stateErr := h.consumeState(ctx, state)
+	if stateErr != nil {
+		// A store failure must not be treated as "unknown state": fail closed
+		// with 503 so the caller retries rather than being told to log in again.
+		c.JSON(consts.StatusServiceUnavailable, dto.ErrorResponse{Error: "authorization state unavailable"})
+		return
+	}
+	if !ok {
 		c.JSON(consts.StatusBadRequest, dto.ErrorResponse{Error: "invalid or expired state"})
 		return
 	}

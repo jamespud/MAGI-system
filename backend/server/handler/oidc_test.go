@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -182,3 +183,79 @@ func TestOIDCHandler_RegisterDisabledForbidden(t *testing.T) {
 
 var _ port.UserRepository = (*memRepo)(nil)
 var _ port.ApiKeyRepository = (*memKeyRepo)(nil)
+
+// memStateRepo models the replica-shared authorization state store.
+type memStateRepo struct {
+	mu     sync.Mutex
+	states map[string]time.Time
+}
+
+func newMemStateRepo() *memStateRepo { return &memStateRepo{states: map[string]time.Time{}} }
+
+func (m *memStateRepo) Issue(_ context.Context, state string, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.states[state] = expiresAt
+	return nil
+}
+
+func (m *memStateRepo) Consume(_ context.Context, state string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	exp, ok := m.states[state]
+	if !ok {
+		return false, nil
+	}
+	delete(m.states, state)
+	return time.Now().Before(exp), nil
+}
+
+// Two replicas share one state store: /login on replica A followed by the
+// provider callback on replica B must succeed. With the old in-process store
+// this always failed with "invalid or expired state".
+func TestOIDCHandler_SharedStateAcrossReplicas(t *testing.T) {
+	issuer := newIssuer(t)
+	defer issuer.Close()
+	repo := &memRepo{users: map[int64]*entity.User{}, next: 1}
+	shared := newMemStateRepo()
+
+	newHandler := func() *handler.OIDCHandler {
+		client, err := auth.NewOIDCClient(auth.OIDCConfig{
+			Enabled: true, Issuer: issuer.URL, ClientID: "cid", ClientSecret: "cs",
+			RedirectURL: "http://localhost/auth/oidc/callback", SelfRegistration: true,
+		}, repo)
+		if err != nil {
+			t.Fatalf("oidc client: %v", err)
+		}
+		codec, _ := auth.NewSessionCodec(strings.Repeat("x", 32), time.Hour)
+		usersSvc := users.NewServiceWithOptions(repo, &memKeyRepo{keys: map[string]*entity.ApiKey{}}, users.WithSelfRegistration(true))
+		return handler.NewOIDCHandlerWithStates(client, codec, usersSvc, nil, shared)
+	}
+
+	loginServer := server.Default(server.WithHostPorts("127.0.0.1:0"))
+	loginServer.GET("/login", newHandler().Login)
+	callbackServer := server.Default(server.WithHostPorts("127.0.0.1:0"))
+	callbackServer.GET("/callback", newHandler().Callback)
+
+	w := ut.PerformRequest(loginServer.Engine, "GET", "/login", nil)
+	if w.Code != 302 {
+		t.Fatalf("login status = %d body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	idx := strings.Index(loc, "state=")
+	if idx < 0 {
+		t.Fatalf("no state in %q", loc)
+	}
+	state := loc[idx+len("state="):]
+	if amp := strings.Index(state, "&"); amp >= 0 {
+		state = state[:amp]
+	}
+
+	w2 := ut.PerformRequest(callbackServer.Engine, "GET", "/callback?state="+state+"&code=abc", nil)
+	if w2.Code != 302 {
+		t.Fatalf("cross-replica callback status = %d body=%s", w2.Code, w2.Body.String())
+	}
+	if cookie := w2.Header().Get("Set-Cookie"); !strings.Contains(cookie, "magi_session=") {
+		t.Fatalf("callback did not issue a session cookie: %q", cookie)
+	}
+}

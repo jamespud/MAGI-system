@@ -93,6 +93,7 @@ var Module = fx.Options(
 		provideSessionCodec,
 		provideSessionAuthorizer,
 		provideOIDCClient,
+		provideOIDCStateRepository,
 		provideOIDCHandler,
 		provideUserRepository,
 		provideApiKeyRepository,
@@ -1382,8 +1383,15 @@ func provideOIDCClient(cfg *Config, users port.UserRepository) (*auth.OIDCClient
 	}, users)
 }
 
-func provideOIDCHandler(client *auth.OIDCClient, codec *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service) *handler.OIDCHandler {
-	return handler.NewOIDCHandler(client, codec, usersSvc, auditSvc)
+func provideOIDCHandler(client *auth.OIDCClient, codec *auth.SessionCodec, usersSvc *users.Service, auditSvc *audit.Service, oidcStateRepo port.OIDCStateRepository) *handler.OIDCHandler {
+	return handler.NewOIDCHandlerWithStates(client, codec, usersSvc, auditSvc, oidcStateRepo)
+}
+
+// provideOIDCStateRepository shares pending authorization states across
+// replicas; without it a callback landing on another pod always failed with
+// "invalid or expired state" (docs/reliability-hazard-audit.md §3.5).
+func provideOIDCStateRepository(db *gorm.DB) port.OIDCStateRepository {
+	return magi.NewOIDCStateRepository(db)
 }
 
 func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {
