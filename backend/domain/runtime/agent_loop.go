@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 
@@ -427,6 +428,12 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 	nameToDef := make(map[string]port.ToolDefinition)
 	infos := make([]*schema.ToolInfo, 0, len(defs))
 	for _, d := range defs {
+		if _, dup := nameToDef[d.Name]; dup {
+			// Two sources described the same model-facing name. Keep the first and
+			// never send the provider a duplicated function name.
+			log.Printf("agent loop: duplicate tool name %q from %s ignored", d.Name, d.Source)
+			continue
+		}
 		nameToDef[d.Name] = d
 		info := &schema.ToolInfo{Name: d.Name, Desc: d.Desc}
 		// Pass the tool's real parameter schema to the model. Without
