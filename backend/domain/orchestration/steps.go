@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/runtime"
@@ -97,7 +98,11 @@ func (o *Orchestrator) stepNormalize(ctx context.Context, case_ *entity.Decision
 	}
 	st.Task = t
 	if o.caseRepo != nil {
-		_ = o.caseRepo.UpdateTask(ctx, case_.ID, t)
+		// task_json is a cache of the normalized task, not an audit artifact:
+		// losing it is tolerable, but it must still be visible.
+		o.persistArtifact(ctx, metrics.ArtifactTaskSnapshot, case_.ID, func() error {
+			return o.caseRepo.UpdateTask(ctx, case_.ID, t)
+		})
 	}
 	return entity.CaseStatusContextBuilding, false, nil
 }
@@ -165,9 +170,11 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 	allEvidence := o.collectEvidence(st.Results)
 	packet := o.debate.BuildPacket(derefVotes(st.Votes), allClaims, st.Round, allEvidence)
 	if o.repo != nil {
-		_ = o.repo.DebateRepo().Create(ctx, &entity.DebateRound{
-			ID: fmt.Sprintf("deb-%s-r%d", case_.ID, st.Round), CaseID: case_.ID, Round: st.Round,
-			Packet: packet, StartedAt: time.Now(),
+		o.persistArtifact(ctx, metrics.ArtifactDebateRound, case_.ID, func() error {
+			return o.repo.DebateRepo().Create(ctx, &entity.DebateRound{
+				ID: fmt.Sprintf("deb-%s-r%d", case_.ID, st.Round), CaseID: case_.ID, Round: st.Round,
+				Packet: packet, StartedAt: time.Now(),
+			})
 		})
 	}
 	st.Results = o.dispatcher.DispatchReconsider(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round)
@@ -195,7 +202,9 @@ func (o *Orchestrator) stepRevote(ctx context.Context, case_ *entity.DecisionCas
 				rf.AgentRunID = newVotes[idx].AgentRunID
 			}
 			remapReflection(rf, remap)
-			_ = o.repo.ReflectionRepo().Create(ctx, rf)
+			o.persistArtifact(ctx, metrics.ArtifactReflection, case_.ID, func() error {
+				return o.repo.ReflectionRepo().Create(ctx, rf)
+			})
 		}
 	}
 	st.Votes = newVotes
@@ -241,7 +250,12 @@ func (o *Orchestrator) stepSaveMemory(ctx context.Context, case_ *entity.Decisio
 	if o.knowledge != nil {
 		// The knowledge adapter owns the MEMORY_INDEXED event: it is published
 		// after indexing actually completes (sync) or by the async worker.
-		_, _ = o.knowledge.Store(ctx, proj)
+		// The projection is best-effort (the background indexer retries), but a
+		// persistent failure should be visible.
+		o.persistArtifact(ctx, metrics.ArtifactMemoryProjection, case_.ID, func() error {
+			_, err := o.knowledge.Store(ctx, proj)
+			return err
+		})
 	}
 	if o.memRepo != nil {
 		// Persist the projection row itself. The Memory page search reads

@@ -487,6 +487,37 @@ func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
 	}
 }
 
+// A failed debate-round write is audit-critical: the debate happened, so the
+// record of it must not disappear silently.
+func TestOrchestrate_CountsDebatePersistFailure(t *testing.T) {
+	reg := metrics.New()
+	repo := newStubRepo()
+	repo.debateErr = errors.New("debate round insert failed")
+
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{reject(), approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+		Repo:      repo,
+		Metrics:   reg,
+	})
+
+	if _, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-debate", Question: "q", MaxDebateRounds: 2}); err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if got := reg.ArtifactPersistFailures(metrics.ArtifactDebateRound); got == 0 {
+		t.Fatal("debate persist failure was not counted")
+	}
+}
+
 // A tolerated artifact write failure must be counted instead of vanishing: the
 // stock-mcp incident produced complete-looking cases whose tool-call/evidence
 // rows never persisted.
@@ -698,6 +729,7 @@ type stubRepo struct {
 	resolutions []*entity.Resolution
 	toolCalls   []*entity.ToolCall
 	evidenceErr error
+	debateErr   error
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
@@ -707,7 +739,7 @@ func (s *stubRepo) AgentRunRepo() port.AgentRunRepository     { return &stubAgen
 func (s *stubRepo) EvidenceRepo() port.EvidenceRepository     { return &stubEvidenceRepo{s: s} }
 func (s *stubRepo) ClaimRepo() port.ClaimRepository           { return &stubClaimRepo{s: s} }
 func (s *stubRepo) VoteRepo() port.VoteRepository             { return &stubVoteRepo{s: s} }
-func (s *stubRepo) DebateRepo() port.DebateRepository         { return &stubDebateRepo{} }
+func (s *stubRepo) DebateRepo() port.DebateRepository         { return &stubDebateRepo{s: s} }
 func (s *stubRepo) ReflectionRepo() port.ReflectionRepository { return &stubReflRepo{} }
 func (s *stubRepo) ResolutionRepo() port.ResolutionRepository { return &stubResRepo{s: s} }
 func (s *stubRepo) EventRepo() port.EventRepository           { return &stubEventRepo{} }
@@ -811,10 +843,15 @@ func (r *stubVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	return nil, nil
 }
 
-type stubDebateRepo struct{}
+type stubDebateRepo struct{ s *stubRepo }
 
-func (stubDebateRepo) Create(ctx context.Context, d *entity.DebateRound) error { return nil }
-func (stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.DebateRound, error) {
+func (r *stubDebateRepo) Create(ctx context.Context, d *entity.DebateRound) error {
+	if r.s != nil && r.s.debateErr != nil {
+		return r.s.debateErr
+	}
+	return nil
+}
+func (r *stubDebateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.DebateRound, error) {
 	return nil, nil
 }
 
