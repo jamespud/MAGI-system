@@ -62,6 +62,11 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 	}
 	out := make([][]float32, len(r.Data))
 	for i, d := range r.Data {
+		if e.dim > 0 && len(d.Embedding) != e.dim {
+			// A provider-side model change would otherwise feed the index vectors
+			// of the wrong width, silently degrading search to lexical-only.
+			return nil, fmt.Errorf("embed: provider returned %d dimensions, config expects %d", len(d.Embedding), e.dim)
+		}
 		out[i] = d.Embedding
 	}
 	return out, nil

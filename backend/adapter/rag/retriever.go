@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"sort"
+
+	"github.com/jamespud/magi/backend/application/metrics"
 )
 
 // MergedBlock is a retrieval result block at one of the three levels.
@@ -32,6 +34,15 @@ type Retriever struct {
 	repo *ChunkRepository
 	opts MergeOpts
 	log  *log.Logger
+	// metrics is optional: hybrid retrieval keeps working when one index fails,
+	// so the degradation counters are how that loss becomes visible.
+	metrics *metrics.Registry
+}
+
+// WithMetrics attaches the metrics registry used to count index degradation.
+func (r *Retriever) WithMetrics(reg *metrics.Registry) *Retriever {
+	r.metrics = reg
+	return r
 }
 
 func NewRetriever(vec VectorIndex, lex LexicalIndex, emb Embedder, repo *ChunkRepository, opts MergeOpts) *Retriever {
@@ -89,12 +100,14 @@ func (r *Retriever) RetrieveMulti(ctx context.Context, queries []string, optsOve
 		lexHits, lexErr := r.lex.Search(ctx, q, opts.TopK, filter)
 		if vecErr != nil {
 			r.logf("rag retrieve: vector index degraded (query=%q): %v", q, vecErr)
+			r.metrics.IncRAGIndexDegraded(metrics.RAGIndexVector)
 			vecFails++
 		} else {
 			allHits = append(allHits, vectorToRRF(vecHits))
 		}
 		if lexErr != nil {
 			r.logf("rag retrieve: lexical index degraded (query=%q): %v", q, lexErr)
+			r.metrics.IncRAGIndexDegraded(metrics.RAGIndexLexical)
 			lexFails++
 		} else {
 			allHits = append(allHits, textToRRF(lexHits))

@@ -201,7 +201,7 @@ func TestProvideKnowledgePort_ReturnsNonNil(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.Embedding.Dim = 3
 	// Empty Milvus/ES addresses -> fake indexes; no real connections.
-	kp, idx, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
+	kp, idx, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil, metrics.New())
 	if err != nil {
 		t.Fatalf("ProvideKnowledgePort: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestProvideKnowledgePort_AsyncReturnsMemoryIndexer(t *testing.T) {
 	cfg := &bootstrap.Config{}
 	cfg.Embedding.Dim = 3
 	cfg.RAG.StoreAsync = true
-	kp, doc, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil)
+	kp, doc, mem, err := bootstrap.ProvideKnowledgePort(cfg, db, nil, metrics.New())
 	if err != nil {
 		t.Fatalf("ProvideKnowledgePort: %v", err)
 	}

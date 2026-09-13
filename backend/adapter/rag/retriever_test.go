@@ -5,7 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/jamespud/magi/backend/application/metrics"
 )
+
+// A degraded vector index used to leave only a log line: the retrieval still
+// succeeded through lexical hits, so nothing in metrics showed the loss.
+func TestRetriever_CountsVectorDegradation(t *testing.T) {
+	reg := metrics.New()
+	r := NewRetriever(
+		&FakeVectorIndex{Err: errors.New("milvus down")},
+		&FakeLexicalIndex{Err: errors.New("es down")},
+		FakeEmbedder{Dim: 3},
+		nil,
+		MergeOpts{TopK: 5, RRFK: 60, Thr900: 3, Thr1800: 2, Orphan: "keep_300"},
+	).WithMetrics(reg)
+
+	if _, err := r.RetrieveMulti(context.Background(), []string{"q"}, MergeOpts{TopK: 5}, nil); err == nil {
+		t.Fatal("expected an error when no index is usable")
+	}
+	if got := reg.RAGIndexDegraded(metrics.RAGIndexVector); got != 1 {
+		t.Fatalf("vector degradation count = %d, want 1", got)
+	}
+	if got := reg.RAGIndexDegraded(metrics.RAGIndexLexical); got != 1 {
+		t.Fatalf("lexical degradation count = %d, want 1", got)
+	}
+}
 
 func newRetrieverForTest(t *testing.T, vecHits []VectorHit, lexHits []TextHit) *Retriever {
 	return newRetrieverForTestFull(t, vecHits, nil, lexHits, nil)

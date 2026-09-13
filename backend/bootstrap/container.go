@@ -553,7 +553,7 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 // knowledge service. When async store is enabled, the KnowledgePort is the
 // AsyncIndexer while the DocumentIndexer stays the synchronous adapter (doc
 // uploads are user-triggered and return their index status immediately).
-func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (port.KnowledgePort, port.DocumentIndexer, port.MemoryIndexer, error) {
+func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher, reg *metrics.Registry) (port.KnowledgePort, port.DocumentIndexer, port.MemoryIndexer, error) {
 	ch := rag.NewChunker(rag.RuneTokenCounter{CharsPerToken: 4}, rag.ChunkLevels{L1800: 1800, L900: 900, L300: 300})
 	emb := rag.NewOpenAIEmbedder(cfg.Embedding.BaseURL, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.Dim)
 
@@ -583,7 +583,7 @@ func ProvideKnowledgePort(cfg *Config, db *gorm.DB, pub port.EventPublisher) (po
 		TopK: cfg.RAG.TopK, RRFK: cfg.RAG.RRFK,
 		Thr900: cfg.RAG.MergeThreshold900, Thr1800: cfg.RAG.MergeThreshold1800,
 		Orphan: cfg.RAG.OrphanStrategy,
-	})
+	}).WithMetrics(reg)
 	// inner shares the event publisher so storeRaw emits MEMORY_INDEXED on
 	// successful indexing (the poller executes synchronously through inner).
 	inner := rag.NewHybridKnowledgeAdapter(ch, emb, repo, vec, lex, retriever, pub)

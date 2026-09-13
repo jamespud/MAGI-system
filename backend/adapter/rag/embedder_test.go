@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+// A dimension change silently degrades vector search to lexical-only, so the
+// embedder must refuse vectors that do not match the configured width instead of
+// handing them to the index (docs/reliability-hazard-audit.md §4.4).
+func TestOpenAIEmbedder_RejectsDimensionDrift(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The provider silently returns 3-dim vectors while config expects 1024.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"embedding": []float64{0.1, 0.2, 0.3}}},
+		})
+	}))
+	defer srv.Close()
+
+	emb := NewOpenAIEmbedder(srv.URL, "k", "m", 1024)
+	if _, err := emb.Embed(context.Background(), []string{"q"}); err == nil {
+		t.Fatal("dimension drift was accepted")
+	}
+}
+
 func TestOpenAIEmbedderEmbed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/embeddings" {

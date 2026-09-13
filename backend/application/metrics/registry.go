@@ -39,6 +39,7 @@ type Registry struct {
 
 	artifactPersistFailures [lenArtifactKinds]atomic.Int64
 	protectionDisabled      [lenProtectionNames]atomic.Int64
+	ragIndexDegraded        [lenRAGIndexes]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -231,6 +232,46 @@ func (r *Registry) DisabledProtections() []ProtectionName {
 		}
 	}
 	return out
+}
+
+// RAGIndex is a fixed label value for retrieval-index degradation. Hybrid
+// retrieval keeps working when one index fails, so without this counter the
+// loss is only visible in logs (see docs/reliability-hazard-audit.md §4.4).
+type RAGIndex string
+
+const (
+	RAGIndexVector  RAGIndex = "vector"
+	RAGIndexLexical RAGIndex = "lexical"
+)
+
+const lenRAGIndexes = 2
+
+var ragIndexes = [...]RAGIndex{RAGIndexVector, RAGIndexLexical}
+
+// IncRAGIndexDegraded records one degraded retrieval index.
+func (r *Registry) IncRAGIndexDegraded(kind RAGIndex) {
+	if r == nil {
+		return
+	}
+	for i, k := range ragIndexes {
+		if k == kind {
+			r.ragIndexDegraded[i].Add(1)
+			return
+		}
+	}
+}
+
+// RAGIndexDegraded returns the current degradation count for a fixed index kind.
+func (r *Registry) RAGIndexDegraded(kind RAGIndex) int64 {
+	if r == nil {
+		return 0
+	}
+	for i, k := range ragIndexes {
+		if k == kind {
+			return r.ragIndexDegraded[i].Load()
+		}
+	}
+	return 0
 }
 
 // IncA2ARequest records one A2A protocol request by its fixed operation and
@@ -555,6 +596,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintln(w, "# TYPE magi_config_protection_disabled gauge")
 	for i, name := range protectionNames {
 		fmt.Fprintf(w, "magi_config_protection_disabled{name=%q} %d\n", name, r.protectionDisabled[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_rag_index_degraded_total counter")
+	for i, kind := range ragIndexes {
+		fmt.Fprintf(w, "magi_rag_index_degraded_total{index=%q} %d\n", kind, r.ragIndexDegraded[i].Load())
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())
