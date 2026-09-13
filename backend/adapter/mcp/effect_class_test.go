@@ -14,19 +14,28 @@ import (
 func boolPtr(v bool) *bool { return &v }
 
 func TestEffectClassFromAnnotations(t *testing.T) {
+	// The triple mcp-go writes into every tool it creates. It equals the MCP
+	// defaults for absent hints, so it carries no author intent.
+	mcpGoDefault := mcpgo.ToolAnnotation{
+		ReadOnlyHint: boolPtr(false), DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(false),
+	}
 	cases := []struct {
 		name string
 		a    mcpgo.ToolAnnotation
 		want port.ToolEffectClass
 	}{
 		{"read only", mcpgo.ToolAnnotation{ReadOnlyHint: boolPtr(true)}, port.ToolEffectReadOnly},
-		{"destructive", mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true)}, port.ToolEffectNonIdempotent},
 		{"idempotent", mcpgo.ToolAnnotation{IdempotentHint: boolPtr(true)}, port.ToolEffectIdempotent},
+		{"declared destructive", mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true)}, port.ToolEffectNonIdempotent},
+		{"destructive and idempotent repeats safely", mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(true)}, port.ToolEffectIdempotent},
 		{"read only outranks destructive", mcpgo.ToolAnnotation{ReadOnlyHint: boolPtr(true), DestructiveHint: boolPtr(true)}, port.ToolEffectReadOnly},
-		{"destructive outranks idempotent", mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(true)}, port.ToolEffectNonIdempotent},
 		{"unannotated", mcpgo.ToolAnnotation{}, port.ToolEffectUnknown},
+		{"protocol defaults are not a declaration", mcpGoDefault, port.ToolEffectUnknown},
+		{"read only false is not a declaration", mcpgo.ToolAnnotation{ReadOnlyHint: boolPtr(false)}, port.ToolEffectUnknown},
 		{"explicit non-destructive is still unclassified", mcpgo.ToolAnnotation{DestructiveHint: boolPtr(false)}, port.ToolEffectUnknown},
-		{"read only false is still unclassified", mcpgo.ToolAnnotation{ReadOnlyHint: boolPtr(false)}, port.ToolEffectUnknown},
+		{"defaults plus an unrelated open world hint stay unclassified",
+			mcpgo.ToolAnnotation{ReadOnlyHint: boolPtr(false), DestructiveHint: boolPtr(true), IdempotentHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
+			port.ToolEffectUnknown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,16 +82,22 @@ func TestAdapter_ListCarriesEffectClassAndOverride(t *testing.T) {
 	srv.AddTool(mcpgo.NewTool("search", mcpgo.WithReadOnlyHintAnnotation(true)), ok)
 	srv.AddTool(mcpgo.NewTool("wipe", mcpgo.WithDestructiveHintAnnotation(true)), ok)
 	srv.AddTool(mcpgo.NewTool("plain"), ok)
-	// A server that ships no annotations at all. mcp-go's own NewTool always
-	// fills in the protocol defaults (readOnly=false, destructive=true), so
-	// "plain" below is a declared-destructive tool even though its author never
-	// said anything: only a tool built without those defaults can be classified
-	// by config.
+	// A server that ships no annotations at all.
 	srv.AddTool(mcpgo.Tool{Name: "bare", InputSchema: mcpgo.ToolInputSchema{Type: "object"}}, ok)
+	// A server that declares destruction without also declaring the other
+	// hints: this is a statement, not the protocol default, so config may not
+	// downgrade it.
+	srv.AddTool(mcpgo.Tool{
+		Name:        "purge",
+		InputSchema: mcpgo.ToolInputSchema{Type: "object"},
+		Annotations: mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true)},
+	}, ok)
 
 	a := newWithDial([]ServerConfig{{
 		Name: "annotated", Transport: "stdio", Command: "x",
-		EffectOverrides: map[string]string{"bare": "idempotent", "plain": "idempotent", "wipe": "read_only"},
+		EffectOverrides: map[string]string{
+			"bare": "idempotent", "plain": "idempotent", "wipe": "read_only", "purge": "read_only",
+		},
 	}}, inProcessDial(srv))
 
 	defs, err := a.List(context.Background(), []entity.ToolBinding{
@@ -90,6 +105,7 @@ func TestAdapter_ListCarriesEffectClassAndOverride(t *testing.T) {
 		{Source: entity.ToolSourceMCP, Server: "annotated", ToolName: "wipe"},
 		{Source: entity.ToolSourceMCP, Server: "annotated", ToolName: "plain"},
 		{Source: entity.ToolSourceMCP, Server: "annotated", ToolName: "bare"},
+		{Source: entity.ToolSourceMCP, Server: "annotated", ToolName: "purge"},
 	})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -100,11 +116,14 @@ func TestAdapter_ListCarriesEffectClassAndOverride(t *testing.T) {
 	}
 	want := map[string]port.ToolEffectClass{
 		"mcp_annotated_search": port.ToolEffectReadOnly,
-		"mcp_annotated_wipe":   port.ToolEffectNonIdempotent,
 		"mcp_annotated_bare":   port.ToolEffectIdempotent,
-		// mcp-go answered with the protocol's default destructive hint, so the
-		// override is refused rather than trusted.
-		"mcp_annotated_plain": port.ToolEffectNonIdempotent,
+		// mcp-go answered with the protocol's default hints, which carry no
+		// intent, so the operator classification is honoured.
+		"mcp_annotated_plain": port.ToolEffectIdempotent,
+		"mcp_annotated_wipe":  port.ToolEffectReadOnly,
+		// The server declared destruction explicitly, so the override is
+		// refused rather than trusted.
+		"mcp_annotated_purge": port.ToolEffectNonIdempotent,
 	}
 	for name, wantEffect := range want {
 		if got[name] != wantEffect {

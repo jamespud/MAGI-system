@@ -48,10 +48,9 @@ type ServerConfig struct {
 	// tool whose effect class is not retry-safe.
 	RetryAttempts int
 	// EffectOverrides classifies individual tools by MCP tool name (not the
-	// namespaced mcp_<server>_<tool> form) for servers that ship no annotations.
-	// An override can classify an unannotated tool and can always be more
-	// conservative, but it can never claim a tool is safer than the server's own
-	// annotation says.
+	// namespaced mcp_<server>_<tool> form). An override can classify a tool the
+	// server left unspecified and can always be more conservative, but it can
+	// never claim a tool is safer than the server explicitly declared.
 	EffectOverrides map[string]string
 }
 
@@ -371,26 +370,49 @@ func (s *server) effectClass(tool string, annotations mcpgo.ToolAnnotation) port
 }
 
 // effectClassFromAnnotations maps the MCP tool-hint annotations onto MAGI's
-// effect classes. The protocol defaults are already pessimistic — an unannotated
-// tool may be destructive and is not idempotent — so a hint has to be present
-// and explicit before a call is treated as safe to repeat.
+// effect classes.
+//
+// MCP defines the defaults for absent hints as readOnly=false, destructive=true
+// and idempotent=false, and mcp-go writes exactly those values into every tool
+// it creates. A triple equal to those defaults therefore carries no author
+// intent — treating it as a destructive declaration would leave every mcp-go
+// tool unclassifiable — so it is reported as unknown and an operator override
+// may still classify it. Only a hint combination the server went out of its way
+// to state counts as a declaration.
 func effectClassFromAnnotations(a mcpgo.ToolAnnotation) port.ToolEffectClass {
 	if a.ReadOnlyHint != nil && *a.ReadOnlyHint {
 		return port.ToolEffectReadOnly
 	}
-	if a.DestructiveHint != nil && *a.DestructiveHint {
-		return port.ToolEffectNonIdempotent
-	}
+	// A tool the server declares repeatable may be re-invoked even when it is
+	// destructive: repeating it has no additional effect.
 	if a.IdempotentHint != nil && *a.IdempotentHint {
 		return port.ToolEffectIdempotent
+	}
+	if isProtocolDefaultHints(a) {
+		return port.ToolEffectUnknown
+	}
+	if a.DestructiveHint != nil && *a.DestructiveHint {
+		return port.ToolEffectNonIdempotent
 	}
 	return port.ToolEffectUnknown
 }
 
+// isProtocolDefaultHints reports whether the server sent exactly the MCP
+// defaults for the three effect-relevant hints. openWorldHint is deliberately
+// not part of the comparison: it says nothing about whether a call may be
+// repeated.
+func isProtocolDefaultHints(a mcpgo.ToolAnnotation) bool {
+	return a.ReadOnlyHint != nil && !*a.ReadOnlyHint &&
+		a.DestructiveHint != nil && *a.DestructiveHint &&
+		a.IdempotentHint != nil && !*a.IdempotentHint
+}
+
 // mergeEffectClass applies a configured override. An override may classify a
-// tool the server did not annotate, and may always be more conservative, but it
-// can never claim a tool is safer than the server's own annotation says: a
-// destructive tool stays destructive no matter what the config asks for.
+// tool the server left unspecified (no annotations, or only the protocol
+// defaults), and may always be more conservative, but it can never claim a tool
+// is safer than the server explicitly declared: a tool the server marked
+// destructive outside the default set stays destructive no matter what the
+// config asks for.
 func mergeEffectClass(server, tool string, annotation port.ToolEffectClass, override string) port.ToolEffectClass {
 	if override == "" {
 		return annotation

@@ -224,11 +224,12 @@ type MCPServerConfig struct {
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
 	Headers        map[string]string `yaml:"headers"`
 	RetryAttempts  int               `yaml:"retry_attempts"`
-	// EffectOverrides classifies individual tools by MCP tool name for servers
-	// that ship no annotations (read_only | idempotent | non_idempotent |
-	// unknown). It can classify a tool the server did not annotate and can
-	// always be more conservative, but it can never claim a tool is safer than
-	// the server's own annotation says.
+	// EffectOverrides classifies individual tools by MCP tool name
+	// (read_only | idempotent | non_idempotent | unknown). It can classify a
+	// tool the server left unspecified — no annotations at all, or only the MCP
+	// protocol defaults, which is what mcp-go writes into every tool it creates
+	// — and can always be more conservative. It can never claim a tool is safer
+	// than the server explicitly declared.
 	EffectOverrides map[string]string `yaml:"effect_overrides"`
 }
 

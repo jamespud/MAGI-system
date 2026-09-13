@@ -312,7 +312,7 @@ mcp:
       args: ["--flag"]
       # headers: { Authorization: "Bearer ..." }   # http servers only
       # retry_attempts: 2                          # transport retries for one call (0 = attempt once)
-      # effect_overrides:                          # classify tools the server does not annotate
+      # effect_overrides:                          # classify tools the server leaves unspecified
       #   search: read_only                        # read_only | idempotent | non_idempotent | unknown
       # env: { MY_TOKEN: "secret" }
       timeout_seconds: 60
