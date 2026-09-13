@@ -1,0 +1,6 @@
+{
+  "normal": {},
+  "slow": { "delay_ms": 1500 },
+  "fail": { "status": 500 },
+  "invalid": { "malformed": true }
+}

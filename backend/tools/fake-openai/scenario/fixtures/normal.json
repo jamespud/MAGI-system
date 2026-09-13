@@ -1,0 +1,66 @@
+{
+  "responses": {
+    "decision_task": {
+      "canonical_question": "Should the MAGI E2E fixture adopt the change?",
+      "decision_type": "generic",
+      "background": "Deterministic fixture background.",
+      "dimensions": [{ "code": "cost", "description": "Total cost of the decision." }],
+      "success_criteria": [{ "code": "clear", "description": "A clear, defensible decision." }],
+      "unknowns": []
+    },
+    "final_report": {
+      "decision": "approve",
+      "summary": "Deterministic E2E report summary.",
+      "key_reasons": ["The fixture reason."],
+      "risks": ["The fixture risk."],
+      "next_steps": ["The fixture next step."]
+    },
+    "evidence_summary": {
+      "evidence_by_type": {},
+      "claims": [],
+      "ready": true
+    },
+    "reflection": {
+      "position_change": "none",
+      "reasoning": "Deterministic E2E reflection.",
+      "ready_to_revote": true
+    },
+    "vote.melchior": {
+      "decision": "approve",
+      "confidence": 80,
+      "utility_scores": [
+        { "dimension_code": "correctness", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "efficiency", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "feasibility", "score": 80, "evidence_ids": [], "reasoning": "fixture" }
+      ],
+      "reasoning_summary": "Deterministic E2E vote.",
+      "evidence_ids": [],
+      "key_claim_ids": []
+    },
+    "vote.balthasar": {
+      "decision": "approve",
+      "confidence": 80,
+      "utility_scores": [
+        { "dimension_code": "safety", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "reversibility", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "maintainability", "score": 80, "evidence_ids": [], "reasoning": "fixture" }
+      ],
+      "reasoning_summary": "Deterministic E2E vote.",
+      "evidence_ids": [],
+      "key_claim_ids": []
+    },
+    "vote.casper": {
+      "decision": "approve",
+      "confidence": 80,
+      "utility_scores": [
+        { "dimension_code": "opportunity", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "innovation", "score": 80, "evidence_ids": [], "reasoning": "fixture" },
+        { "dimension_code": "user_value", "score": 80, "evidence_ids": [], "reasoning": "fixture" }
+      ],
+      "reasoning_summary": "Deterministic E2E vote.",
+      "evidence_ids": [],
+      "key_claim_ids": []
+    },
+    "compaction": "Deterministic compaction summary: no identifiers pending."
+  }
+}
