@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // The generated run identifiers land in runtime_invocation.run_id and
@@ -25,8 +26,8 @@ func TestRunIDsFitInvocationColumns(t *testing.T) {
 					// The dispatcher retry path appends -retryN to the checkpoint ID.
 					retry := checkpoint + "-retry9"
 					for _, id := range []string{checkpoint, execution, retry} {
-						if len(id) > maxInvocationRunIDBytes {
-							t.Fatalf("%s: id length %d exceeds %d", id, len(id), maxInvocationRunIDBytes)
+						if len(id) > validation.MaxInvocationRunIDBytes {
+							t.Fatalf("%s: id length %d exceeds %d", id, len(id), validation.MaxInvocationRunIDBytes)
 						}
 					}
 				}

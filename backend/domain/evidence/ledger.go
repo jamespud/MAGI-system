@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // EvidenceLedger is the in-memory per-run store of EvidenceRecords and Claims.
@@ -110,10 +111,10 @@ func (l *EvidenceLedger) Record(toolCallID, toolName, sourceType, sourceURI, obs
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.evCounter++
-	// evidence_record.source_uri is VARCHAR(512). Truncating (rather than
-	// failing) keeps the observation, which is the part agents actually cite.
-	if len(sourceURI) > maxEvidenceSourceURIBytes {
-		cut := maxEvidenceSourceURIBytes
+	// Truncating (rather than failing) keeps the observation, which is the part
+	// agents actually cite.
+	if len(sourceURI) > validation.MaxEvidenceSourceURIBytes {
+		cut := validation.MaxEvidenceSourceURIBytes
 		for cut > 0 && !utf8.ValidString(sourceURI[:cut]) {
 			cut--
 		}
@@ -129,9 +130,6 @@ func (l *EvidenceLedger) Record(toolCallID, toolName, sourceType, sourceURI, obs
 	l.recordOrder = append(l.recordOrder, ev.ID)
 	return ev
 }
-
-// maxEvidenceSourceURIBytes mirrors evidence_record.source_uri.
-const maxEvidenceSourceURIBytes = 512
 
 func (l *EvidenceLedger) RecordClaim(stmt string, supports, contradicts []string) *entity.Claim {
 	l.mu.Lock()

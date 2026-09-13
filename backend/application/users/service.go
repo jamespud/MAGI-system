@@ -14,6 +14,7 @@ import (
 	"github.com/jamespud/magi/backend/application/auth"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // ErrForbidden is returned when a non-admin calls an admin operation.
@@ -25,13 +26,6 @@ var ErrNotFound = errors.New("not found")
 // ErrEmailTaken is returned when an account already uses the email. The column
 // is not unique yet (legacy duplicates may exist), so the guard lives here.
 var ErrEmailTaken = errors.New("users: email already registered")
-
-// Column widths the account rows must fit (users.name / users.email). Rejecting
-// them here keeps an oversized value from surfacing as a MySQL 1406 at insert.
-const (
-	maxUserNameLen  = 191
-	maxUserEmailLen = 255
-)
 
 // IssuedKey carries a freshly issued API key. Plaintext is shown exactly once.
 type IssuedKey struct {
@@ -130,11 +124,11 @@ func (s *Service) CreateUserWithEmail(ctx context.Context, actorRole, name, emai
 		return nil, nil, fmt.Errorf("users: role must be one of %q, %q, %q", entity.RoleAdmin, entity.RoleOperator, entity.RoleUser)
 	}
 	email = strings.TrimSpace(email)
-	if utf8.RuneCountInString(name) > maxUserNameLen {
-		return nil, nil, fmt.Errorf("users: name exceeds %d characters", maxUserNameLen)
+	if utf8.RuneCountInString(name) > validation.MaxUserNameRune {
+		return nil, nil, fmt.Errorf("users: name exceeds %d characters", validation.MaxUserNameRune)
 	}
-	if utf8.RuneCountInString(email) > maxUserEmailLen {
-		return nil, nil, fmt.Errorf("users: email exceeds %d characters", maxUserEmailLen)
+	if utf8.RuneCountInString(email) > validation.MaxUserEmailRune {
+		return nil, nil, fmt.Errorf("users: email exceeds %d characters", validation.MaxUserEmailRune)
 	}
 	if err := s.ensureEmailFree(ctx, email); err != nil {
 		return nil, nil, err
@@ -162,11 +156,11 @@ func (s *Service) SelfRegister(ctx context.Context, name, email string) (*entity
 		return nil, nil, fmt.Errorf("users: name is required")
 	}
 	email = strings.TrimSpace(email)
-	if utf8.RuneCountInString(name) > maxUserNameLen {
-		return nil, nil, fmt.Errorf("users: name exceeds %d characters", maxUserNameLen)
+	if utf8.RuneCountInString(name) > validation.MaxUserNameRune {
+		return nil, nil, fmt.Errorf("users: name exceeds %d characters", validation.MaxUserNameRune)
 	}
-	if utf8.RuneCountInString(email) > maxUserEmailLen {
-		return nil, nil, fmt.Errorf("users: email exceeds %d characters", maxUserEmailLen)
+	if utf8.RuneCountInString(email) > validation.MaxUserEmailRune {
+		return nil, nil, fmt.Errorf("users: email exceeds %d characters", validation.MaxUserEmailRune)
 	}
 	if err := s.ensureEmailFree(ctx, email); err != nil {
 		return nil, nil, err

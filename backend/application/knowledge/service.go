@@ -13,6 +13,7 @@ import (
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // ErrForbidden is returned when a principal tries to access a document they
@@ -37,21 +38,14 @@ func NewService(repo port.KnowledgeRepository, idx port.DocumentIndexer) *Servic
 // Create persists a document and indexes it into the RAG pipeline. A failed
 // index never loses the user's content: the document is stored with
 // Status=failed and the error recorded so the UI can surface it.
-// Column widths the row must fit (knowledge_docs.title / source_url); rejecting
-// them here avoids surfacing as a MySQL 1406 at insert.
-const (
-	maxKnowledgeTitleLen = 191
-	maxKnowledgeURLLen   = 191
-)
-
 func (s *Service) Create(ctx context.Context, userID int64, title, content, sourceKind, sourceURL string) (*entity.KnowledgeDoc, error) {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
-	if utf8.RuneCountInString(title) > maxKnowledgeTitleLen {
-		return nil, fmt.Errorf("knowledge: title exceeds %d characters", maxKnowledgeTitleLen)
+	if utf8.RuneCountInString(title) > validation.MaxKnowledgeTitleRune {
+		return nil, fmt.Errorf("knowledge: title exceeds %d characters", validation.MaxKnowledgeTitleRune)
 	}
-	if utf8.RuneCountInString(sourceURL) > maxKnowledgeURLLen {
-		return nil, fmt.Errorf("knowledge: source url exceeds %d characters", maxKnowledgeURLLen)
+	if utf8.RuneCountInString(sourceURL) > validation.MaxKnowledgeSourceURLRune {
+		return nil, fmt.Errorf("knowledge: source url exceeds %d characters", validation.MaxKnowledgeSourceURLRune)
 	}
 	if title == "" {
 		return nil, fmt.Errorf("knowledge: title is required")
