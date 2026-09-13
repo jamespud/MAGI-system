@@ -43,6 +43,69 @@ func TestSchedulerLock_ExcludesSecondOwner(t *testing.T) {
 	}
 }
 
+// The owner must be able to renew its own lease, and every acquisition must
+// leave a fresh updated_at: that field is the only freshness signal operators
+// (and the MySQL branch, before this fix) can read.
+func TestSchedulerLock_OwnerRenewsAndTimestampAdvances(t *testing.T) {
+	db := openLockDB(t)
+	lock := magi.NewSchedulerLock(db)
+	ctx := context.Background()
+
+	if ok, err := lock.Acquire(ctx, "tick", "replica-a", time.Minute); err != nil || !ok {
+		t.Fatalf("first acquire: ok=%v err=%v", ok, err)
+	}
+	var first magi.SchedulerLockModel
+	if err := db.First(&first, "name = ?", "tick").Error; err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+
+	time.Sleep(5 * time.Millisecond)
+	if ok, err := lock.Acquire(ctx, "tick", "replica-a", time.Minute); err != nil || !ok {
+		t.Fatalf("renew: ok=%v err=%v", ok, err)
+	}
+	var second magi.SchedulerLockModel
+	if err := db.First(&second, "name = ?", "tick").Error; err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if !second.UpdatedAt.After(first.UpdatedAt) {
+		t.Fatalf("renewal did not refresh updated_at: %v -> %v", first.UpdatedAt, second.UpdatedAt)
+	}
+	if !second.LeaseUntil.After(first.LeaseUntil) {
+		t.Fatalf("renewal did not extend the lease: %v -> %v", first.LeaseUntil, second.LeaseUntil)
+	}
+
+	// A different replica must not steal a live lease.
+	if ok, err := lock.Acquire(ctx, "tick", "replica-b", time.Minute); err != nil || ok {
+		t.Fatalf("steal of a live lease = %v err=%v, want false", ok, err)
+	}
+}
+
+func TestSchedulerLock_ExpiredLeaseIsTakenWithFreshTimestamp(t *testing.T) {
+	db := openLockDB(t)
+	lock := magi.NewSchedulerLock(db)
+	ctx := context.Background()
+
+	if err := db.Create(&magi.SchedulerLockModel{
+		Name: "tick", Owner: "replica-a",
+		LeaseUntil: time.Now().Add(-time.Hour), UpdatedAt: time.Now().Add(-time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if ok, err := lock.Acquire(ctx, "tick", "replica-b", time.Minute); err != nil || !ok {
+		t.Fatalf("takeover: ok=%v err=%v", ok, err)
+	}
+	var m magi.SchedulerLockModel
+	if err := db.First(&m, "name = ?", "tick").Error; err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if m.Owner != "replica-b" {
+		t.Fatalf("owner = %q, want replica-b", m.Owner)
+	}
+	if time.Since(m.UpdatedAt) > 5*time.Second {
+		t.Fatalf("takeover left a stale updated_at: %v", m.UpdatedAt)
+	}
+}
+
 func TestSchedulerLock_ExpiresLease(t *testing.T) {
 	lock := magi.NewSchedulerLock(openLockDB(t))
 	ctx := context.Background()
