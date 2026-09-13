@@ -58,10 +58,54 @@ func clipToolOutput(in *port.ToolExecutionResult, max int) bool {
 	return true
 }
 
+// defaultToolErrorMaxBytes bounds the error text an executor may inject into
+// the durable record. magi_tool_call.err is TEXT and the same string is fed
+// back to the model and published in the tool-call-failed event payload, but
+// unlike a result an error is never validated before it is stored. MCP servers
+// control their own error text, so this is untrusted input: a failing tool
+// could otherwise replay the MySQL 1406 failure the output clamp was added to
+// prevent.
+const defaultToolErrorMaxBytes = 4 * 1024
+
+// boundedError keeps the wrapped error chain intact (errors.Is/As still see the
+// original sentinel) while rendering a shortened message.
+type boundedError struct {
+	err  error
+	text string
+}
+
+func (e *boundedError) Error() string { return e.text }
+func (e *boundedError) Unwrap() error { return e.err }
+
+// boundErrorMessage shortens an oversized error message and reports whether it
+// changed anything.
+func boundErrorMessage(err error, max int) (error, bool) {
+	if err == nil || max <= 0 {
+		return err, false
+	}
+	msg := err.Error()
+	if len(msg) <= max {
+		return err, false
+	}
+	cut := max
+	for cut > 0 && !utf8.ValidString(msg[:cut]) {
+		cut--
+	}
+	return &boundedError{err: err, text: msg[:cut] + outputTruncationMarker(max)}, true
+}
+
 func (r *Runtime) clipToolResult(in *port.ToolExecutionResult) {
 	if clipToolOutput(in, defaultToolOutputMaxBytes) {
 		r.metrics.IncToolOutputClipped()
 	}
+}
+
+func (r *Runtime) clipToolError(err error) error {
+	clipped, changed := boundErrorMessage(err, defaultToolErrorMaxBytes)
+	if changed {
+		r.metrics.IncToolErrorClipped()
+	}
+	return clipped
 }
 
 type Deps struct {
@@ -172,7 +216,10 @@ func (r *Runtime) Execute(ctx context.Context, req Request) (*Result, error) {
 			IdempotencyKey: result.IdempotencyKey,
 		})
 		if executeErr != nil {
-			return nil, executeErr
+			// Bound the message before the kernel persists it: the same text
+			// lands in magi_tool_call.err, the failure event payload, and the
+			// model's next message.
+			return nil, r.clipToolError(executeErr)
 		}
 		if executed == nil {
 			return nil, errors.New("tool executor returned nil result")

@@ -27,6 +27,7 @@ type Registry struct {
 	ToolCalls         atomic.Int64
 	ToolCallFailures  atomic.Int64
 	ToolOutputClipped atomic.Int64
+	ToolErrorClipped  atomic.Int64
 	TokensTotal       atomic.Int64
 	RequestsTotal     atomic.Int64
 
@@ -555,6 +556,17 @@ func (r *Registry) IncToolOutputClipped() {
 	r.ToolOutputClipped.Add(1)
 }
 
+// IncToolErrorClipped counts tool failures whose error text had to be
+// shortened. Executor errors are untrusted external input; without a bound a
+// hostile or broken tool can overflow the TEXT column that stores
+// magi_tool_call.err and the tool-call-failed event payload.
+func (r *Registry) IncToolErrorClipped() {
+	if r == nil {
+		return
+	}
+	r.ToolErrorClipped.Add(1)
+}
+
 // RecordRunDuration records one run duration in milliseconds.
 func (r *Registry) RecordRunDuration(ms int64) {
 	if r == nil {
@@ -589,6 +601,7 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintf(w, "# TYPE magi_tool_calls_total counter\nmagi_tool_calls_total %d\n", r.ToolCalls.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_call_failures_total counter\nmagi_tool_call_failures_total %d\n", r.ToolCallFailures.Load())
 	fmt.Fprintf(w, "# TYPE magi_tool_output_clipped_total counter\nmagi_tool_output_clipped_total %d\n", r.ToolOutputClipped.Load())
+	fmt.Fprintf(w, "# TYPE magi_tool_error_clipped_total counter\nmagi_tool_error_clipped_total %d\n", r.ToolErrorClipped.Load())
 	fmt.Fprintln(w, "# TYPE magi_artifact_persist_failures_total counter")
 	for i, kind := range artifactKinds {
 		fmt.Fprintf(w, "magi_artifact_persist_failures_total{kind=%q} %d\n", kind, r.artifactPersistFailures[i].Load())
