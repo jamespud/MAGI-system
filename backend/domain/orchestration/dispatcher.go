@@ -175,6 +175,12 @@ func isCompleted(r *runtime.LoopResult) bool {
 // checkpointRunID is the stable identity of an agent's working memory for a
 // (case, agent, round, phase). Unlike executionRunID it deliberately excludes
 // the execution attempt so durable retries resume the same checkpoint.
+//
+// maxInvocationRunIDBytes mirrors the width of runtime_invocation.run_id and
+// runtime_invocation_attempt.attempt_id. Keep it next to the builders so a
+// future suffix cannot silently exceed the column.
+const maxInvocationRunIDBytes = 191
+
 func checkpointRunID(caseID string, code entity.MagiCode, round int, phase string) string {
 	return fmt.Sprintf("%s-%s-r%d-%s", caseID, code, round, phase)
 }
