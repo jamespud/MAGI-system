@@ -139,10 +139,24 @@ func pluginArgsSchema(t *pluginmodel.ToolInfo) []byte {
 	return data
 }
 
+// openAPISchemaMaxDepth bounds recursion into a request-body schema. Depth
+// alone is not sufficient: a self-referencing $ref resolves to a pointer cycle,
+// so the walk also tracks the schemas on the current path.
+const openAPISchemaMaxDepth = 24
+
 func openAPISchema(s *openapi3.Schema) map[string]any {
-	if s == nil {
+	return openAPISchemaWalk(s, make(map[*openapi3.Schema]bool), 0)
+}
+
+func openAPISchemaWalk(s *openapi3.Schema, onPath map[*openapi3.Schema]bool, depth int) map[string]any {
+	if s == nil || depth > openAPISchemaMaxDepth || onPath[s] {
+		// Degrade to a permissive object instead of recursing: the tool stays
+		// callable and the cyclic/degenerate branch simply carries no constraints.
 		return map[string]any{"type": "object"}
 	}
+	onPath[s] = true
+	defer delete(onPath, s)
+
 	out := make(map[string]any)
 	if s.Type != "" {
 		out["type"] = s.Type
@@ -163,13 +177,13 @@ func openAPISchema(s *openapi3.Schema) map[string]any {
 		props := make(map[string]any, len(s.Properties))
 		for name, ref := range s.Properties {
 			if ref != nil && ref.Value != nil {
-				props[name] = openAPISchema(ref.Value)
+				props[name] = openAPISchemaWalk(ref.Value, onPath, depth+1)
 			}
 		}
 		out["properties"] = props
 	}
 	if s.Items != nil && s.Items.Value != nil {
-		out["items"] = openAPISchema(s.Items.Value)
+		out["items"] = openAPISchemaWalk(s.Items.Value, onPath, depth+1)
 	}
 	return out
 }
