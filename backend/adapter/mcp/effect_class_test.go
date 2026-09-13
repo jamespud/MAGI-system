@@ -7,6 +7,7 @@ import (
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	mcpgo_server "github.com/mark3labs/mcp-go/server"
 
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
 )
@@ -93,12 +94,13 @@ func TestAdapter_ListCarriesEffectClassAndOverride(t *testing.T) {
 		Annotations: mcpgo.ToolAnnotation{DestructiveHint: boolPtr(true)},
 	}, ok)
 
+	reg := metrics.New()
 	a := newWithDial([]ServerConfig{{
 		Name: "annotated", Transport: "stdio", Command: "x",
 		EffectOverrides: map[string]string{
 			"bare": "idempotent", "plain": "idempotent", "wipe": "read_only", "purge": "read_only",
 		},
-	}}, inProcessDial(srv))
+	}}, inProcessDial(srv)).WithMetrics(reg)
 
 	defs, err := a.List(context.Background(), []entity.ToolBinding{
 		{Source: entity.ToolSourceMCP, Server: "annotated", ToolName: "search"},
@@ -129,5 +131,18 @@ func TestAdapter_ListCarriesEffectClassAndOverride(t *testing.T) {
 		if got[name] != wantEffect {
 			t.Fatalf("tool %s effect class = %q, want %q (all: %v)", name, got[name], wantEffect, got)
 		}
+	}
+
+	// The overrides that decided the class are counted, so "why was an
+	// unclassified tool allowed to be retried?" is answerable from metrics.
+	if got := reg.ToolEffectOverrides(metrics.ToolEffectUnknown, metrics.ToolEffectReadOnly); got != 1 {
+		t.Fatalf("override counts[unknown->read_only] = %d, want 1", got)
+	}
+	if got := reg.ToolEffectOverrides(metrics.ToolEffectUnknown, metrics.ToolEffectIdempotent); got != 2 {
+		t.Fatalf("override counts[unknown->idempotent] = %d, want 2", got)
+	}
+	// The refused override on "purge" must not be counted as an applied one.
+	if got := reg.ToolEffectOverrides(metrics.ToolEffectNonIdempotent, metrics.ToolEffectReadOnly); got != 0 {
+		t.Fatalf("refused override was counted %d times", got)
 	}
 }

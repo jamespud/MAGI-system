@@ -532,7 +532,7 @@ func ProvideToolExecutor(cfg *Config, mcpAdapter *mcpadapter.Adapter, reg *metri
 // provideMCPAdapter builds the MCP client adapter from config. It is always
 // non-nil so the lifecycle close hook can be registered; the registry/executor
 // mux only attaches it when at least one server is configured.
-func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
+func provideMCPAdapter(cfg *Config, reg *metrics.Registry) *mcpadapter.Adapter {
 	cfgs := make([]mcpadapter.ServerConfig, 0, len(cfg.MCP.Servers))
 	for _, s := range cfg.MCP.Servers {
 		cfgs = append(cfgs, mcpadapter.ServerConfig{
@@ -541,7 +541,7 @@ func provideMCPAdapter(cfg *Config) *mcpadapter.Adapter {
 			EffectOverrides: s.EffectOverrides,
 		})
 	}
-	return mcpadapter.New(cfgs)
+	return mcpadapter.New(cfgs).WithMetrics(reg)
 }
 
 // ProvideKnowledgePort builds the HybridKnowledgeAdapter. When milvus.address /

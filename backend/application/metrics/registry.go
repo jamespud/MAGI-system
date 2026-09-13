@@ -42,6 +42,7 @@ type Registry struct {
 	protectionDisabled      [lenProtectionNames]atomic.Int64
 	ragIndexDegraded        [lenRAGIndexes]atomic.Int64
 	commitFenceFallbacks    [lenCommitFenceOps]atomic.Int64
+	toolEffectOverrides     [lenToolEffectClasses][lenToolEffectClasses]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -233,6 +234,64 @@ func (r *Registry) CommitFenceFallbacks(op CommitFenceOp) int64 {
 		}
 	}
 	return 0
+}
+
+// ToolEffectClass is a fixed label value for a tool's resolved side-effect
+// class. It mirrors the domain constants rather than importing them: this
+// package stays free of domain dependencies so every layer can depend on it.
+type ToolEffectClass string
+
+const (
+	ToolEffectReadOnly      ToolEffectClass = "read_only"
+	ToolEffectIdempotent    ToolEffectClass = "idempotent"
+	ToolEffectNonIdempotent ToolEffectClass = "non_idempotent"
+	ToolEffectUnknown       ToolEffectClass = "unknown"
+)
+
+const lenToolEffectClasses = 4
+
+var toolEffectClasses = [...]ToolEffectClass{
+	ToolEffectReadOnly, ToolEffectIdempotent, ToolEffectNonIdempotent, ToolEffectUnknown,
+}
+
+func indexOfToolEffectClass(effect ToolEffectClass) int {
+	for i, candidate := range toolEffectClasses {
+		if candidate == effect {
+			return i
+		}
+	}
+	return -1
+}
+
+// IncToolEffectOverride records one tool whose resolved effect class came from
+// configured effect_overrides rather than from the server's own annotations,
+// labelled with the class the server declared and the class that took effect.
+// Widening this surface is how the audit question "why was an unclassified MCP
+// tool allowed to be retried?" is answered later; both labels come from the
+// fixed set above, so the series count stays bounded.
+func (r *Registry) IncToolEffectOverride(from, to ToolEffectClass) {
+	if r == nil {
+		return
+	}
+	fi := indexOfToolEffectClass(from)
+	ti := indexOfToolEffectClass(to)
+	if fi < 0 || ti < 0 {
+		return
+	}
+	r.toolEffectOverrides[fi][ti].Add(1)
+}
+
+// ToolEffectOverrides returns the current count for one fixed label pair.
+func (r *Registry) ToolEffectOverrides(from, to ToolEffectClass) int64 {
+	if r == nil {
+		return 0
+	}
+	fi := indexOfToolEffectClass(from)
+	ti := indexOfToolEffectClass(to)
+	if fi < 0 || ti < 0 {
+		return 0
+	}
+	return r.toolEffectOverrides[fi][ti].Load()
 }
 
 // ProtectionName is a fixed label value for the "protection disabled" gauge.
@@ -663,6 +722,14 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 	fmt.Fprintln(w, "# TYPE magi_commit_fence_fallback_total counter")
 	for i, op := range commitFenceOps {
 		fmt.Fprintf(w, "magi_commit_fence_fallback_total{op=%q} %d\n", op, r.commitFenceFallbacks[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_tool_effect_override_total counter")
+	for fi, from := range toolEffectClasses {
+		for ti, to := range toolEffectClasses {
+			// Every fixed pair is exposed, including the zero ones: this series
+			// exists to answer an audit question after the fact.
+			fmt.Fprintf(w, "magi_tool_effect_override_total{from=%q,to=%q} %d\n", from, to, r.toolEffectOverrides[fi][ti].Load())
+		}
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())

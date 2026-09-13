@@ -18,6 +18,7 @@ import (
 	transport "github.com/mark3labs/mcp-go/client/transport"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -62,12 +63,14 @@ type Adapter struct {
 	order   []string
 	servers map[string]*server
 	dial    func(ServerConfig) (*mcpclient.Client, error)
+	metrics *metrics.Registry
 }
 
 type server struct {
 	mu      sync.Mutex
 	cfg     ServerConfig
 	dial    func(ServerConfig) (*mcpclient.Client, error)
+	metrics *metrics.Registry
 	client  *mcpclient.Client
 	tools   []port.ToolDefinition
 	lastErr error
@@ -80,6 +83,20 @@ var _ port.ToolExecutorPort = (*Adapter)(nil)
 // (unique non-empty names, valid transports) happens in bootstrap.Validate.
 func New(cfgs []ServerConfig) *Adapter {
 	return newWithDial(cfgs, dial)
+}
+
+// WithMetrics attaches the counter registry that records effect-class overrides.
+// It must be called before the adapter is used; the connection setup that
+// resolves each tool's class happens on first use.
+func (a *Adapter) WithMetrics(reg *metrics.Registry) *Adapter {
+	if a == nil {
+		return a
+	}
+	a.metrics = reg
+	for _, s := range a.servers {
+		s.metrics = reg
+	}
+	return a
 }
 
 func newWithDial(cfgs []ServerConfig, dial func(ServerConfig) (*mcpclient.Client, error)) *Adapter {
@@ -364,9 +381,26 @@ func (s *server) call(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.Ca
 }
 
 // effectClass resolves one tool's side-effect semantics from the server's own
-// annotations, then applies the operator override.
+// annotations, then applies the operator override. An override that changes the
+// outcome is counted so an unclassified tool being allowed to retry is
+// answerable after the fact.
 func (s *server) effectClass(tool string, annotations mcpgo.ToolAnnotation) port.ToolEffectClass {
-	return mergeEffectClass(s.cfg.Name, tool, effectClassFromAnnotations(annotations), s.cfg.EffectOverrides[tool])
+	declared := effectClassFromAnnotations(annotations)
+	override := s.cfg.EffectOverrides[tool]
+	resolved := mergeEffectClass(s.cfg.Name, tool, declared, override)
+	if override != "" && resolved != declared {
+		s.metrics.IncToolEffectOverride(effectLabel(declared), effectLabel(resolved))
+	}
+	return resolved
+}
+
+// effectLabel maps a class onto its metric label, folding the zero value into
+// "unknown" so a configured override always has a bounded label pair.
+func effectLabel(class port.ToolEffectClass) metrics.ToolEffectClass {
+	if class == "" {
+		return metrics.ToolEffectUnknown
+	}
+	return metrics.ToolEffectClass(class)
 }
 
 // effectClassFromAnnotations maps the MCP tool-hint annotations onto MAGI's

@@ -87,6 +87,13 @@ groups:
         annotations:
           summary: "Status transitions are committing without the atomic fence ({{ $labels.op }})"
           description: "The wired repository no longer implements TerminalCommitter/StatusTransitionCommitter, so the status write, its artifacts, and its event are no longer one transaction."
+      - alert: MagiToolEffectOverride
+        expr: increase(magi_tool_effect_override_total[1h]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "An operator override decided a tool's effect class ({{ $labels.from }} -> {{ $labels.to }})"
+          description: "The server did not declare this class, so the configured effect_overrides set it. A tool that may now be re-invoked after an ambiguous failure should be traceable to this decision."
       - alert: MagiMemoryRetrievalFailures
         expr: increase(magi_memory_retrieval_failures_total[15m]) > 3
         labels:
