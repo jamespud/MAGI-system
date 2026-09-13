@@ -88,6 +88,7 @@ var Module = fx.Options(
 		ProvideToolRegistry,
 		ProvideToolExecutor,
 		provideMCPAdapter,
+		providePluginAdapter,
 		provideAuthService,
 		provideSessionCodec,
 		provideSessionAuthorizer,
@@ -388,7 +389,7 @@ func provideAuditHandler(svc *audit.Service) *handler.AuditHandler {
 }
 
 // ProvideToolRegistry routes local/plugin/workflow/code-runner/MCP bindings through one registry.
-func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolRegistryPort {
+func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter, pluginAdapter *magi.PluginAdapter) port.ToolRegistryPort {
 	var local port.ToolRegistryPort
 	if enabledLocal := enabledLocalTools(cfg); len(enabledLocal) > 0 {
 		local = magi.NewLocalToolRegistry(enabledLocal...)
@@ -397,8 +398,14 @@ func ProvideToolRegistry(cfg *Config, mcpAdapter *mcpadapter.Adapter) port.ToolR
 	if len(cfg.MCP.Servers) > 0 {
 		mcpReg = mcpAdapter
 	}
-	return magi.NewToolRegistryMuxWithAll(local, magi.NewPluginAdapter(crossplugin.DefaultSVC()),
+	return magi.NewToolRegistryMuxWithAll(local, pluginAdapter,
 		magi.NewWorkflowAdapter(crossworkflow.DefaultSVC()), codeRunnerAdapter(cfg), mcpReg)
+}
+
+// providePluginAdapter builds the Coze plugin adapter once so the tool registry
+// and the binding service share the same client.
+func providePluginAdapter() *magi.PluginAdapter {
+	return magi.NewPluginAdapter(crossplugin.DefaultSVC())
 }
 
 // ProvideToolExecutor routes local/plugin/workflow/code-runner/MCP execution through one executor.
@@ -1383,8 +1390,11 @@ func providePluginBindingRepository(db *gorm.DB) port.PluginBindingRepository {
 	return magi.NewPluginBindingRepository(db)
 }
 
-func providePluginsService(repo port.PluginBindingRepository) *plugins.Service {
-	return plugins.NewService(repo)
+func providePluginsService(repo port.PluginBindingRepository, pluginAdapter *magi.PluginAdapter) *plugins.Service {
+	// Bindings are validated against the plugin service at creation time: a
+	// binding whose tool cannot be resolved used to return 201 and then expose
+	// nothing at run time (see docs/reliability-hazard-audit.md §4.7).
+	return plugins.NewService(repo, plugins.WithToolResolver(pluginAdapter))
 }
 
 func codeRunnerAdapter(cfg *Config) port.CodeRunnerPort {

@@ -64,11 +64,11 @@ func TestMigrationModels_ExcludeEventSequenceUntilAtlasMigration(t *testing.T) {
 func TestProvideToolRegistry_SelectsByApiKey(t *testing.T) {
 	withCfg := &bootstrap.Config{}
 	withCfg.Tavily.APIKey = "k"
-	with := bootstrap.ProvideToolRegistry(withCfg, nil)
+	with := bootstrap.ProvideToolRegistry(withCfg, nil, magi.NewPluginAdapter(nil))
 	if _, ok := with.(*magi.ToolRegistryMux); !ok {
 		t.Fatalf("expected ToolRegistryMux when key set, got %T", with)
 	}
-	without := bootstrap.ProvideToolRegistry(&bootstrap.Config{}, nil)
+	without := bootstrap.ProvideToolRegistry(&bootstrap.Config{}, nil, magi.NewPluginAdapter(nil))
 	if _, ok := without.(*magi.ToolRegistryMux); !ok {
 		t.Fatalf("expected ToolRegistryMux when no key, got %T", without)
 	}

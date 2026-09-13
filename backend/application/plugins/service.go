@@ -14,11 +14,26 @@ import (
 // Service manages user-scoped plugin tool bindings and resolves the enabled
 // bindings into runtime ToolBindings for agent runs.
 type Service struct {
-	repo port.PluginBindingRepository
+	repo     port.PluginBindingRepository
+	resolver port.PluginToolResolver
 }
 
-func NewService(repo port.PluginBindingRepository) *Service {
-	return &Service{repo: repo}
+// Option configures a Service.
+type Option func(*Service)
+
+// WithToolResolver lets Create reject bindings whose tool does not exist. When
+// no resolver is configured the previous behaviour is preserved (useful for
+// tests and for deployments without the plugin service).
+func WithToolResolver(r port.PluginToolResolver) Option {
+	return func(s *Service) { s.resolver = r }
+}
+
+func NewService(repo port.PluginBindingRepository, opts ...Option) *Service {
+	s := &Service{repo: repo}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *Service) List(ctx context.Context, userID int64) ([]*entity.PluginBinding, error) {
@@ -31,6 +46,11 @@ func (s *Service) Create(ctx context.Context, userID, pluginID, toolID int64, is
 	}
 	if pluginID <= 0 || toolID <= 0 {
 		return nil, fmt.Errorf("plugins: plugin_id and tool_id are required")
+	}
+	if s.resolver != nil {
+		if _, err := s.resolver.ResolveToolName(ctx, pluginID, toolID, isDraft); err != nil {
+			return nil, fmt.Errorf("plugins: resolve tool %d of plugin %d: %w", toolID, pluginID, err)
+		}
 	}
 	b := &entity.PluginBinding{ID: "pb-" + uuid.NewString(), UserID: userID, PluginID: pluginID, ToolID: toolID, IsDraft: isDraft, Enabled: enabled, CreatedAt: time.Now()}
 	if err := s.repo.Create(ctx, b); err != nil {

@@ -8,7 +8,48 @@ import (
 
 	"github.com/jamespud/magi/backend/application/plugins"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
+
+type stubResolver struct {
+	name string
+	err  error
+}
+
+func (s stubResolver) ResolveToolName(context.Context, int64, int64, bool) (string, error) {
+	return s.name, s.err
+}
+
+// A binding whose tool cannot be resolved must fail at creation time instead of
+// returning 201 and silently exposing nothing at run time.
+func TestService_CreateRejectsUnresolvableTool(t *testing.T) {
+	repo := newStubBindingRepo()
+	svc := plugins.NewService(repo, plugins.WithToolResolver(stubResolver{err: port.ErrPluginToolNotFound}))
+
+	if _, err := svc.Create(context.Background(), 7, 11, 22, false, true); err == nil {
+		t.Fatal("expected create to fail for an unresolvable tool")
+	}
+	if len(repo.b) != 0 {
+		t.Fatalf("binding persisted despite unresolved tool: %+v", repo.b)
+	}
+}
+
+func TestService_CreatePersistsResolvableTool(t *testing.T) {
+	repo := newStubBindingRepo()
+	svc := plugins.NewService(repo, plugins.WithToolResolver(stubResolver{name: "search"}))
+
+	if _, err := svc.Create(context.Background(), 7, 11, 22, false, true); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(repo.b) != 1 {
+		t.Fatalf("binding not persisted: %+v", repo.b)
+	}
+	for _, b := range repo.b {
+		if b.ToolID != 22 || b.PluginID != 11 {
+			t.Fatalf("binding = %+v", b)
+		}
+	}
+}
 
 type stubBindingRepo struct {
 	mu sync.Mutex

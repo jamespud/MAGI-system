@@ -190,3 +190,28 @@ func openAPISchemaWalk(s *openapi3.Schema, onPath map[*openapi3.Schema]bool, dep
 
 var _ port.ToolRegistryPort = (*PluginAdapter)(nil)
 var _ port.ToolExecutorPort = (*PluginAdapter)(nil)
+var _ port.PluginToolResolver = (*PluginAdapter)(nil)
+
+// ResolveToolName reports the tool name for a (plugin, tool) pair, or
+// port.ErrPluginToolNotFound when the plugin exposes no such tool.
+func (a *PluginAdapter) ResolveToolName(ctx context.Context, pluginID, toolID int64, isDraft bool) (string, error) {
+	if err := a.activate(ctx); err != nil {
+		return "", err
+	}
+	var tools []*pluginmodel.ToolInfo
+	var err error
+	if isDraft {
+		tools, err = a.svc.MGetDraftTools(ctx, []int64{pluginID})
+	} else {
+		tools, err = a.svc.MGetOnlineTools(ctx, []int64{pluginID})
+	}
+	if err != nil {
+		return "", fmt.Errorf("fetch plugin tools failed: %w", err)
+	}
+	for _, t := range tools {
+		if t != nil && t.ID == toolID && t.GetName() != "" {
+			return t.GetName(), nil
+		}
+	}
+	return "", port.ErrPluginToolNotFound
+}
