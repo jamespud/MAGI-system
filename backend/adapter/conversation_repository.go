@@ -47,7 +47,7 @@ func (r *conversationRepo) ListByUser(ctx context.Context, userID int64, limit, 
 	var models []ConversationModel
 	q := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
-		Order("updated_at DESC").
+		Order("updated_at DESC, id DESC").
 		Limit(limit).Offset(offset)
 	if err := q.Find(&models).Error; err != nil {
 		return nil, err

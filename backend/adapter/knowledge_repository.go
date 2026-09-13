@@ -44,7 +44,7 @@ func (r *knowledgeRepo) ListByUser(ctx context.Context, userID int64, limit, off
 		offset = 0
 	}
 	var models []KnowledgeDocModel
-	q := r.db.WithContext(ctx).Order("created_at DESC").Limit(limit).Offset(offset)
+	q := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Limit(limit).Offset(offset)
 	if userID != 0 {
 		q = q.Where("user_id = ?", userID)
 	}
@@ -65,7 +65,7 @@ func (r *knowledgeRepo) Update(ctx context.Context, doc *entity.KnowledgeDoc) er
 
 func (r *knowledgeRepo) ListAll(ctx context.Context) ([]*entity.KnowledgeDoc, error) {
 	var models []KnowledgeDocModel
-	if err := r.db.WithContext(ctx).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.KnowledgeDoc, len(models))

@@ -60,7 +60,7 @@ func (r *taskTreeRepo) DeleteByCase(ctx context.Context, caseID string) error {
 
 func (r *taskTreeRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.TaskNode, error) {
 	var models []TaskNodeModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.TaskNode, 0, len(models))

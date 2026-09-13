@@ -41,7 +41,7 @@ func (r *judgeRepo) Save(ctx context.Context, j *entity.JudgeResult) error {
 
 func (r *judgeRepo) GetLatest(ctx context.Context, caseID string) (*entity.JudgeResult, error) {
 	var m JudgeModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at DESC").First(&m).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at DESC, id DESC").First(&m).Error; err != nil {
 		return nil, err
 	}
 	return &entity.JudgeResult{

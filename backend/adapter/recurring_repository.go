@@ -39,7 +39,7 @@ func (r *recurringRepo) Get(ctx context.Context, id string) (*entity.RecurringCa
 
 func (r *recurringRepo) ListByUser(ctx context.Context, userID int64) ([]*entity.RecurringCase, error) {
 	var models []RecurringCaseModel
-	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.RecurringCase, len(models))
@@ -51,7 +51,7 @@ func (r *recurringRepo) ListByUser(ctx context.Context, userID int64) ([]*entity
 
 func (r *recurringRepo) ListEnabled(ctx context.Context) ([]*entity.RecurringCase, error) {
 	var models []RecurringCaseModel
-	if err := r.db.WithContext(ctx).Where("enabled = ?", true).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("enabled = ?", true).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.RecurringCase, len(models))

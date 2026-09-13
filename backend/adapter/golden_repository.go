@@ -37,7 +37,7 @@ func (r *goldenRepo) Create(ctx context.Context, g *entity.GoldenCase) error {
 
 func (r *goldenRepo) List(ctx context.Context) ([]*entity.GoldenCase, error) {
 	var models []GoldenCaseModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.GoldenCase, 0, len(models))

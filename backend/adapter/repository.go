@@ -211,7 +211,7 @@ func (r *caseRepo) UpdateTask(ctx context.Context, id string, task *entity.Decis
 }
 func (r *caseRepo) List(ctx context.Context) ([]*entity.DecisionCase, error) {
 	var models []CaseModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	cases := make([]*entity.DecisionCase, len(models))
@@ -243,7 +243,7 @@ func (r *caseRepo) ListPaged(ctx context.Context, userID int64, page, pageSize i
 		return nil, 0, err
 	}
 	var models []CaseModel
-	if err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&models).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&models).Error; err != nil {
 		return nil, 0, err
 	}
 	cases := make([]*entity.DecisionCase, len(models))
@@ -275,7 +275,7 @@ func (r *caseRepo) ListForUser(ctx context.Context, userID int64, limit, offset 
 	if userID != 0 {
 		q = q.Where("user_id = ?", userID)
 	}
-	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&models).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Limit(limit).Offset(offset).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	cases := make([]*entity.DecisionCase, len(models))
@@ -682,7 +682,7 @@ func (r *eventRepo) ListAfter(ctx context.Context, caseID string, after time.Tim
 	var models []EventModel
 	if err := r.db.WithContext(ctx).
 		Where("case_id = ? AND timestamp >= ?", caseID, after).
-		Order("timestamp ASC").Find(&models).Error; err != nil {
+		Order("timestamp ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	return eventsFromModels(models), nil
@@ -936,7 +936,7 @@ func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	err := r.db.WithContext(ctx).
 		Joins("JOIN magi_agent_run ON magi_agent_run.id = magi_tool_call.agent_run_id").
 		Where("magi_agent_run.case_id = ?", caseID).
-		Order("magi_tool_call.created_at ASC").
+		Order("magi_tool_call.created_at ASC, magi_tool_call.id ASC").
 		Find(&models).Error
 	if err != nil {
 		return nil, err

@@ -142,7 +142,7 @@ func (r *ragIndexJobRepo) ListRunnable(ctx context.Context, now time.Time) ([]*e
 	var models []RagIndexJobModel
 	if err := r.db.WithContext(ctx).
 		Where("status = ? AND available_at <= ?", string(entity.RagIndexJobQueued), now).
-		Order("created_at ASC").Find(&models).Error; err != nil {
+		Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.RagIndexJob, len(models))

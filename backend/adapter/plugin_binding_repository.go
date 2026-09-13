@@ -40,7 +40,7 @@ func (r *pluginBindingRepo) Get(ctx context.Context, id string) (*entity.PluginB
 
 func (r *pluginBindingRepo) ListByUser(ctx context.Context, userID int64) ([]*entity.PluginBinding, error) {
 	var models []PluginBindingModel
-	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.PluginBinding, len(models))

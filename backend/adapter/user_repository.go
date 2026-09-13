@@ -242,7 +242,7 @@ func (r *apiKeyRepo) GetByID(ctx context.Context, id string) (*entity.ApiKey, er
 
 func (r *apiKeyRepo) ListByUser(ctx context.Context, userID int64) ([]*entity.ApiKey, error) {
 	var models []ApiKeyModel
-	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.ApiKey, len(models))

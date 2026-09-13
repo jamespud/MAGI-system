@@ -53,7 +53,7 @@ func (r *approvalRepo) FindByKey(ctx context.Context, caseID, runID, toolName st
 	var m ApprovalModel
 	err := r.db.WithContext(ctx).
 		Where("case_id = ? AND run_id = ? AND tool_name = ?", caseID, runID, toolName).
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -66,7 +66,7 @@ func (r *approvalRepo) FindByKey(ctx context.Context, caseID, runID, toolName st
 
 func (r *approvalRepo) List(ctx context.Context, caseID string) ([]*entity.ApprovalRequest, error) {
 	var models []ApprovalModel
-	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.ApprovalRequest, len(models))
@@ -78,7 +78,7 @@ func (r *approvalRepo) List(ctx context.Context, caseID string) ([]*entity.Appro
 
 func (r *approvalRepo) ListAll(ctx context.Context) ([]*entity.ApprovalRequest, error) {
 	var models []ApprovalModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.ApprovalRequest, len(models))

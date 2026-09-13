@@ -22,7 +22,7 @@ func (r *selfImproveRepo) Create(ctx context.Context, s *entity.SelfImproveSugge
 
 func (r *selfImproveRepo) List(ctx context.Context) ([]*entity.SelfImproveSuggestion, error) {
 	var models []SelfImproveModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.SelfImproveSuggestion, 0, len(models))

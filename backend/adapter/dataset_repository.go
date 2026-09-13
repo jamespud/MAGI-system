@@ -41,7 +41,7 @@ func (r *datasetRepo) GetDataset(ctx context.Context, id string) (*entity.Benchm
 
 func (r *datasetRepo) ListDatasets(ctx context.Context) ([]*entity.BenchmarkDataset, error) {
 	var models []DatasetModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.BenchmarkDataset, len(models))
@@ -82,7 +82,7 @@ func (r *datasetRepo) CreateItems(ctx context.Context, items []*entity.Benchmark
 
 func (r *datasetRepo) ListItems(ctx context.Context, datasetID string) ([]*entity.BenchmarkItem, error) {
 	var models []DatasetItemModel
-	if err := r.db.WithContext(ctx).Where("dataset_id = ?", datasetID).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("dataset_id = ?", datasetID).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.BenchmarkItem, len(models))
@@ -216,7 +216,7 @@ func (r *datasetRepo) ExpireRunLeases(ctx context.Context, now time.Time) error 
 
 func (r *datasetRepo) ListRuns(ctx context.Context, datasetID string) ([]*entity.BenchmarkRun, error) {
 	var models []BenchmarkRunModel
-	if err := r.db.WithContext(ctx).Where("dataset_id = ?", datasetID).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("dataset_id = ?", datasetID).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.BenchmarkRun, len(models))
@@ -228,7 +228,7 @@ func (r *datasetRepo) ListRuns(ctx context.Context, datasetID string) ([]*entity
 
 func (r *datasetRepo) ListAllRuns(ctx context.Context) ([]*entity.BenchmarkRun, error) {
 	var models []BenchmarkRunModel
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.BenchmarkRun, len(models))
@@ -257,7 +257,7 @@ func (r *datasetRepo) UpdateFeedback(ctx context.Context, resultID, feedback str
 
 func (r *datasetRepo) ListItemResults(ctx context.Context, runID string) ([]*entity.BenchmarkItemResult, error) {
 	var models []BenchmarkItemResultModel
-	if err := r.db.WithContext(ctx).Where("run_id = ?", runID).Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("run_id = ?", runID).Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.BenchmarkItemResult, len(models))
