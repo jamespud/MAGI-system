@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
+	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 // ServerConfig describes one external MCP server to connect to.
@@ -283,10 +285,23 @@ func (s *server) connectLocked(ctx context.Context) error {
 				_ = c.Close()
 				return fmt.Errorf("tool %q: encode input schema: %w", t.Name, err)
 			}
+			// Providers reject the shapes MCP servers (and mcp-go itself) can
+			// emit, and a rejected definition fails the whole model call, so a
+			// tool whose schema cannot be made valid is skipped rather than
+			// forwarded.
+			normalized, err := validation.NormalizeToolSchema(schema)
+			if err != nil {
+				log.Printf("mcp server %q tool %q: unusable input schema: %v", s.cfg.Name, t.Name, err)
+				continue
+			}
+			if err := validation.CompileSchema(normalized); err != nil {
+				log.Printf("mcp server %q tool %q: skipping tool with invalid input schema: %v", s.cfg.Name, t.Name, err)
+				continue
+			}
 			s.tools = append(s.tools, port.ToolDefinition{
 				Name:       ToolName(s.cfg.Name, t.Name),
 				Desc:       t.Description,
-				ArgsSchema: schema,
+				ArgsSchema: normalized,
 				Source:     entity.ToolSourceMCP,
 				Binding:    entity.ToolBinding{Source: entity.ToolSourceMCP, Server: s.cfg.Name, ToolName: t.Name},
 			})
