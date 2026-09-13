@@ -16,6 +16,8 @@ type stubRecurringRepo struct {
 	mu      sync.Mutex
 	items   map[string]*entity.RecurringCase
 	enabled []string
+	// lastRunErr, when set, makes UpdateLastRun fail.
+	lastRunErr error
 }
 
 func newStubRecurringRepo() *stubRecurringRepo {
@@ -70,6 +72,9 @@ func (s *stubRecurringRepo) UpdateEnabled(ctx context.Context, id string, enable
 func (s *stubRecurringRepo) UpdateLastRun(ctx context.Context, id string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.lastRunErr != nil {
+		return s.lastRunErr
+	}
 	if r, ok := s.items[id]; ok {
 		r.LastRunAt = &at
 	}
@@ -80,6 +85,70 @@ func (s *stubRecurringRepo) Delete(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 	delete(s.items, id)
 	return nil
+}
+
+// countingLock records how often the distributed lease is taken and released.
+type countingLock struct {
+	mu       sync.Mutex
+	acquires int
+	releases int
+}
+
+func (l *countingLock) Acquire(context.Context, string, string, time.Duration) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.acquires++
+	return true, nil
+}
+
+func (l *countingLock) Release(context.Context, string, string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.releases++
+	return nil
+}
+
+// Releasing the lease after every tick reopened a window where two replicas
+// could both observe a template as due. The owner now keeps (and renews) the
+// lease, releasing only on shutdown.
+func TestScheduler_HoldsLeaseAcrossTicks(t *testing.T) {
+	lock := &countingLock{}
+	svc := recurring.NewService(newStubRecurringRepo(), nil, nil, 1)
+	s := recurring.NewSchedulerWithLock(svc, time.Millisecond, lock, "replica-a")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go s.Run(ctx)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	time.Sleep(5 * time.Millisecond)
+
+	lock.mu.Lock()
+	acquires, releases := lock.acquires, lock.releases
+	lock.mu.Unlock()
+	if acquires < 2 {
+		t.Fatalf("acquires = %d, want the ticker to keep ticking", acquires)
+	}
+	if releases > 1 {
+		t.Fatalf("releases = %d, want at most one release on shutdown", releases)
+	}
+}
+
+// A failed last-run write must surface: the template stays due until the write
+// succeeds, so swallowing the error means the next tick fires it again.
+func TestService_TickSurfacesLastRunFailure(t *testing.T) {
+	repo := newStubRecurringRepo()
+	repo.lastRunErr = errors.New("write failed")
+	if err := repo.Create(context.Background(), &entity.RecurringCase{
+		ID: "rec-1", UserID: 7, Name: "daily", Question: "q",
+		Enabled: true, Interval: time.Millisecond,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	svc := recurring.NewService(repo, &stubCases{}, nil, 1)
+
+	if err := svc.Tick(context.Background(), time.Now()); err == nil {
+		t.Fatal("tick swallowed the last-run write failure")
+	}
 }
 
 type stubCases struct {

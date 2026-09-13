@@ -102,7 +102,11 @@ func (s *Service) Tick(ctx context.Context, now time.Time) error {
 			log.Printf("recurring: template %s (%s) failed to launch: %v", rc.ID, rc.Name, err)
 			continue
 		}
-		_ = s.repo.UpdateLastRun(ctx, rc.ID, now)
+		if err := s.repo.UpdateLastRun(ctx, rc.ID, now); err != nil {
+			// The template stays due until this write succeeds, so a swallowed
+			// failure means the next tick fires it again (duplicate run).
+			return fmt.Errorf("recurring: record last run for %s: %w", rc.ID, err)
+		}
 	}
 	return nil
 }

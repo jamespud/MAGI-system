@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/jamespud/magi/backend/domain/port"
@@ -44,8 +45,14 @@ func (s *Scheduler) Run(ctx context.Context) {
 			if err != nil || !ok {
 				continue // another replica holds the lease
 			}
-			_ = s.svc.Tick(ctx, time.Now())
-			_ = s.lock.Release(ctx, schedulerLockName, s.owner)
+			// The lease is intentionally NOT released per tick: the same owner
+			// renews it on the next Acquire, while another replica can only take
+			// over once the TTL expires (owner died). Releasing after every tick
+			// reopened a window where two replicas could both see a template as
+			// due (see docs/reliability-hazard-audit.md §4.5).
+			if err := s.svc.Tick(ctx, time.Now()); err != nil {
+				log.Printf("recurring: tick failed: %v", err)
+			}
 		case <-ctx.Done():
 			if s.lock != nil {
 				_ = s.lock.Release(ctx, schedulerLockName, s.owner)
