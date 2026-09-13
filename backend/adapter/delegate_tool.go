@@ -46,7 +46,18 @@ func NewLoopSubInvestigator(loop runtime.MagiRuntime, cfg *entity.MagiConfig) (*
 	if cfg == nil {
 		return nil, fmt.Errorf("delegate: role config is required")
 	}
-	return &LoopSubInvestigator{loop: loop, cfg: cfg}, nil
+	// A sub-investigation must not be able to delegate again: the sub-run has no
+	// durable run identity, so unbounded nesting is both a resource hazard and
+	// invisible in the audit trail. Clone so the caller's config is untouched.
+	clone := *cfg
+	clone.Tools = make([]entity.ToolBinding, 0, len(cfg.Tools))
+	for _, b := range cfg.Tools {
+		if b.ToolName == DelegateToolName {
+			continue
+		}
+		clone.Tools = append(clone.Tools, b)
+	}
+	return &LoopSubInvestigator{loop: loop, cfg: &clone}, nil
 }
 
 func (s *LoopSubInvestigator) Investigate(ctx context.Context, question, background string) (*DelegateResult, error) {
