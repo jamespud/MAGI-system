@@ -10,6 +10,7 @@ import (
 
 	"github.com/jamespud/magi/backend/application/toolpolicy"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/execution"
 	"github.com/jamespud/magi/backend/domain/port"
 	"github.com/jamespud/magi/backend/domain/runtime"
 	"github.com/jamespud/magi/backend/domain/validation"
@@ -50,11 +51,11 @@ func (r *fakeApprovalRepo) Get(_ context.Context, id string) (*entity.ApprovalRe
 	return &cp, nil
 }
 
-func (r *fakeApprovalRepo) FindByKey(_ context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {
+func (r *fakeApprovalRepo) FindByKey(_ context.Context, caseID, runID, toolName, intentDigest string) (*entity.ApprovalRequest, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, a := range r.reqs {
-		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName {
+		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName && a.IntentDigest == intentDigest {
 			return a, nil
 		}
 	}
@@ -153,7 +154,7 @@ func TestAgentLoop_ApprovalApprovedExecutesTool(t *testing.T) {
 	if executed == nil || executed.ApprovedBy != "human-1" {
 		t.Fatalf("expected executed approved tool call: %+v", executed)
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-1", "calc")
+	req, _ := repo.FindByKey(context.Background(), "c1", "run-1", "calc", execution.ApprovalIntentDigest("calc", []byte(`{"a":1,"b":2}`)))
 	if req == nil || req.Status != entity.ApprovalApproved {
 		t.Fatalf("request: %+v", req)
 	}
@@ -190,7 +191,7 @@ func TestAgentLoop_ApprovalRejectedFeedsBack(t *testing.T) {
 	if rejected == nil || !contains(rejected.Err, "rejected by human") {
 		t.Fatalf("expected rejected tool call: %+v", rejected)
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-2", "calc")
+	req, _ := repo.FindByKey(context.Background(), "c1", "run-2", "calc", execution.ApprovalIntentDigest("calc", []byte(`{"a":1,"b":2}`)))
 	if req == nil || req.Status != entity.ApprovalRejected {
 		t.Fatalf("request: %+v", req)
 	}
@@ -213,7 +214,7 @@ func TestAgentLoop_ApprovalExpires(t *testing.T) {
 	if res.Vote == nil {
 		t.Fatal("expected a vote after timeout")
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-3", "calc")
+	req, _ := repo.FindByKey(context.Background(), "c1", "run-3", "calc", execution.ApprovalIntentDigest("calc", []byte(`{"a":1,"b":2}`)))
 	if req == nil || req.Status != entity.ApprovalExpired {
 		t.Fatalf("request: %+v", req)
 	}

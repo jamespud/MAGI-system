@@ -280,18 +280,21 @@ type RuntimeInvocationAttemptModel struct {
 func (RuntimeInvocationAttemptModel) TableName() string { return "runtime_invocation_attempt" }
 
 type ApprovalModel struct {
-	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index"`
-	RunID       string
-	AgentCode   string
-	ToolName    string
-	Arguments   string `gorm:"type:text"`
-	Status      string `gorm:"index"`
-	Reason      string `gorm:"type:text"`
-	DecidedBy   string
-	RequestedAt time.Time
-	DecidedAt   *time.Time
-	CreatedAt   time.Time
+	ID        string `gorm:"primaryKey"`
+	CaseID    string `gorm:"index;index:idx_approval_intent,priority:1"`
+	RunID     string `gorm:"index:idx_approval_intent,priority:2"`
+	AgentCode string
+	ToolName  string `gorm:"index:idx_approval_intent,priority:3"`
+	Arguments string `gorm:"type:text"`
+	// IntentDigest is the canonical digest of the invocation the decision
+	// authorizes. Empty on rows persisted before intent binding existed.
+	IntentDigest string `gorm:"size:64;not null;default:'';index:idx_approval_intent,priority:4"`
+	Status       string `gorm:"index"`
+	Reason       string `gorm:"type:text"`
+	DecidedBy    string
+	RequestedAt  time.Time
+	DecidedAt    *time.Time
+	CreatedAt    time.Time
 }
 
 func (ApprovalModel) TableName() string { return "magi_approval_request" }

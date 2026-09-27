@@ -1096,14 +1096,17 @@ func (l *AgentLoop) requestApproval(runCtx context.Context, actx *AgentContext, 
 	if l.approvalRepo == nil {
 		return false, "", "approval required but approval repository is not configured", nil
 	}
-	req, err := l.approvalRepo.FindByKey(runCtx, actx.CaseID, actx.RunID, td.Name)
+	// Bind the decision to this exact invocation: the same tool called with
+	// different arguments is a new intent that needs its own approval.
+	intentDigest := execution.ApprovalIntentDigest(td.Name, canonicalToolArguments(tc.Function.Arguments))
+	req, err := l.approvalRepo.FindByKey(runCtx, actx.CaseID, actx.RunID, td.Name, intentDigest)
 	if err != nil {
 		return false, "", "", fmt.Errorf("find approval: %w", err)
 	}
 	if req == nil {
 		req = &entity.ApprovalRequest{
 			CaseID: actx.CaseID, RunID: actx.RunID, AgentCode: agentCode,
-			ToolName: td.Name, Arguments: tc.Function.Arguments,
+			ToolName: td.Name, Arguments: tc.Function.Arguments, IntentDigest: intentDigest,
 			Status: entity.ApprovalPending, RequestedAt: time.Now(),
 		}
 		if err := l.approvalRepo.Create(runCtx, req); err != nil {

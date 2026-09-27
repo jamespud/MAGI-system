@@ -34,9 +34,9 @@ func (r *approvalRepo) Create(ctx context.Context, a *entity.ApprovalRequest) er
 	}
 	m := ApprovalModel{
 		ID: a.ID, CaseID: a.CaseID, RunID: a.RunID, AgentCode: string(a.AgentCode),
-		ToolName: a.ToolName, Arguments: a.Arguments, Status: string(a.Status),
-		Reason: a.Reason, DecidedBy: a.DecidedBy, RequestedAt: a.RequestedAt,
-		DecidedAt: a.DecidedAt, CreatedAt: a.CreatedAt,
+		ToolName: a.ToolName, Arguments: a.Arguments, IntentDigest: a.IntentDigest,
+		Status: string(a.Status), Reason: a.Reason, DecidedBy: a.DecidedBy,
+		RequestedAt: a.RequestedAt, DecidedAt: a.DecidedAt, CreatedAt: a.CreatedAt,
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
 }
@@ -49,10 +49,16 @@ func (r *approvalRepo) Get(ctx context.Context, id string) (*entity.ApprovalRequ
 	return approvalFromModel(&m), nil
 }
 
-func (r *approvalRepo) FindByKey(ctx context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {
+func (r *approvalRepo) FindByKey(ctx context.Context, caseID, runID, toolName, intentDigest string) (*entity.ApprovalRequest, error) {
+	// Fail closed on an empty digest: rows persisted before intent binding
+	// existed carry an empty intent_digest, and matching them would restore the
+	// reuse-across-arguments bug this key exists to prevent.
+	if intentDigest == "" {
+		return nil, nil
+	}
 	var m ApprovalModel
 	err := r.db.WithContext(ctx).
-		Where("case_id = ? AND run_id = ? AND tool_name = ?", caseID, runID, toolName).
+		Where("case_id = ? AND run_id = ? AND tool_name = ? AND intent_digest = ?", caseID, runID, toolName, intentDigest).
 		Order("created_at DESC, id DESC").
 		First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -126,9 +132,9 @@ func (r *approvalRepo) MarkExpired(ctx context.Context, id string) error {
 func approvalFromModel(m *ApprovalModel) *entity.ApprovalRequest {
 	return &entity.ApprovalRequest{
 		ID: m.ID, CaseID: m.CaseID, RunID: m.RunID, AgentCode: entity.MagiCode(m.AgentCode),
-		ToolName: m.ToolName, Arguments: m.Arguments, Status: entity.ApprovalStatus(m.Status),
-		Reason: m.Reason, DecidedBy: m.DecidedBy, RequestedAt: m.RequestedAt,
-		DecidedAt: m.DecidedAt, CreatedAt: m.CreatedAt,
+		ToolName: m.ToolName, Arguments: m.Arguments, IntentDigest: m.IntentDigest,
+		Status: entity.ApprovalStatus(m.Status), Reason: m.Reason, DecidedBy: m.DecidedBy,
+		RequestedAt: m.RequestedAt, DecidedAt: m.DecidedAt, CreatedAt: m.CreatedAt,
 	}
 }
 

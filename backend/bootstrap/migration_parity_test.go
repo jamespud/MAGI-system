@@ -14,6 +14,43 @@ import (
 )
 
 const s21MigrationPath = "../../docker/atlas/migrations/magi_s21_runtime_kernel.sql"
+const s24MigrationPath = "../../docker/atlas/migrations/magi_s24_approval_intent_binding.sql"
+
+// Issue #9: the approval lookup key gained an intent digest. The Atlas script
+// and the GORM model must agree on the column width, so a deployment that
+// applies the SQL by hand does not diverge from one that relies on the startup
+// AutoMigrate path.
+func TestS24ApprovalIntentMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s24MigrationPath)
+	if err != nil {
+		t.Fatalf("read s24 migration: %v", err)
+	}
+	if !strings.Contains(strings.ToUpper(string(raw)), "INTENT_DIGEST") {
+		t.Fatalf("S24 must add the intent_digest column:\n%s", string(raw))
+	}
+
+	field, ok := reflect.TypeOf(magi.ApprovalModel{}).FieldByName("IntentDigest")
+	if !ok {
+		t.Fatal("ApprovalModel is missing IntentDigest")
+	}
+	modelSize := 0
+	for _, part := range strings.Split(field.Tag.Get("gorm"), ";") {
+		if strings.HasPrefix(part, "size:") {
+			modelSize, _ = strconv.Atoi(strings.TrimPrefix(part, "size:"))
+		}
+	}
+	if modelSize == 0 {
+		t.Fatal("ApprovalModel.IntentDigest must declare an explicit size")
+	}
+
+	match := regexp.MustCompile(`(?i)intent_digest\s+VARCHAR\((\d+)\)`).FindStringSubmatch(string(raw))
+	if match == nil {
+		t.Fatalf("S24 must declare intent_digest as VARCHAR(n):\n%s", string(raw))
+	}
+	if declared, _ := strconv.Atoi(match[1]); declared != modelSize {
+		t.Fatalf("S24 declares intent_digest VARCHAR(%d) but ApprovalModel declares size:%d", declared, modelSize)
+	}
+}
 
 // The Atlas snapshot and the GORM models describe the same tables. Nothing kept
 // them in sync, which is how run_id ended up 64 wide in both while callers wrote

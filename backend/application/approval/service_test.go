@@ -33,11 +33,11 @@ func (r *fakeRepo) Get(_ context.Context, id string) (*entity.ApprovalRequest, e
 	}
 	return a, nil
 }
-func (r *fakeRepo) FindByKey(_ context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {
+func (r *fakeRepo) FindByKey(_ context.Context, caseID, runID, toolName, intentDigest string) (*entity.ApprovalRequest, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, a := range r.reqs {
-		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName {
+		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName && a.IntentDigest == intentDigest {
 			return a, nil
 		}
 	}
