@@ -44,6 +44,7 @@ type Registry struct {
 	commitFenceFallbacks    [lenCommitFenceOps]atomic.Int64
 	toolEffectOverrides     [lenToolEffectClasses][lenToolEffectClasses]atomic.Int64
 	autoApplyBlocked        [lenAutoApplyBlockReasons]atomic.Int64
+	autoApplyResults        [lenAutoApplyResults]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -327,6 +328,61 @@ func (r *Registry) AutoApplyBlocked(reason AutoApplyBlockReason) int64 {
 		return 0
 	}
 	return r.autoApplyBlocked[i].Load()
+}
+
+// AutoApplyResult is the fixed outcome set of an automated publish that the
+// regression gate allowed to proceed. Like the block reasons it is a metric
+// label, so the set is closed and never carries free text.
+type AutoApplyResult string
+
+const (
+	// AutoApplyResultApplied: the publish ran and wrote at least one
+	// suggestion.
+	AutoApplyResultApplied AutoApplyResult = "applied"
+	// AutoApplyResultFailed: the verdict permitted the publish but applying it
+	// failed. This is not a regression block.
+	AutoApplyResultFailed AutoApplyResult = "failed"
+)
+
+const lenAutoApplyResults = 2
+
+var autoApplyResults = [...]AutoApplyResult{AutoApplyResultApplied, AutoApplyResultFailed}
+
+// AutoApplyResults returns the closed result set in exposure order.
+func AutoApplyResults() []AutoApplyResult {
+	return autoApplyResults[:]
+}
+
+func indexOfAutoApplyResult(result AutoApplyResult) int {
+	for i, candidate := range autoApplyResults {
+		if candidate == result {
+			return i
+		}
+	}
+	return -1
+}
+
+// IncAutoApplyResult records one automated publish outcome. An unknown result is
+// dropped rather than turned into a new series.
+func (r *Registry) IncAutoApplyResult(result AutoApplyResult) {
+	if r == nil {
+		return
+	}
+	if i := indexOfAutoApplyResult(result); i >= 0 {
+		r.autoApplyResults[i].Add(1)
+	}
+}
+
+// AutoApplyOutcome returns the current count for one fixed result.
+func (r *Registry) AutoApplyOutcome(result AutoApplyResult) int64 {
+	if r == nil {
+		return 0
+	}
+	i := indexOfAutoApplyResult(result)
+	if i < 0 {
+		return 0
+	}
+	return r.autoApplyResults[i].Load()
 }
 
 // IncToolEffectOverride records one tool whose resolved effect class came from
@@ -802,6 +858,10 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 		// Every fixed reason is exposed, including the zero ones: a blocked
 		// publish must be distinguishable from a reason that is never wired up.
 		fmt.Fprintf(w, "magi_selfimprove_autoapply_blocked_total{reason=%q} %d\n", reason, r.autoApplyBlocked[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_selfimprove_autoapply_total counter")
+	for i, result := range autoApplyResults {
+		fmt.Fprintf(w, "magi_selfimprove_autoapply_total{result=%q} %d\n", result, r.autoApplyResults[i].Load())
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())

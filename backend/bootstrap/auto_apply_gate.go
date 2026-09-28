@@ -62,6 +62,17 @@ func (g autoApplyGate) run(ctx context.Context) (applied int, blocked metrics.Au
 		g.recordBlock(reason)
 		return 0, reason, fmt.Errorf("await auto regression %s: %w", run.ID, err)
 	}
+	// A verdict that does not describe the run we started cannot be trusted,
+	// even when its contents look like a pass.
+	if verdict == nil {
+		g.recordBlock(metrics.AutoApplyBlockedIncomplete)
+		return 0, metrics.AutoApplyBlockedIncomplete, fmt.Errorf("auto regression %s produced no verdict", run.ID)
+	}
+	if verdict.ID != run.ID {
+		g.recordBlock(metrics.AutoApplyBlockedIncomplete)
+		return 0, metrics.AutoApplyBlockedIncomplete,
+			fmt.Errorf("auto regression verdict %q does not describe the started run %q", verdict.ID, run.ID)
+	}
 
 	allowed, reason := regressionAllowsAutoApply(verdict)
 	if !allowed {
@@ -75,7 +86,11 @@ func (g autoApplyGate) run(ctx context.Context) (applied int, blocked metrics.Au
 	if err != nil {
 		// The verdict permitted the publish; the publish itself failed. That is
 		// a different operational event, so it must not be counted as a block.
+		g.recordOutcome(metrics.AutoApplyResultFailed)
 		return 0, "", fmt.Errorf("apply suggestions: %w", err)
+	}
+	if applied > 0 {
+		g.recordOutcome(metrics.AutoApplyResultApplied)
 	}
 	return applied, "", nil
 }
@@ -86,12 +101,21 @@ func (g autoApplyGate) recordBlock(reason metrics.AutoApplyBlockReason) {
 	}
 }
 
+func (g autoApplyGate) recordOutcome(result metrics.AutoApplyResult) {
+	if g.metrics != nil {
+		g.metrics.IncAutoApplyResult(result)
+	}
+}
+
 // regressionAllowsAutoApply is the admission rule for an automated publish. It
-// permits the publish only for an explicit, interpretable pass: the run must be
-// finished and succeeded, must not have failed its regression threshold, must
-// have evaluated at least one sample, and must carry a configured threshold.
-// Everything else — a missing or unfinished run, a failed threshold, item
-// errors, or a run that cannot be interpreted — blocks.
+// permits the publish only for an explicit, interpretable pass: the run must not
+// have failed its regression, must be finished and succeeded, must carry a
+// completion time (the worker writes the status and the timestamp together, so
+// a terminal status without one is not a trustworthy record), must have
+// evaluated at least one sample, must carry a configured threshold, and its
+// recorded accuracy must clear that threshold. Everything else — a missing or
+// unfinished run, a failed threshold, item errors, a missing completion time, or
+// any other record that cannot be interpreted — blocks.
 //
 // Passing this gate only means the regression did not regress. It does not
 // validate the candidate prompt that is about to be published; version binding,
@@ -108,10 +132,18 @@ func regressionAllowsAutoApply(run *entity.BenchmarkRun) (bool, metrics.AutoAppl
 		// A failed status without a regression flag means the run itself hit
 		// execution or item errors, so there is no trustworthy verdict.
 		return false, metrics.AutoApplyBlockedRegressionError
+	case run.CompletedAt == nil || run.CompletedAt.IsZero():
+		// The worker sets the terminal status and the completion time in the
+		// same update; a status without one is an incomplete record.
+		return false, metrics.AutoApplyBlockedIncomplete
 	case run.Total <= 0:
 		return false, metrics.AutoApplyBlockedIncomplete
 	case run.RegressionThreshold <= 0:
 		return false, metrics.AutoApplyBlockedIncomplete
+	case run.Accuracy < run.RegressionThreshold:
+		// Check the recorded accuracy as well as the flag: the flag alone can be
+		// missing or stale, and the threshold is the acceptance condition.
+		return false, metrics.AutoApplyBlockedRegressionFailed
 	}
 	return true, ""
 }
