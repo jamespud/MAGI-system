@@ -1,21 +1,31 @@
--- MAGI S24: bind a human tool approval to one exact invocation intent.
+-- MAGI S24: bind a human tool approval to one exact logical invocation.
 --
 -- S10 keyed approval requests by (case_id, run_id, tool_name) only, and the
 -- agent loop reused whatever decision that key returned. Approving a tool once
--- with argument set A therefore also authorized a later call to the same tool
--- with argument set B inside the same run (issue #9).
+-- therefore also authorized a later call to the same tool with different
+-- arguments in the same run, and a second call with identical arguments was
+-- indistinguishable from a retry of the first (issue #9).
 --
--- The runtime now looks decisions up by the digest of the invocation it is
--- about to run (execution.ApprovalIntentDigest: sha256 over the tool name and
--- the canonical arguments, always 64 hex characters), so the lookup key is
--- (case_id, run_id, tool_name, intent_digest).
+-- The authoritative identity is now the logical invocation
+-- (execution.NewInvocationID: sha256 over the step id, the invocation kind and
+-- the ordinal, always exactly 64 hex characters). It is stable across a
+-- dispatcher retry or a resume of the same logical call, and distinct for a
+-- different call even when tool and arguments are identical, so the unique key
+-- is (case_id, invocation_id). intent_digest additionally pins the tool and its
+-- canonical arguments; the runtime validates it on reuse.
 --
--- Existing rows keep the empty default and stay fail-closed: the repository
--- refuses an empty lookup key, so a decision persisted before this revision can
--- never be reused by a new call. Both the startup AutoMigrate path and this
--- forward-only script add the same column and index; apply this once, per
--- deployment, when provisioning with Atlas instead of the service.
+-- invocation_id is NULL-able on purpose. Rows persisted before this revision
+-- have no invocation, and MySQL allows repeated NULLs in a unique index, so
+-- existing rows cannot collide with each other during the upgrade. The
+-- repository refuses an empty invocation lookup, so a legacy row is never
+-- reused by a new call.
+--
+-- Both the startup AutoMigrate path and this forward-only script produce the
+-- same shape; apply this once, per deployment, when provisioning with Atlas
+-- instead of the service.
+ALTER TABLE magi_approval_request
+    ADD COLUMN invocation_id VARCHAR(64) NULL;
 ALTER TABLE magi_approval_request
     ADD COLUMN intent_digest VARCHAR(64) NOT NULL DEFAULT '';
 ALTER TABLE magi_approval_request
-    ADD KEY idx_approval_intent (case_id, run_id, tool_name, intent_digest);
+    ADD UNIQUE KEY uk_approval_invocation (case_id, invocation_id);

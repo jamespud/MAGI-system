@@ -35,10 +35,17 @@ func (r *approvalRepo) Create(ctx context.Context, a *entity.ApprovalRequest) er
 	m := ApprovalModel{
 		ID: a.ID, CaseID: a.CaseID, RunID: a.RunID, AgentCode: string(a.AgentCode),
 		ToolName: a.ToolName, Arguments: a.Arguments, IntentDigest: a.IntentDigest,
-		Status: string(a.Status), Reason: a.Reason, DecidedBy: a.DecidedBy,
+		InvocationID: optionalInvocationID(a.InvocationID),
+		Status:       string(a.Status), Reason: a.Reason, DecidedBy: a.DecidedBy,
 		RequestedAt: a.RequestedAt, DecidedAt: a.DecidedAt, CreatedAt: a.CreatedAt,
 	}
-	return r.db.WithContext(ctx).Create(&m).Error
+	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("%w: invocation %s", port.ErrApprovalConflict, a.InvocationID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *approvalRepo) Get(ctx context.Context, id string) (*entity.ApprovalRequest, error) {
@@ -49,17 +56,16 @@ func (r *approvalRepo) Get(ctx context.Context, id string) (*entity.ApprovalRequ
 	return approvalFromModel(&m), nil
 }
 
-func (r *approvalRepo) FindByKey(ctx context.Context, caseID, runID, toolName, intentDigest string) (*entity.ApprovalRequest, error) {
-	// Fail closed on an empty digest: rows persisted before intent binding
-	// existed carry an empty intent_digest, and matching them would restore the
-	// reuse-across-arguments bug this key exists to prevent.
-	if intentDigest == "" {
+func (r *approvalRepo) FindByInvocation(ctx context.Context, caseID, invocationID string) (*entity.ApprovalRequest, error) {
+	// Fail closed on an empty invocation: rows persisted before invocation
+	// binding existed carry NULL there, and resolving them would restore the
+	// reuse-across-calls bug this key exists to prevent.
+	if invocationID == "" {
 		return nil, nil
 	}
 	var m ApprovalModel
 	err := r.db.WithContext(ctx).
-		Where("case_id = ? AND run_id = ? AND tool_name = ? AND intent_digest = ?", caseID, runID, toolName, intentDigest).
-		Order("created_at DESC, id DESC").
+		Where("case_id = ? AND invocation_id = ?", caseID, invocationID).
 		First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -130,12 +136,27 @@ func (r *approvalRepo) MarkExpired(ctx context.Context, id string) error {
 }
 
 func approvalFromModel(m *ApprovalModel) *entity.ApprovalRequest {
+	invocationID := ""
+	if m.InvocationID != nil {
+		invocationID = *m.InvocationID
+	}
 	return &entity.ApprovalRequest{
 		ID: m.ID, CaseID: m.CaseID, RunID: m.RunID, AgentCode: entity.MagiCode(m.AgentCode),
 		ToolName: m.ToolName, Arguments: m.Arguments, IntentDigest: m.IntentDigest,
-		Status: entity.ApprovalStatus(m.Status), Reason: m.Reason, DecidedBy: m.DecidedBy,
+		InvocationID: invocationID,
+		Status:       entity.ApprovalStatus(m.Status), Reason: m.Reason, DecidedBy: m.DecidedBy,
 		RequestedAt: m.RequestedAt, DecidedAt: m.DecidedAt, CreatedAt: m.CreatedAt,
 	}
+}
+
+// optionalInvocationID stores an empty invocation as SQL NULL so pre-existing
+// rows and new rows never share a key, and so the unique index tolerates the
+// repeated NULLs of a legacy table.
+func optionalInvocationID(invocationID string) *string {
+	if invocationID == "" {
+		return nil
+	}
+	return &invocationID
 }
 
 var _ port.ApprovalRepository = (*approvalRepo)(nil)

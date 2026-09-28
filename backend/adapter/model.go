@@ -280,15 +280,20 @@ type RuntimeInvocationAttemptModel struct {
 func (RuntimeInvocationAttemptModel) TableName() string { return "runtime_invocation_attempt" }
 
 type ApprovalModel struct {
-	ID        string `gorm:"primaryKey"`
-	CaseID    string `gorm:"index;index:idx_approval_intent,priority:1"`
-	RunID     string `gorm:"index:idx_approval_intent,priority:2"`
-	AgentCode string
-	ToolName  string `gorm:"index:idx_approval_intent,priority:3"`
-	Arguments string `gorm:"type:text"`
+	ID     string `gorm:"primaryKey"`
+	CaseID string `gorm:"index;uniqueIndex:uk_approval_invocation,priority:1"`
+	RunID  string
+	// InvocationID is the logical call this request authorizes. It is NULL for
+	// rows persisted before invocation binding existed: MySQL allows repeated
+	// NULLs in a unique index, so those legacy rows cannot collide with each
+	// other and the lookup refuses them.
+	InvocationID *string `gorm:"size:64;uniqueIndex:uk_approval_invocation,priority:2"`
+	AgentCode    string
+	ToolName     string
+	Arguments    string `gorm:"type:text"`
 	// IntentDigest is the canonical digest of the invocation the decision
 	// authorizes. Empty on rows persisted before intent binding existed.
-	IntentDigest string `gorm:"size:64;not null;default:'';index:idx_approval_intent,priority:4"`
+	IntentDigest string `gorm:"size:64;not null;default:''"`
 	Status       string `gorm:"index"`
 	Reason       string `gorm:"type:text"`
 	DecidedBy    string

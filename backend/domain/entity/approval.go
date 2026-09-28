@@ -22,6 +22,11 @@ type ApprovalRequest struct {
 	AgentCode MagiCode
 	ToolName  string
 	Arguments string
+	// InvocationID is the logical invocation this decision authorizes. It is
+	// stable across a dispatcher retry or a resume of the same logical call, and
+	// distinct for a different call even when the tool and arguments are
+	// identical. Empty on rows persisted before invocation binding existed.
+	InvocationID string
 	// IntentDigest binds the decision to one exact invocation intent (tool plus
 	// canonical arguments). A later call to the same tool with different
 	// arguments has a different digest and can never inherit this approval.
