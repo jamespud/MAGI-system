@@ -210,13 +210,18 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 	// TerminalCommitter, so count it instead of degrading silently.
 	log.Printf("orchestrator: case %s: repository lacks TerminalCommitter, committing terminal outcome non-atomically", case_.ID)
 	o.metrics.IncCommitFenceFallback(metrics.CommitFenceTerminal)
-	if err := o.confirmCurrentStatus(ctx, case_, expected, target); err != nil {
-		return err
-	}
+	// This path cannot roll back, so the reference check must run BEFORE the
+	// status advances: otherwise a refused commit would leave the case in a
+	// terminal state with no resolution.
 	if resolution != nil && o.repo != nil {
 		if err := o.verifyResolutionArtifacts(ctx, resolution); err != nil {
 			return err
 		}
+	}
+	if err := o.confirmCurrentStatus(ctx, case_, expected, target); err != nil {
+		return err
+	}
+	if resolution != nil && o.repo != nil {
 		if err := o.repo.ResolutionRepo().Create(ctx, resolution); err != nil {
 			return fmt.Errorf("persist resolution: %w", err)
 		}
@@ -284,6 +289,9 @@ func requireAllPresent(kind string, cited []string, present map[string]struct{})
 	var missing []string
 	seen := make(map[string]struct{}, len(cited))
 	for _, id := range cited {
+		if id == "" {
+			return fmt.Errorf("resolution cites an empty %s id", kind)
+		}
 		if _, dup := seen[id]; dup {
 			continue
 		}

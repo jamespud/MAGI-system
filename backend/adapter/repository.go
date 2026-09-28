@@ -60,27 +60,35 @@ func verifyResolutionReferences(tx *gorm.DB, res *entity.Resolution) error {
 		{"claim", &ClaimModel{}, res.KeyClaimIDs},
 	}
 	for _, check := range checks {
-		ids := uniqueNonEmptyIDs(check.ids)
+		ids, err := citedArtifactIDs(check.kind, check.ids)
+		if err != nil {
+			return err
+		}
 		if len(ids) == 0 {
 			continue
 		}
 		var n int64
-		if err := tx.Model(check.model).Where("id IN ?", ids).Count(&n).Error; err != nil {
+		// Scope by case: an id that exists but belongs to another case must not
+		// satisfy this resolution's reference.
+		if err := tx.Model(check.model).Where("id IN ? AND case_id = ?", ids, res.CaseID).Count(&n).Error; err != nil {
 			return fmt.Errorf("terminal commit: verify %s references: %w", check.kind, err)
 		}
 		if int(n) != len(ids) {
-			return fmt.Errorf("terminal commit: resolution cites %d %s id(s) but only %d exist", len(ids), check.kind, n)
+			return fmt.Errorf("terminal commit: resolution cites %d %s id(s) of case %s but only %d exist", len(ids), check.kind, res.CaseID, n)
 		}
 	}
 	return nil
 }
 
-func uniqueNonEmptyIDs(ids []string) []string {
+// citedArtifactIDs validates and deduplicates the ids a resolution cites for
+// one artifact kind. An empty id is a malformed reference, not something to
+// skip silently.
+func citedArtifactIDs(kind string, ids []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(ids))
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == "" {
-			continue
+			return nil, fmt.Errorf("terminal commit: resolution cites an empty %s id", kind)
 		}
 		if _, dup := seen[id]; dup {
 			continue
@@ -88,7 +96,7 @@ func uniqueNonEmptyIDs(ids []string) []string {
 		seen[id] = struct{}{}
 		out = append(out, id)
 	}
-	return out
+	return out, nil
 }
 
 // CleanupCaseArtifacts removes the persisted artifacts of a previous execution

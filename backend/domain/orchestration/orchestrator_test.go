@@ -709,6 +709,24 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 	}
 }
 
+// Issue #11: the fallback path cannot roll back, so it must prove the
+// resolution's references are durable BEFORE it advances the case to a terminal
+// status. Otherwise a refused commit leaves a terminal case with no resolution.
+func TestOrchestrate_RefusedTerminalCommitDoesNotLeaveTerminalStatus(t *testing.T) {
+	repo, orch := requiredArtifactFixture(t)
+	repo.voteErr = errors.New("vote insert failed")
+
+	fixtureCase := &entity.DecisionCase{ID: "c-order", Question: "compute", MaxDebateRounds: 2}
+	_, err := orch.Orchestrate(context.Background(), fixtureCase)
+	if err == nil {
+		t.Fatal("a missing required artifact must refuse the terminal commit")
+	}
+	switch repo.statuses["c-order"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-order"])
+	}
+}
+
 // assertNoDanglingResolutionReferences fails when a committed resolution cites a
 // row the repository never stored.
 func assertNoDanglingResolutionReferences(t *testing.T, repo *stubRepo) {
@@ -782,6 +800,7 @@ func requiredArtifactFixture(t *testing.T) (*stubRepo, *orchestration.Orchestrat
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		Repo:       repo,
+		CaseRepo:   repo.CaseRepo(),
 		AgentLoop:  mrt,
 		Consensus:  consensus.NewConsensusEngine(),
 		Debate:     debate.NewDebateEngine(nil),

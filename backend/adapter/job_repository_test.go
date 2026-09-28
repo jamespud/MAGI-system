@@ -232,6 +232,67 @@ func TestTerminalCommitter_RefusesResolutionCitingUnpersistedArtifacts(t *testin
 	}
 }
 
+// terminalCommitFixture builds a repository with two cases and one real ballot
+// that belongs to the second case.
+func terminalCommitFixture(t *testing.T) (*gorm.DB, port.TerminalCommitter, context.Context) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}, &magi.VoteModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.TerminalCommitter)
+	if !ok {
+		t.Fatal("production repository must provide terminal commit fencing")
+	}
+	ctx := context.Background()
+	for _, id := range []string{"case-a", "case-b"} {
+		if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{ID: id, Status: entity.CaseStatusEvaluating}); err != nil {
+			t.Fatalf("create case %s: %v", id, err)
+		}
+	}
+	if err := db.Create(&magi.VoteModel{ID: "vote-of-case-b", CaseID: "case-b", Decision: string(entity.VoteDecisionApprove)}).Error; err != nil {
+		t.Fatalf("seed vote: %v", err)
+	}
+	return db, committer, ctx
+}
+
+// Issue #11: an id that exists is not enough; it must belong to the case the
+// resolution is about, or one case could satisfy its references with another
+// case's artifacts.
+func TestTerminalCommitter_RefusesCrossCaseReference(t *testing.T) {
+	_, committer, ctx := terminalCommitFixture(t)
+	event := entity.NewEvent("case-a", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err := committer.CommitTerminal(ctx, "case-a", entity.CaseStatusEvaluating, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "res-case-a", CaseID: "case-a", FinalDecision: entity.VoteDecisionApprove,
+			VoteIDs: []string{"vote-of-case-b"}}, &event)
+	if err == nil {
+		t.Fatal("a resolution must not satisfy its references with another case's artifacts")
+	}
+	if committed {
+		t.Fatal("a cross-case reference must not commit")
+	}
+}
+
+// An empty cited id is a malformed reference and must be refused explicitly
+// rather than silently dropped.
+func TestTerminalCommitter_RefusesEmptyReferenceID(t *testing.T) {
+	_, committer, ctx := terminalCommitFixture(t)
+	event := entity.NewEvent("case-a", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err := committer.CommitTerminal(ctx, "case-a", entity.CaseStatusEvaluating, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "res-case-a", CaseID: "case-a", FinalDecision: entity.VoteDecisionApprove,
+			VoteIDs: []string{""}}, &event)
+	if err == nil {
+		t.Fatal("an empty cited id must be refused")
+	}
+	if committed {
+		t.Fatal("an empty cited id must not commit")
+	}
+}
+
 func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
