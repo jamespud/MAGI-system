@@ -43,6 +43,8 @@ type Registry struct {
 	ragIndexDegraded        [lenRAGIndexes]atomic.Int64
 	commitFenceFallbacks    [lenCommitFenceOps]atomic.Int64
 	toolEffectOverrides     [lenToolEffectClasses][lenToolEffectClasses]atomic.Int64
+	autoApplyBlocked        [lenAutoApplyBlockReasons]atomic.Int64
+	autoApplyResults        [lenAutoApplyResults]atomic.Int64
 
 	RunDurationSumMs   atomic.Int64
 	RunDurationCount   atomic.Int64
@@ -261,6 +263,126 @@ func indexOfToolEffectClass(effect ToolEffectClass) int {
 		}
 	}
 	return -1
+}
+
+// AutoApplyBlockReason is the fixed set of reasons an automated prompt publish
+// can be blocked. The values are metric labels, so the set is deliberately
+// closed: free-text error detail must never reach a label, or the series count
+// grows without bound.
+type AutoApplyBlockReason string
+
+const (
+	// AutoApplyBlockedRegressionFailed: the run finished and did not meet its
+	// regression threshold.
+	AutoApplyBlockedRegressionFailed AutoApplyBlockReason = "regression_failed"
+	// AutoApplyBlockedRegressionError: the run could not produce a verdict
+	// (execution error, item errors, or the regression could not be started).
+	AutoApplyBlockedRegressionError AutoApplyBlockReason = "regression_error"
+	// AutoApplyBlockedTimeout: the verdict was still not persisted in time.
+	AutoApplyBlockedTimeout AutoApplyBlockReason = "timeout"
+	// AutoApplyBlockedIncomplete: no usable verdict (missing run, still
+	// running, no samples, or no configured threshold).
+	AutoApplyBlockedIncomplete AutoApplyBlockReason = "incomplete"
+)
+
+const lenAutoApplyBlockReasons = 4
+
+var autoApplyBlockReasons = [...]AutoApplyBlockReason{
+	AutoApplyBlockedRegressionFailed, AutoApplyBlockedRegressionError,
+	AutoApplyBlockedTimeout, AutoApplyBlockedIncomplete,
+}
+
+// AutoApplyBlockReasons returns the closed label set in exposure order.
+func AutoApplyBlockReasons() []AutoApplyBlockReason {
+	return autoApplyBlockReasons[:]
+}
+
+func indexOfAutoApplyBlockReason(reason AutoApplyBlockReason) int {
+	for i, candidate := range autoApplyBlockReasons {
+		if candidate == reason {
+			return i
+		}
+	}
+	return -1
+}
+
+// IncAutoApplyBlocked records one automated publish that the regression gate
+// blocked, labelled with the fixed reason. An unknown reason is dropped rather
+// than turned into a new series.
+func (r *Registry) IncAutoApplyBlocked(reason AutoApplyBlockReason) {
+	if r == nil {
+		return
+	}
+	if i := indexOfAutoApplyBlockReason(reason); i >= 0 {
+		r.autoApplyBlocked[i].Add(1)
+	}
+}
+
+// AutoApplyBlocked returns the current count for one fixed reason.
+func (r *Registry) AutoApplyBlocked(reason AutoApplyBlockReason) int64 {
+	if r == nil {
+		return 0
+	}
+	i := indexOfAutoApplyBlockReason(reason)
+	if i < 0 {
+		return 0
+	}
+	return r.autoApplyBlocked[i].Load()
+}
+
+// AutoApplyResult is the fixed outcome set of an automated publish that the
+// regression gate allowed to proceed. Like the block reasons it is a metric
+// label, so the set is closed and never carries free text.
+type AutoApplyResult string
+
+const (
+	// AutoApplyResultApplied: the publish ran and wrote at least one
+	// suggestion.
+	AutoApplyResultApplied AutoApplyResult = "applied"
+	// AutoApplyResultFailed: the verdict permitted the publish but applying it
+	// failed. This is not a regression block.
+	AutoApplyResultFailed AutoApplyResult = "failed"
+)
+
+const lenAutoApplyResults = 2
+
+var autoApplyResults = [...]AutoApplyResult{AutoApplyResultApplied, AutoApplyResultFailed}
+
+// AutoApplyResults returns the closed result set in exposure order.
+func AutoApplyResults() []AutoApplyResult {
+	return autoApplyResults[:]
+}
+
+func indexOfAutoApplyResult(result AutoApplyResult) int {
+	for i, candidate := range autoApplyResults {
+		if candidate == result {
+			return i
+		}
+	}
+	return -1
+}
+
+// IncAutoApplyResult records one automated publish outcome. An unknown result is
+// dropped rather than turned into a new series.
+func (r *Registry) IncAutoApplyResult(result AutoApplyResult) {
+	if r == nil {
+		return
+	}
+	if i := indexOfAutoApplyResult(result); i >= 0 {
+		r.autoApplyResults[i].Add(1)
+	}
+}
+
+// AutoApplyOutcome returns the current count for one fixed result.
+func (r *Registry) AutoApplyOutcome(result AutoApplyResult) int64 {
+	if r == nil {
+		return 0
+	}
+	i := indexOfAutoApplyResult(result)
+	if i < 0 {
+		return 0
+	}
+	return r.autoApplyResults[i].Load()
 }
 
 // IncToolEffectOverride records one tool whose resolved effect class came from
@@ -730,6 +852,16 @@ func (r *Registry) WritePrometheus(w io.Writer) {
 			// exists to answer an audit question after the fact.
 			fmt.Fprintf(w, "magi_tool_effect_override_total{from=%q,to=%q} %d\n", from, to, r.toolEffectOverrides[fi][ti].Load())
 		}
+	}
+	fmt.Fprintln(w, "# TYPE magi_selfimprove_autoapply_blocked_total counter")
+	for i, reason := range autoApplyBlockReasons {
+		// Every fixed reason is exposed, including the zero ones: a blocked
+		// publish must be distinguishable from a reason that is never wired up.
+		fmt.Fprintf(w, "magi_selfimprove_autoapply_blocked_total{reason=%q} %d\n", reason, r.autoApplyBlocked[i].Load())
+	}
+	fmt.Fprintln(w, "# TYPE magi_selfimprove_autoapply_total counter")
+	for i, result := range autoApplyResults {
+		fmt.Fprintf(w, "magi_selfimprove_autoapply_total{result=%q} %d\n", result, r.autoApplyResults[i].Load())
 	}
 	fmt.Fprintf(w, "# TYPE magi_tokens_total counter\nmagi_tokens_total %d\n", r.TokensTotal.Load())
 	fmt.Fprintf(w, "# TYPE magi_requests_total counter\nmagi_requests_total %d\n", r.RequestsTotal.Load())

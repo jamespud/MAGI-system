@@ -345,7 +345,7 @@ Beyond the core decision loop, MAGI ships as a governed, deployable AI harness:
 - **Fine-grained roles** - admin / operator / user roles with route-level gating (`RequireAnyRole`); operators can run evals, benchmarks, and manage prompts while user/API-key administration stays admin-only.
 - **Deterministic feedback sensors** - the `check_output` tool lints the model's own JSON against a schema and constraint rules, and violations are fed back so the agent self-corrects before human review.
 - **Self-improving harness (human-in-the-loop)** - analyze a failed case into a categorized, rule-based improvement suggestion; an admin confirms before a proposed prompt change is written to the versioned registry.
-- **Automated regression gate** - schedule periodic re-runs of the built-in decision sanity suite (`benchmark.auto_interval_seconds`); regression failures are counted and alerted.
+- **Automated regression gate** - schedule periodic re-runs of the built-in decision sanity suite (`benchmark.auto_interval_seconds`); regression failures are counted and alerted. When prompt auto-apply is enabled the scheduled task waits for the persisted verdict and publishes only after it passes, so a failing or unfinished regression blocks the change instead of racing it.
 - **Docker sandbox** - optional container runtime (`code_runner.docker`) that runs code in a throwaway, network-isolated container with memory/CPU/PID/time limits on top of the shared guardrails.
 - **File tool (read by default)** - `file_query` reads files and lists directories inside allow-listed roots with traversal rejection and size/item bounds; writes, appends, deletes and mkdir are separate opt-in flags that default to off (`file_tool` config).
 - **Read-only repo tool** - `repo_query` greps and lists files inside allow-listed repository roots with extension filtering and result bounds (`repo_tool` config).
@@ -421,7 +421,7 @@ delegate_tool: { enabled: true }
 selfimprove: { auto_apply_enabled: false, auto_apply_threshold: 3 }
 sensor_tool: { enabled: true, checks: [{ name: "lint", command: "gofmt" }] }
 feedback_tool: { enabled: true }
-benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8 }
+benchmark: { auto_interval_seconds: 86400, auto_regression_threshold: 0.8, auto_regression_timeout_seconds: 1800 }
 tool_policy: { require_approval: ["code_runner"], auto_approved: [] }
 magi: { approval_timeout_seconds: 3600, token_budget: 150000, compaction_threshold: 0.7 }
 # ordered global failover providers + per-role overrides (unset fields inherit primary)

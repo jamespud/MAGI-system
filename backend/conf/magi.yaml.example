@@ -372,6 +372,10 @@ benchmark:
   auto_interval_seconds: 0      # e.g. 86400 for a daily regression gate
   auto_runs_per_item: 1
   auto_regression_threshold: 0  # 0 = reuse regression_threshold
+  # When selfimprove.auto_apply_enabled is on, the scheduled task waits for the
+  # persisted regression verdict and publishes only after it passes. This bounds
+  # that wait; a timeout blocks the publish instead of assuming success.
+  auto_regression_timeout_seconds: 1800
 
 rag:
   levels: [1800, 900, 300]

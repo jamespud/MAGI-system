@@ -85,8 +85,12 @@ type Service struct {
 	regressionThreshold float64
 	workerID            string
 	leaseDuration       time.Duration
+	runPollInterval     time.Duration
 	metrics             *metrics.Registry
 }
+
+// defaultRunPollInterval is how often AwaitRun re-reads a run's persisted state.
+const defaultRunPollInterval = time.Second
 
 // Option configures a dataset.Service.
 type Option func(*Service)
@@ -111,12 +115,23 @@ func WithMetrics(reg *metrics.Registry) Option {
 	return func(s *Service) { s.metrics = reg }
 }
 
+// WithRunPollInterval sets how often AwaitRun re-reads a run's persisted state.
+// It exists so tests do not wait on the production interval.
+func WithRunPollInterval(d time.Duration) Option {
+	return func(s *Service) {
+		if d > 0 {
+			s.runPollInterval = d
+		}
+	}
+}
+
 func NewService(datasets port.DatasetRepository, cases port.CaseRepository, orch Orchestrator, maxDebateRounds int, opts ...Option) *Service {
 	s := &Service{
 		datasets: datasets, cases: cases, orch: orch, maxDebateRounds: maxDebateRounds, runsPerItem: 1,
-		workerSlots:   make(chan struct{}, 2),
-		workerID:      "bench-worker-" + uuid.NewString(),
-		leaseDuration: 10 * time.Minute,
+		workerSlots:     make(chan struct{}, 2),
+		workerID:        "bench-worker-" + uuid.NewString(),
+		leaseDuration:   10 * time.Minute,
+		runPollInterval: defaultRunPollInterval,
 	}
 	for _, o := range opts {
 		o(s)
@@ -505,6 +520,48 @@ func (s *Service) RunAutoRegression(ctx context.Context, runsPerItem int, thresh
 		s.metrics.IncBenchmarkAutoRun()
 	}
 	return run, nil
+}
+
+// AwaitRun blocks until the run reaches a terminal status and returns that
+// terminal run. Callers that gate an automated change on a regression verdict
+// must use this instead of the object RunAutoRegression returns, which is still
+// queued: the verdict is computed later by the benchmark worker and persisted,
+// and in a multi-replica deployment another instance may be the one that
+// finishes it, so only the persisted state is authoritative.
+//
+// It returns ctx.Err() when the run does not finish in time, and an error when
+// the run is missing entirely; both mean "no verdict", never "passed".
+func (s *Service) AwaitRun(ctx context.Context, runID string) (*entity.BenchmarkRun, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("dataset: await run: run id is required")
+	}
+	interval := s.runPollInterval
+	if interval <= 0 {
+		interval = defaultRunPollInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		run, err := s.datasets.GetRun(ctx, runID)
+		if err != nil {
+			return nil, fmt.Errorf("dataset: await run %s: %w", runID, err)
+		}
+		if run == nil {
+			return nil, fmt.Errorf("dataset: await run %s: run not found", runID)
+		}
+		if isTerminalRunStatus(run.Status) {
+			return run, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func isTerminalRunStatus(status entity.BenchmarkRunStatus) bool {
+	return status == entity.BenchmarkRunSucceeded || status == entity.BenchmarkRunFailed
 }
 
 func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerID int64, opts RunOptions) {

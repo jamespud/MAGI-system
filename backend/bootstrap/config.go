@@ -188,6 +188,10 @@ type BenchmarkConfig struct {
 	AutoIntervalSeconds     int     `yaml:"auto_interval_seconds"`
 	AutoRunsPerItem         int     `yaml:"auto_runs_per_item"`
 	AutoRegressionThreshold float64 `yaml:"auto_regression_threshold"`
+	// AutoRegressionTimeoutSeconds bounds how long the lifecycle worker waits
+	// for an automated regression verdict before it refuses to publish on this
+	// tick. An unanswered run is never treated as a pass.
+	AutoRegressionTimeoutSeconds int `yaml:"auto_regression_timeout_seconds"`
 }
 
 type APIKeySpec struct {
@@ -541,6 +545,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Benchmark.RunsPerItem == 0 {
 		cfg.Benchmark.RunsPerItem = 1
+	}
+	if cfg.Benchmark.AutoRegressionTimeoutSeconds == 0 {
+		cfg.Benchmark.AutoRegressionTimeoutSeconds = 1800
 	}
 	if len(cfg.RAG.Levels) == 0 {
 		cfg.RAG.Levels = []int{1800, 900, 300}
@@ -1252,6 +1259,9 @@ func (c *Config) Validate() error {
 	}
 	if c.HTTPRateLimit.Enabled && c.HTTPRateLimit.PerUserPerMinute <= 0 && c.HTTPRateLimit.PerIPPerMinute <= 0 {
 		return fmt.Errorf("http_rate_limit: at least one of per_user_per_minute / per_ip_per_minute must be positive when enabled")
+	}
+	if c.Benchmark.AutoIntervalSeconds > 0 && c.Benchmark.AutoRegressionTimeoutSeconds < 1 {
+		return fmt.Errorf("benchmark: auto_regression_timeout_seconds must be positive when auto_interval_seconds is enabled")
 	}
 	if c.Magi.MaxDebateRounds < 1 || c.Magi.MaxSteps < 1 || c.Magi.TimeoutSeconds < 1 || c.Magi.CallTimeoutSeconds < 1 {
 		return fmt.Errorf("magi: max_debate_rounds, max_steps, timeout_seconds and call_timeout_seconds must be positive")

@@ -959,7 +959,7 @@ func provideServer(lc fx.Lifecycle) *hzserver.Hertz {
 	return h
 }
 
-func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config, a2a *A2A) {
+func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.Service, siSvc *selfimprove.Service, poller *ragindex.RagIndexPoller, cfg *Config, a2a *A2A, reg *metrics.Registry) {
 	var autoCancel context.CancelFunc
 	var ragCancel context.CancelFunc
 	var a2aRecoveryCancel context.CancelFunc
@@ -1020,19 +1020,39 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 						case <-autoCtx.Done():
 							return
 						case <-ticker.C:
+							if siSvc != nil && cfg.SelfImprove.AutoApplyEnabled {
+								// The publish is gated on the persisted regression
+								// verdict: starting a run is not evidence it passed.
+								gate := autoApplyGate{
+									startRegression: func(ctx context.Context) (*entity.BenchmarkRun, error) {
+										return dsSvc.RunAutoRegression(ctx, cfg.Benchmark.AutoRunsPerItem, cfg.Benchmark.AutoRegressionThreshold)
+									},
+									awaitRegression: dsSvc.AwaitRun,
+									apply:           siSvc.AutoApply,
+									timeout:         time.Duration(cfg.Benchmark.AutoRegressionTimeoutSeconds) * time.Second,
+									metrics:         reg,
+								}
+								applied, blocked, gerr := gate.run(autoCtx)
+								switch {
+								case blocked != "" && gerr != nil:
+									log.Printf("selfimprove auto-apply blocked (%s): %v", blocked, gerr)
+								case blocked != "":
+									log.Printf("selfimprove auto-apply blocked (%s)", blocked)
+								case gerr != nil:
+									log.Printf("selfimprove auto-apply failed after publishing %d suggestion(s): %v", applied, gerr)
+								case applied > 0:
+									log.Printf("selfimprove auto-applied %d suggestion(s) after a passing regression", applied)
+								}
+								continue
+							}
+							// Monitoring-only path: nothing publishes, so the run
+							// stays fire-and-forget.
 							if _, err := dsSvc.RunAutoRegression(autoCtx,
 								cfg.Benchmark.AutoRunsPerItem, cfg.Benchmark.AutoRegressionThreshold); err != nil {
 								if errors.Is(err, dataset.ErrRunActive) {
 									continue // previous automated run still in flight
 								}
 								log.Printf("auto regression: %v", err)
-							}
-							if siSvc != nil && cfg.SelfImprove.AutoApplyEnabled {
-								if applied, aerr := siSvc.AutoApply(autoCtx); aerr != nil {
-									log.Printf("selfimprove auto-apply: %v", aerr)
-								} else if applied > 0 {
-									log.Printf("selfimprove auto-applied %d suggestion(s) after regression", applied)
-								}
 							}
 						}
 					}
