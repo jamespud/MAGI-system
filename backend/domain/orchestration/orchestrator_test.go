@@ -705,6 +705,46 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 	}
 }
 
+// Issue #11: reaching RESOLVED asserts that the decision's own basis is durable.
+// If a required artifact write fails, the case must not commit a resolution that
+// cites a vote, evidence record or claim which does not exist.
+func TestOrchestrate_RequiredArtifactFailureBlocksTerminalSuccess(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+	repo.voteErr = errors.New("vote insert failed")
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		Repo:       repo,
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 0},
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-required", Question: "compute", MaxDebateRounds: 2})
+	if err != nil || len(repo.resolutions) == 0 {
+		return // refusing to commit at all is an acceptable way to block success
+	}
+	persisted := map[string]bool{}
+	for _, v := range repo.votes {
+		persisted[v.ID] = true
+	}
+	for _, r := range repo.resolutions {
+		for _, id := range r.VoteIDs {
+			if !persisted[id] {
+				t.Fatalf("committed a resolution citing an unpersisted vote %q (persisted=%d, res=%+v)",
+					id, len(repo.votes), res)
+			}
+		}
+	}
+}
+
 // fail_case aborts the decision on any agent failure instead of fabricating a
 // ballot for the missing participant.
 // Issue #10: one Orchestrator instance serves many Cases, so a failure must not
@@ -962,6 +1002,7 @@ type stubRepo struct {
 	toolCalls   []*entity.ToolCall
 	evidenceErr error
 	debateErr   error
+	voteErr     error
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
@@ -1066,6 +1107,9 @@ func (r *stubClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entit
 type stubVoteRepo struct{ s *stubRepo }
 
 func (r *stubVoteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if r.s.voteErr != nil {
+		return r.s.voteErr
+	}
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	r.s.votes = append(r.s.votes, v)
