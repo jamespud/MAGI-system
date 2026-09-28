@@ -177,6 +177,11 @@ func (s *Service) Apply(ctx context.Context, id string) (*entity.SelfImproveSugg
 // automation: suggestions carry prompt content that is written to the
 // versioned prompt registry, and repeated failures are required before
 // anything changes.
+//
+// A per-suggestion failure is never swallowed. The batch keeps trying the
+// remaining candidates, the returned count is the number that actually
+// published, and any failure is reported alongside it, so a registry write
+// error can never be mistaken for "nothing to publish".
 func (s *Service) AutoApply(ctx context.Context) (int, error) {
 	if s.repo == nil || !s.autoApply {
 		return 0, nil
@@ -193,6 +198,7 @@ func (s *Service) AutoApply(ctx context.Context) (int, error) {
 		openByCategory[suggestion.Category] = append(openByCategory[suggestion.Category], suggestion)
 	}
 	applied := 0
+	var failures []string
 	for _, suggestions := range openByCategory {
 		if len(suggestions) < s.threshold {
 			continue
@@ -203,11 +209,15 @@ func (s *Service) AutoApply(ctx context.Context) (int, error) {
 				continue
 			}
 			if _, err := s.Apply(ctx, suggestion.ID); err != nil {
+				failures = append(failures, fmt.Sprintf("%s: %v", suggestion.ID, err))
 				continue
 			}
 			applied++
 			break
 		}
+	}
+	if len(failures) > 0 {
+		return applied, fmt.Errorf("selfimprove: %d suggestion(s) failed to apply: %s", len(failures), strings.Join(failures, "; "))
 	}
 	return applied, nil
 }

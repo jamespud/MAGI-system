@@ -1039,7 +1039,7 @@ func registerLifecycle(lc fx.Lifecycle, rm *decision.RunManager, dsSvc *dataset.
 								case blocked != "":
 									log.Printf("selfimprove auto-apply blocked (%s)", blocked)
 								case gerr != nil:
-									log.Printf("selfimprove auto-apply failed: %v", gerr)
+									log.Printf("selfimprove auto-apply failed after publishing %d suggestion(s): %v", applied, gerr)
 								case applied > 0:
 									log.Printf("selfimprove auto-applied %d suggestion(s) after a passing regression", applied)
 								}

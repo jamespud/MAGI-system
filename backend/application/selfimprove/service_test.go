@@ -134,6 +134,8 @@ func (s *stubSIAgentRunRepo) CountByUser(ctx context.Context, userID int64) (int
 type stubSIPromptRepo struct {
 	current map[string]*entity.PromptTemplate
 	saved   map[string]*entity.PromptTemplate
+	// saveErr makes Save fail for the listed prompt keys.
+	saveErr map[string]error
 }
 
 func (s *stubSIPromptRepo) List(ctx context.Context) ([]*entity.PromptTemplate, error) {
@@ -143,6 +145,9 @@ func (s *stubSIPromptRepo) Get(ctx context.Context, key string) (*entity.PromptT
 	return s.current[key], nil
 }
 func (s *stubSIPromptRepo) Save(ctx context.Context, key, content string) (*entity.PromptTemplate, error) {
+	if err := s.saveErr[key]; err != nil {
+		return nil, err
+	}
 	s.saved[key] = &entity.PromptTemplate{Key: key, Content: content}
 	return s.saved[key], nil
 }
@@ -268,6 +273,68 @@ func TestService_AutoApplyDisabledIsNoOp(t *testing.T) {
 	svc := selfimprove.NewService(&stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{})
 	if applied, err := svc.AutoApply(context.Background()); err != nil || applied != 0 {
 		t.Fatalf("disabled auto-apply: applied=%d err=%v", applied, err)
+	}
+}
+
+// Issue #12: a Prompt Registry write failure must not be reported as a plain
+// "nothing to publish" result. AutoApply used to swallow every per-suggestion
+// error and return (0, nil), which the regression gate cannot tell apart from
+// an empty queue, so a real publish failure produced no blocked and no failed
+// signal at all.
+func TestService_AutoApplyReportsPromptRegistryFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	prompts := &stubSIPromptRepo{
+		current: map[string]*entity.PromptTemplate{},
+		saved:   map[string]*entity.PromptTemplate{},
+		saveErr: map[string]error{"agent.workflow_tools": errors.New("prompt registry unavailable")},
+	}
+	svc := selfimprove.NewService(repo, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{},
+		selfimprove.WithPrompts(prompts), selfimprove.WithAutoApply(true, 1))
+	_ = repo.Create(ctx, &entity.SelfImproveSuggestion{
+		ID: "s1", Category: entity.SelfImproveGateFailure,
+		PromptKey: "agent.workflow_tools", PromptContent: "x",
+		Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+	})
+
+	applied, err := svc.AutoApply(ctx)
+	if err == nil {
+		t.Fatalf("a registry write failure must surface as an error, got applied=%d err=nil", applied)
+	}
+	if applied != 0 {
+		t.Fatalf("applied = %d, want 0", applied)
+	}
+}
+
+// A batch that partially succeeds must keep the real success count and still
+// report the failure; collapsing it to a zero publish would hide both facts.
+func TestService_AutoApplyReportsPartialFailureWithTheRealCount(t *testing.T) {
+	ctx := context.Background()
+	repo := &stubSIRepo{items: map[string]*entity.SelfImproveSuggestion{}}
+	prompts := &stubSIPromptRepo{
+		current: map[string]*entity.PromptTemplate{},
+		saved:   map[string]*entity.PromptTemplate{},
+		saveErr: map[string]error{"agent.risky": errors.New("prompt registry unavailable")},
+	}
+	svc := selfimprove.NewService(repo, &stubSICaseRepo{}, &stubSIEventRepo{}, &stubSIAgentRunRepo{},
+		selfimprove.WithPrompts(prompts), selfimprove.WithAutoApply(true, 1))
+	_ = repo.Create(ctx, &entity.SelfImproveSuggestion{
+		ID: "ok", Category: entity.SelfImproveGateFailure,
+		PromptKey: "agent.workflow_tools", PromptContent: "x",
+		Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+	})
+	_ = repo.Create(ctx, &entity.SelfImproveSuggestion{
+		ID: "bad", Category: entity.SelfImproveToolError,
+		PromptKey: "agent.risky", PromptContent: "y",
+		Status: entity.SelfImproveOpen, CreatedAt: time.Now(),
+	})
+
+	applied, err := svc.AutoApply(ctx)
+	if err == nil {
+		t.Fatalf("a partial failure must still be reported, got applied=%d err=nil", applied)
+	}
+	if applied != 1 {
+		t.Fatalf("applied = %d, want the one suggestion that succeeded", applied)
 	}
 }
 

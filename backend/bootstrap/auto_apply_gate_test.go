@@ -198,14 +198,22 @@ func TestAutoApplyGate_DoesNotSwallowApplyErrors(t *testing.T) {
 		awaitRegression: func(context.Context, string) (*entity.BenchmarkRun, error) {
 			return passedRun("bench-1"), nil
 		},
-		apply:   func(context.Context) (int, error) { return 0, errors.New("prompt registry unavailable") },
+		// A batch may publish some suggestions before one fails; the gate must
+		// keep that count and still report the failure.
+		apply:   func(context.Context) (int, error) { return 2, errors.New("prompt registry unavailable") },
 		metrics: reg,
 	}
 	applied, blocked, err := gate.run(context.Background())
-	if err == nil || applied != 0 {
-		t.Fatalf("apply failure must be reported: applied=%d blocked=%q err=%v", applied, blocked, err)
+	if err == nil {
+		t.Fatalf("apply failure must be reported: applied=%d blocked=%q err=nil", applied, blocked)
+	}
+	if applied != 2 {
+		t.Fatalf("partial success must keep its real count, applied=%d", applied)
 	}
 	if blocked != "" {
 		t.Fatalf("an apply failure is not a regression block, got %q", blocked)
+	}
+	if got := reg.AutoApplyOutcome(metrics.AutoApplyResultFailed); got != 1 {
+		t.Fatalf("failed outcome metric = %d", got)
 	}
 }

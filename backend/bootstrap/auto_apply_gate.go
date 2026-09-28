@@ -86,8 +86,10 @@ func (g autoApplyGate) run(ctx context.Context) (applied int, blocked metrics.Au
 	if err != nil {
 		// The verdict permitted the publish; the publish itself failed. That is
 		// a different operational event, so it must not be counted as a block.
+		// A batch may have published some suggestions before failing, so the
+		// real count is kept instead of being collapsed to zero.
 		g.recordOutcome(metrics.AutoApplyResultFailed)
-		return 0, "", fmt.Errorf("apply suggestions: %w", err)
+		return applied, "", fmt.Errorf("apply suggestions: %w", err)
 	}
 	if applied > 0 {
 		g.recordOutcome(metrics.AutoApplyResultApplied)
