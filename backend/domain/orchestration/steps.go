@@ -135,8 +135,11 @@ func (o *Orchestrator) stepGateEvidence(ctx context.Context, case_ *entity.Decis
 
 func (o *Orchestrator) stepCollectVotes(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	st.Votes, st.Absences = o.collectBallots(st.Results)
-	if o.failPolicy.Mode == "fail_case" && o.lastAgentErr != nil {
-		return "", false, errors.New(o.lastAgentErr.Error())
+	// The abort decision is derived from this round's own absences, so one Case
+	// cannot leave failure state behind that aborts a later, healthy Case on the
+	// same shared Orchestrator.
+	if o.failPolicy.Mode == "fail_case" && len(st.Absences) > 0 {
+		return "", false, fmt.Errorf("%w: %s", ErrAgentFailed, absencesMsg(st.Absences))
 	}
 	remap := o.persistArtifacts(ctx, case_, st.Results, st.Votes, st.Round, "investigate")
 	st.AllRemaps = append(st.AllRemaps, remap)
@@ -173,7 +176,9 @@ func (o *Orchestrator) stepCheckConsensus(ctx context.Context, case_ *entity.Dec
 		// actually cast; agent failures are handled as INCOMPLETE above.
 		return entity.CaseStatusDeadlocked, false, nil
 	default:
-		return entity.CaseStatusResolving, false, nil
+		// An outcome the orchestrator cannot interpret must not be treated as a
+		// decision: fail closed rather than resolve on an unknown verdict.
+		return "", false, fmt.Errorf("unrecognised consensus outcome %q", st.ConsResult.Outcome)
 	}
 }
 

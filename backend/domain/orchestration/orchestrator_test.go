@@ -33,13 +33,19 @@ type scriptedChatModel struct {
 	mu        sync.Mutex
 	responses []*schema.Message
 	calls     int
+	// cycle restarts the script instead of erroring, so one helper can serve
+	// several cases in the same test.
+	cycle bool
 }
 
 func (s *scriptedChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.calls >= len(s.responses) {
-		return nil, fmt.Errorf("no more responses")
+		if !s.cycle {
+			return nil, fmt.Errorf("no more responses")
+		}
+		s.calls = 0
 	}
 	r := s.responses[s.calls]
 	s.calls++
@@ -135,12 +141,24 @@ func magiCfg(code string) *entity.MagiConfig {
 
 func newCommander(t *testing.T) *service.Commander {
 	t.Helper()
+	return newCommanderWith(t, false)
+}
+
+// newRepeatingCommander serves any number of cases in one test by cycling its
+// scripted responses.
+func newRepeatingCommander(t *testing.T) *service.Commander {
+	t.Helper()
+	return newCommanderWith(t, true)
+}
+
+func newCommanderWith(t *testing.T, cycle bool) *service.Commander {
+	t.Helper()
 	gen := validation.NewReflectSchemaGenerator()
 	val := validation.NewJSONSchemaValidator()
 	cm := &scriptedChatModel{responses: []*schema.Message{
 		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
 		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"]}`, nil),
-	}}
+	}, cycle: cycle}
 	cmd, err := service.NewCommander(service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"}, &stubModelPort{m: cm}, gen, val)
 	if err != nil {
 		t.Fatalf("commander: %v", err)
@@ -689,6 +707,68 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 
 // fail_case aborts the decision on any agent failure instead of fabricating a
 // ballot for the missing participant.
+// Issue #10: one Orchestrator instance serves many Cases, so a failure must not
+// leave state behind that aborts a later, healthy Case.
+func TestOrchestrate_FailureDoesNotLeakAcrossCases(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.failFirst["melchior"] = true // only the very first melchior run fails
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve(), approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newRepeatingCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "fail_case", RetryLimit: 0},
+	})
+
+	if _, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-first", Question: "compute", MaxDebateRounds: 2}); err == nil {
+		t.Fatal("the first case must fail: an agent produced no ballot under fail_case")
+	}
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-second", Question: "compute", MaxDebateRounds: 2})
+	if err != nil || res == nil {
+		t.Fatalf("a later healthy case must not inherit the previous failure: res=%+v err=%v", res, err)
+	}
+}
+
+// unknownConsensus returns an outcome the orchestrator does not define.
+type unknownConsensus struct{}
+
+func (unknownConsensus) EvaluateBallots(_ consensus.BallotSet, round int, _ consensus.ConsensusPolicy) entity.ConsensusResult {
+	return entity.ConsensusResult{Outcome: entity.ConsensusOutcome("not_a_real_outcome"), Round: round}
+}
+
+// Issue #10: an outcome the orchestrator cannot interpret must fail closed
+// instead of resolving on an unknown verdict.
+func TestOrchestrate_UnknownConsensusOutcomeFailsClosed(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		AgentLoop: mrt,
+		Consensus: unknownConsensus{},
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-unknown", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("an unknown consensus outcome must fail closed, got %+v", res)
+	}
+	if res != nil {
+		t.Fatalf("an unknown outcome must not produce a resolution: %+v", res)
+	}
+}
+
 func TestOrchestrate_FailurePolicy(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // melchior fails

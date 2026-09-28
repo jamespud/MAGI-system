@@ -51,7 +51,7 @@ func absenceKind(result *runtime.LoopResult) entity.AbsenceKind {
 	switch {
 	case errors.Is(result.Err, context.DeadlineExceeded):
 		return entity.AbsenceTimeout
-	case result.Status == runtime.LoopStatusCancelled:
+	case errors.Is(result.Err, context.Canceled), result.Status == runtime.LoopStatusCancelled:
 		return entity.AbsenceCancelled
 	default:
 		return entity.AbsenceAgentFailed

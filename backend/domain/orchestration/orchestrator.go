@@ -19,28 +19,35 @@ import (
 	"github.com/jamespud/magi/backend/domain/service"
 )
 
+// ConsensusEvaluator is the deterministic ballot evaluator the orchestrator
+// consults. It is an interface so a test can inject an outcome the orchestrator
+// does not understand and prove the case fails closed instead of resolving on an
+// uninterpretable verdict.
+type ConsensusEvaluator interface {
+	EvaluateBallots(ballots consensus.BallotSet, round int, policy consensus.ConsensusPolicy) entity.ConsensusResult
+}
+
 type Orchestrator struct {
-	dispatcher   *Dispatcher
-	consensus    *consensus.ConsensusEngine
-	debate       *debate.DebateEngine
-	commander    *service.Commander
-	eventPub     port.EventPublisher
-	caseRepo     port.CaseRepository
-	repo         port.Repository
-	knowledge    port.KnowledgePort
-	memRepo      port.MemoryRepository
-	policy       consensus.ConsensusPolicy
-	failPolicy   FailurePolicy
-	lastAgentErr error
-	configs      []*entity.MagiConfig
-	blueprint    *entity.FSMBlueprint
-	actions      map[string]ActionHandler
-	metrics      *metrics.Registry
+	dispatcher *Dispatcher
+	consensus  ConsensusEvaluator
+	debate     *debate.DebateEngine
+	commander  *service.Commander
+	eventPub   port.EventPublisher
+	caseRepo   port.CaseRepository
+	repo       port.Repository
+	knowledge  port.KnowledgePort
+	memRepo    port.MemoryRepository
+	policy     consensus.ConsensusPolicy
+	failPolicy FailurePolicy
+	configs    []*entity.MagiConfig
+	blueprint  *entity.FSMBlueprint
+	actions    map[string]ActionHandler
+	metrics    *metrics.Registry
 }
 
 type OrchestratorDeps struct {
 	AgentLoop            runtime.MagiRuntime
-	Consensus            *consensus.ConsensusEngine
+	Consensus            ConsensusEvaluator
 	Debate               *debate.DebateEngine
 	Commander            *service.Commander
 	EventPub             port.EventPublisher
@@ -63,21 +70,20 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 		fp = DefaultFailurePolicy()
 	}
 	o := &Orchestrator{
-		dispatcher:   NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
-		consensus:    d.Consensus,
-		debate:       d.Debate,
-		commander:    d.Commander,
-		eventPub:     d.EventPub,
-		caseRepo:     d.CaseRepo,
-		repo:         d.Repo,
-		knowledge:    d.Knowledge,
-		memRepo:      d.MemoryRepo,
-		policy:       d.Policy,
-		failPolicy:   fp,
-		lastAgentErr: nil,
-		configs:      d.Configs,
-		blueprint:    d.Blueprint,
-		metrics:      d.Metrics,
+		dispatcher: NewDispatcher(d.AgentLoop, d.ContextBuilder, WithToolBindingsProvider(d.ToolBindingsProvider)),
+		consensus:  d.Consensus,
+		debate:     d.Debate,
+		commander:  d.Commander,
+		eventPub:   d.EventPub,
+		caseRepo:   d.CaseRepo,
+		repo:       d.Repo,
+		knowledge:  d.Knowledge,
+		memRepo:    d.MemoryRepo,
+		policy:     d.Policy,
+		failPolicy: fp,
+		configs:    d.Configs,
+		blueprint:  d.Blueprint,
+		metrics:    d.Metrics,
 	}
 	o.actions = o.buildActionRegistry()
 	return o
@@ -311,12 +317,6 @@ func (o *Orchestrator) collectBallots(results []*runtime.LoopResult) ([]*entity.
 		if absence != nil {
 			absence.AgentCode = codeOf(o.configAt(i))
 			absences = append(absences, *absence)
-			// fail_case keeps its abort signal; it no longer needs a synthetic
-			// vote to carry it. The caller reports the failure so the durable
-			// worker retries or fails the case per its own retry policy.
-			if o.failPolicy.Mode == "fail_case" {
-				o.lastAgentErr = ErrAgentFailed
-			}
 			continue
 		}
 		votes[i] = vote

@@ -28,6 +28,7 @@ func TestFailurePolicy_ClassifySeparatesBallotsFromAbsences(t *testing.T) {
 		{name: "nil result", result: nil, wantKind: entity.AbsenceMissing},
 		{name: "agent error", result: &runtime.LoopResult{Status: runtime.LoopStatusError, Err: errors.New("boom")}, wantKind: entity.AbsenceAgentFailed},
 		{name: "deadline exceeded", result: &runtime.LoopResult{Status: runtime.LoopStatusError, Err: context.DeadlineExceeded}, wantKind: entity.AbsenceTimeout},
+		{name: "context canceled", result: &runtime.LoopResult{Status: runtime.LoopStatusError, Err: context.Canceled}, wantKind: entity.AbsenceCancelled},
 		{name: "cancelled", result: &runtime.LoopResult{Status: runtime.LoopStatusCancelled}, wantKind: entity.AbsenceCancelled},
 		{name: "completed without a ballot", result: &runtime.LoopResult{Status: runtime.LoopStatusCompleted}, wantKind: entity.AbsenceMissing},
 		{name: "empty decision", result: &runtime.LoopResult{Status: runtime.LoopStatusCompleted, Vote: &entity.Vote{}}, wantKind: entity.AbsenceInvalid},
