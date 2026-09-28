@@ -36,6 +36,17 @@ func ToolIdempotencyKey(invocationID string, toolName string, canonicalArguments
 	return digest("tool:v1|" + invocationID + "|" + toolName + "|" + argumentsHash)
 }
 
+// ApprovalIntentDigest binds a human approval decision to one exact invocation
+// intent: the tool plus its canonical arguments. It deliberately shares the
+// canonical argument encoding with ToolIdempotencyKey so "the same call" means
+// the same thing to the approval key and to the execution kernel. A call that
+// changes any business argument produces a different digest and therefore
+// cannot inherit an earlier decision.
+func ApprovalIntentDigest(toolName string, canonicalArguments []byte) string {
+	argumentsHash := digestBytes(canonicalArguments)
+	return digest("approval-intent:v1|" + toolName + "|" + argumentsHash)
+}
+
 func digest(value string) string {
 	return digestBytes([]byte(value))
 }

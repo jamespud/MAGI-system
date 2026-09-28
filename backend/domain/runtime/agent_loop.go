@@ -838,7 +838,7 @@ func (l *AgentLoop) run(ctx context.Context, cfg *entity.MagiConfig, actx *Agent
 					Permission:     toolruntime.Permission{ToolName: tc.Function.Name},
 					ExpectedSchema: expectedSchemaForTool(tc.Function.Name, phase, summarySchema, voteSchema, reflectionSchema),
 					Approval: func(approvalCtx context.Context) (toolruntime.ApprovalDecision, error) {
-						approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
+						approved, decidedBy, reason, approvalErr := l.requestApproval(approvalCtx, actx, agentCode, invocationID, &tc, td, cfg.LoopPolicy.ApprovalTimeout)
 						approvalReason = reason
 						return toolruntime.ApprovalDecision{Approved: approved, DecidedBy: decidedBy, Reason: reason}, approvalErr
 					},
@@ -1092,26 +1092,49 @@ func (l *AgentLoop) restoreCheckpointSummaryFromMessages(messages []*schema.Mess
 	return nil, errors.New("schema-valid evidence summary with gate-passed transition missing from message history")
 }
 
-func (l *AgentLoop) requestApproval(runCtx context.Context, actx *AgentContext, agentCode entity.MagiCode, tc *schema.ToolCall, td port.ToolDefinition, timeout time.Duration) (bool, string, string, error) {
+func (l *AgentLoop) requestApproval(runCtx context.Context, actx *AgentContext, agentCode entity.MagiCode, invocationID string, tc *schema.ToolCall, td port.ToolDefinition, timeout time.Duration) (bool, string, string, error) {
 	if l.approvalRepo == nil {
 		return false, "", "approval required but approval repository is not configured", nil
 	}
-	req, err := l.approvalRepo.FindByKey(runCtx, actx.CaseID, actx.RunID, td.Name)
+	// The authoritative identity is the logical invocation, not the tool name or
+	// the arguments: a resumed retry of the same call reuses its decision, while
+	// an independent call needs its own even when the arguments are identical.
+	intentDigest := execution.ApprovalIntentDigest(td.Name, canonicalToolArguments(tc.Function.Arguments))
+	req, err := l.approvalRepo.FindByInvocation(runCtx, actx.CaseID, invocationID)
 	if err != nil {
 		return false, "", "", fmt.Errorf("find approval: %w", err)
 	}
 	if req == nil {
 		req = &entity.ApprovalRequest{
 			CaseID: actx.CaseID, RunID: actx.RunID, AgentCode: agentCode,
-			ToolName: td.Name, Arguments: tc.Function.Arguments,
-			Status: entity.ApprovalPending, RequestedAt: time.Now(),
+			ToolName: td.Name, Arguments: tc.Function.Arguments, IntentDigest: intentDigest,
+			InvocationID: invocationID,
+			Status:       entity.ApprovalPending, RequestedAt: time.Now(),
 		}
-		if err := l.approvalRepo.Create(runCtx, req); err != nil {
+		switch err := l.approvalRepo.Create(runCtx, req); {
+		case err == nil:
+			l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalRequested, map[string]any{
+				"approval_id": req.ID, "tool_name": td.Name, "case_id": actx.CaseID,
+			})
+		case errors.Is(err, port.ErrApprovalConflict):
+			// Lost a create race: another writer stored the authoritative
+			// request for this invocation, so wait on that one instead of
+			// creating a second.
+			req, err = l.approvalRepo.FindByInvocation(runCtx, actx.CaseID, invocationID)
+			if err != nil {
+				return false, "", "", fmt.Errorf("find approval after conflict: %w", err)
+			}
+			if req == nil {
+				return false, "", "approval conflict without an authoritative request", nil
+			}
+		default:
 			return false, "", "", fmt.Errorf("create approval: %w", err)
 		}
-		l.publish(runCtx, actx.CaseID, actx.RunID, agentCode, entity.EventToolApprovalRequested, map[string]any{
-			"approval_id": req.ID, "tool_name": td.Name, "case_id": actx.CaseID,
-		})
+	}
+	// The stored request must describe exactly this invocation. A row whose tool
+	// or arguments drifted must not authorize this call.
+	if req.ToolName != td.Name || req.IntentDigest != intentDigest {
+		return false, "", "approval does not match this invocation", nil
 	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

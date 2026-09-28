@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ type fakeApprovalRepo struct {
 	mu       sync.Mutex
 	reqs     map[string]*entity.ApprovalRequest
 	onCreate func(a *entity.ApprovalRequest)
+	seq      int
 }
 
 func newFakeApprovalRepo() *fakeApprovalRepo {
@@ -28,7 +30,10 @@ func newFakeApprovalRepo() *fakeApprovalRepo {
 func (r *fakeApprovalRepo) Create(_ context.Context, a *entity.ApprovalRequest) error {
 	r.mu.Lock()
 	if a.ID == "" {
-		a.ID = "appr-fake"
+		// Unique per request: a fixed id would make the map hold only the last
+		// request and silently hide how many approvals a run actually created.
+		r.seq++
+		a.ID = fmt.Sprintf("appr-fake-%d", r.seq)
 	}
 	r.reqs[a.ID] = a
 	cb := r.onCreate
@@ -50,15 +55,29 @@ func (r *fakeApprovalRepo) Get(_ context.Context, id string) (*entity.ApprovalRe
 	return &cp, nil
 }
 
-func (r *fakeApprovalRepo) FindByKey(_ context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {
+func (r *fakeApprovalRepo) FindByInvocation(_ context.Context, caseID, invocationID string) (*entity.ApprovalRequest, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, a := range r.reqs {
-		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName {
+		if a.CaseID == caseID && a.InvocationID == invocationID && invocationID != "" {
 			return a, nil
 		}
 	}
 	return nil, nil
+}
+
+// findByRunTool is a test-only accessor: the assertions below care about the
+// request the loop produced for a run/tool pair, not about its invocation id.
+func (r *fakeApprovalRepo) findByRunTool(caseID, runID, toolName string) *entity.ApprovalRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.reqs {
+		if a.CaseID == caseID && a.RunID == runID && a.ToolName == toolName {
+			cp := *a
+			return &cp
+		}
+	}
+	return nil
 }
 
 func (r *fakeApprovalRepo) List(_ context.Context, _ string) ([]*entity.ApprovalRequest, error) {
@@ -153,7 +172,7 @@ func TestAgentLoop_ApprovalApprovedExecutesTool(t *testing.T) {
 	if executed == nil || executed.ApprovedBy != "human-1" {
 		t.Fatalf("expected executed approved tool call: %+v", executed)
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-1", "calc")
+	req := repo.findByRunTool("c1", "run-1", "calc")
 	if req == nil || req.Status != entity.ApprovalApproved {
 		t.Fatalf("request: %+v", req)
 	}
@@ -190,7 +209,7 @@ func TestAgentLoop_ApprovalRejectedFeedsBack(t *testing.T) {
 	if rejected == nil || !contains(rejected.Err, "rejected by human") {
 		t.Fatalf("expected rejected tool call: %+v", rejected)
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-2", "calc")
+	req := repo.findByRunTool("c1", "run-2", "calc")
 	if req == nil || req.Status != entity.ApprovalRejected {
 		t.Fatalf("request: %+v", req)
 	}
@@ -213,7 +232,7 @@ func TestAgentLoop_ApprovalExpires(t *testing.T) {
 	if res.Vote == nil {
 		t.Fatal("expected a vote after timeout")
 	}
-	req, _ := repo.FindByKey(context.Background(), "c1", "run-3", "calc")
+	req := repo.findByRunTool("c1", "run-3", "calc")
 	if req == nil || req.Status != entity.ApprovalExpired {
 		t.Fatalf("request: %+v", req)
 	}

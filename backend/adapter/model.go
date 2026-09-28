@@ -280,18 +280,26 @@ type RuntimeInvocationAttemptModel struct {
 func (RuntimeInvocationAttemptModel) TableName() string { return "runtime_invocation_attempt" }
 
 type ApprovalModel struct {
-	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index"`
-	RunID       string
-	AgentCode   string
-	ToolName    string
-	Arguments   string `gorm:"type:text"`
-	Status      string `gorm:"index"`
-	Reason      string `gorm:"type:text"`
-	DecidedBy   string
-	RequestedAt time.Time
-	DecidedAt   *time.Time
-	CreatedAt   time.Time
+	ID     string `gorm:"primaryKey"`
+	CaseID string `gorm:"index;uniqueIndex:uk_approval_invocation,priority:1"`
+	RunID  string
+	// InvocationID is the logical call this request authorizes. It is NULL for
+	// rows persisted before invocation binding existed: MySQL allows repeated
+	// NULLs in a unique index, so those legacy rows cannot collide with each
+	// other and the lookup refuses them.
+	InvocationID *string `gorm:"size:64;uniqueIndex:uk_approval_invocation,priority:2"`
+	AgentCode    string
+	ToolName     string
+	Arguments    string `gorm:"type:text"`
+	// IntentDigest is the canonical digest of the invocation the decision
+	// authorizes. Empty on rows persisted before intent binding existed.
+	IntentDigest string `gorm:"size:64;not null;default:''"`
+	Status       string `gorm:"index"`
+	Reason       string `gorm:"type:text"`
+	DecidedBy    string
+	RequestedAt  time.Time
+	DecidedAt    *time.Time
+	CreatedAt    time.Time
 }
 
 func (ApprovalModel) TableName() string { return "magi_approval_request" }

@@ -14,6 +14,64 @@ import (
 )
 
 const s21MigrationPath = "../../docker/atlas/migrations/magi_s21_runtime_kernel.sql"
+const s24MigrationPath = "../../docker/atlas/migrations/magi_s24_approval_intent_binding.sql"
+
+// Issue #9: the approval identity became the logical invocation, pinned by an
+// intent digest. The Atlas script and the GORM model must agree on the column
+// widths and on the unique key, so a deployment that applies the SQL by hand
+// does not diverge from one that relies on the startup AutoMigrate path.
+func TestS24ApprovalIntentMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s24MigrationPath)
+	if err != nil {
+		t.Fatalf("read s24 migration: %v", err)
+	}
+	sql := string(raw)
+	if !strings.Contains(strings.ToUpper(sql), "INTENT_DIGEST") {
+		t.Fatalf("S24 must add the intent_digest column:\n%s", sql)
+	}
+
+	for _, column := range []string{"invocation_id", "intent_digest"} {
+		match := regexp.MustCompile(`(?i)` + column + `\s+VARCHAR\((\d+)\)`).FindStringSubmatch(sql)
+		if match == nil {
+			t.Fatalf("S24 must declare %s as VARCHAR(n):\n%s", column, sql)
+		}
+		declared, _ := strconv.Atoi(match[1])
+		if model := modelColumnSize(t, column); declared != model {
+			t.Fatalf("S24 declares %s VARCHAR(%d) but ApprovalModel declares size:%d", column, declared, model)
+		}
+	}
+
+	// The unique constraint is what makes "one logical call, one authoritative
+	// approval request" hold under a concurrent create, so the script must
+	// carry it, not only the model tag.
+	if match := regexp.MustCompile(`(?i)UNIQUE KEY\s+uk_approval_invocation\s*\(\s*case_id\s*,\s*invocation_id\s*\)`).FindString(sql); match == "" {
+		t.Fatalf("S24 must declare UNIQUE KEY uk_approval_invocation (case_id, invocation_id):\n%s", sql)
+	}
+}
+
+// modelColumnSize returns the explicit gorm size of the model field whose
+// snake_case column name matches, using GORM's own naming strategy so an ID
+// field is not mangled into run__id.
+func modelColumnSize(t *testing.T, column string) int {
+	t.Helper()
+	naming := schema.NamingStrategy{}
+	rt := reflect.TypeOf(magi.ApprovalModel{})
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		if naming.ColumnName("", field.Name) != column {
+			continue
+		}
+		for _, part := range strings.Split(field.Tag.Get("gorm"), ";") {
+			if strings.HasPrefix(part, "size:") {
+				size, _ := strconv.Atoi(strings.TrimPrefix(part, "size:"))
+				return size
+			}
+		}
+		t.Fatalf("ApprovalModel.%s must declare an explicit size", field.Name)
+	}
+	t.Fatalf("ApprovalModel has no field for column %s", column)
+	return 0
+}
 
 // The Atlas snapshot and the GORM models describe the same tables. Nothing kept
 // them in sync, which is how run_id ended up 64 wide in both while callers wrote

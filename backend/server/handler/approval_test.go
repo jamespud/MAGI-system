@@ -30,7 +30,7 @@ func (r *memApprovalRepo) Get(ctx context.Context, id string) (*entity.ApprovalR
 	}
 	return nil, nil
 }
-func (r *memApprovalRepo) FindByKey(ctx context.Context, caseID, runID, toolName string) (*entity.ApprovalRequest, error) {
+func (r *memApprovalRepo) FindByInvocation(ctx context.Context, caseID, invocationID string) (*entity.ApprovalRequest, error) {
 	return nil, nil
 }
 func (r *memApprovalRepo) List(ctx context.Context, caseID string) ([]*entity.ApprovalRequest, error) {
