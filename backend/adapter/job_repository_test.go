@@ -188,6 +188,50 @@ func TestDecisionJobRepo_TerminalJobDoesNotConsumeCapacity(t *testing.T) {
 	}
 }
 
+// Issue #11: the terminal transaction must refuse a resolution that cites an
+// artifact which was never persisted, and must roll back the status change with
+// it, so a case can never reach a successful terminal state on a dangling
+// reference.
+func TestTerminalCommitter_RefusesResolutionCitingUnpersistedArtifacts(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.ResolutionModel{}, &magi.EventModel{}, &magi.EventCursorModel{}, &magi.VoteModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	committer, ok := repo.(port.TerminalCommitter)
+	if !ok {
+		t.Fatal("production repository must provide terminal commit fencing")
+	}
+	ctx := context.Background()
+	caseID := "case-terminal-dangling"
+	if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusEvaluating}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	committed, err := committer.CommitTerminal(ctx, caseID, entity.CaseStatusEvaluating, entity.CaseStatusResolved,
+		&entity.Resolution{ID: "res-terminal-dangling", CaseID: caseID, FinalDecision: entity.VoteDecisionApprove,
+			VoteIDs: []string{"vote-never-persisted"}}, &event)
+	if err == nil {
+		t.Fatal("a resolution citing an unpersisted vote must be refused")
+	}
+	if committed {
+		t.Fatal("a refused terminal commit must not report success")
+	}
+	if _, err := repo.ResolutionRepo().Get(ctx, caseID); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("resolution after refused terminal commit: %v", err)
+	}
+	got, err := repo.CaseRepo().Get(ctx, caseID)
+	if err != nil {
+		t.Fatalf("re-read case: %v", err)
+	}
+	if got.Status != entity.CaseStatusEvaluating {
+		t.Fatalf("status after refused terminal commit = %s, want the status rolled back", got.Status)
+	}
+}
+
 func TestTerminalCommitter_DoesNotWriteArtifactsAfterCancellation(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

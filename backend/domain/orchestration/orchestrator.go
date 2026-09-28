@@ -214,11 +214,88 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		return err
 	}
 	if resolution != nil && o.repo != nil {
+		if err := o.verifyResolutionArtifacts(ctx, resolution); err != nil {
+			return err
+		}
 		if err := o.repo.ResolutionRepo().Create(ctx, resolution); err != nil {
 			return fmt.Errorf("persist resolution: %w", err)
 		}
 	}
 	return o.publish(ctx, case_, event.Type, event.Payload)
+}
+
+// verifyResolutionArtifacts refuses a terminal success whose resolution cites
+// artifacts that are not durable. A resolution asserts "these ballots and this
+// evidence decided the case"; citing a row that was never persisted would make
+// that claim false, so the terminal commit must not happen.
+//
+// The cited ids embed the execution attempt, so checking them for existence is
+// also what keeps a retry from validating against artifacts of an older
+// attempt. This is the fallback path's guard; the database-backed
+// TerminalCommitter runs the same check inside its terminal transaction.
+func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entity.Resolution) error {
+	if res == nil {
+		return nil
+	}
+	if len(res.VoteIDs) > 0 {
+		votes, err := o.repo.VoteRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution votes: %w", err)
+		}
+		present := make(map[string]struct{}, len(votes))
+		for _, v := range votes {
+			present[v.ID] = struct{}{}
+		}
+		if err := requireAllPresent("vote", res.VoteIDs, present); err != nil {
+			return err
+		}
+	}
+	if len(res.KeyEvidenceIDs) > 0 {
+		evidence, err := o.repo.EvidenceRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution evidence: %w", err)
+		}
+		present := make(map[string]struct{}, len(evidence))
+		for _, e := range evidence {
+			present[e.ID] = struct{}{}
+		}
+		if err := requireAllPresent("evidence", res.KeyEvidenceIDs, present); err != nil {
+			return err
+		}
+	}
+	if len(res.KeyClaimIDs) > 0 {
+		claims, err := o.repo.ClaimRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution claims: %w", err)
+		}
+		present := make(map[string]struct{}, len(claims))
+		for _, c := range claims {
+			present[c.ID] = struct{}{}
+		}
+		if err := requireAllPresent("claim", res.KeyClaimIDs, present); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireAllPresent reports every cited id that has no persisted row.
+func requireAllPresent(kind string, cited []string, present map[string]struct{}) error {
+	var missing []string
+	seen := make(map[string]struct{}, len(cited))
+	for _, id := range cited {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, ok := present[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("resolution cites %d unpersisted %s id(s): %s", len(missing), kind, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // isNormalTerminal reports whether a status is one of the normal terminal
