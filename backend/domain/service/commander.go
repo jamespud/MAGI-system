@@ -97,11 +97,19 @@ func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCa
 	if err != nil {
 		return "", fmt.Errorf("commander: build model: %w", err)
 	}
+	// Count the authoritative ballots: a nil slot marks a participant that
+	// produced none, which is not an abstention.
+	ballots := 0
+	for _, v := range votes {
+		if v != nil {
+			ballots++
+		}
+	}
 	prompt := c.render(ctx, prompt.KeyCommanderReport, map[string]string{
 		"PERSONA":      c.cfg.Persona,
 		"QUESTION":     case_.Question,
 		"CONSENSUS":    string(resolution.Consensus.Outcome),
-		"VOTES":        fmt.Sprintf("%d", len(votes)),
+		"VOTES":        fmt.Sprintf("%d", ballots),
 		"EVIDENCE_IDS": fmt.Sprintf("%v", evidenceIDs),
 		"CLAIM_IDS":    fmt.Sprintf("%v", claimIDs),
 	})

@@ -1,7 +1,9 @@
 package orchestration
 
 import (
+	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/runtime"
@@ -20,15 +22,38 @@ func DefaultFailurePolicy() FailurePolicy {
 // fails the whole decision instead of silently converting to an abstention.
 var ErrAgentFailed = errors.New("agent failed: case aborted by failure policy")
 
-// HandleFailure produces an ABSTAIN vote for a failed Magi.
-func (p FailurePolicy) HandleFailure(result *runtime.LoopResult, cfg *entity.MagiConfig) *entity.Vote {
-	if result != nil && result.Vote != nil && result.Err == nil {
-		return result.Vote
+// Classify separates an authoritative ballot from a non-vote. Exactly one of
+// the two results is non-nil.
+//
+// A failure, timeout, cancellation, missing ballot or unknown decision value is
+// an absence, never a Vote: ABSTAIN is a decision a persona makes, not the
+// absence of one, and fabricating it lets a missing participant satisfy quorum.
+func (p FailurePolicy) Classify(result *runtime.LoopResult) (*entity.Vote, *entity.AgentAbsence) {
+	switch {
+	case result == nil:
+		return nil, &entity.AgentAbsence{Kind: entity.AbsenceMissing, Reason: "agent produced no result"}
+	case result.Err != nil || result.Status != runtime.LoopStatusCompleted:
+		return nil, &entity.AgentAbsence{Kind: absenceKind(result), Reason: runtime.LoopFailureReason(result)}
+	case result.Vote == nil:
+		return nil, &entity.AgentAbsence{Kind: entity.AbsenceMissing, Reason: "agent returned no final ballot"}
+	case !entity.IsValidVoteDecision(result.Vote.Decision):
+		return nil, &entity.AgentAbsence{
+			Kind:   entity.AbsenceInvalid,
+			Reason: fmt.Sprintf("invalid vote decision %q", result.Vote.Decision),
+		}
 	}
-	reason := runtime.LoopFailureReason(result)
-	return &entity.Vote{
-		Decision:         entity.VoteDecisionAbstain,
-		Confidence:       0,
-		ReasoningSummary: "agent failed: " + reason,
+	return result.Vote, nil
+}
+
+// absenceKind classifies why no ballot arrived. A timeout is a distinct
+// operational fact from a generic failure or an explicit cancellation.
+func absenceKind(result *runtime.LoopResult) entity.AbsenceKind {
+	switch {
+	case errors.Is(result.Err, context.DeadlineExceeded):
+		return entity.AbsenceTimeout
+	case result.Status == runtime.LoopStatusCancelled:
+		return entity.AbsenceCancelled
+	default:
+		return entity.AbsenceAgentFailed
 	}
 }

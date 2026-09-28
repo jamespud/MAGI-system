@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jamespud/magi/backend/domain/entity"
 )
@@ -10,10 +11,46 @@ type ConsensusEngine struct{}
 
 func NewConsensusEngine() *ConsensusEngine { return &ConsensusEngine{} }
 
-// Evaluate counts votes and classifies the outcome deterministically (ADR-009).
-// It does NOT decide state transitions (debate vs resolve); the orchestrator
-// inspects the Outcome + Detail + policy to choose the next state.
+// BallotSet is one round's authoritative input: the ballots that were actually
+// cast, and the expected participants that produced none. A non-vote is never
+// turned into a ballot.
+type BallotSet struct {
+	Votes    []entity.Vote
+	Absences []entity.AgentAbsence
+}
+
+// Evaluate is the legacy entry point for a round with no recorded absences. It
+// is kept for callers that only hold ballots; EvaluateBallots is the contract
+// the orchestrator uses.
 func (e *ConsensusEngine) Evaluate(votes []entity.Vote, round int, policy ConsensusPolicy) entity.ConsensusResult {
+	return e.EvaluateBallots(BallotSet{Votes: votes}, round, policy)
+}
+
+// EvaluateBallots counts the authoritative ballots of one round and classifies
+// the outcome deterministically (ADR-009). It does NOT decide state transitions
+// (debate vs resolve); the orchestrator inspects the Outcome + Detail + policy
+// to choose the next state.
+//
+// A round is INCOMPLETE when an expected participant produced no ballot or when
+// a ballot carries an unknown decision value. Such a round cannot produce a
+// decision however many of the remaining ballots approve, because a failed,
+// timed-out, cancelled, missing or malformed vote is not an abstention.
+func (e *ConsensusEngine) EvaluateBallots(ballots BallotSet, round int, policy ConsensusPolicy) entity.ConsensusResult {
+	for _, v := range ballots.Votes {
+		if !entity.IsValidVoteDecision(v.Decision) {
+			return entity.ConsensusResult{
+				Outcome: entity.ConsensusIncomplete, Votes: ballots.Votes, Round: round,
+				Detail: fmt.Sprintf("invalid vote decision %q", v.Decision),
+			}
+		}
+	}
+	if len(ballots.Absences) > 0 {
+		return entity.ConsensusResult{
+			Outcome: entity.ConsensusIncomplete, Votes: ballots.Votes, Round: round,
+			Detail: absencesDetail(ballots.Absences),
+		}
+	}
+	votes := ballots.Votes
 	if len(votes) == 0 {
 		return entity.ConsensusResult{Outcome: entity.ConsensusInsufficientQuorum, Round: round, Detail: "no votes"}
 	}
@@ -37,8 +74,15 @@ func (e *ConsensusEngine) Evaluate(votes []entity.Vote, round int, policy Consen
 			approve++
 		case entity.VoteDecisionReject:
 			reject++
-		default:
+		case entity.VoteDecisionAbstain:
 			abstain++
+		default:
+			// Unreachable: unknown values are rejected above. Kept explicit so a
+			// future decision value cannot silently become an abstention again.
+			return entity.ConsensusResult{
+				Outcome: entity.ConsensusIncomplete, Votes: votes, Round: round,
+				Detail: fmt.Sprintf("invalid vote decision %q", d),
+			}
 		}
 	}
 
@@ -92,4 +136,13 @@ func (e *ConsensusEngine) Evaluate(votes []entity.Vote, round int, policy Consen
 
 	// deadlock: no majority (e.g. approve=1, reject=1, abstain=1)
 	return entity.ConsensusResult{Outcome: entity.ConsensusDeadlock, Votes: votes, Round: round, Detail: fmt.Sprintf("approve=%d reject=%d abstain=%d", approve, reject, abstain)}
+}
+
+// absencesDetail renders the missing participants for logs and case failures.
+func absencesDetail(absences []entity.AgentAbsence) string {
+	parts := make([]string, 0, len(absences))
+	for _, a := range absences {
+		parts = append(parts, a.String())
+	}
+	return fmt.Sprintf("%d participant(s) produced no ballot: %s", len(absences), strings.Join(parts, "; "))
 }

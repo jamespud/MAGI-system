@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/jamespud/magi/backend/application/metrics"
+	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/memory"
 	"github.com/jamespud/magi/backend/domain/runtime"
@@ -19,10 +19,14 @@ import (
 // local variables that used to live inside the Orchestrate loop, so each step
 // (and later the table-driven action dispatch) operates on one explicit state.
 type State struct {
-	MaxDebate  int
-	Task       *entity.DecisionTask
-	Results    []*runtime.LoopResult
-	Votes      []*entity.Vote
+	MaxDebate int
+	Task      *entity.DecisionTask
+	Results   []*runtime.LoopResult
+	Votes     []*entity.Vote
+	// Absences lists the expected participants that produced no authoritative
+	// ballot this round. Votes stays index-aligned with Results, so a nil vote
+	// slot plus its absence means "this agent did not vote", not "abstain".
+	Absences   []entity.AgentAbsence
 	ConsResult entity.ConsensusResult
 	Resolution *entity.Resolution
 	AllRemaps  []*ArtifactRemap
@@ -130,18 +134,26 @@ func (o *Orchestrator) stepGateEvidence(ctx context.Context, case_ *entity.Decis
 }
 
 func (o *Orchestrator) stepCollectVotes(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
-	st.Votes = o.extractVotes(st.Results)
+	st.Votes, st.Absences = o.collectBallots(st.Results)
 	if o.failPolicy.Mode == "fail_case" && o.lastAgentErr != nil {
 		return "", false, errors.New(o.lastAgentErr.Error())
 	}
 	remap := o.persistArtifacts(ctx, case_, st.Results, st.Votes, st.Round, "investigate")
 	st.AllRemaps = append(st.AllRemaps, remap)
-	o.publish(ctx, case_, entity.EventVoteSubmitted, map[string]any{"round": st.Round, "votes": len(st.Votes)})
+	payload := map[string]any{"round": st.Round, "votes": ballotCount(st.Votes)}
+	if len(st.Absences) > 0 {
+		// The absence is a first-class, observable fact: the case failure and
+		// the diagnostics both name which participant produced no ballot.
+		payload["absences"] = absencesMsg(st.Absences)
+	}
+	o.publish(ctx, case_, entity.EventVoteSubmitted, payload)
 	return entity.CaseStatusConsensusCheck, false, nil
 }
 
 func (o *Orchestrator) stepCheckConsensus(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
-	st.ConsResult = o.consensus.Evaluate(derefVotes(st.Votes), st.Round, o.policy)
+	st.ConsResult = o.consensus.EvaluateBallots(consensus.BallotSet{
+		Votes: derefVotes(st.Votes), Absences: st.Absences,
+	}, st.Round, o.policy)
 	o.publish(ctx, case_, entity.EventConsensusEvaluated, map[string]any{"outcome": string(st.ConsResult.Outcome), "round": st.Round})
 	switch st.ConsResult.Outcome {
 	case entity.ConsensusStrongApproval, entity.ConsensusStrongRejection, entity.ConsensusConditional:
@@ -151,13 +163,14 @@ func (o *Orchestrator) stepCheckConsensus(ctx context.Context, case_ *entity.Dec
 			return entity.CaseStatusDebating, false, nil
 		}
 		return entity.CaseStatusResolving, false, nil
+	case entity.ConsensusIncomplete:
+		// A failed, timed-out, cancelled, missing or invalid ballot is not an
+		// abstention, so the round cannot decide: surface it as a definite
+		// failure instead of resolving on the remaining approvals.
+		return "", false, fmt.Errorf("incomplete vote: %s", st.ConsResult.Detail)
 	case entity.ConsensusDeadlock, entity.ConsensusInsufficientQuorum:
-		// A tie caused by agent FAILURES is not a genuine deadlock: it means
-		// the decision could not be reached because an agent malfunctioned.
-		// Surface that as a case failure instead of a misleading DEADLOCKED.
-		if reasons := failedAgentReasons(st.Votes); len(reasons) > 0 {
-			return "", false, fmt.Errorf("deadlock caused by agent failures: %s", strings.Join(reasons, "; "))
-		}
+		// A genuine deadlock or quorum shortfall among ballots that were
+		// actually cast; agent failures are handled as INCOMPLETE above.
 		return entity.CaseStatusDeadlocked, false, nil
 	default:
 		return entity.CaseStatusResolving, false, nil
@@ -189,7 +202,7 @@ func (o *Orchestrator) stepReflect(ctx context.Context, case_ *entity.DecisionCa
 
 func (o *Orchestrator) stepRevote(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": st.Round})
-	newVotes := o.extractVotes(st.Results)
+	newVotes, newAbsences := o.collectBallots(st.Results)
 	remap := o.persistArtifacts(ctx, case_, st.Results, newVotes, st.Round, "reconsider")
 	st.AllRemaps = append(st.AllRemaps, remap)
 	reflections := EnforceReflectionRule(st.Votes, newVotes, st.Results, o.configs, st.Round)
@@ -208,6 +221,7 @@ func (o *Orchestrator) stepRevote(ctx context.Context, case_ *entity.DecisionCas
 		}
 	}
 	st.Votes = newVotes
+	st.Absences = newAbsences
 	st.Round++
 	return entity.CaseStatusConsensusCheck, false, nil
 }

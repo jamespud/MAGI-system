@@ -45,4 +45,9 @@ const (
 	ConsensusDeadlock                 ConsensusOutcome = "deadlock"
 	ConsensusInsufficientQuorum       ConsensusOutcome = "insufficient_quorum"
 	ConsensusConditional              ConsensusOutcome = "conditional"
+	// ConsensusIncomplete means the round is missing at least one expected
+	// participant's ballot. A failed, timed-out, cancelled, missing or invalid
+	// vote is not an abstention, so the round cannot produce a decision no
+	// matter how many of the remaining ballots approve.
+	ConsensusIncomplete ConsensusOutcome = "incomplete"
 )

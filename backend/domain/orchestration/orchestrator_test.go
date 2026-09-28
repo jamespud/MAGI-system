@@ -453,16 +453,19 @@ func TestOrchestrate_RetriesFailedAgent(t *testing.T) {
 	}
 }
 
-// TestOrchestrate_RetryExhaustedFallsBack guards the bounded-retry bound:
-// when the agent keeps failing, the failure policy still applies after the
-// retry budget is consumed.
+// TestOrchestrate_RetryExhaustedFallsBack guards the bounded-retry bound and
+// the failure contract behind it: once the retry budget is consumed, the
+// persistently failing agent is an absence, not an abstention, so the two
+// healthy approvals must not become a decision.
 func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // always fails
 	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
 	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		Repo:       repo,
 		AgentLoop:  mrt,
 		Consensus:  consensus.NewConsensusEngine(),
 		Debate:     debate.NewDebateEngine(nil),
@@ -473,17 +476,86 @@ func TestOrchestrate_RetryExhaustedFallsBack(t *testing.T) {
 	})
 
 	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-retry-exhausted", Question: "compute", MaxDebateRounds: 2})
-	if err != nil {
-		t.Fatalf("orchestrate: %v", err)
+	if err == nil {
+		t.Fatalf("a persistently failing agent must not be resolved as a majority, got %+v", res)
 	}
-	if res == nil {
-		t.Fatal("expected resolution via majority of the two healthy agents")
+	if res != nil {
+		t.Fatalf("an incomplete round must not produce a resolution: %+v", res)
 	}
-	// investigate (1 initial + 2 retries) + reconsider (same) = 6; the retry
-	// budget is bounded per dispatch round, so the persistent failure still
-	// falls back to the failure policy instead of looping forever.
-	if mrt.calls["melchior"] != 6 {
-		t.Fatalf("expected 6 melchior attempts (2 rounds x 3), got %d", mrt.calls["melchior"])
+	// 1 initial + 2 retries in the investigate round; the round is incomplete
+	// as soon as the budget is consumed, so it never reaches a debate round.
+	if mrt.calls["melchior"] != 3 {
+		t.Fatalf("expected 3 melchior attempts (1 initial + 2 retries), got %d", mrt.calls["melchior"])
+	}
+}
+
+// Issue #10: a failed agent is not an abstention. Two approvals plus one
+// persistent agent failure must not become a majority decision, and the failure
+// must not be persisted as a third authoritative ballot.
+func TestOrchestrate_AgentFailureIsNotAnAbstention(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.errOn["melchior"] = true // always fails, retry budget is consumed
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		Repo:       repo,
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 1},
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-absent", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("two approvals plus a failed agent must not resolve, got %+v", res)
+	}
+	if res != nil {
+		t.Fatalf("an incomplete round must not produce a resolution: %+v", res)
+	}
+	for _, v := range repo.votes {
+		if v.Decision == entity.VoteDecisionAbstain || v.Decision == "" {
+			t.Fatalf("a failed agent must not be persisted as a ballot: %+v", v)
+		}
+	}
+	if len(repo.votes) != 2 {
+		t.Fatalf("only the two authoritative ballots may be persisted, got %d", len(repo.votes))
+	}
+}
+
+// An agent that answers with a decision value outside the protocol is not an
+// abstention: it is an invalid ballot, so the round must not decide and the
+// malformed value must not be persisted as an authoritative vote.
+func TestOrchestrate_InvalidVoteDecisionIsNotAnAbstention(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{{Decision: entity.VoteDecision("perhaps"), Confidence: 80}}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		Repo:       repo,
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 0},
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-invalid", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("an invalid decision must not resolve, got %+v", res)
+	}
+	for _, v := range repo.votes {
+		if !entity.IsValidVoteDecision(v.Decision) {
+			t.Fatalf("an invalid ballot must not be persisted: %+v", v)
+		}
 	}
 }
 
@@ -615,27 +687,37 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 	}
 }
 
+// fail_case aborts the decision on any agent failure instead of fabricating a
+// ballot for the missing participant.
 func TestOrchestrate_FailurePolicy(t *testing.T) {
 	mrt := newMockMagiRuntime()
 	mrt.errOn["melchior"] = true // melchior fails
 	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
 	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		AgentLoop: mrt,
-		Consensus: consensus.NewConsensusEngine(),
-		Debate:    debate.NewDebateEngine(nil),
-		Commander: newCommander(t),
-		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
-		Policy:    consensus.DefaultConsensusPolicy(),
+		Repo:       repo,
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "fail_case", RetryLimit: 0},
 	})
 
 	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c1", Question: "compute", MaxDebateRounds: 2})
-	if err != nil {
-		t.Fatalf("orchestrate: %v", err)
+	if err == nil {
+		t.Fatalf("fail_case must abort on an agent failure, got %+v", res)
 	}
-	if res == nil {
-		t.Fatalf("expected resolution despite failure")
+	if res != nil {
+		t.Fatalf("an aborted case must not resolve: %+v", res)
+	}
+	for _, v := range repo.votes {
+		if v.Decision == entity.VoteDecisionAbstain || v.Decision == "" {
+			t.Fatalf("fail_case must not persist a synthetic ballot: %+v", v)
+		}
 	}
 }
 

@@ -298,23 +298,39 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 	return o.publish(ctx, case_, entity.EventCaseStatusChanged, map[string]any{"status": string(to), "round": round})
 }
 
-func (o *Orchestrator) extractVotes(results []*runtime.LoopResult) []*entity.Vote {
+// collectBallots separates authoritative ballots from non-votes. A failed,
+// timed-out, cancelled, missing or invalid result becomes an AgentAbsence and is
+// never injected into the ballot set as a synthetic ABSTAIN. The vote slice
+// stays index-aligned with results/configs: a nil entry means that agent
+// produced no ballot, and State.Absences carries the reason.
+func (o *Orchestrator) collectBallots(results []*runtime.LoopResult) ([]*entity.Vote, []entity.AgentAbsence) {
 	votes := make([]*entity.Vote, len(results))
+	var absences []entity.AgentAbsence
 	for i, r := range results {
-		var cfg *entity.MagiConfig
-		if i < len(o.configs) {
-			cfg = o.configs[i]
-		}
-		if o.failPolicy.Mode == "fail_case" && (r == nil || r.Err != nil || r.Vote == nil || r.Status != runtime.LoopStatusCompleted) {
-			votes[i] = &entity.Vote{Decision: entity.VoteDecisionAbstain, ReasoningSummary: "agent failed under fail_case policy"}
-			// The loop below reports the failure so the durable worker retries
-			// or fails the case per its own retry policy.
-			o.lastAgentErr = ErrAgentFailed
+		vote, absence := o.failPolicy.Classify(r)
+		if absence != nil {
+			absence.AgentCode = codeOf(o.configAt(i))
+			absences = append(absences, *absence)
+			// fail_case keeps its abort signal; it no longer needs a synthetic
+			// vote to carry it. The caller reports the failure so the durable
+			// worker retries or fails the case per its own retry policy.
+			if o.failPolicy.Mode == "fail_case" {
+				o.lastAgentErr = ErrAgentFailed
+			}
 			continue
 		}
-		votes[i] = o.failPolicy.HandleFailure(r, cfg)
+		votes[i] = vote
 	}
-	return votes
+	return votes, absences
+}
+
+// absencesMsg renders the non-votes for a case-failure message.
+func absencesMsg(absences []entity.AgentAbsence) string {
+	parts := make([]string, 0, len(absences))
+	for _, a := range absences {
+		parts = append(parts, a.String())
+	}
+	return strings.Join(parts, "; ")
 }
 
 // retryFailedAgents re-dispatches agents that did not complete successfully,
@@ -710,16 +726,6 @@ func isPublicTerminalCaseStatus(status entity.CaseStatus) bool {
 // failedAgentReasons collects the failure reasons carried by ABSTAIN votes
 // produced through the failure policy (their reasoning starts with
 // "agent failed"). Genuine model abstentions do not match and are ignored.
-func failedAgentReasons(votes []*entity.Vote) []string {
-	var out []string
-	for _, v := range votes {
-		if v != nil && v.Decision == entity.VoteDecisionAbstain && strings.HasPrefix(v.ReasoningSummary, "agent failed") {
-			out = append(out, v.ReasoningSummary)
-		}
-	}
-	return out
-}
-
 func finalDecision(c entity.ConsensusResult) entity.VoteDecision {
 	switch c.Outcome {
 	case entity.ConsensusStrongApproval, entity.ConsensusMajorityApprovalDissent:
@@ -736,16 +742,33 @@ func finalDecision(c entity.ConsensusResult) entity.VoteDecision {
 func voteIDs(votes []*entity.Vote) []string {
 	ids := make([]string, 0, len(votes))
 	for _, v := range votes {
-		ids = append(ids, v.ID)
+		if v != nil {
+			ids = append(ids, v.ID)
+		}
 	}
 	return ids
 }
 
-func derefVotes(vs []*entity.Vote) []entity.Vote {
-	out := make([]entity.Vote, len(vs))
-	for i, v := range vs {
+// ballotCount counts the authoritative ballots, ignoring the nil slots that
+// mark a participant which produced none.
+func ballotCount(votes []*entity.Vote) int {
+	n := 0
+	for _, v := range votes {
 		if v != nil {
-			out[i] = *v
+			n++
+		}
+	}
+	return n
+}
+
+// derefVotes returns only the authoritative ballots. A nil entry means the
+// agent produced no ballot (see State.Absences); a non-vote must never be
+// materialised as a zero-value Vote, because an empty decision is not abstain.
+func derefVotes(vs []*entity.Vote) []entity.Vote {
+	out := make([]entity.Vote, 0, len(vs))
+	for _, v := range vs {
+		if v != nil {
+			out = append(out, *v)
 		}
 	}
 	return out
