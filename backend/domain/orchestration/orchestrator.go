@@ -213,17 +213,25 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 	o.metrics.IncCommitFenceFallback(metrics.CommitFenceTerminal)
 	// Only a repository that explicitly declares itself non-durable may use this
 	// path; anything else fails closed instead of degrading to three independent
-	// writes that cannot be rolled back. A nil repository persists nothing at
-	// all, which is the pure in-memory case the non-atomic path exists for.
-	if o.repo != nil {
-		marker, ok := o.repo.(port.NonAtomicTerminalRepository)
-		if !ok || !marker.AllowsNonAtomicTerminalCommit() {
-			return fmt.Errorf("terminal commit for case %s requires an atomic TerminalCommitter; refusing to commit the outcome non-atomically", case_.ID)
-		}
-	}
+	// writes that cannot be rolled back.
 	if o.repo == nil {
-		// Nothing durable is claimed, so there is no artifact to fence.
+		// With no aggregate repository nothing can commit a resolution or its
+		// completion event, yet a case repository can still persist the terminal
+		// status on its own. That is not "nothing durable", so it may only
+		// proceed for a run with no persistence at all or for a case repository
+		// that explicitly declares itself non-durable.
+		if o.caseRepo == nil {
+			return nil
+		}
+		marker, ok := o.caseRepo.(port.NonAtomicTerminalRepository)
+		if !ok || !marker.AllowsNonAtomicTerminalCommit() {
+			return fmt.Errorf("terminal commit for case %s has a case repository but no aggregate repository; refusing to advance the status without an atomic commit", case_.ID)
+		}
 		return o.confirmCurrentStatus(ctx, case_, expected, target)
+	}
+	marker, ok := o.repo.(port.NonAtomicTerminalRepository)
+	if !ok || !marker.AllowsNonAtomicTerminalCommit() {
+		return fmt.Errorf("terminal commit for case %s requires an atomic TerminalCommitter; refusing to commit the outcome non-atomically", case_.ID)
 	}
 	log.Printf("orchestrator: case %s: committing terminal outcome non-atomically (explicit in-memory/test repository)", case_.ID)
 	// This path cannot roll back, so the reference check must run BEFORE the

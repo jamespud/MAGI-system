@@ -1113,6 +1113,43 @@ func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.Case
 // terminal path.
 func (s *stubRepo) AllowsNonAtomicTerminalCommit() bool { return true }
 
+// durableCaseRepo is the in-memory case repository WITHOUT the non-durable
+// marker: it stands in for a case repository that persists status but has no
+// aggregate repository to commit the terminal outcome with.
+type durableCaseRepo struct{ *stubCaseRepo }
+
+func (durableCaseRepo) AllowsNonAtomicTerminalCommit() bool { return false }
+
+// Issue #11: a case repository can be injected on its own. It can persist the
+// terminal status even when the aggregate repository is absent, so that
+// combination must not be treated as "nothing durable" and must fail closed.
+func TestOrchestrate_CaseRepoWithoutAggregateRepoFailsClosed(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		CaseRepo:  durableCaseRepo{&stubCaseRepo{s: repo}},
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-caserepo", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("a case repository without an aggregate repository must not commit terminally: %+v", res)
+	}
+	switch repo.statuses["c-caserepo"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-caserepo"])
+	}
+}
+
 // durableOnlyRepo is the in-memory double without the non-durable marker: it
 // stands in for a repository that persists decisions but cannot commit the
 // terminal outcome atomically.
@@ -1135,6 +1172,10 @@ func (s *stubRepo) PromptRepo() port.PromptRepository         { return nil }
 func (s *stubRepo) ToolCallRepo() port.ToolCallRepository     { return &stubToolCallRepo{s: s} }
 
 type stubCaseRepo struct{ s *stubRepo }
+
+// AllowsNonAtomicTerminalCommit marks this in-memory case repository as
+// explicitly non-durable.
+func (r *stubCaseRepo) AllowsNonAtomicTerminalCommit() bool { return true }
 
 func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
 	r.s.mu.Lock()
