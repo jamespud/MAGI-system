@@ -709,6 +709,26 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 	}
 }
 
+// Issue #11: a repository that persists decisions but cannot commit the terminal
+// outcome atomically must fail closed. Its three independent writes (status,
+// resolution, completion event) can otherwise leave a terminal case without a
+// resolution, or with one but no completion event.
+func TestOrchestrate_NonAtomicTerminalCommitFailsClosed(t *testing.T) {
+	repo, orch := requiredArtifactFixtureWith(t, false)
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-atomic", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("a repository without TerminalCommitter must not commit terminally: %+v", res)
+	}
+	if len(repo.resolutions) != 0 {
+		t.Fatalf("a refused terminal commit must not persist a resolution: %+v", repo.resolutions)
+	}
+	switch repo.statuses["c-atomic"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-atomic"])
+	}
+}
+
 // Issue #11: the fallback path cannot roll back, so it must prove the
 // resolution's references are durable BEFORE it advances the case to a terminal
 // status. Otherwise a refused commit leaves a terminal case with no resolution.
@@ -792,14 +812,26 @@ func TestOrchestrate_RequiredArtifactFailureBlocksTerminalSuccess(t *testing.T) 
 // repository whose artifact writes can be made to fail.
 func requiredArtifactFixture(t *testing.T) (*stubRepo, *orchestration.Orchestrator) {
 	t.Helper()
+	return requiredArtifactFixtureWith(t, true)
+}
+
+// requiredArtifactFixtureWith builds the standard three-agent fixture. The
+// in-memory stub has no TerminalCommitter, so the caller must opt in explicitly
+// to the non-atomic fallback.
+func requiredArtifactFixtureWith(t *testing.T, allowNonAtomic bool) (*stubRepo, *orchestration.Orchestrator) {
+	t.Helper()
 	mrt := newMockMagiRuntime()
 	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
 	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
 	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
 	repo := newStubRepo()
+	var repoPort port.Repository = repo
+	if !allowNonAtomic {
+		repoPort = durableOnlyRepo{repo}
+	}
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
-		Repo:       repo,
+		Repo:       repoPort,
 		CaseRepo:   repo.CaseRepo(),
 		AgentLoop:  mrt,
 		Consensus:  consensus.NewConsensusEngine(),
@@ -1075,6 +1107,18 @@ type stubRepo struct {
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
+
+// AllowsNonAtomicTerminalCommit marks this repository as explicitly
+// non-durable, which is the only way the orchestrator uses its non-atomic
+// terminal path.
+func (s *stubRepo) AllowsNonAtomicTerminalCommit() bool { return true }
+
+// durableOnlyRepo is the in-memory double without the non-durable marker: it
+// stands in for a repository that persists decisions but cannot commit the
+// terminal outcome atomically.
+type durableOnlyRepo struct{ *stubRepo }
+
+func (durableOnlyRepo) AllowsNonAtomicTerminalCommit() bool { return false }
 
 func (s *stubRepo) CaseRepo() port.CaseRepository             { return &stubCaseRepo{s: s} }
 func (s *stubRepo) AgentRunRepo() port.AgentRunRepository     { return &stubAgentRunRepo{s: s} }
@@ -1454,6 +1498,9 @@ type statusTransitionCommitRepo struct {
 	fenceLost     bool
 	signalOnce    sync.Once
 }
+
+// This double wraps the in-memory stub, so it is explicitly non-durable too.
+func (r *statusTransitionCommitRepo) AllowsNonAtomicTerminalCommit() bool { return true }
 
 func (r *statusTransitionCommitRepo) CommitStatusTransition(_ context.Context, _ string, _ []entity.CaseStatus, _ entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
 	if r.commitStarted != nil {

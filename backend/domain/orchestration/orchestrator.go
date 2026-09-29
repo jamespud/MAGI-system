@@ -204,12 +204,28 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 		return nil
 	}
-	// The repository cannot fence the status write, the Resolution row, and the
-	// completion event in one transaction. That is expected for in-memory
-	// fakes; in production it means an adapter stopped implementing
-	// TerminalCommitter, so count it instead of degrading silently.
-	log.Printf("orchestrator: case %s: repository lacks TerminalCommitter, committing terminal outcome non-atomically", case_.ID)
+	// The repository cannot fence the status write, the Resolution row and the
+	// completion event in one transaction, so a failure in any of the three
+	// steps can leave a terminal case without a resolution, or with one but
+	// without its completion event. Reordering cannot fix a path that has no
+	// transaction, so a repository that persists decisions must fail closed
+	// unless it explicitly opted into the in-memory/test semantics.
 	o.metrics.IncCommitFenceFallback(metrics.CommitFenceTerminal)
+	// Only a repository that explicitly declares itself non-durable may use this
+	// path; anything else fails closed instead of degrading to three independent
+	// writes that cannot be rolled back. A nil repository persists nothing at
+	// all, which is the pure in-memory case the non-atomic path exists for.
+	if o.repo != nil {
+		marker, ok := o.repo.(port.NonAtomicTerminalRepository)
+		if !ok || !marker.AllowsNonAtomicTerminalCommit() {
+			return fmt.Errorf("terminal commit for case %s requires an atomic TerminalCommitter; refusing to commit the outcome non-atomically", case_.ID)
+		}
+	}
+	if o.repo == nil {
+		// Nothing durable is claimed, so there is no artifact to fence.
+		return o.confirmCurrentStatus(ctx, case_, expected, target)
+	}
+	log.Printf("orchestrator: case %s: committing terminal outcome non-atomically (explicit in-memory/test repository)", case_.ID)
 	// This path cannot roll back, so the reference check must run BEFORE the
 	// status advances: otherwise a refused commit would leave the case in a
 	// terminal state with no resolution.

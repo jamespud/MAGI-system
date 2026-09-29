@@ -109,6 +109,18 @@ type TerminalCommitter interface {
 	CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, targetStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error)
 }
 
+// NonAtomicTerminalRepository is implemented by pure in-memory and test
+// repositories to opt into the non-atomic terminal path. A repository that
+// persists decisions must implement TerminalCommitter instead: three
+// independent writes can leave a terminal case without a resolution, or with
+// one but without its completion event, and no ordering fixes a path that has no
+// transaction.
+type NonAtomicTerminalRepository interface {
+	// AllowsNonAtomicTerminalCommit reports that this repository is explicitly
+	// non-durable, so the non-atomic terminal path is acceptable for it.
+	AllowsNonAtomicTerminalCommit() bool
+}
+
 // StatusTransitionCommitter atomically fences an ordinary FSM status change
 // together with its ordered CASE_STATUS_CHANGED event. A false result means
 // another transaction changed the case status before this worker could commit
