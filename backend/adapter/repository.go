@@ -229,6 +229,12 @@ var _ port.StatusTransitionCommitter = (*magiRepository)(nil)
 type caseRepo struct{ db *gorm.DB }
 
 func (r *caseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
+	// The generation is an ownership epoch, so persist nothing that later fencing
+	// predicates would have to interpret: a negative value is rejected here, at
+	// the storage boundary, not only when a caller validates explicitly.
+	if err := c.ValidateExecutionGeneration(); err != nil {
+		return err
+	}
 	m := caseToModel(c)
 	return r.db.WithContext(ctx).Create(&m).Error
 }
@@ -424,7 +430,8 @@ func caseToModel(c *entity.DecisionCase) CaseModel {
 		ID: c.ID, UserID: c.UserID, Question: c.Question, Context: c.Context,
 		ConstraintsJSON: toJSON(c.Constraints), ParentCaseID: c.ParentCaseID, Status: string(c.Status),
 		CurrentPhase: string(c.CurrentPhase), PausedFromStatus: string(c.PausedFromStatus),
-		MaxDebateRounds: c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		ExecutionGeneration: c.ExecutionGeneration,
+		MaxDebateRounds:     c.MaxDebateRounds, Deadline: c.Deadline, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		Pinned: c.Pinned, Archived: c.Archived,
 	}
 }
@@ -434,7 +441,8 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 		Constraints: fromJSON[[]entity.Constraint](m.ConstraintsJSON), ParentCaseID: m.ParentCaseID,
 		Status:       entity.CaseStatus(m.Status),
 		CurrentPhase: entity.CasePhase(m.CurrentPhase), PausedFromStatus: entity.CaseStatus(m.PausedFromStatus),
-		MaxDebateRounds: m.MaxDebateRounds, Deadline: m.Deadline,
+		ExecutionGeneration: m.ExecutionGeneration,
+		MaxDebateRounds:     m.MaxDebateRounds, Deadline: m.Deadline,
 		Pinned: m.Pinned, Archived: m.Archived,
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
