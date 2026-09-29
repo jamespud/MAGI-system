@@ -69,6 +69,12 @@ func BuildProjection(
 	}
 
 	for _, v := range votes {
+		if v == nil {
+			// A nil slot means the participant produced no ballot (see the
+			// orchestrator's absences); it is not an abstention and must not be
+			// projected as one.
+			continue
+		}
 		proj.Votes = append(proj.Votes, entity.MemoryVote{
 			MagiCode:   entity.CodeOfRun(v.AgentRunID),
 			Decision:   v.Decision,

@@ -1,6 +1,9 @@
 package entity
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // EvidenceSummaryClaim is a claim asserted in an EvidenceSummary.
 type EvidenceSummaryClaim struct {
@@ -67,6 +70,45 @@ const (
 	VoteDecisionAbstain            VoteDecision = "abstain"
 	VoteDecisionConditionalApprove VoteDecision = "conditional_approve"
 )
+
+// IsValidVoteDecision reports whether a decision is one of the defined final
+// decisions. Unknown values must be rejected explicitly: a malformed decision
+// is not an abstention and must never be counted as one.
+func IsValidVoteDecision(d VoteDecision) bool {
+	switch d {
+	case VoteDecisionApprove, VoteDecisionReject, VoteDecisionAbstain, VoteDecisionConditionalApprove:
+		return true
+	default:
+		return false
+	}
+}
+
+// AbsenceKind classifies a participant that produced no authoritative ballot.
+// It exists because "the persona decided to abstain" and "no ballot arrived"
+// are different facts and must stay distinguishable.
+type AbsenceKind string
+
+const (
+	AbsenceAgentFailed AbsenceKind = "agent_failed"
+	AbsenceTimeout     AbsenceKind = "timeout"
+	AbsenceCancelled   AbsenceKind = "cancelled"
+	AbsenceMissing     AbsenceKind = "missing"
+	AbsenceInvalid     AbsenceKind = "invalid"
+)
+
+// AgentAbsence records one expected participant that produced no authoritative
+// ballot, with the reason kept as an observable diagnostic. It is deliberately
+// not a Vote: a non-vote must never enter the ballot set.
+type AgentAbsence struct {
+	AgentCode MagiCode
+	Kind      AbsenceKind
+	Reason    string
+}
+
+// String renders one absence for logs and error messages.
+func (a AgentAbsence) String() string {
+	return fmt.Sprintf("%s (%s): %s", a.AgentCode, a.Kind, a.Reason)
+}
 
 type UtilityDimensionScore struct {
 	DimensionCode string   `json:"dimension_code"`
