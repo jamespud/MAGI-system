@@ -43,6 +43,62 @@ func NewRepository(db *gorm.DB) port.Repository {
 	return &magiRepository{db: db}
 }
 
+// verifyResolutionReferences refuses a terminal commit whose resolution cites
+// artifacts that are not in the database. It runs inside the same transaction
+// that fences the terminal status, so a resolution can never be committed
+// alongside a missing ballot, evidence record or claim. The cited ids embed the
+// execution attempt, which keeps the check attempt-scoped: an older attempt's
+// artifacts cannot satisfy a newer attempt's resolution.
+func verifyResolutionReferences(tx *gorm.DB, res *entity.Resolution) error {
+	checks := []struct {
+		kind  string
+		model any
+		ids   []string
+	}{
+		{"vote", &VoteModel{}, res.VoteIDs},
+		{"evidence", &EvidenceModel{}, res.KeyEvidenceIDs},
+		{"claim", &ClaimModel{}, res.KeyClaimIDs},
+	}
+	for _, check := range checks {
+		ids, err := citedArtifactIDs(check.kind, check.ids)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		var n int64
+		// Scope by case: an id that exists but belongs to another case must not
+		// satisfy this resolution's reference.
+		if err := tx.Model(check.model).Where("id IN ? AND case_id = ?", ids, res.CaseID).Count(&n).Error; err != nil {
+			return fmt.Errorf("terminal commit: verify %s references: %w", check.kind, err)
+		}
+		if int(n) != len(ids) {
+			return fmt.Errorf("terminal commit: resolution cites %d %s id(s) of case %s but only %d exist", len(ids), check.kind, res.CaseID, n)
+		}
+	}
+	return nil
+}
+
+// citedArtifactIDs validates and deduplicates the ids a resolution cites for
+// one artifact kind. An empty id is a malformed reference, not something to
+// skip silently.
+func citedArtifactIDs(kind string, ids []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			return nil, fmt.Errorf("terminal commit: resolution cites an empty %s id", kind)
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // CleanupCaseArtifacts removes the persisted artifacts of a previous execution
 // attempt so a resumed retry does not leave duplicate evidence/claims/votes.
 // Checkpoints, events, approval history and resolutions are preserved.
@@ -103,6 +159,9 @@ func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expe
 			return nil
 		}
 		if resolution != nil {
+			if err := verifyResolutionReferences(tx, resolution); err != nil {
+				return err
+			}
 			model := resolutionModel(resolution)
 			if err := tx.Create(&model).Error; err != nil {
 				return err

@@ -204,12 +204,44 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 		return nil
 	}
-	// The repository cannot fence the status write, the Resolution row, and the
-	// completion event in one transaction. That is expected for in-memory
-	// fakes; in production it means an adapter stopped implementing
-	// TerminalCommitter, so count it instead of degrading silently.
-	log.Printf("orchestrator: case %s: repository lacks TerminalCommitter, committing terminal outcome non-atomically", case_.ID)
+	// The repository cannot fence the status write, the Resolution row and the
+	// completion event in one transaction, so a failure in any of the three
+	// steps can leave a terminal case without a resolution, or with one but
+	// without its completion event. Reordering cannot fix a path that has no
+	// transaction, so a repository that persists decisions must fail closed
+	// unless it explicitly opted into the in-memory/test semantics.
 	o.metrics.IncCommitFenceFallback(metrics.CommitFenceTerminal)
+	// Only a repository that explicitly declares itself non-durable may use this
+	// path; anything else fails closed instead of degrading to three independent
+	// writes that cannot be rolled back.
+	if o.repo == nil {
+		// With no aggregate repository nothing can commit a resolution or its
+		// completion event, yet a case repository can still persist the terminal
+		// status on its own. That is not "nothing durable", so it may only
+		// proceed for a run with no persistence at all or for a case repository
+		// that explicitly declares itself non-durable.
+		if o.caseRepo == nil {
+			return nil
+		}
+		marker, ok := o.caseRepo.(port.NonAtomicTerminalRepository)
+		if !ok || !marker.AllowsNonAtomicTerminalCommit() {
+			return fmt.Errorf("terminal commit for case %s has a case repository but no aggregate repository; refusing to advance the status without an atomic commit", case_.ID)
+		}
+		return o.confirmCurrentStatus(ctx, case_, expected, target)
+	}
+	marker, ok := o.repo.(port.NonAtomicTerminalRepository)
+	if !ok || !marker.AllowsNonAtomicTerminalCommit() {
+		return fmt.Errorf("terminal commit for case %s requires an atomic TerminalCommitter; refusing to commit the outcome non-atomically", case_.ID)
+	}
+	log.Printf("orchestrator: case %s: committing terminal outcome non-atomically (explicit in-memory/test repository)", case_.ID)
+	// This path cannot roll back, so the reference check must run BEFORE the
+	// status advances: otherwise a refused commit would leave the case in a
+	// terminal state with no resolution.
+	if resolution != nil && o.repo != nil {
+		if err := o.verifyResolutionArtifacts(ctx, resolution); err != nil {
+			return err
+		}
+	}
 	if err := o.confirmCurrentStatus(ctx, case_, expected, target); err != nil {
 		return err
 	}
@@ -219,6 +251,83 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 		}
 	}
 	return o.publish(ctx, case_, event.Type, event.Payload)
+}
+
+// verifyResolutionArtifacts refuses a terminal success whose resolution cites
+// artifacts that are not durable. A resolution asserts "these ballots and this
+// evidence decided the case"; citing a row that was never persisted would make
+// that claim false, so the terminal commit must not happen.
+//
+// The cited ids embed the execution attempt, so checking them for existence is
+// also what keeps a retry from validating against artifacts of an older
+// attempt. This is the fallback path's guard; the database-backed
+// TerminalCommitter runs the same check inside its terminal transaction.
+func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entity.Resolution) error {
+	if res == nil {
+		return nil
+	}
+	if len(res.VoteIDs) > 0 {
+		votes, err := o.repo.VoteRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution votes: %w", err)
+		}
+		present := make(map[string]struct{}, len(votes))
+		for _, v := range votes {
+			present[v.ID] = struct{}{}
+		}
+		if err := requireAllPresent("vote", res.VoteIDs, present); err != nil {
+			return err
+		}
+	}
+	if len(res.KeyEvidenceIDs) > 0 {
+		evidence, err := o.repo.EvidenceRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution evidence: %w", err)
+		}
+		present := make(map[string]struct{}, len(evidence))
+		for _, e := range evidence {
+			present[e.ID] = struct{}{}
+		}
+		if err := requireAllPresent("evidence", res.KeyEvidenceIDs, present); err != nil {
+			return err
+		}
+	}
+	if len(res.KeyClaimIDs) > 0 {
+		claims, err := o.repo.ClaimRepo().ListByCase(ctx, res.CaseID)
+		if err != nil {
+			return fmt.Errorf("verify resolution claims: %w", err)
+		}
+		present := make(map[string]struct{}, len(claims))
+		for _, c := range claims {
+			present[c.ID] = struct{}{}
+		}
+		if err := requireAllPresent("claim", res.KeyClaimIDs, present); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireAllPresent reports every cited id that has no persisted row.
+func requireAllPresent(kind string, cited []string, present map[string]struct{}) error {
+	var missing []string
+	seen := make(map[string]struct{}, len(cited))
+	for _, id := range cited {
+		if id == "" {
+			return fmt.Errorf("resolution cites an empty %s id", kind)
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, ok := present[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("resolution cites %d unpersisted %s id(s): %s", len(missing), kind, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // isNormalTerminal reports whether a status is one of the normal terminal

@@ -614,7 +614,11 @@ func TestOrchestrate_CountsDebatePersistFailure(t *testing.T) {
 func TestOrchestrate_CountsToleratedPersistFailure(t *testing.T) {
 	reg := metrics.New()
 	repo := newStubRepo()
-	repo.evidenceErr = errors.New("data too long for column 'observation'")
+	// A tool-call trace is operational telemetry, not the decision's basis, so a
+	// failed write stays tolerated and only the counter records it. The
+	// authoritative artifacts (votes, evidence, claims) are covered by
+	// TestOrchestrate_RequiredArtifactFailureBlocksTerminalSuccess instead.
+	repo.toolCallErr = errors.New("data too long for column 'result'")
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
 		AgentLoop: newMockMagiRuntime(),
@@ -630,8 +634,8 @@ func TestOrchestrate_CountsToleratedPersistFailure(t *testing.T) {
 	if _, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-persist", Question: "q", MaxDebateRounds: 1}); err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
-	if got := reg.ArtifactPersistFailures(metrics.ArtifactEvidence); got == 0 {
-		t.Fatal("evidence persist failure was not counted")
+	if got := reg.ArtifactPersistFailures(metrics.ArtifactToolCall); got == 0 {
+		t.Fatal("tolerated tool-call persist failure was not counted")
 	}
 }
 
@@ -703,6 +707,141 @@ func TestOrchestrate_DoesNotCountFencedCommitAsFallback(t *testing.T) {
 	if got := reg.CommitFenceFallbacks(metrics.CommitFenceTerminal); got != 0 {
 		t.Fatalf("fenced terminal commit counted as fallback %d times", got)
 	}
+}
+
+// Issue #11: a repository that persists decisions but cannot commit the terminal
+// outcome atomically must fail closed. Its three independent writes (status,
+// resolution, completion event) can otherwise leave a terminal case without a
+// resolution, or with one but no completion event.
+func TestOrchestrate_NonAtomicTerminalCommitFailsClosed(t *testing.T) {
+	repo, orch := requiredArtifactFixtureWith(t, false)
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-atomic", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("a repository without TerminalCommitter must not commit terminally: %+v", res)
+	}
+	if len(repo.resolutions) != 0 {
+		t.Fatalf("a refused terminal commit must not persist a resolution: %+v", repo.resolutions)
+	}
+	switch repo.statuses["c-atomic"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-atomic"])
+	}
+}
+
+// Issue #11: the fallback path cannot roll back, so it must prove the
+// resolution's references are durable BEFORE it advances the case to a terminal
+// status. Otherwise a refused commit leaves a terminal case with no resolution.
+func TestOrchestrate_RefusedTerminalCommitDoesNotLeaveTerminalStatus(t *testing.T) {
+	repo, orch := requiredArtifactFixture(t)
+	repo.voteErr = errors.New("vote insert failed")
+
+	fixtureCase := &entity.DecisionCase{ID: "c-order", Question: "compute", MaxDebateRounds: 2}
+	_, err := orch.Orchestrate(context.Background(), fixtureCase)
+	if err == nil {
+		t.Fatal("a missing required artifact must refuse the terminal commit")
+	}
+	switch repo.statuses["c-order"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-order"])
+	}
+}
+
+// assertNoDanglingResolutionReferences fails when a committed resolution cites a
+// row the repository never stored.
+func assertNoDanglingResolutionReferences(t *testing.T, repo *stubRepo) {
+	t.Helper()
+	votes := map[string]bool{}
+	for _, v := range repo.votes {
+		votes[v.ID] = true
+	}
+	evidence := map[string]bool{}
+	for _, e := range repo.evidence {
+		evidence[e.ID] = true
+	}
+	claims := map[string]bool{}
+	for _, c := range repo.claims {
+		claims[c.ID] = true
+	}
+	for _, r := range repo.resolutions {
+		for _, id := range r.VoteIDs {
+			if !votes[id] {
+				t.Fatalf("committed a resolution citing an unpersisted vote %q (persisted=%d)", id, len(repo.votes))
+			}
+		}
+		for _, id := range r.KeyEvidenceIDs {
+			if !evidence[id] {
+				t.Fatalf("committed a resolution citing unpersisted evidence %q (persisted=%d)", id, len(repo.evidence))
+			}
+		}
+		for _, id := range r.KeyClaimIDs {
+			if !claims[id] {
+				t.Fatalf("committed a resolution citing an unpersisted claim %q (persisted=%d)", id, len(repo.claims))
+			}
+		}
+	}
+}
+
+// Issue #11: reaching RESOLVED asserts that the decision's own basis is durable.
+// If a required artifact write fails, the case must not commit a resolution that
+// cites a vote, evidence record or claim which does not exist.
+func TestOrchestrate_RequiredArtifactFailureBlocksTerminalSuccess(t *testing.T) {
+	cases := []struct {
+		name   string
+		inject func(*stubRepo)
+	}{
+		{"vote", func(r *stubRepo) { r.voteErr = errors.New("vote insert failed") }},
+		{"evidence", func(r *stubRepo) { r.evidenceErr = errors.New("evidence insert failed") }},
+		{"claim", func(r *stubRepo) { r.claimErr = errors.New("claim insert failed") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, orch := requiredArtifactFixture(t)
+			tc.inject(repo)
+
+			_, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-required", Question: "compute", MaxDebateRounds: 2})
+			if err != nil && len(repo.resolutions) != 0 {
+				t.Fatal("a refused terminal commit must not leave a resolution behind")
+			}
+			assertNoDanglingResolutionReferences(t, repo)
+		})
+	}
+}
+
+// requiredArtifactFixture builds the standard three-agent fixture with a
+// repository whose artifact writes can be made to fail.
+func requiredArtifactFixture(t *testing.T) (*stubRepo, *orchestration.Orchestrator) {
+	t.Helper()
+	return requiredArtifactFixtureWith(t, true)
+}
+
+// requiredArtifactFixtureWith builds the standard three-agent fixture. The
+// in-memory stub has no TerminalCommitter, so the caller must opt in explicitly
+// to the non-atomic fallback.
+func requiredArtifactFixtureWith(t *testing.T, allowNonAtomic bool) (*stubRepo, *orchestration.Orchestrator) {
+	t.Helper()
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+	var repoPort port.Repository = repo
+	if !allowNonAtomic {
+		repoPort = durableOnlyRepo{repo}
+	}
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		Repo:       repoPort,
+		CaseRepo:   repo.CaseRepo(),
+		AgentLoop:  mrt,
+		Consensus:  consensus.NewConsensusEngine(),
+		Debate:     debate.NewDebateEngine(nil),
+		Commander:  newCommander(t),
+		Configs:    []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:     consensus.DefaultConsensusPolicy(),
+		FailPolicy: orchestration.FailurePolicy{Mode: "abstain_on_fail", RetryLimit: 0},
+	})
+	return repo, orch
 }
 
 // fail_case aborts the decision on any agent failure instead of fabricating a
@@ -962,9 +1101,61 @@ type stubRepo struct {
 	toolCalls   []*entity.ToolCall
 	evidenceErr error
 	debateErr   error
+	voteErr     error
+	claimErr    error
+	toolCallErr error
 }
 
 func newStubRepo() *stubRepo { return &stubRepo{statuses: map[string]entity.CaseStatus{}} }
+
+// AllowsNonAtomicTerminalCommit marks this repository as explicitly
+// non-durable, which is the only way the orchestrator uses its non-atomic
+// terminal path.
+func (s *stubRepo) AllowsNonAtomicTerminalCommit() bool { return true }
+
+// durableCaseRepo is the in-memory case repository WITHOUT the non-durable
+// marker: it stands in for a case repository that persists status but has no
+// aggregate repository to commit the terminal outcome with.
+type durableCaseRepo struct{ *stubCaseRepo }
+
+func (durableCaseRepo) AllowsNonAtomicTerminalCommit() bool { return false }
+
+// Issue #11: a case repository can be injected on its own. It can persist the
+// terminal status even when the aggregate repository is absent, so that
+// combination must not be treated as "nothing durable" and must fail closed.
+func TestOrchestrate_CaseRepoWithoutAggregateRepoFailsClosed(t *testing.T) {
+	mrt := newMockMagiRuntime()
+	mrt.votes["melchior"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["balthasar"] = []*entity.Vote{approve(), approve()}
+	mrt.votes["casper"] = []*entity.Vote{approve(), approve()}
+	repo := newStubRepo()
+
+	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{
+		CaseRepo:  durableCaseRepo{&stubCaseRepo{s: repo}},
+		AgentLoop: mrt,
+		Consensus: consensus.NewConsensusEngine(),
+		Debate:    debate.NewDebateEngine(nil),
+		Commander: newCommander(t),
+		Configs:   []*entity.MagiConfig{magiCfg("melchior"), magiCfg("balthasar"), magiCfg("casper")},
+		Policy:    consensus.DefaultConsensusPolicy(),
+	})
+
+	res, err := orch.Orchestrate(context.Background(), &entity.DecisionCase{ID: "c-caserepo", Question: "compute", MaxDebateRounds: 2})
+	if err == nil {
+		t.Fatalf("a case repository without an aggregate repository must not commit terminally: %+v", res)
+	}
+	switch repo.statuses["c-caserepo"] {
+	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusDeadlocked:
+		t.Fatalf("a refused terminal commit left the case terminal: %s", repo.statuses["c-caserepo"])
+	}
+}
+
+// durableOnlyRepo is the in-memory double without the non-durable marker: it
+// stands in for a repository that persists decisions but cannot commit the
+// terminal outcome atomically.
+type durableOnlyRepo struct{ *stubRepo }
+
+func (durableOnlyRepo) AllowsNonAtomicTerminalCommit() bool { return false }
 
 func (s *stubRepo) CaseRepo() port.CaseRepository             { return &stubCaseRepo{s: s} }
 func (s *stubRepo) AgentRunRepo() port.AgentRunRepository     { return &stubAgentRunRepo{s: s} }
@@ -981,6 +1172,10 @@ func (s *stubRepo) PromptRepo() port.PromptRepository         { return nil }
 func (s *stubRepo) ToolCallRepo() port.ToolCallRepository     { return &stubToolCallRepo{s: s} }
 
 type stubCaseRepo struct{ s *stubRepo }
+
+// AllowsNonAtomicTerminalCommit marks this in-memory case repository as
+// explicitly non-durable.
+func (r *stubCaseRepo) AllowsNonAtomicTerminalCommit() bool { return true }
 
 func (r *stubCaseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
 	r.s.mu.Lock()
@@ -1047,12 +1242,23 @@ func (r *stubEvidenceRepo) Get(ctx context.Context, id string) (*entity.Evidence
 	return nil, nil
 }
 func (r *stubEvidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) {
-	return nil, nil
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out []*entity.EvidenceRecord
+	for _, e := range r.s.evidence {
+		if e.CaseID == caseID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 type stubClaimRepo struct{ s *stubRepo }
 
 func (r *stubClaimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	if r.s.claimErr != nil {
+		return r.s.claimErr
+	}
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	r.s.claims = append(r.s.claims, c)
@@ -1060,19 +1266,38 @@ func (r *stubClaimRepo) Create(ctx context.Context, c *entity.Claim) error {
 }
 func (r *stubClaimRepo) Get(ctx context.Context, id string) (*entity.Claim, error) { return nil, nil }
 func (r *stubClaimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Claim, error) {
-	return nil, nil
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out []*entity.Claim
+	for _, c := range r.s.claims {
+		if c.CaseID == caseID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 type stubVoteRepo struct{ s *stubRepo }
 
 func (r *stubVoteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if r.s.voteErr != nil {
+		return r.s.voteErr
+	}
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	r.s.votes = append(r.s.votes, v)
 	return nil
 }
 func (r *stubVoteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vote, error) {
-	return nil, nil
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out []*entity.Vote
+	for _, v := range r.s.votes {
+		if v.CaseID == caseID {
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 type stubDebateRepo struct{ s *stubRepo }
@@ -1097,6 +1322,9 @@ func (stubReflRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Re
 type stubToolCallRepo struct{ s *stubRepo }
 
 func (r *stubToolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	if r.s.toolCallErr != nil {
+		return r.s.toolCallErr
+	}
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	cp := *t
@@ -1311,6 +1539,9 @@ type statusTransitionCommitRepo struct {
 	fenceLost     bool
 	signalOnce    sync.Once
 }
+
+// This double wraps the in-memory stub, so it is explicitly non-durable too.
+func (r *statusTransitionCommitRepo) AllowsNonAtomicTerminalCommit() bool { return true }
 
 func (r *statusTransitionCommitRepo) CommitStatusTransition(_ context.Context, _ string, _ []entity.CaseStatus, _ entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
 	if r.commitStarted != nil {
