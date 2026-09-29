@@ -15,6 +15,45 @@ import (
 
 const s21MigrationPath = "../../docker/atlas/migrations/magi_s21_runtime_kernel.sql"
 const s24MigrationPath = "../../docker/atlas/migrations/magi_s24_approval_intent_binding.sql"
+const s25MigrationPath = "../../docker/atlas/migrations/magi_s25_execution_generation.sql"
+
+// T1 (#19): the Case execution generation is persisted on both the Case and the
+// job that claims it. The Atlas migration and the GORM models must agree on the
+// shape, or a hand-applied schema diverges from the startup AutoMigrate path.
+func TestS25ExecutionGenerationMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s25MigrationPath)
+	if err != nil {
+		t.Fatalf("read s25 migration: %v", err)
+	}
+	sql := string(raw)
+	pattern := regexp.MustCompile(`(?i)ALTER TABLE\s+(decision_case|decision_job)\s+ADD COLUMN\s+execution_generation\s+BIGINT\s+NOT NULL\s+DEFAULT\s+0`)
+	matched := map[string]bool{}
+	for _, m := range pattern.FindAllStringSubmatch(sql, -1) {
+		matched[strings.ToLower(m[1])] = true
+	}
+	for _, table := range []string{"decision_case", "decision_job"} {
+		if !matched[table] {
+			t.Fatalf("S25 must add execution_generation BIGINT NOT NULL DEFAULT 0 to %s:\n%s", table, sql)
+		}
+	}
+
+	for _, tc := range []struct {
+		model any
+		name  string
+	}{
+		{&magi.CaseModel{}, "CaseModel"},
+		{&magi.DecisionJobModel{}, "DecisionJobModel"},
+	} {
+		field, ok := reflect.TypeOf(tc.model).Elem().FieldByName("ExecutionGeneration")
+		if !ok {
+			t.Fatalf("%s is missing ExecutionGeneration", tc.name)
+		}
+		tag := field.Tag.Get("gorm")
+		if !strings.Contains(tag, "not null") || !strings.Contains(tag, "default:0") {
+			t.Fatalf("%s.ExecutionGeneration tag = %q, want not null and default:0", tc.name, tag)
+		}
+	}
+}
 
 // Issue #9: the approval identity became the logical invocation, pinned by an
 // intent digest. The Atlas script and the GORM model must agree on the column

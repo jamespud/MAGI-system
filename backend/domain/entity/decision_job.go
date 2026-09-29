@@ -13,10 +13,13 @@ type DecisionJob struct {
 	MaxAttempts int
 	WorkerID    string
 	LeaseUntil  *time.Time
-	AvailableAt time.Time
-	LastError   string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ExecutionGeneration records which Case generation this claim owns. T1 only
+	// persists and reads it; advancing it belongs to the claim path (T2).
+	ExecutionGeneration int64
+	AvailableAt         time.Time
+	LastError           string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type DecisionJobStatus string

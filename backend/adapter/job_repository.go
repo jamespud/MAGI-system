@@ -320,7 +320,8 @@ func jobFromModel(model *DecisionJobModel) *entity.DecisionJob {
 	return &entity.DecisionJob{
 		ID: model.ID, CaseID: model.CaseID, Status: entity.DecisionJobStatus(model.Status),
 		Attempt: model.Attempt, MaxAttempts: model.MaxAttempts, WorkerID: model.WorkerID,
-		LeaseUntil: model.LeaseUntil, AvailableAt: model.AvailableAt, LastError: model.LastError,
+		ExecutionGeneration: model.ExecutionGeneration,
+		LeaseUntil:          model.LeaseUntil, AvailableAt: model.AvailableAt, LastError: model.LastError,
 		CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 }
