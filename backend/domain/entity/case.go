@@ -1,5 +1,7 @@
 package entity
 
+import "fmt"
+
 import "time"
 
 // DecisionCase is the aggregate root of a MAGI decision run.
@@ -17,8 +19,14 @@ type DecisionCase struct {
 	Pinned   bool
 	Archived bool
 	// ExecutionAttempt is set by the durable worker for the current attempt.
-	// It is intentionally runtime-only: the durable job owns the source of truth.
+	// It is intentionally runtime-only and is compatibility/metrics only: it is
+	// not derived from ExecutionGeneration and never identifies the owner.
 	ExecutionAttempt int
+	// ExecutionGeneration is the Case-lifetime ownership epoch and the only
+	// fencing generation. It is persisted, monotonically increasing and never
+	// reset by a retry path; 0 means legacy/unknown provenance, and the first
+	// generation-aware claim produces 1.
+	ExecutionGeneration int64
 	// PausedFromStatus records the case status before a task-level pause, so
 	// wake can continue the FSM from where it stopped.
 	PausedFromStatus CaseStatus
@@ -63,4 +71,15 @@ type Constraint struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 	Hard  bool   `json:"hard"`
+}
+
+// ValidateExecutionGeneration rejects a negative generation. ExecutionGeneration
+// is a Case-lifetime ownership epoch, so a negative value can only be a
+// programming error; catching it at the domain boundary keeps later fencing
+// predicates from comparing meaningless epochs.
+func (c DecisionCase) ValidateExecutionGeneration() error {
+	if c.ExecutionGeneration < 0 {
+		return fmt.Errorf("execution generation must be non-negative, got %d", c.ExecutionGeneration)
+	}
+	return nil
 }

@@ -18,8 +18,12 @@ type CaseModel struct {
 	TaskJSON         string `gorm:"type:text"`
 	Pinned           bool
 	Archived         bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// ExecutionGeneration is the Case-lifetime ownership epoch: persisted,
+	// monotonically increasing and never reset. Existing rows default to 0
+	// (legacy/unknown provenance) and are never backfilled to a positive value.
+	ExecutionGeneration int64 `gorm:"not null;default:0"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (CaseModel) TableName() string { return "decision_case" }
@@ -51,10 +55,13 @@ type DecisionJobModel struct {
 	MaxAttempts int
 	WorkerID    string
 	LeaseUntil  *time.Time
-	AvailableAt time.Time `gorm:"index"`
-	LastError   string    `gorm:"type:text"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ExecutionGeneration records which Case generation this job claim owns.
+	// T1 only persists the column; advancing it belongs to the claim path (T2).
+	ExecutionGeneration int64     `gorm:"not null;default:0"`
+	AvailableAt         time.Time `gorm:"index"`
+	LastError           string    `gorm:"type:text"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (DecisionJobModel) TableName() string { return "decision_job" }
