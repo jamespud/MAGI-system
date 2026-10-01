@@ -201,3 +201,8 @@ jobs:
 
       - name: MySQL-backed runtime invariants
         run: go test -p 1 -count=1 -v ./adapter/ -run 'MySQL'
+
+      - name: Decision ownership generation invariants
+        run: >-
+          go test -p 1 -count=1 -v ./bootstrap/
+          -run 'TestMySQLDecisionJobClaim_|TestMySQLDecisionJobOwnership_|TestMySQLRunManager_ClaimReplyLoss'

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+
+	"github.com/google/uuid"
 	"testing"
 	"time"
 
@@ -24,7 +26,7 @@ func openMultiDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -40,8 +42,8 @@ type retryClaimCancellingRepo struct {
 	cancelAfterClaim func()
 }
 
-func (r *retryClaimCancellingRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
-	job, ok, err := r.DecisionJobRepository.Claim(ctx, jobID, workerID, leaseUntil)
+func (r *retryClaimCancellingRepo) Claim(ctx context.Context, jobID, workerID, claimToken string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
+	job, ok, err := r.DecisionJobRepository.Claim(ctx, jobID, workerID, claimToken, leaseUntil)
 	if err == nil && ok && job.Attempt > 1 {
 		r.cancelAfterClaim()
 	}
@@ -149,11 +151,12 @@ func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
+	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", uuid.NewString(), time.Now().Add(time.Minute))
+	if err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
 	}
 	retryAt := time.Now().Add(-time.Millisecond)
-	if err := jobs.MarkFailed(context.Background(), job.ID, "previous-worker", "retry", &retryAt); err != nil {
+	if err := jobs.MarkFailed(context.Background(), job.ID, job.CaseID, "previous-worker", claimed.ExecutionGeneration, "retry", &retryAt); err != nil {
 		t.Fatalf("seed retry: %v", err)
 	}
 
@@ -232,11 +235,12 @@ func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
+	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", uuid.NewString(), time.Now().Add(time.Minute))
+	if err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
 	}
 	retryAt := time.Now().Add(-time.Millisecond)
-	if err := jobs.MarkFailed(context.Background(), job.ID, "previous-worker", "retry", &retryAt); err != nil {
+	if err := jobs.MarkFailed(context.Background(), job.ID, job.CaseID, "previous-worker", claimed.ExecutionGeneration, "retry", &retryAt); err != nil {
 		t.Fatalf("seed retry: %v", err)
 	}
 	decoratedJobs := &retryClaimCancellingRepo{
@@ -289,11 +293,12 @@ func TestRunManager_RetryResetFenceDoesNotLeaveClaimRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", time.Now().Add(time.Minute)); err != nil || !ok {
+	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "previous-worker", uuid.NewString(), time.Now().Add(time.Minute))
+	if err != nil || !ok {
 		t.Fatalf("seed claim: ok=%v err=%v", ok, err)
 	}
 	retryAt := time.Now().Add(-time.Millisecond)
-	if err := jobs.MarkFailed(context.Background(), job.ID, "previous-worker", "retry", &retryAt); err != nil {
+	if err := jobs.MarkFailed(context.Background(), job.ID, job.CaseID, "previous-worker", claimed.ExecutionGeneration, "retry", &retryAt); err != nil {
 		t.Fatalf("seed retry: %v", err)
 	}
 	rm := decision.NewRunManager(&retryResetOrchestrator{}, decision.RunManagerDeps{

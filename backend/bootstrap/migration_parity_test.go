@@ -16,6 +16,7 @@ import (
 const s21MigrationPath = "../../docker/atlas/migrations/magi_s21_runtime_kernel.sql"
 const s24MigrationPath = "../../docker/atlas/migrations/magi_s24_approval_intent_binding.sql"
 const s25MigrationPath = "../../docker/atlas/migrations/magi_s25_execution_generation.sql"
+const s26MigrationPath = "../../docker/atlas/migrations/magi_s26_claim_token.sql"
 
 // T1 (#19): the Case execution generation is persisted on both the Case and the
 // job that claims it. The Atlas migration and the GORM models must agree on the
@@ -52,6 +53,38 @@ func TestS25ExecutionGenerationMigrationMatchesModel(t *testing.T) {
 		if !strings.Contains(tag, "not null") || !strings.Contains(tag, "default:0") {
 			t.Fatalf("%s.ExecutionGeneration tag = %q, want not null and default:0", tc.name, tag)
 		}
+	}
+}
+
+// T2 (#20): claim_token is a nullable operation identity used only to recover
+// a committed Claim after reply loss. The unique key proves one token maps to
+// at most one durable job; it is not an ownership or fencing predicate.
+func TestS26ClaimTokenMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s26MigrationPath)
+	if err != nil {
+		t.Fatalf("read s26 migration: %v", err)
+	}
+	sql := string(raw)
+	if regexp.MustCompile(`(?i)ADD COLUMN\s+claim_token\s+VARCHAR\(36\)\s+NULL\s+DEFAULT\s+NULL`).FindString(sql) == "" {
+		t.Fatalf("S26 must add nullable VARCHAR(36) claim_token:\n%s", sql)
+	}
+	if regexp.MustCompile(`(?i)CREATE UNIQUE INDEX\s+uk_decision_job_claim_token\s+ON\s+decision_job\s*\(\s*claim_token\s*\)`).FindString(sql) == "" {
+		t.Fatalf("S26 must add unique claim_token index:\n%s", sql)
+	}
+	if regexp.MustCompile(`(?i)CREATE TABLE\s+decision_job_claim\s*\(`).FindString(sql) == "" {
+		t.Fatalf("S26 must create the append-only decision_job_claim registry:\n%s", sql)
+	}
+	field, ok := reflect.TypeOf(magi.DecisionJobModel{}).FieldByName("ClaimToken")
+	if !ok {
+		t.Fatal("DecisionJobModel is missing ClaimToken")
+	}
+	tag := field.Tag.Get("gorm")
+	if !strings.Contains(tag, "size:36") || !strings.Contains(tag, "uniqueIndex:uk_decision_job_claim_token") {
+		t.Fatalf("DecisionJobModel.ClaimToken tag = %q", tag)
+	}
+	tokenField, ok := reflect.TypeOf(magi.DecisionJobClaimModel{}).FieldByName("ClaimToken")
+	if !ok || !strings.Contains(tokenField.Tag.Get("gorm"), "primaryKey") || !strings.Contains(tokenField.Tag.Get("gorm"), "size:36") {
+		t.Fatalf("DecisionJobClaimModel.ClaimToken must be a size-36 primary key")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
@@ -18,7 +19,7 @@ func TestDecisionJobRepository_LifecycleAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := magi.NewDecisionJobRepository(db)
@@ -33,26 +34,26 @@ func TestDecisionJobRepository_LifecycleAndRetry(t *testing.T) {
 		t.Fatal("first admit should be admitted")
 	}
 	lease := time.Now().Add(time.Minute)
-	claimed, ok, err := repo.Claim(context.Background(), job.ID, "worker-1", lease)
+	claimed, ok, err := repo.Claim(context.Background(), job.ID, "worker-1", uuid.NewString(), lease)
 	if err != nil || !ok || claimed.Attempt != 1 || claimed.Status != entity.DecisionJobRunning {
 		t.Fatalf("claim: job=%+v ok=%v err=%v", claimed, ok, err)
 	}
-	if err := repo.Heartbeat(context.Background(), job.ID, "worker-1", time.Now().Add(time.Minute)); err != nil {
+	if err := repo.Heartbeat(context.Background(), job.ID, job.CaseID, "worker-1", claimed.ExecutionGeneration, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	retryAt := time.Now().Add(-time.Second)
-	if err := repo.MarkFailed(context.Background(), job.ID, "worker-1", "transient", &retryAt); err != nil {
+	if err := repo.MarkFailed(context.Background(), job.ID, job.CaseID, "worker-1", claimed.ExecutionGeneration, "transient", &retryAt); err != nil {
 		t.Fatalf("mark retry: %v", err)
 	}
 	runnable, err := repo.ListRunnable(context.Background(), time.Now())
 	if err != nil || len(runnable) != 1 || runnable[0].LastError != "transient" {
 		t.Fatalf("runnable retry: jobs=%+v err=%v", runnable, err)
 	}
-	claimed, ok, err = repo.Claim(context.Background(), job.ID, "worker-2", lease)
+	claimed, ok, err = repo.Claim(context.Background(), job.ID, "worker-2", uuid.NewString(), lease)
 	if err != nil || !ok || claimed.Attempt != 2 {
 		t.Fatalf("second claim: job=%+v ok=%v err=%v", claimed, ok, err)
 	}
-	if err := repo.MarkSucceeded(context.Background(), job.ID, "worker-2"); err != nil {
+	if err := repo.MarkSucceeded(context.Background(), job.ID, job.CaseID, "worker-2", claimed.ExecutionGeneration); err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
 	final, err := repo.GetByCase(context.Background(), "case-1")
@@ -66,7 +67,7 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := magi.NewDecisionJobRepository(db)
@@ -77,7 +78,8 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := repo.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute)); err != nil || !ok {
+	claimed, ok, err := repo.Claim(context.Background(), job.ID, "worker-a", uuid.NewString(), time.Now().Add(time.Minute))
+	if err != nil || !ok {
 		t.Fatalf("claim: ok=%v err=%v", ok, err)
 	}
 	if err := repo.Cancel(context.Background(), job.ID); err != nil {
@@ -86,10 +88,14 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 
 	for name, mutate := range map[string]func() error{
 		"heartbeat": func() error {
-			return repo.Heartbeat(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute))
+			return repo.Heartbeat(context.Background(), job.ID, job.CaseID, "worker-a", claimed.ExecutionGeneration, time.Now().Add(time.Minute))
 		},
-		"succeeded": func() error { return repo.MarkSucceeded(context.Background(), job.ID, "worker-a") },
-		"failed":    func() error { return repo.MarkFailed(context.Background(), job.ID, "worker-a", "late", nil) },
+		"succeeded": func() error {
+			return repo.MarkSucceeded(context.Background(), job.ID, job.CaseID, "worker-a", claimed.ExecutionGeneration)
+		},
+		"failed": func() error {
+			return repo.MarkFailed(context.Background(), job.ID, job.CaseID, "worker-a", claimed.ExecutionGeneration, "late", nil)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := mutate(); !errors.Is(err, port.ErrLeaseLost) {
@@ -105,7 +111,7 @@ func openAdmissionDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite admission: %v", err)
 	}
-	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate admission: %v", err)
 	}
 	return db
@@ -476,7 +482,7 @@ func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Reposit
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "worker-a", time.Now().Add(time.Minute))
+	claimed, ok, err := jobs.Claim(context.Background(), job.ID, "worker-a", uuid.NewString(), time.Now().Add(time.Minute))
 	if err != nil || !ok {
 		t.Fatalf("claim: job=%+v ok=%v err=%v", claimed, ok, err)
 	}
@@ -486,7 +492,7 @@ func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Reposit
 func TestDecisionJobRepository_CommitFinalFailureAtomically(t *testing.T) {
 	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-failure")
 	event := entity.NewEvent("case-final-failure", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
-	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", "case-final-failure",
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", job.ExecutionGeneration, "case-final-failure",
 		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "boom", &event)
 	if err != nil || !committed {
 		t.Fatalf("commit final failure: committed=%v err=%v", committed, err)
@@ -512,7 +518,7 @@ func TestDecisionJobRepository_CommitFinalFailureAtomically(t *testing.T) {
 func TestDecisionJobRepository_CommitFinalFailureFenceLossRollsBack(t *testing.T) {
 	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-fence")
 	event := entity.NewEvent("case-final-fence", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
-	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-b", "case-final-fence",
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-b", job.ExecutionGeneration, "case-final-fence",
 		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "late", &event)
 	if err != nil || committed {
 		t.Fatalf("fence loss = committed=%v err=%v, want no commit", committed, err)
@@ -543,7 +549,7 @@ func TestDecisionJobRepository_CommitFinalFailureEventInsertRollback(t *testing.
 	}
 	failed := entity.NewEvent("case-final-event-rollback", "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
 	failed.ID = duplicate.ID
-	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", "case-final-event-rollback",
+	committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", job.ExecutionGeneration, "case-final-event-rollback",
 		[]entity.CaseStatus{entity.CaseStatusInvestigating}, "boom", &failed)
 	if err == nil || committed {
 		t.Fatalf("duplicate event insert = committed=%v err=%v, want rollback", committed, err)
@@ -584,7 +590,7 @@ func TestDecisionJobRepository_CommitFinalFailureRejectsPublicTerminalCase(t *te
 				t.Fatal(err)
 			}
 			event := entity.NewEvent(caseID, "", nil, entity.EventCaseFailed, map[string]any{"status": "FAILED"})
-			committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", caseID,
+			committed, err := jobs.CommitFinalFailure(context.Background(), job.ID, "worker-a", job.ExecutionGeneration, caseID,
 				[]entity.CaseStatus{status}, "late", &event)
 			if err != nil || committed {
 				t.Fatalf("terminal case commit = committed=%v err=%v, want false,nil", committed, err)
