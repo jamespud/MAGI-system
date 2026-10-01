@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,7 +15,10 @@ import (
 	"github.com/jamespud/magi/backend/domain/port"
 )
 
-const defaultJobAttempts = 3
+const (
+	defaultJobAttempts   = 3
+	claimRecoveryTimeout = 10 * time.Second
+)
 
 type decisionJobRepo struct {
 	db *gorm.DB
@@ -160,43 +164,164 @@ func (r *decisionJobRepo) Admit(ctx context.Context, caseID string, maxAttempts,
 	return jobEntity, admitted, nil
 }
 
-func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
+var errClaimFenceLost = errors.New("decision job: claim fence lost")
+
+func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
+	if claimToken == "" {
+		return nil, false, fmt.Errorf("decision job: claim token is required")
+	}
+	if _, err := uuid.Parse(claimToken); err != nil {
+		return nil, false, fmt.Errorf("decision job: invalid claim token: %w", err)
+	}
 	var claimed DecisionJobModel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND status = ? AND available_at <= ?", jobID, string(entity.DecisionJobQueued), time.Now()).First(&claimed).Error; err != nil {
+		var existing DecisionJobClaimModel
+		if err := tx.Where("claim_token = ?", claimToken).First(&existing).Error; err == nil {
+			if existing.JobID != jobID {
+				return port.ErrClaimTokenConflict
+			}
+			claimed = claimRecordToJobModel(&existing)
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		result := tx.Model(&DecisionJobModel{}).
-			Where("id = ? AND status = ?", jobID, string(entity.DecisionJobQueued)).
+
+		jobQuery := tx.Where("id = ? AND status = ? AND available_at <= ?", jobID, string(entity.DecisionJobQueued), time.Now())
+		if tx.Dialector.Name() == "mysql" {
+			jobQuery = jobQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := jobQuery.First(&claimed).Error; err != nil {
+			return err
+		}
+
+		var caseModel CaseModel
+		caseQuery := tx.Where("id = ?", claimed.CaseID)
+		if tx.Dialector.Name() == "mysql" {
+			caseQuery = caseQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := caseQuery.First(&caseModel).Error; err != nil {
+			return err
+		}
+		if caseModel.ExecutionGeneration != claimed.ExecutionGeneration {
+			return fmt.Errorf("decision job: claim generation mismatch: case=%d job=%d", caseModel.ExecutionGeneration, claimed.ExecutionGeneration)
+		}
+		if caseModel.ExecutionGeneration == math.MaxInt64 {
+			return fmt.Errorf("decision job: execution generation exhausted")
+		}
+		nextGeneration := caseModel.ExecutionGeneration + 1
+		caseResult := tx.Model(&CaseModel{}).
+			Where("id = ? AND execution_generation = ?", claimed.CaseID, caseModel.ExecutionGeneration).
+			Updates(map[string]any{"execution_generation": nextGeneration, "updated_at": time.Now()})
+		if caseResult.Error != nil {
+			return caseResult.Error
+		}
+		if caseResult.RowsAffected != 1 {
+			return errClaimFenceLost
+		}
+
+		jobResult := tx.Model(&DecisionJobModel{}).
+			Where("id = ? AND status = ? AND attempt = ? AND execution_generation = ?",
+				jobID, string(entity.DecisionJobQueued), claimed.Attempt, claimed.ExecutionGeneration).
 			Updates(map[string]any{
 				"status": string(entity.DecisionJobRunning), "worker_id": workerID,
-				"lease_until": leaseUntil, "attempt": claimed.Attempt + 1, "updated_at": time.Now(),
+				"lease_until": leaseUntil, "attempt": claimed.Attempt + 1,
+				"execution_generation": nextGeneration, "claim_token": claimToken, "updated_at": time.Now(),
 			})
-		if result.Error != nil {
-			return result.Error
+		if jobResult.Error != nil {
+			return jobResult.Error
 		}
-		if result.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
+		if jobResult.RowsAffected != 1 {
+			return errClaimFenceLost
 		}
 		claimed.Status = string(entity.DecisionJobRunning)
 		claimed.WorkerID = workerID
 		claimed.LeaseUntil = &leaseUntil
 		claimed.Attempt++
+		claimed.ExecutionGeneration = nextGeneration
+		claimed.ClaimToken = &claimToken
+
+		claimRecord := DecisionJobClaimModel{
+			ClaimToken: claimToken, JobID: claimed.ID, CaseID: claimed.CaseID,
+			WorkerID: workerID, ExecutionGeneration: nextGeneration,
+			Attempt: claimed.Attempt, MaxAttempts: claimed.MaxAttempts,
+			LeaseUntil: leaseUntil, ClaimedAt: time.Now(),
+		}
+		if err := tx.Create(&claimRecord).Error; err != nil {
+			return err
+		}
 		return nil
 	})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, nil
-	}
 	if err != nil {
+		// A commit may have succeeded even when its reply was lost. A stable
+		// token lets the caller/repository recover that exact Claim rather than
+		// blindly allocating another generation.
+		recoveryParent := ctx
+		if recoveryParent == nil {
+			recoveryParent = context.Background()
+		}
+		recoveryCtx, recoveryCancel := context.WithTimeout(context.WithoutCancel(recoveryParent), claimRecoveryTimeout)
+		recovered, recoverErr := r.GetByClaimToken(recoveryCtx, claimToken)
+		recoveryCancel()
+		if recoverErr == nil {
+			if recovered.ID != jobID {
+				return nil, false, port.ErrClaimTokenConflict
+			}
+			return recovered, true, nil
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, errClaimFenceLost) {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	return jobFromModel(&claimed), true, nil
 }
 
-func (r *decisionJobRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
-	result := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
-		Where("id = ? AND status = ? AND worker_id = ?", jobID, string(entity.DecisionJobRunning), workerID).
-		Updates(map[string]any{"lease_until": leaseUntil, "updated_at": time.Now()})
+func (r *decisionJobRepo) GetByClaimToken(ctx context.Context, claimToken string) (*entity.DecisionJob, error) {
+	if claimToken == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var model DecisionJobClaimModel
+	if err := r.db.WithContext(ctx).Where("claim_token = ?", claimToken).First(&model).Error; err != nil {
+		return nil, err
+	}
+	return jobFromClaimRecord(&model), nil
+}
+
+func claimRecordToJobModel(model *DecisionJobClaimModel) DecisionJobModel {
+	token := model.ClaimToken
+	leaseUntil := model.LeaseUntil
+	return DecisionJobModel{
+		ID: model.JobID, CaseID: model.CaseID, Status: string(entity.DecisionJobRunning),
+		Attempt: model.Attempt, MaxAttempts: model.MaxAttempts, WorkerID: model.WorkerID,
+		LeaseUntil: &leaseUntil, ExecutionGeneration: model.ExecutionGeneration,
+		ClaimToken: &token, CreatedAt: model.ClaimedAt, UpdatedAt: model.ClaimedAt,
+	}
+}
+
+func jobFromClaimRecord(model *DecisionJobClaimModel) *entity.DecisionJob {
+	job := claimRecordToJobModel(model)
+	return jobFromModel(&job)
+}
+
+func activeDecisionJobOwner(db *gorm.DB, jobID, caseID, workerID string, generation int64, now time.Time) *gorm.DB {
+	return db.Model(&DecisionJobModel{}).Where(
+		`id = ? AND case_id = ? AND status = ? AND worker_id = ? AND execution_generation = ?
+		 AND lease_until IS NOT NULL AND lease_until > ?
+		 AND EXISTS (
+			SELECT 1 FROM decision_case c
+			WHERE c.id = ? AND c.id = decision_job.case_id AND c.execution_generation = ?
+		 )`,
+		jobID, caseID, string(entity.DecisionJobRunning), workerID, generation, now, caseID, generation,
+	)
+}
+
+func (r *decisionJobRepo) Heartbeat(ctx context.Context, jobID, caseID, workerID string, generation int64, leaseUntil time.Time) error {
+	now := time.Now()
+	if !leaseUntil.After(now) {
+		return fmt.Errorf("decision job: heartbeat: %w", port.ErrLeaseLost)
+	}
+	result := activeDecisionJobOwner(r.db.WithContext(ctx), jobID, caseID, workerID, generation, now).
+		Updates(map[string]any{"lease_until": leaseUntil, "updated_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -206,10 +331,10 @@ func (r *decisionJobRepo) Heartbeat(ctx context.Context, jobID, workerID string,
 	return nil
 }
 
-func (r *decisionJobRepo) MarkSucceeded(ctx context.Context, jobID, workerID string) error {
-	result := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
-		Where("id = ? AND status = ? AND worker_id = ?", jobID, string(entity.DecisionJobRunning), workerID).
-		Updates(map[string]any{"status": string(entity.DecisionJobSucceeded), "worker_id": "", "lease_until": nil, "updated_at": time.Now()})
+func (r *decisionJobRepo) MarkSucceeded(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
+	now := time.Now()
+	result := activeDecisionJobOwner(r.db.WithContext(ctx), jobID, caseID, workerID, generation, now).
+		Updates(map[string]any{"status": string(entity.DecisionJobSucceeded), "worker_id": "", "lease_until": nil, "updated_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -219,17 +344,16 @@ func (r *decisionJobRepo) MarkSucceeded(ctx context.Context, jobID, workerID str
 	return nil
 }
 
-func (r *decisionJobRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error {
-	updates := map[string]any{"worker_id": "", "lease_until": nil, "last_error": lastError, "updated_at": time.Now()}
+func (r *decisionJobRepo) MarkFailed(ctx context.Context, jobID, caseID, workerID string, generation int64, lastError string, retryAt *time.Time) error {
+	now := time.Now()
+	updates := map[string]any{"worker_id": "", "lease_until": nil, "last_error": lastError, "updated_at": now}
 	if retryAt != nil {
 		updates["status"] = string(entity.DecisionJobQueued)
 		updates["available_at"] = *retryAt
 	} else {
 		updates["status"] = string(entity.DecisionJobFailed)
 	}
-	result := r.db.WithContext(ctx).Model(&DecisionJobModel{}).
-		Where("id = ? AND status = ? AND worker_id = ?", jobID, string(entity.DecisionJobRunning), workerID).
-		Updates(updates)
+	result := activeDecisionJobOwner(r.db.WithContext(ctx), jobID, caseID, workerID, generation, now).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -253,6 +377,19 @@ func (r *decisionJobRepo) Cancel(ctx context.Context, jobID string) error {
 	return nil
 }
 
+func (r *decisionJobRepo) CancelOwned(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
+	now := time.Now()
+	result := activeDecisionJobOwner(r.db.WithContext(ctx), jobID, caseID, workerID, generation, now).
+		Updates(map[string]any{"status": string(entity.DecisionJobCancelled), "worker_id": "", "lease_until": nil, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("decision job: cancel owned: %w", port.ErrLeaseLost)
+	}
+	return nil
+}
+
 // MarkPaused parks a queued/running durable job. The execution context is
 // cancelled by the run manager; the job stays out of the runnable set until
 // ResumeQueued.
@@ -266,6 +403,19 @@ func (r *decisionJobRepo) MarkPaused(ctx context.Context, jobID string) error {
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("decision job: cannot pause")
+	}
+	return nil
+}
+
+func (r *decisionJobRepo) MarkPausedOwned(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
+	now := time.Now()
+	result := activeDecisionJobOwner(r.db.WithContext(ctx), jobID, caseID, workerID, generation, now).
+		Updates(map[string]any{"status": string(entity.DecisionJobPaused), "worker_id": "", "lease_until": nil, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("decision job: pause owned: %w", port.ErrLeaseLost)
 	}
 	return nil
 }
@@ -317,11 +467,15 @@ func (r *decisionJobRepo) getByCase(db *gorm.DB, caseID string) (*entity.Decisio
 }
 
 func jobFromModel(model *DecisionJobModel) *entity.DecisionJob {
+	claimToken := ""
+	if model.ClaimToken != nil {
+		claimToken = *model.ClaimToken
+	}
 	return &entity.DecisionJob{
 		ID: model.ID, CaseID: model.CaseID, Status: entity.DecisionJobStatus(model.Status),
 		Attempt: model.Attempt, MaxAttempts: model.MaxAttempts, WorkerID: model.WorkerID,
-		ExecutionGeneration: model.ExecutionGeneration,
-		LeaseUntil:          model.LeaseUntil, AvailableAt: model.AvailableAt, LastError: model.LastError,
+		ExecutionGeneration: model.ExecutionGeneration, ClaimToken: claimToken,
+		LeaseUntil: model.LeaseUntil, AvailableAt: model.AvailableAt, LastError: model.LastError,
 		CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 }
@@ -343,7 +497,7 @@ var errFinalFailureFence = errors.New("decision job: final failure fence lost")
 // CommitFinalFailure is the durable terminal write for an exhausted worker
 // attempt. The job lease, case status, event cursor, and CASE_FAILED event all
 // commit or roll back together.
-func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
+func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID string, generation int64, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
 	if event == nil {
 		return false, fmt.Errorf("decision job: final failure event is required")
 	}
@@ -360,8 +514,8 @@ func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerI
 	committed := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now()
-		jobResult := tx.Model(&DecisionJobModel{}).
-			Where("id = ? AND case_id = ? AND status = ? AND worker_id = ?", jobID, caseID, string(entity.DecisionJobRunning), workerID).
+		jobResult := activeDecisionJobOwner(tx, jobID, caseID, workerID, generation, now).
+			Where("case_id = ?", caseID).
 			Updates(map[string]any{
 				"status": string(entity.DecisionJobFailed), "worker_id": "", "lease_until": nil,
 				"last_error": lastError, "updated_at": now,
@@ -373,7 +527,8 @@ func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerI
 			return errFinalFailureFence
 		}
 		caseResult := tx.Model(&CaseModel{}).
-			Where("id = ? AND status IN ? AND status NOT IN ?", caseID, allowedStatuses, publicTerminalCaseStatuses()).
+			Where("id = ? AND execution_generation = ? AND status IN ? AND status NOT IN ?",
+				caseID, generation, allowedStatuses, publicTerminalCaseStatuses()).
 			Updates(map[string]any{"status": string(entity.CaseStatusFailed), "updated_at": now})
 		if caseResult.Error != nil {
 			return caseResult.Error

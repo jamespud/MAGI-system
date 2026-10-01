@@ -131,7 +131,12 @@ func (h *DecisionHandler) Cancel(ctx context.Context, c *app.RequestContext) {
 		Forbidden(c)
 		return
 	}
-	if h.svc.CancelRun(id) {
+	active, cancelErr := h.svc.CancelRunWithError(id)
+	if cancelErr != nil {
+		c.JSON(consts.StatusConflict, dto.ErrorResponse{Error: cancelErr.Error()})
+		return
+	}
+	if active {
 		if err := h.svc.Cancel(ctx, id); err != nil {
 			c.JSON(consts.StatusConflict, dto.ErrorResponse{Error: err.Error()})
 			return

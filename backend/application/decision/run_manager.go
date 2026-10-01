@@ -281,6 +281,20 @@ func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) boo
 	return true
 }
 
+func activeClaimForWorker(job *entity.DecisionJob, expected *entity.DecisionJob, workerID, claimToken string, now time.Time) bool {
+	return job != nil &&
+		expected != nil &&
+		job.ID == expected.ID &&
+		job.CaseID == expected.CaseID &&
+		job.Status == entity.DecisionJobRunning &&
+		job.WorkerID == workerID &&
+		job.ExecutionGeneration == expected.ExecutionGeneration &&
+		job.ExecutionGeneration > 0 &&
+		job.ClaimToken == claimToken &&
+		job.LeaseUntil != nil &&
+		job.LeaseUntil.After(now)
+}
+
 func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *entity.DecisionJob) {
 	defer func() {
 		m.mu.Lock()
@@ -304,17 +318,43 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 	}
 	for {
 		if ctx.Err() != nil {
-			if job != nil {
-				m.cancelWorkerJob(c.ID, job.ID)
-			}
 			return
 		}
 		leaseUntil := time.Now().Add(m.lease)
-		claimed, ok, err := m.jobRepo.Claim(ctx, job.ID, m.workerID, leaseUntil)
-		if err != nil || !ok {
+		claimToken := uuid.NewString()
+		claimed, ok, err := m.jobRepo.Claim(ctx, job.ID, m.workerID, claimToken, leaseUntil)
+		if err != nil {
+			// The transaction may have committed even though its reply was lost.
+			// Recover only by the exact caller-generated token; never infer a
+			// Claim from workerID/attempt/lease fields. The authoritative reread
+			// is detached from attempt cancellation but remains deadline-bounded.
+			recoveryCtx, recoveryCancel := detachedContext(ctx)
+			recovered, recoverErr := m.jobRepo.GetByClaimToken(recoveryCtx, claimToken)
+			recoveryCancel()
+			if recoverErr != nil {
+				return
+			}
+			claimed, ok = recovered, true
+		}
+		if !ok || claimed == nil {
+			return
+		}
+		// claim_token proves which Claim operation committed; it is not an
+		// authorization credential. A reply can be lost and then an external
+		// Cancel/Pause can win before recovery. Re-read the current durable Job
+		// and require that exact Claim to still be the active owner before any
+		// orchestration starts.
+		currentJob, currentErr := m.jobRepo.GetByCase(ctx, claimed.CaseID)
+		if currentErr != nil || !activeClaimForWorker(currentJob, claimed, m.workerID, claimToken, time.Now()) {
+			return
+		}
+		claimed = currentJob
+		if ctx.Err() != nil {
+			m.cancelWorkerJob(c.ID, claimed)
 			return
 		}
 		c.ExecutionAttempt = claimed.Attempt
+		c.ExecutionGeneration = claimed.ExecutionGeneration
 		// A remote replica may have committed an authoritative terminal
 		// transition between the case load that launched this worker and this
 		// claim. Re-read the case so the terminal settlement below never acts
@@ -327,9 +367,13 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				return
 			}
 			c = fresh
-			// ExecutionAttempt is runtime-only and not part of CaseModel; the
-			// authoritative re-read above must not lose the claim's attempt.
+			// ExecutionAttempt remains compatibility/debug metadata. The
+			// authoritative generation is persisted on Case and must match Claim.
 			c.ExecutionAttempt = claimed.Attempt
+			if c.ExecutionGeneration != claimed.ExecutionGeneration {
+				m.releaseRejectedRetryClaim(claimed)
+				return
+			}
 		}
 		// A Case that already reached an authoritative terminal state (for
 		// example a replica committed DEADLOCKED while this worker was down)
@@ -358,7 +402,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			}
 		}
 		attemptCtx, attemptCancel := context.WithCancelCause(ctx)
-		stopHeartbeat := m.startHeartbeat(attemptCtx, attemptCancel, claimed.ID, leaseUntil)
+		stopHeartbeat := m.startHeartbeat(attemptCtx, attemptCancel, claimed.ID, c.ID, claimed.ExecutionGeneration, leaseUntil)
 		runStart := time.Now()
 		m.metrics.RunStart()
 		m.metrics.RunStartForUser(userIDString(c.UserID))
@@ -375,7 +419,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				finishMetrics(false)
 				return
 			}
-			if err := m.markJobSucceeded(claimed.ID); err != nil {
+			if err := m.markJobSucceeded(claimed.ID, c.ID, claimed.ExecutionGeneration); err != nil {
 				attemptCancel(port.ErrLeaseLost)
 				finishMetrics(false)
 			} else {
@@ -388,12 +432,12 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		if ctx.Err() != nil {
-			m.cancelWorkerJob(c.ID, claimed.ID)
+			m.cancelWorkerJob(c.ID, claimed)
 			return
 		}
 		if claimed.Attempt < claimed.MaxAttempts {
 			retryAt := time.Now().Add(m.retryDelay(claimed.Attempt))
-			if err := m.markJobFailed(claimed.ID, runErr.Error(), &retryAt); err != nil {
+			if err := m.markJobFailed(claimed.ID, c.ID, claimed.ExecutionGeneration, runErr.Error(), &retryAt); err != nil {
 				if errors.Is(err, port.ErrLeaseLost) {
 					attemptCancel(port.ErrLeaseLost)
 				}
@@ -405,7 +449,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				if !timer.Stop() {
 					<-timer.C
 				}
-				m.cancelWorkerJob(c.ID, claimed.ID)
+				m.cancelWorkerJob(c.ID, claimed)
 				return
 			case <-timer.C:
 			}
@@ -422,7 +466,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			m.settleTerminalCaseJob(claimed, c, runErr.Error(), attemptCancel)
 			return
 		}
-		committed, err := m.commitFinalFailure(claimed.ID, c.ID, statuses, runErr.Error(), &event)
+		committed, err := m.commitFinalFailure(claimed.ID, claimed.ExecutionGeneration, c.ID, statuses, runErr.Error(), &event)
 		if err != nil {
 			return
 		}
@@ -439,16 +483,16 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 // The helpers below wrap every durable settlement write in a detached, bounded
 // context. They replace context.Background() call sites so a queued settlement
 // cannot hang a worker while still surviving caller cancellation.
-func (m *RunManager) markJobSucceeded(jobID string) error {
+func (m *RunManager) markJobSucceeded(jobID, caseID string, generation int64) error {
 	ctx, cancel := detachedContext(context.Background())
 	defer cancel()
-	return m.jobRepo.MarkSucceeded(ctx, jobID, m.workerID)
+	return m.jobRepo.MarkSucceeded(ctx, jobID, caseID, m.workerID, generation)
 }
 
-func (m *RunManager) markJobFailed(jobID, reason string, retryAt *time.Time) error {
+func (m *RunManager) markJobFailed(jobID, caseID string, generation int64, reason string, retryAt *time.Time) error {
 	ctx, cancel := detachedContext(context.Background())
 	defer cancel()
-	return m.jobRepo.MarkFailed(ctx, jobID, m.workerID, reason, retryAt)
+	return m.jobRepo.MarkFailed(ctx, jobID, caseID, m.workerID, generation, reason, retryAt)
 }
 
 func (m *RunManager) markJobPaused(jobID string) error {
@@ -475,10 +519,10 @@ func (m *RunManager) resumeJob(jobID string) error {
 	return m.jobRepo.ResumeQueued(ctx, jobID)
 }
 
-func (m *RunManager) commitFinalFailure(jobID, caseID string, statuses []entity.CaseStatus, reason string, event *entity.MagiEvent) (bool, error) {
+func (m *RunManager) commitFinalFailure(jobID string, generation int64, caseID string, statuses []entity.CaseStatus, reason string, event *entity.MagiEvent) (bool, error) {
 	ctx, cancel := detachedContext(context.Background())
 	defer cancel()
-	return m.jobRepo.CommitFinalFailure(ctx, jobID, m.workerID, caseID, statuses, reason, event)
+	return m.jobRepo.CommitFinalFailure(ctx, jobID, m.workerID, generation, caseID, statuses, reason, event)
 }
 
 func (m *RunManager) getCaseByID(caseID string) (*entity.DecisionCase, error) {
@@ -511,7 +555,7 @@ func (m *RunManager) settleRetryCleanupFailure(claimed *entity.DecisionJob, c *e
 	if c.Status == entity.CaseStatusDraft {
 		statuses = append(statuses, "")
 	}
-	committed, err := m.commitFinalFailure(claimed.ID, c.ID, statuses, "retry cleanup failed: "+cause.Error(), &event)
+	committed, err := m.commitFinalFailure(claimed.ID, claimed.ExecutionGeneration, c.ID, statuses, "retry cleanup failed: "+cause.Error(), &event)
 	if err != nil {
 		log.Printf("run manager: settle retry cleanup failure for case %s: %v", c.ID, err)
 		return
@@ -532,9 +576,9 @@ func (m *RunManager) settleTerminalCaseJob(job *entity.DecisionJob, c *entity.De
 	var err error
 	switch c.Status {
 	case entity.CaseStatusFailed, entity.CaseStatusCancelled, entity.CaseStatusTimedOut:
-		err = m.markJobFailed(job.ID, lastError, nil)
+		err = m.markJobFailed(job.ID, c.ID, job.ExecutionGeneration, lastError, nil)
 	case entity.CaseStatusResolved, entity.CaseStatusMemoryIndexed, entity.CaseStatusInsufficientEv, entity.CaseStatusDeadlocked:
-		err = m.markJobSucceeded(job.ID)
+		err = m.markJobSucceeded(job.ID, c.ID, job.ExecutionGeneration)
 	default:
 		onLeaseLost(port.ErrLeaseLost)
 		return
@@ -557,7 +601,10 @@ func (m *RunManager) settleClaimedCaseIfTerminal(c *entity.DecisionCase, claimed
 		m.settleTerminalCaseJob(claimed, c, "terminal case settlement", func(error) {})
 		return true
 	case entity.CaseStatusCancelled:
-		if err := m.cancelJob(claimed.ID); err != nil && !errors.Is(err, port.ErrLeaseLost) {
+		ctx, cancel := detachedContext(context.Background())
+		err := m.jobRepo.CancelOwned(ctx, claimed.ID, c.ID, m.workerID, claimed.ExecutionGeneration)
+		cancel()
+		if err != nil && !errors.Is(err, port.ErrLeaseLost) {
 			log.Printf("run manager: settle cancelled job %s: %v", claimed.ID, err)
 		}
 		return true
@@ -570,7 +617,7 @@ func (m *RunManager) releaseRejectedRetryClaim(job *entity.DecisionJob) {
 	if job == nil {
 		return
 	}
-	err := m.markJobFailed(job.ID, "retry reset fenced", nil)
+	err := m.markJobFailed(job.ID, job.CaseID, job.ExecutionGeneration, "retry reset fenced", nil)
 	if err != nil && !errors.Is(err, port.ErrLeaseLost) {
 		_ = m.cancelJob(job.ID)
 	}
@@ -640,7 +687,7 @@ type heartbeatResult struct {
 	err            error
 }
 
-func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.CancelCauseFunc, jobID string, leaseUntil time.Time) func() {
+func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.CancelCauseFunc, jobID, caseID string, generation int64, leaseUntil time.Time) func() {
 	interval := m.lease / 3
 	if interval < 10*time.Millisecond {
 		interval = 10 * time.Millisecond
@@ -657,7 +704,7 @@ func (m *RunManager) startHeartbeat(ctx context.Context, attemptCancel context.C
 			select {
 			case request := <-requests:
 				callCtx, callCancel := context.WithDeadline(workerCtx, request.leaseUntil)
-				err := m.jobRepo.Heartbeat(callCtx, jobID, m.workerID, request.nextLeaseUntil)
+				err := m.jobRepo.Heartbeat(callCtx, jobID, caseID, m.workerID, generation, request.nextLeaseUntil)
 				callCancel()
 				select {
 				case results <- heartbeatResult{nextLeaseUntil: request.nextLeaseUntil, err: err}:
@@ -808,16 +855,34 @@ func (m *RunManager) CancelLocal(caseID string) bool {
 
 // Cancel cancels a local worker or a durable queued/running job.
 func (m *RunManager) Cancel(caseID string) bool {
-	local := m.CancelLocal(caseID)
+	ok, _ := m.CancelWithError(caseID)
+	return ok
+}
+
+// CancelWithError exposes durable invalidation failure to authority callers.
+// A local context cancellation is not reported as success when the durable job
+// could not be invalidated.
+func (m *RunManager) CancelWithError(caseID string) (bool, error) {
+	m.mu.Lock()
+	_, local := m.runs[caseID]
+	m.mu.Unlock()
+	durable := false
 	if m.jobRepo != nil {
 		job, err := m.getJobByCase(caseID)
-		if err == nil && job != nil &&
-			(job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
-			_ = m.cancelJob(job.ID)
-			return true
+		if err != nil {
+			return false, err
+		}
+		if job != nil && (job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
+			if err := m.cancelJob(job.ID); err != nil {
+				return false, err
+			}
+			durable = true
 		}
 	}
-	return local
+	if local {
+		m.CancelLocal(caseID)
+	}
+	return durable || local, nil
 }
 
 // WaitStopped blocks until the in-process worker for caseID has fully exited,
@@ -845,24 +910,38 @@ func (m *RunManager) WaitStopped(caseID string, timeout time.Duration) bool {
 // cancelled, so a later Resume can wake it from its checkpoint. Returns true
 // when a local worker or durable job was stopped.
 func (m *RunManager) Pause(caseID string) bool {
+	ok, _ := m.PauseWithError(caseID)
+	return ok
+}
+
+// PauseWithError requires durable ownership invalidation to succeed before the
+// local worker is cancelled or the Case is reported paused.
+func (m *RunManager) PauseWithError(caseID string) (bool, error) {
 	m.mu.Lock()
 	h, local := m.runs[caseID]
-	m.paused[caseID] = true
 	m.mu.Unlock()
 	parked := false
 	if m.jobRepo != nil {
 		job, err := m.getJobByCase(caseID)
-		if err == nil && job != nil &&
-			(job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
-			if m.markJobPaused(job.ID) == nil {
-				parked = true
-			}
+		if err != nil {
+			return false, err
 		}
+		if job != nil && (job.Status == entity.DecisionJobQueued || job.Status == entity.DecisionJobRunning) {
+			if err := m.markJobPaused(job.ID); err != nil {
+				return false, err
+			}
+			parked = true
+		}
+	}
+	if parked || local {
+		m.mu.Lock()
+		m.paused[caseID] = true
+		m.mu.Unlock()
 	}
 	if local {
 		h.cancel()
 	}
-	return parked || local
+	return parked || local, nil
 }
 
 // Resume wakes a paused durable job back into the runnable set and relaunches
@@ -909,15 +988,20 @@ func (m *RunManager) Resume(caseID string) bool {
 // cancelWorkerJob records the durable job state when a worker stops because
 // its context was cancelled: a deliberate pause parks the job, any other
 // cancellation (API cancel, shutdown) marks it cancelled.
-func (m *RunManager) cancelWorkerJob(caseID, jobID string) {
+func (m *RunManager) cancelWorkerJob(caseID string, job *entity.DecisionJob) {
+	if job == nil {
+		return
+	}
 	m.mu.Lock()
 	wasPaused := m.paused[caseID]
 	m.mu.Unlock()
+	ctx, cancel := detachedContext(context.Background())
+	defer cancel()
 	if wasPaused {
-		_ = m.markJobPaused(jobID)
+		_ = m.jobRepo.MarkPausedOwned(ctx, job.ID, caseID, m.workerID, job.ExecutionGeneration)
 		return
 	}
-	_ = m.cancelJob(jobID)
+	_ = m.jobRepo.CancelOwned(ctx, job.ID, caseID, m.workerID, job.ExecutionGeneration)
 }
 
 func (m *RunManager) IsRunning(caseID string) bool {
