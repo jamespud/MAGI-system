@@ -56,15 +56,35 @@ type DecisionJobModel struct {
 	WorkerID    string
 	LeaseUntil  *time.Time
 	// ExecutionGeneration records which Case generation this job claim owns.
-	// T1 only persists the column; advancing it belongs to the claim path (T2).
-	ExecutionGeneration int64     `gorm:"not null;default:0"`
-	AvailableAt         time.Time `gorm:"index"`
-	LastError           string    `gorm:"type:text"`
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ExecutionGeneration int64 `gorm:"not null;default:0"`
+	// ClaimToken identifies one Claim operation for reply-loss recovery. NULL is
+	// legacy/no token. It is deliberately not part of the ownership predicate.
+	ClaimToken  *string   `gorm:"size:36;uniqueIndex:uk_decision_job_claim_token"`
+	AvailableAt time.Time `gorm:"index"`
+	LastError   string    `gorm:"type:text"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (DecisionJobModel) TableName() string { return "decision_job" }
+
+// DecisionJobClaimModel is the append-only idempotency registry for Claim.
+// DecisionJobModel.claim_token points at the current claim, while this table
+// preserves every committed token so a superseded token can never allocate a
+// different generation later.
+type DecisionJobClaimModel struct {
+	ClaimToken          string    `gorm:"primaryKey;size:36"`
+	JobID               string    `gorm:"size:64;not null;index:idx_decision_job_claim_job"`
+	CaseID              string    `gorm:"size:64;not null;index:idx_decision_job_claim_case_generation,priority:1"`
+	WorkerID            string    `gorm:"size:255;not null"`
+	ExecutionGeneration int64     `gorm:"not null;index:idx_decision_job_claim_case_generation,priority:2"`
+	Attempt             int       `gorm:"type:bigint;not null"`
+	MaxAttempts         int       `gorm:"type:bigint;not null"`
+	LeaseUntil          time.Time `gorm:"not null"`
+	ClaimedAt           time.Time `gorm:"not null"`
+}
+
+func (DecisionJobClaimModel) TableName() string { return "decision_job_claim" }
 
 // RagIndexJobModel is the durable envelope for one RAG index mutation.
 type RagIndexJobModel struct {
@@ -464,7 +484,7 @@ func (SelfImproveModel) TableName() string { return "self_improve_suggestion" }
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
-		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
+		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &DecisionJobClaimModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{}, &EventCursorModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
 		&ToolCallModel{}, &ApprovalModel{},
