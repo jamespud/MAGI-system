@@ -20,6 +20,7 @@ import (
 // (and later the table-driven action dispatch) operates on one explicit state.
 type State struct {
 	MaxDebate int
+	Execution  *entity.ExecutionContext
 	Task      *entity.DecisionTask
 	Results   []*runtime.LoopResult
 	Votes     []*entity.Vote
@@ -123,7 +124,7 @@ func (o *Orchestrator) stepRetrieveMemory(ctx context.Context, case_ *entity.Dec
 
 func (o *Orchestrator) stepInvestigate(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": st.Round})
-	st.Results = o.dispatcher.Dispatch(ctx, case_, st.Task, o.configs, st.Round)
+	st.Results = o.dispatcher.DispatchForExecution(ctx, case_, st.Task, o.configs, st.Round, st.Execution)
 	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "investigate")
 	return entity.CaseStatusEvidenceGating, false, nil
 }
@@ -195,7 +196,7 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 			})
 		})
 	}
-	st.Results = o.dispatcher.DispatchReconsider(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round)
+	st.Results = o.dispatcher.DispatchReconsiderForExecution(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round, st.Execution)
 	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "reconsider")
 	return entity.CaseStatusReflecting, false, nil
 }
