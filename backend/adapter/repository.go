@@ -302,6 +302,123 @@ func (r *magiRepository) LoadForExecution(ctx context.Context, owner *entity.Exe
 	return out, err
 }
 
+func (r *magiRepository) ListAgentRunsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.AgentRun, error) {
+	var models []AgentRunModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).
+		Order("magi_code asc, round asc, started_at asc, id asc").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.AgentRun, len(models))
+	for i, m := range models {
+		out[i] = &entity.AgentRun{
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+			MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode), Round: m.Round,
+			Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
+			Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON), Err: m.Err,
+			StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+		}
+	}
+	return out, nil
+}
+
+func (r *magiRepository) ListEvidenceByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.EvidenceRecord, error) {
+	var models []EvidenceModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.EvidenceRecord, len(models))
+	for i := range models { out[i] = evidenceFromModel(&models[i]) }
+	return out, nil
+}
+
+func (r *magiRepository) ListClaimsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Claim, error) {
+	var models []ClaimModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Claim, len(models))
+	for i := range models { out[i] = claimFromModel(&models[i]) }
+	return out, nil
+}
+
+func voteFromModel(m *VoteModel) *entity.Vote {
+	return &entity.Vote{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
+		Confidence: m.Confidence, UtilityScores: fromJSON[[]entity.UtilityDimensionScore](m.UtilityScoresJSON),
+		KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON), EvidenceIDs: fromJSON[[]string](m.EvidenceIDsJSON),
+		ReasoningSummary: m.ReasoningSummary, Conditions: fromJSON[[]entity.DecisionCondition](m.ConditionsJSON),
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListVotesByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Vote, error) {
+	var models []VoteModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Vote, len(models))
+	for i := range models { out[i] = voteFromModel(&models[i]) }
+	return out, nil
+}
+
+func (r *magiRepository) ListDebateRoundsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.DebateRound, error) {
+	var models []DebateRoundModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.DebateRound, len(models))
+	for i, m := range models {
+		out[i] = &entity.DebateRound{
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Round: m.Round,
+			Packet: fromJSON[entity.DebatePacket](m.PacketJSON), StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+		}
+	}
+	return out, nil
+}
+
+func reflectionFromModel(m *ReflectionModel) *entity.Reflection {
+	return &entity.Reflection{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, Round: m.Round, PreviousVoteID: m.PreviousVoteID,
+		PositionChange: entity.PositionChange(m.PositionChange),
+		AcceptedClaims: fromJSON[[]string](m.AcceptedClaimsJSON),
+		RejectedClaims: fromJSON[[]string](m.RejectedClaimsJSON),
+		NewEvidenceIDs: fromJSON[[]string](m.NewEvidenceIDsJSON),
+		Reasoning: m.Reasoning, ReadyToRevote: m.ReadyToRevote, CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListReflectionsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Reflection, error) {
+	var models []ReflectionModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Reflection, len(models))
+	for i := range models { out[i] = reflectionFromModel(&models[i]) }
+	return out, nil
+}
+
+func toolCallFromModel(m *ToolCallModel) *entity.ToolCall {
+	return &entity.ToolCall{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+		Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err,
+		ApprovedBy: m.ApprovedBy, EvidenceID: m.EvidenceID, DurationMs: m.DurationMs, CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListToolCallsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.ToolCall, error) {
+	var models []ToolCallModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).
+		Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.ToolCall, len(models))
+	for i := range models { out[i] = toolCallFromModel(&models[i]) }
+	return out, nil
+}
+
 func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
 func (r *magiRepository) AgentRunRepo() port.AgentRunRepository     { return &agentRunRepo{db: r.db} }
 func (r *magiRepository) EvidenceRepo() port.EvidenceRepository     { return &evidenceRepo{db: r.db} }
