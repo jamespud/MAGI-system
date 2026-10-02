@@ -32,9 +32,10 @@ type ClaimSubmission struct {
 
 // Vote is a Magi's structured final decision for a round.
 type Vote struct {
-	ID               string                  `json:"id,omitempty"`
-	CaseID           string                  `json:"case_id,omitempty"`
-	AgentRunID       string                  `json:"agent_run_id,omitempty"`
+	ID                  string                  `json:"id,omitempty"`
+	CaseID              string                  `json:"case_id,omitempty"`
+	ExecutionGeneration int64                   `json:"execution_generation,omitempty"`
+	AgentRunID          string                  `json:"agent_run_id,omitempty"`
 	Round            int                     `json:"round,omitempty"`
 	Decision         VoteDecision            `json:"decision"`
 	Confidence       float64                 `json:"confidence"`
