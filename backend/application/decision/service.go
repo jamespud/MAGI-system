@@ -71,6 +71,14 @@ type RunController interface {
 	Resume(caseID string) bool
 }
 
+// runControlWithErrors is an optional durable-control capability. Keeping it
+// separate from RunController preserves lightweight test fakes while production
+// RunManager can surface durable invalidation failures.
+type runControlWithErrors interface {
+	CancelWithError(caseID string) (bool, error)
+	PauseWithError(caseID string) (bool, error)
+}
+
 // WithRunManager injects an async run controller. When set, StartRun delegates
 // to it (async); otherwise StartRun falls back to synchronous Run.
 func WithRunManager(rm RunController) Option {
@@ -206,10 +214,18 @@ func (s *Service) ForkAndRun(ctx context.Context, userID int64, sourceCaseID str
 
 // CancelRun cancels an active run. Returns true if a run was active.
 func (s *Service) CancelRun(caseID string) bool {
+	ok, _ := s.CancelRunWithError(caseID)
+	return ok
+}
+
+func (s *Service) CancelRunWithError(caseID string) (bool, error) {
 	if s.runs == nil {
-		return false
+		return false, nil
 	}
-	return s.runs.Cancel(caseID)
+	if controlled, ok := s.runs.(runControlWithErrors); ok {
+		return controlled.CancelWithError(caseID)
+	}
+	return s.runs.Cancel(caseID), nil
 }
 
 // WaitStopped waits for the in-process worker to drain after a cancel. The
@@ -424,9 +440,14 @@ func (s *Service) Pause(ctx context.Context, id string) error {
 		c.Status == entity.CaseStatusCancelled || c.Status == entity.CaseStatusPaused {
 		return fmt.Errorf("case is not pauseable in status %s", c.Status)
 	}
-	if s.runs != nil && !s.runs.Pause(id) {
-		// Nothing was actively running or parked; still mark the case paused
-		// so the user-facing state is explicit.
+	if s.runs != nil {
+		if controlled, ok := s.runs.(runControlWithErrors); ok {
+			if _, err := controlled.PauseWithError(id); err != nil {
+				return err
+			}
+		} else {
+			s.runs.Pause(id)
+		}
 	}
 	if writer, ok := s.caseRepo.(port.PauseStatusWriter); ok {
 		return writer.UpdatePaused(ctx, id, entity.CaseStatusPaused, c.Status)

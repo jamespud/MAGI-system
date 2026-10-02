@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/metrics"
@@ -38,7 +39,7 @@ type blockingHeartbeatRepo struct {
 	once    sync.Once
 }
 
-func (r *blockingHeartbeatRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
+func (r *blockingHeartbeatRepo) Heartbeat(ctx context.Context, jobID, caseID, workerID string, generation int64, leaseUntil time.Time) error {
 	r.once.Do(func() { close(r.started) })
 	<-r.release
 	close(r.done)
@@ -51,11 +52,13 @@ type markSucceededErrorRepo struct {
 	markFaileds atomic.Int32
 }
 
-func (r *markSucceededErrorRepo) MarkSucceeded(context.Context, string, string) error { return r.err }
+func (r *markSucceededErrorRepo) MarkSucceeded(context.Context, string, string, string, int64) error {
+	return r.err
+}
 
-func (r *markSucceededErrorRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error {
+func (r *markSucceededErrorRepo) MarkFailed(ctx context.Context, jobID, caseID, workerID string, generation int64, lastError string, retryAt *time.Time) error {
 	r.markFaileds.Add(1)
-	return r.DecisionJobRepository.MarkFailed(ctx, jobID, workerID, lastError, retryAt)
+	return r.DecisionJobRepository.MarkFailed(ctx, jobID, caseID, workerID, generation, lastError, retryAt)
 }
 
 type leaseLossBeforeSuccessRepo struct {
@@ -63,13 +66,27 @@ type leaseLossBeforeSuccessRepo struct {
 	markSucceededs atomic.Int32
 }
 
-func (r *leaseLossBeforeSuccessRepo) Heartbeat(context.Context, string, string, time.Time) error {
+func (r *leaseLossBeforeSuccessRepo) Heartbeat(context.Context, string, string, string, int64, time.Time) error {
 	return port.ErrLeaseLost
 }
 
-func (r *leaseLossBeforeSuccessRepo) MarkSucceeded(ctx context.Context, jobID, workerID string) error {
+func (r *leaseLossBeforeSuccessRepo) MarkSucceeded(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
 	r.markSucceededs.Add(1)
-	return r.DecisionJobRepository.MarkSucceeded(ctx, jobID, workerID)
+	return r.DecisionJobRepository.MarkSucceeded(ctx, jobID, caseID, workerID, generation)
+}
+
+type durableControlErrorRepo struct {
+	port.DecisionJobRepository
+	cancelErr error
+	pauseErr  error
+}
+
+func (r *durableControlErrorRepo) Cancel(context.Context, string) error {
+	return r.cancelErr
+}
+
+func (r *durableControlErrorRepo) MarkPaused(context.Context, string) error {
+	return r.pauseErr
 }
 
 type successThenObserveCancellationOrchestrator struct {
@@ -123,7 +140,7 @@ func openJobDB(t *testing.T) *gorm.DB {
 	// the retry-cleanup-failure path) writes the case event and bumps the
 	// per-case sequence cursor in the same transaction.
 	if err := db.AutoMigrate(
-		&magi.DecisionJobModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{},
+		&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{},
 		&magi.EventModel{}, &magi.EventCursorModel{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -136,6 +153,33 @@ func seedDecisionCase(t *testing.T, db *gorm.DB, id string, userID int64) {
 	repo := magi.NewRepository(db)
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: id, UserID: userID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("seed case %s: %v", id, err)
+	}
+}
+
+func TestRunManager_DurableControlErrorsAreReported(t *testing.T) {
+	db := openJobDB(t)
+	seedDecisionCase(t, db, "case-control-error", 0)
+	baseJobs := magi.NewDecisionJobRepository(db)
+	if _, admitted, err := baseJobs.Admit(context.Background(), "case-control-error", 2, 0); err != nil || !admitted {
+		t.Fatalf("admit: admitted=%v err=%v", admitted, err)
+	}
+	injected := errors.New("durable control unavailable")
+	jobs := &durableControlErrorRepo{DecisionJobRepository: baseJobs, cancelErr: injected, pauseErr: injected}
+	rm := decision.NewRunManager(newBlockingOrchestrator(), decision.RunManagerDeps{JobRepo: jobs})
+
+	if ok, err := rm.CancelWithError("case-control-error"); ok || !errors.Is(err, injected) {
+		t.Fatalf("cancel = ok=%v err=%v, want durable error", ok, err)
+	}
+	job, err := baseJobs.GetByCase(context.Background(), "case-control-error")
+	if err != nil || job.Status != entity.DecisionJobQueued {
+		t.Fatalf("job after failed cancel = %+v err=%v", job, err)
+	}
+	if ok, err := rm.PauseWithError("case-control-error"); ok || !errors.Is(err, injected) {
+		t.Fatalf("pause = ok=%v err=%v, want durable error", ok, err)
+	}
+	job, err = baseJobs.GetByCase(context.Background(), "case-control-error")
+	if err != nil || job.Status != entity.DecisionJobQueued {
+		t.Fatalf("job after failed pause = %+v err=%v", job, err)
 	}
 }
 
@@ -315,9 +359,8 @@ func TestRunManager_RecoverQueuedJob(t *testing.T) {
 		t.Fatalf("admit recover: admitted=%v err=%v", admitted, err)
 	}
 	orch := &durableRetryOrchestrator{}
-	case_ := &entity.DecisionCase{ID: "case-recover"}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: &stubCaseRepo{case_: case_}, WorkerID: "worker-recover", MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
+		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(), WorkerID: "worker-recover", MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
 	})
 	if err := rm.Recover(context.Background()); err != nil {
 		t.Fatalf("recover: %v", err)
@@ -334,7 +377,7 @@ func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &blockingUserOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: &stubCaseRepo{case_: &entity.DecisionCase{ID: "case-pause"}},
+		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(),
 		WorkerID: "worker-pause", MaxAttempts: 2, RetryBase: time.Millisecond,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-pause"}); err != nil {
@@ -387,7 +430,7 @@ func openJobAdmissionDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.RunAdmissionLockModel{}); err != nil {
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate admission: %v", err)
 	}
 	return db
@@ -409,7 +452,7 @@ func TestRunManager_CrashedProcessDoesNotLeakConcurrencySlot(t *testing.T) {
 		t.Fatalf("crash admit 1 = job=%+v admitted=%v err=%v", job, admitted, err)
 	}
 	// Simulate a worker claiming the job then crashing (lease expires).
-	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-crashed", time.Now().Add(-time.Hour)); err != nil || !ok {
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-crashed", uuid.NewString(), time.Now().Add(-time.Hour)); err != nil || !ok {
 		t.Fatalf("claim crash = ok=%v err=%v", ok, err)
 	}
 	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
@@ -483,7 +526,7 @@ func TestRunManager_RunRecoversLeaseExpiredAfterStartup(t *testing.T) {
 	if err != nil || !admitted {
 		t.Fatalf("admit = admitted=%v err=%v", admitted, err)
 	}
-	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", uuid.NewString(), time.Now().Add(-time.Hour)); err != nil || !ok {
 		t.Fatalf("claim A = ok=%v err=%v", ok, err)
 	}
 
@@ -553,7 +596,7 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", uuid.NewString(), time.Now().Add(-time.Hour)); err != nil || !ok {
 		t.Fatalf("seed claim: %v", err)
 	}
 	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
@@ -590,7 +633,7 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", time.Now().Add(-time.Hour)); err != nil || !ok {
+	if _, ok, err := jobs.Claim(ctx, job.ID, "worker-a", uuid.NewString(), time.Now().Add(-time.Hour)); err != nil || !ok {
 		t.Fatalf("seed claim: %v", err)
 	}
 	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {

@@ -143,11 +143,15 @@ func (f *fakeJobRepo) Admit(ctx context.Context, caseID string, maxAttempts, per
 	return job, true, nil
 }
 
-func (f *fakeJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
+func (f *fakeJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken string, leaseUntil time.Time) (*entity.DecisionJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, j := range f.jobs {
 		if j.ID == jobID && j.Status == entity.DecisionJobQueued {
+			c := f.cases[j.CaseID]
+			c.ExecutionGeneration++
+			j.ExecutionGeneration = c.ExecutionGeneration
+			j.ClaimToken = claimToken
 			j.Status = entity.DecisionJobRunning
 			j.WorkerID = workerID
 			j.LeaseUntil = &leaseUntil
@@ -157,14 +161,26 @@ func (f *fakeJobRepo) Claim(ctx context.Context, jobID, workerID string, leaseUn
 	}
 	return nil, false, nil
 }
-func (f *fakeJobRepo) Heartbeat(ctx context.Context, jobID, workerID string, leaseUntil time.Time) error {
+func (f *fakeJobRepo) GetByClaimToken(ctx context.Context, claimToken string) (*entity.DecisionJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, j := range f.jobs {
+		if j.ClaimToken == claimToken {
+			return j, nil
+		}
+	}
+	return nil, gormErrRecordNotFound()
+}
+func (f *fakeJobRepo) Heartbeat(ctx context.Context, jobID, caseID, workerID string, generation int64, leaseUntil time.Time) error {
 	return nil
 }
-func (f *fakeJobRepo) MarkSucceeded(ctx context.Context, jobID, workerID string) error { return nil }
-func (f *fakeJobRepo) MarkFailed(ctx context.Context, jobID, workerID, lastError string, retryAt *time.Time) error {
+func (f *fakeJobRepo) MarkSucceeded(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
 	return nil
 }
-func (f *fakeJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, caseID string, expected []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
+func (f *fakeJobRepo) MarkFailed(ctx context.Context, jobID, caseID, workerID string, generation int64, lastError string, retryAt *time.Time) error {
+	return nil
+}
+func (f *fakeJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID string, generation int64, caseID string, expected []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.commitErr != nil {
@@ -174,7 +190,7 @@ func (f *fakeJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID, c
 		return false, errors.New("failure event is required")
 	}
 	for _, job := range f.jobs {
-		if job.ID == jobID && job.Status == entity.DecisionJobRunning && job.WorkerID == workerID {
+		if job.ID == jobID && job.Status == entity.DecisionJobRunning && job.WorkerID == workerID && job.ExecutionGeneration == generation {
 			case_, ok := f.cases[caseID]
 			if !ok || !containsExpectedCaseStatus(case_.Status, expected) || isTerminalCaseStatus(case_.Status) {
 				return false, nil
@@ -218,6 +234,9 @@ func isTerminalCaseStatus(status entity.CaseStatus) bool {
 	}
 }
 func (f *fakeJobRepo) Cancel(ctx context.Context, jobID string) error { return nil }
+func (f *fakeJobRepo) CancelOwned(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
+	return nil
+}
 func (f *fakeJobRepo) MarkPaused(ctx context.Context, jobID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -227,6 +246,9 @@ func (f *fakeJobRepo) MarkPaused(ctx context.Context, jobID string) error {
 		}
 	}
 	return nil
+}
+func (f *fakeJobRepo) MarkPausedOwned(ctx context.Context, jobID, caseID, workerID string, generation int64) error {
+	return f.MarkPaused(ctx, jobID)
 }
 func (f *fakeJobRepo) ResumeQueued(ctx context.Context, jobID string) error { return nil }
 func (f *fakeJobRepo) RequeueExpired(ctx context.Context, now time.Time) error {
