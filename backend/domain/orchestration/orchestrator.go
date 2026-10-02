@@ -468,6 +468,7 @@ func (o *Orchestrator) retryFailedAgents(
 	results []*runtime.LoopResult,
 	round int,
 	phase string,
+	execution *entity.ExecutionContext,
 ) []*runtime.LoopResult {
 	limit := o.failPolicy.RetryLimit
 	if limit <= 0 || len(results) == 0 {
@@ -481,7 +482,7 @@ func (o *Orchestrator) retryFailedAgents(
 			continue
 		}
 		for attempt := 1; attempt <= limit; attempt++ {
-			rr := o.dispatcher.RetryAgent(ctx, case_, task, o.configs[i], round, attempt, phase)
+			rr := o.dispatcher.RetryAgentForExecution(ctx, case_, task, o.configs[i], round, attempt, phase, execution)
 			results[i] = rr
 			if isCompleted(rr) {
 				break
