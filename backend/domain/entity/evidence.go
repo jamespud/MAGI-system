@@ -5,9 +5,10 @@ import "time"
 // EvidenceRecord is an observation collected by a tool (ADR-005). It records
 // what the tool returned, NOT the agent's interpretation (which lives in Claim).
 type EvidenceRecord struct {
-	ID          string
-	CaseID      string
-	AgentRunID  string
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	AgentRunID          string
 	ToolCallID  string
 	ToolName    string
 	SourceType  EvidenceSourceType
