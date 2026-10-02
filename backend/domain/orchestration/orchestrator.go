@@ -536,8 +536,10 @@ func (o *Orchestrator) persistArtifactValue(ctx context.Context, execution *enti
 		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
 		return o.repo.ClaimRepo().Create(ctx, v)
 	case *entity.Vote:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
-		return o.persistArtifactValue(ctx, execution, v)
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
+		return o.repo.VoteRepo().Create(ctx, v)
 	case *entity.DebateRound:
 		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
 		return o.repo.DebateRepo().Create(ctx, v)
@@ -621,8 +623,6 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 					return o.persistArtifactValue(ctx, execution, &cp)
 				}); err != nil {
 					return remap, err
-				}; err != nil {
-					return remap, err
 				}
 			}
 			claims := r.Ledger.ListClaims()
@@ -634,6 +634,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp := *cl
 				cp.ID = remap.ClaimMap()[cl.ID]
 				cp.CaseID = case_.ID
+				cp.ExecutionGeneration = case_.ExecutionGeneration
 				cp.AgentRunID = run.ID
 				cp.Supports = remapRefs(cl.Supports, remap.EvidenceMap())
 				cp.Contradicts = remapRefs(cl.Contradicts, remap.ClaimMap())
@@ -701,8 +702,10 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		v.ExecutionGeneration = case_.ExecutionGeneration
 		v.Round = round
 		if err := o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, func() error {
-			return o.repo.VoteRepo().Create(ctx, v)
-		})
+			return o.persistArtifactValue(ctx, execution, v)
+		}); err != nil {
+			return remap, err
+		}
 	}
 	return remap, nil
 }
