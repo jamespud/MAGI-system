@@ -127,6 +127,181 @@ func (r *magiRepository) CleanupCaseArtifacts(ctx context.Context, caseID string
 	})
 }
 
+func (r *magiRepository) withActiveExecution(ctx context.Context, owner *entity.ExecutionContext, write func(*gorm.DB) error) error {
+	if r.db == nil || owner == nil || !owner.IsDurable() || write == nil {
+		return port.ErrLeaseLost
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		var job DecisionJobModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND case_id = ?", owner.JobID, owner.CaseID).First(&job).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return port.ErrLeaseLost
+			}
+			return err
+		}
+		if job.Status != string(entity.DecisionJobRunning) ||
+			job.WorkerID != owner.WorkerID ||
+			job.ExecutionGeneration != owner.ExecutionGeneration ||
+			job.LeaseUntil == nil || !job.LeaseUntil.After(now) {
+			return port.ErrLeaseLost
+		}
+		var caseModel CaseModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", owner.CaseID).First(&caseModel).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return port.ErrLeaseLost
+			}
+			return err
+		}
+		if caseModel.ExecutionGeneration != owner.ExecutionGeneration {
+			return port.ErrLeaseLost
+		}
+		return write(tx)
+	})
+}
+
+func validateArtifactOwner(owner *entity.ExecutionContext, caseID string, generation int64) error {
+	if owner == nil || !owner.IsDurable() || caseID != owner.CaseID {
+		return port.ErrLeaseLost
+	}
+	if generation != 0 && generation != owner.ExecutionGeneration {
+		return port.ErrLeaseLost
+	}
+	return nil
+}
+
+func (r *magiRepository) CreateAgentRunOwned(ctx context.Context, owner *entity.ExecutionContext, a *entity.AgentRun) error {
+	if a == nil || validateArtifactOwner(owner, a.CaseID, a.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	a.ExecutionGeneration = owner.ExecutionGeneration
+	m := AgentRunModel{
+		ID: a.ID, CaseID: a.CaseID, ExecutionGeneration: a.ExecutionGeneration,
+		MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode), Round: a.Round,
+		Status: string(a.Status), UsageJSON: toJSON(a.Usage), EnvironmentJSON: toJSON(a.Environment),
+		Err: a.Err, StartedAt: a.StartedAt, CompletedAt: a.CompletedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateEvidenceOwned(ctx context.Context, owner *entity.ExecutionContext, e *entity.EvidenceRecord) error {
+	if e == nil || validateArtifactOwner(owner, e.CaseID, e.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	e.ExecutionGeneration = owner.ExecutionGeneration
+	uri := ""
+	if e.SourceURI != nil { uri = *e.SourceURI }
+	m := EvidenceModel{
+		ID: e.ID, CaseID: e.CaseID, ExecutionGeneration: e.ExecutionGeneration,
+		AgentRunID: e.AgentRunID, ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+		SourceType: string(e.SourceType), SourceURI: uri, RawContent: e.RawContent,
+		Observation: e.Observation, ReliabilityJSON: toJSON(e.Reliability),
+		CollectedBy: string(e.CollectedBy), CreatedAt: e.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateClaimOwned(ctx context.Context, owner *entity.ExecutionContext, c *entity.Claim) error {
+	if c == nil || validateArtifactOwner(owner, c.CaseID, c.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	c.ExecutionGeneration = owner.ExecutionGeneration
+	m := ClaimModel{
+		ID: c.ID, CaseID: c.CaseID, ExecutionGeneration: c.ExecutionGeneration,
+		AgentRunID: c.AgentRunID, Statement: c.Statement, SupportsJSON: toJSON(c.Supports),
+		ContradictsJSON: toJSON(c.Contradicts), Status: string(c.Status),
+		CreatedBy: string(c.CreatedBy), CreatedAt: c.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateVoteOwned(ctx context.Context, owner *entity.ExecutionContext, v *entity.Vote) error {
+	if v == nil || validateArtifactOwner(owner, v.CaseID, v.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	v.ExecutionGeneration = owner.ExecutionGeneration
+	m := VoteModel{
+		ID: v.ID, CaseID: v.CaseID, ExecutionGeneration: v.ExecutionGeneration,
+		AgentRunID: v.AgentRunID, Round: v.Round, Decision: string(v.Decision),
+		Confidence: v.Confidence, UtilityScoresJSON: toJSON(v.UtilityScores),
+		KeyClaimIDsJSON: toJSON(v.KeyClaimIDs), EvidenceIDsJSON: toJSON(v.EvidenceIDs),
+		ReasoningSummary: v.ReasoningSummary, ConditionsJSON: toJSON(v.Conditions), CreatedAt: v.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateDebateRoundOwned(ctx context.Context, owner *entity.ExecutionContext, d *entity.DebateRound) error {
+	if d == nil || validateArtifactOwner(owner, d.CaseID, d.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	d.ExecutionGeneration = owner.ExecutionGeneration
+	m := DebateRoundModel{
+		ID: d.ID, CaseID: d.CaseID, ExecutionGeneration: d.ExecutionGeneration,
+		Round: d.Round, PacketJSON: toJSON(d.Packet), StartedAt: d.StartedAt, CompletedAt: d.CompletedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateReflectionOwned(ctx context.Context, owner *entity.ExecutionContext, rf *entity.Reflection) error {
+	if rf == nil || validateArtifactOwner(owner, rf.CaseID, rf.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	rf.ExecutionGeneration = owner.ExecutionGeneration
+	m := ReflectionModel{
+		ID: rf.ID, CaseID: rf.CaseID, ExecutionGeneration: rf.ExecutionGeneration,
+		AgentRunID: rf.AgentRunID, Round: rf.Round, PreviousVoteID: rf.PreviousVoteID,
+		PositionChange: string(rf.PositionChange), AcceptedClaimsJSON: toJSON(rf.AcceptedClaims),
+		RejectedClaimsJSON: toJSON(rf.RejectedClaims), NewEvidenceIDsJSON: toJSON(rf.NewEvidenceIDs),
+		Reasoning: rf.Reasoning, ReadyToRevote: rf.ReadyToRevote, CreatedAt: rf.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateToolCallOwned(ctx context.Context, owner *entity.ExecutionContext, t *entity.ToolCall) error {
+	if t == nil || validateArtifactOwner(owner, t.CaseID, t.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	t.ExecutionGeneration = owner.ExecutionGeneration
+	m := ToolCallModel{
+		ID: t.ID, CaseID: t.CaseID, ExecutionGeneration: t.ExecutionGeneration,
+		AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
+		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err,
+		ApprovedBy: t.ApprovedBy, EvidenceID: t.EvidenceID, DurationMs: t.DurationMs, CreatedAt: t.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) SaveForExecution(ctx context.Context, owner *entity.ExecutionContext, state *entity.AgentState) error {
+	if state == nil || state.RunID == "" || validateArtifactOwner(owner, state.CaseID, state.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	state.ExecutionGeneration = owner.ExecutionGeneration
+	m := checkpointModel(state)
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Save(&m).Error })
+}
+
+func (r *magiRepository) LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error) {
+	if runID == "" || owner == nil || !owner.IsDurable() {
+		return nil, port.ErrLeaseLost
+	}
+	var out *entity.AgentState
+	err := r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error {
+		var m CheckpointModel
+		if err := tx.First(&m, "run_id = ? AND execution_generation = ?", runID, owner.ExecutionGeneration).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				out = nil
+				return nil
+			}
+			return err
+		}
+		out = checkpointFromModel(&m)
+		return nil
+	})
+	return out, err
+}
+
 func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
 func (r *magiRepository) AgentRunRepo() port.AgentRunRepository     { return &agentRunRepo{db: r.db} }
 func (r *magiRepository) EvidenceRepo() port.EvidenceRepository     { return &evidenceRepo{db: r.db} }
@@ -218,6 +393,8 @@ func (r *magiRepository) CommitStatusTransition(ctx context.Context, caseID stri
 	return committed, nil
 }
 
+var _ port.OwnedArtifactRepository = (*magiRepository)(nil)
+var _ port.GenerationCheckpointRepository = (*magiRepository)(nil)
 var _ port.Repository = (*magiRepository)(nil)
 var _ port.TerminalCommitter = (*magiRepository)(nil)
 var _ port.StatusTransitionCommitter = (*magiRepository)(nil)
