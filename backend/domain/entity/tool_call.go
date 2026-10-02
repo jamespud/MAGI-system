@@ -5,9 +5,10 @@ import "time"
 // ToolCall is one tool invocation by an agent during a run (persisted to
 // magi_tool_call, S8). Mirrors runtime.ToolCallRecord plus case/run linkage.
 type ToolCall struct {
-	ID         string
-	CaseID     string
-	AgentRunID string
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	AgentRunID          string
 	ToolCallID string // the LLM-assigned tool-call id
 	ToolName   string
 	Arguments  string
