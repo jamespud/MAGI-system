@@ -288,7 +288,9 @@ func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entit
 		}
 		present := make(map[string]struct{}, len(votes))
 		for _, v := range votes {
-			present[v.ID] = struct{}{}
+			if v.ExecutionGeneration == res.ExecutionGeneration {
+				present[v.ID] = struct{}{}
+			}
 		}
 		if err := requireAllPresent("vote", res.VoteIDs, present); err != nil {
 			return err
@@ -301,7 +303,9 @@ func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entit
 		}
 		present := make(map[string]struct{}, len(evidence))
 		for _, e := range evidence {
-			present[e.ID] = struct{}{}
+			if e.ExecutionGeneration == res.ExecutionGeneration {
+				present[e.ID] = struct{}{}
+			}
 		}
 		if err := requireAllPresent("evidence", res.KeyEvidenceIDs, present); err != nil {
 			return err
@@ -314,7 +318,9 @@ func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entit
 		}
 		present := make(map[string]struct{}, len(claims))
 		for _, c := range claims {
-			present[c.ID] = struct{}{}
+			if c.ExecutionGeneration == res.ExecutionGeneration {
+				present[c.ID] = struct{}{}
+			}
 		}
 		if err := requireAllPresent("claim", res.KeyClaimIDs, present); err != nil {
 			return err
