@@ -3,9 +3,9 @@ package bootstrap
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
-	"errors"
 	"testing"
 	"time"
 
@@ -311,7 +311,6 @@ func TestMySQLArtifactGeneration_LegacyGenerationZeroRemainsHistory(t *testing.T
 		t.Fatalf("legacy generation 0 leaked into generation 1: %+v err=%v", current, err)
 	}
 }
-
 
 // TestMySQLArtifactGeneration_OwnerCheckAndInsertShareLinearization proves the
 // ownership predicate is held across the artifact INSERT itself. The INSERT
