@@ -1143,6 +1143,14 @@ func (r *checkpointRepo) Load(ctx context.Context, runID string) (*entity.AgentS
 	return checkpointFromModel(&m), nil
 }
 
+func (r *checkpointRepo) SaveForExecution(ctx context.Context, owner *entity.ExecutionContext, state *entity.AgentState) error {
+	return (&magiRepository{db: r.db}).SaveForExecution(ctx, owner, state)
+}
+
+func (r *checkpointRepo) LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error) {
+	return (&magiRepository{db: r.db}).LoadForExecution(ctx, owner, runID)
+}
+
 func checkpointModel(state *entity.AgentState) CheckpointModel {
 	return CheckpointModel{
 		RunID: state.RunID, CaseID: state.CaseID, ExecutionGeneration: state.ExecutionGeneration,
@@ -1317,6 +1325,7 @@ var _ port.ConditionalCaseStatusWriter = (*caseRepo)(nil)
 var _ port.CaseListFilter = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
 var _ port.ToolCallRepository = (*toolCallRepo)(nil)
+var _ port.GenerationCheckpointRepository = (*checkpointRepo)(nil)
 
 // CountCasesByUser returns the number of cases per owner (SQL GROUP BY). It
 // backs admin.Usage so a large case history is never fully loaded into memory.
