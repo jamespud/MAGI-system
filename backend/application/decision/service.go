@@ -25,6 +25,13 @@ type Orchestrator interface {
 	Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error)
 }
 
+// ExecutionOrchestrator is the durable-run capability that carries the exact
+// Claim owner into the domain/runtime persistence path. A positive-generation
+// worker must use this capability; generation alone is not authorization.
+type ExecutionOrchestrator interface {
+	OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error)
+}
+
 // ServiceConfig holds application-level config for DecisionService.
 type ServiceConfig struct {
 	MaxDebateRounds int
