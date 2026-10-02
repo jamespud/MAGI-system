@@ -125,7 +125,7 @@ func (o *Orchestrator) stepRetrieveMemory(ctx context.Context, case_ *entity.Dec
 func (o *Orchestrator) stepInvestigate(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": st.Round})
 	st.Results = o.dispatcher.DispatchForExecution(ctx, case_, st.Task, o.configs, st.Round, st.Execution)
-	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "investigate")
+	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "investigate", st.Execution)
 	return entity.CaseStatusEvidenceGating, false, nil
 }
 
@@ -197,7 +197,7 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 		})
 	}
 	st.Results = o.dispatcher.DispatchReconsiderForExecution(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round, st.Execution)
-	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "reconsider")
+	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "reconsider", st.Execution)
 	return entity.CaseStatusReflecting, false, nil
 }
 
