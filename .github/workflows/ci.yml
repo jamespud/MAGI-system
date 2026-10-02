@@ -36,6 +36,9 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "The following Go files are not formatted:"
             echo "$unformatted"
+            echo "::group::gofmt diff"
+            gofmt -d .
+            echo "::endgroup::"
             exit 1
           fi
 
