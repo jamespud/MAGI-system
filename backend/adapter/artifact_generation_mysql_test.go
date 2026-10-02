@@ -116,13 +116,27 @@ func TestArtifactGeneration_StaleWriterFencedAndReadsScopedOnMySQL(t *testing.T)
 		name string
 		run  func() error
 	}{
-		{"agent_run", func() error { return owned.CreateAgentRunOwned(ctx, owner1, &entity.AgentRun{ID: "run-" + uuid.NewString(), CaseID: job.CaseID, StartedAt: now}) }},
-		{"evidence", func() error { return owned.CreateEvidenceOwned(ctx, owner1, &entity.EvidenceRecord{ID: "ev-g1-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now}) }},
-		{"claim", func() error { return owned.CreateClaimOwned(ctx, owner1, &entity.Claim{ID: "cl-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now}) }},
-		{"vote", func() error { return owned.CreateVoteOwned(ctx, owner1, &entity.Vote{ID: "vote-" + uuid.NewString(), CaseID: job.CaseID, Decision: entity.VoteDecisionApprove, CreatedAt: now}) }},
-		{"debate", func() error { return owned.CreateDebateRoundOwned(ctx, owner1, &entity.DebateRound{ID: "deb-" + uuid.NewString(), CaseID: job.CaseID, StartedAt: now}) }},
-		{"reflection", func() error { return owned.CreateReflectionOwned(ctx, owner1, &entity.Reflection{ID: "refl-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now}) }},
-		{"tool_call", func() error { return owned.CreateToolCallOwned(ctx, owner1, &entity.ToolCall{ID: "tool-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now}) }},
+		{"agent_run", func() error {
+			return owned.CreateAgentRunOwned(ctx, owner1, &entity.AgentRun{ID: "run-" + uuid.NewString(), CaseID: job.CaseID, StartedAt: now})
+		}},
+		{"evidence", func() error {
+			return owned.CreateEvidenceOwned(ctx, owner1, &entity.EvidenceRecord{ID: "ev-g1-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now})
+		}},
+		{"claim", func() error {
+			return owned.CreateClaimOwned(ctx, owner1, &entity.Claim{ID: "cl-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now})
+		}},
+		{"vote", func() error {
+			return owned.CreateVoteOwned(ctx, owner1, &entity.Vote{ID: "vote-" + uuid.NewString(), CaseID: job.CaseID, Decision: entity.VoteDecisionApprove, CreatedAt: now})
+		}},
+		{"debate", func() error {
+			return owned.CreateDebateRoundOwned(ctx, owner1, &entity.DebateRound{ID: "deb-" + uuid.NewString(), CaseID: job.CaseID, StartedAt: now})
+		}},
+		{"reflection", func() error {
+			return owned.CreateReflectionOwned(ctx, owner1, &entity.Reflection{ID: "refl-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now})
+		}},
+		{"tool_call", func() error {
+			return owned.CreateToolCallOwned(ctx, owner1, &entity.ToolCall{ID: "tool-" + uuid.NewString(), CaseID: job.CaseID, CreatedAt: now})
+		}},
 	}
 	for _, tc := range active {
 		t.Run("active_" + tc.name, func(t *testing.T) {
