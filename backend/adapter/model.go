@@ -29,8 +29,9 @@ type CaseModel struct {
 func (CaseModel) TableName() string { return "decision_case" }
 
 type AgentRunModel struct {
-	ID              string `gorm:"primaryKey"`
-	CaseID          string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index;index:idx_agent_run_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_agent_run_case_generation,priority:2"`
 	MagiConfigID    string
 	MagiCode        string
 	Round           int
@@ -110,8 +111,10 @@ func (RagIndexJobModel) TableName() string { return "rag_index_job" }
 // own table: checkpoint writes are frequent and should not rewrite the
 // relatively stable AgentRun row.
 type CheckpointModel struct {
-	RunID           string `gorm:"primaryKey"`
-	MessagesJSON    string `gorm:"type:mediumtext"`
+	RunID               string `gorm:"primaryKey;size:191"`
+	ExecutionGeneration int64  `gorm:"primaryKey;not null;default:0;index:idx_checkpoint_case_generation,priority:2"`
+	CaseID              string `gorm:"size:64;not null;default:'';index:idx_checkpoint_case_generation,priority:1"`
+	MessagesJSON        string `gorm:"type:mediumtext"`
 	MessagesRefJSON string `gorm:"type:text"`
 	StepCount       int
 	TokenUsed       int
@@ -125,8 +128,9 @@ type CheckpointModel struct {
 func (CheckpointModel) TableName() string { return "magi_agent_checkpoint" }
 
 type EvidenceModel struct {
-	ID              string `gorm:"primaryKey"`
-	CaseID          string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index;index:idx_evidence_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_evidence_case_generation,priority:2"`
 	AgentRunID      string `gorm:"index"`
 	ToolCallID      string
 	ToolName        string
@@ -142,8 +146,9 @@ type EvidenceModel struct {
 func (EvidenceModel) TableName() string { return "evidence_record" }
 
 type ClaimModel struct {
-	ID              string `gorm:"primaryKey"`
-	CaseID          string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index;index:idx_claim_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_claim_case_generation,priority:2"`
 	AgentRunID      string `gorm:"index"`
 	Statement       string `gorm:"type:text"`
 	SupportsJSON    string `gorm:"type:text"`
@@ -156,8 +161,9 @@ type ClaimModel struct {
 func (ClaimModel) TableName() string { return "claim" }
 
 type VoteModel struct {
-	ID                string `gorm:"primaryKey"`
-	CaseID            string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index;index:idx_vote_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_vote_case_generation,priority:2"`
 	AgentRunID        string
 	Round             int
 	Decision          string
@@ -173,8 +179,9 @@ type VoteModel struct {
 func (VoteModel) TableName() string { return "magi_vote" }
 
 type ResolutionModel struct {
-	ID                 string `gorm:"primaryKey"`
-	CaseID             string `gorm:"uniqueIndex;size:64"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"uniqueIndex;size:64"`
+	ExecutionGeneration int64  `gorm:"not null;default:0"`
 	ConsensusJSON      string `gorm:"type:text"`
 	FinalDecision      string
 	FinalReport        string `gorm:"type:text"`
@@ -208,8 +215,9 @@ type EventCursorModel struct {
 func (EventCursorModel) TableName() string { return "magi_event_cursor" }
 
 type DebateRoundModel struct {
-	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index;index:idx_debate_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_debate_case_generation,priority:2"`
 	Round       int
 	PacketJSON  string `gorm:"type:mediumtext"`
 	StartedAt   time.Time
@@ -219,8 +227,10 @@ type DebateRoundModel struct {
 func (DebateRoundModel) TableName() string { return "debate_round" }
 
 type ReflectionModel struct {
-	ID                 string `gorm:"primaryKey"`
-	AgentRunID         string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"size:64;not null;default:'';index:idx_reflection_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_reflection_case_generation,priority:2"`
+	AgentRunID          string `gorm:"index"`
 	Round              int
 	PreviousVoteID     string
 	PositionChange     string
@@ -251,8 +261,10 @@ type MemoryProjectionModel struct {
 func (MemoryProjectionModel) TableName() string { return "case_memory_projection" }
 
 type ToolCallModel struct {
-	ID         string `gorm:"primaryKey"`
-	AgentRunID string `gorm:"index"`
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"size:64;not null;default:'';index:idx_tool_call_case_generation,priority:1"`
+	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_tool_call_case_generation,priority:2"`
+	AgentRunID          string `gorm:"index"`
 	ToolCallID string
 	ToolName   string
 	Arguments  string `gorm:"type:text"`
