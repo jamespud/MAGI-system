@@ -492,6 +492,66 @@ func (o *Orchestrator) retryFailedAgents(
 	return results
 }
 
+// persistArtifactValue routes positive-generation writes through the durable
+// active-owner repository. Legacy generation-0 callers retain the old
+// sub-repository path for standalone/tests only.
+func (o *Orchestrator) persistArtifactValue(ctx context.Context, execution *entity.ExecutionContext, value any) error {
+	if o.repo == nil {
+		return nil
+	}
+	if execution != nil && execution.IsDurable() {
+		owned, ok := o.repo.(port.OwnedArtifactRepository)
+		if !ok {
+			return port.ErrLeaseLost
+		}
+		switch v := value.(type) {
+		case *entity.AgentRun:
+			return owned.CreateAgentRunOwned(ctx, execution, v)
+		case *entity.EvidenceRecord:
+			return owned.CreateEvidenceOwned(ctx, execution, v)
+		case *entity.Claim:
+			return owned.CreateClaimOwned(ctx, execution, v)
+		case *entity.Vote:
+			return owned.CreateVoteOwned(ctx, execution, v)
+		case *entity.DebateRound:
+			return owned.CreateDebateRoundOwned(ctx, execution, v)
+		case *entity.Reflection:
+			return owned.CreateReflectionOwned(ctx, execution, v)
+		case *entity.ToolCall:
+			return owned.CreateToolCallOwned(ctx, execution, v)
+		default:
+			return fmt.Errorf("unsupported authoritative artifact type %T", value)
+		}
+	}
+	// A positive generation without a complete durable owner would otherwise
+	// bypass T2's worker/job/lease predicate through a legacy Create method.
+	switch v := value.(type) {
+	case *entity.AgentRun:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.AgentRunRepo().Create(ctx, v)
+	case *entity.EvidenceRecord:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.EvidenceRepo().Create(ctx, v)
+	case *entity.Claim:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.ClaimRepo().Create(ctx, v)
+	case *entity.Vote:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.persistArtifactValue(ctx, execution, v)
+	case *entity.DebateRound:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.DebateRepo().Create(ctx, v)
+	case *entity.Reflection:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.ReflectionRepo().Create(ctx, v)
+	case *entity.ToolCall:
+		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		return o.repo.ToolCallRepo().Create(ctx, v)
+	default:
+		return fmt.Errorf("unsupported authoritative artifact type %T", value)
+	}
+}
+
 // persistArtifacts writes agent runs, evidence, claims, and votes for one
 // dispatch round. Nil-safe: no-op when Repo is unset (back-compat for tests).
 //
@@ -504,18 +564,23 @@ func (o *Orchestrator) retryFailedAgents(
 // which would collide on the shared table's primary key. Supports/contradicts/
 // evidence_ids references are rewritten to the namespaced IDs so intra-agent
 // links stay consistent. The in-memory ledger is not mutated (copies persisted).
-func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int, phase string) *ArtifactRemap {
+func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.DecisionCase, results []*runtime.LoopResult, votes []*entity.Vote, round int, phase string, execution *entity.ExecutionContext) (*ArtifactRemap, error) {
 	remap := newArtifactRemap()
 	if o.repo == nil {
-		return remap
+		return remap, nil
+	}
+	if case_.ExecutionGeneration > 0 && (execution == nil || !execution.IsDurable() ||
+		execution.CaseID != case_.ID || execution.ExecutionGeneration != case_.ExecutionGeneration) {
+		return remap, port.ErrLeaseLost
 	}
 	now := time.Now()
 	for i, r := range results {
 		cfg := o.configAt(i)
 		code := codeOf(cfg)
 		run := &entity.AgentRun{
-			ID:          executionRunID(case_.ID, code, case_.ExecutionAttempt, round, phase),
+			ID:          executionRunID(case_.ID, code, case_.ExecutionGeneration, round, phase),
 			CaseID:      case_.ID,
+			ExecutionGeneration: case_.ExecutionGeneration,
 			MagiCode:    code,
 			Round:       round,
 			Status:      agentRunStatus(r),
@@ -533,13 +598,15 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		for _, tb := range cfg.Tools {
 			run.Environment.Tools = append(run.Environment.Tools, string(tb.Source)+":"+tb.ToolName)
 		}
-		o.persistArtifact(ctx, metrics.ArtifactAgentRun, case_.ID, func() error {
-			return o.repo.AgentRunRepo().Create(ctx, run)
-		})
+		if err := o.persistArtifact(ctx, metrics.ArtifactAgentRun, case_.ID, func() error {
+			return o.persistArtifactValue(ctx, execution, run)
+		}); err != nil {
+			return remap, err
+		}
 
 		// Build the ID remap (old in-memory ID -> namespaced persisted ID) and
 		// persist copies so the ledger is left untouched for any later use.
-		prefix := executionRunID(case_.ID, code, case_.ExecutionAttempt, round, phase)
+		prefix := executionRunID(case_.ID, code, case_.ExecutionGeneration, round, phase)
 		if r.Ledger != nil {
 			evidence := r.Ledger.List()
 			for _, ev := range evidence {
@@ -548,10 +615,15 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp := *ev
 				cp.ID = newID
 				cp.CaseID = case_.ID
+				cp.ExecutionGeneration = case_.ExecutionGeneration
 				cp.AgentRunID = run.ID
-				o.persistArtifact(ctx, metrics.ArtifactEvidence, case_.ID, func() error {
-					return o.repo.EvidenceRepo().Create(ctx, &cp)
-				})
+				if err := o.persistArtifact(ctx, metrics.ArtifactEvidence, case_.ID, func() error {
+					return o.persistArtifactValue(ctx, execution, &cp)
+				}); err != nil {
+					return remap, err
+				}; err != nil {
+					return remap, err
+				}
 			}
 			claims := r.Ledger.ListClaims()
 			for _, cl := range claims {
@@ -565,9 +637,11 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.AgentRunID = run.ID
 				cp.Supports = remapRefs(cl.Supports, remap.EvidenceMap())
 				cp.Contradicts = remapRefs(cl.Contradicts, remap.ClaimMap())
-				o.persistArtifact(ctx, metrics.ArtifactClaim, case_.ID, func() error {
-					return o.repo.ClaimRepo().Create(ctx, &cp)
-				})
+				if err := o.persistArtifact(ctx, metrics.ArtifactClaim, case_.ID, func() error {
+					return o.persistArtifactValue(ctx, execution, &cp)
+				}); err != nil {
+					return remap, err
+				}
 			}
 		}
 		// Persist tool-call records from the run trace. The PK is a namespaced
@@ -585,6 +659,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 					toolCall := &entity.ToolCall{
 						ID:         fmt.Sprintf("%s-tc%d", prefix, toolIdx),
 						CaseID:     case_.ID,
+						ExecutionGeneration: case_.ExecutionGeneration,
 						AgentRunID: run.ID,
 						ToolCallID: tc.ToolCallID,
 						ToolName:   tc.ToolName,
@@ -597,9 +672,11 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						DurationMs: tc.Duration.Milliseconds(),
 						CreatedAt:  now,
 					}
-					o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, func() error {
-						return o.repo.ToolCallRepo().Create(ctx, toolCall)
-					})
+					if err := o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, func() error {
+						return o.persistArtifactValue(ctx, execution, toolCall)
+					}); err != nil {
+						return remap, err
+					}
 				}
 			}
 		}
@@ -619,28 +696,33 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		// Regenerate the vote ID unconditionally: a reconsider result may reuse
 		// the investigate Vote pointer, which would otherwise re-insert the old
 		// ID and violate the primary key (observed on real runs).
-		v.ID = "vote-" + executionRunID(case_.ID, codeOf(cfg), case_.ExecutionAttempt, round, phase)
+		v.ID = "vote-" + executionRunID(case_.ID, codeOf(cfg), case_.ExecutionGeneration, round, phase)
 		v.CaseID = case_.ID
+		v.ExecutionGeneration = case_.ExecutionGeneration
 		v.Round = round
-		o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, func() error {
+		if err := o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, func() error {
 			return o.repo.VoteRepo().Create(ctx, v)
 		})
 	}
-	return remap
+	return remap, nil
 }
 
 // persistArtifact runs one durable artifact write. Failures are counted and
 // logged rather than silently dropped: a missing vote/evidence/tool-call row is
 // an audit hole, and the stock-mcp incident showed it can show up as a complete
 // case with no trace of the tool call.
-func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.ArtifactKind, caseID string, write func() error) {
+func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.ArtifactKind, caseID string, write func() error) error {
 	if write == nil {
-		return
+		return nil
 	}
 	if err := write(); err != nil {
 		log.Printf("orchestrator: persist %s for case %s failed: %v", kind, caseID, err)
 		o.metrics.IncArtifactPersistFailure(kind)
+		if errors.Is(err, port.ErrLeaseLost) {
+			return port.ErrLeaseLost
+		}
 	}
+	return nil
 }
 
 func (o *Orchestrator) configAt(i int) *entity.MagiConfig {
