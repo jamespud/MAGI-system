@@ -9,15 +9,15 @@ type EvidenceRecord struct {
 	CaseID              string
 	ExecutionGeneration int64
 	AgentRunID          string
-	ToolCallID  string
-	ToolName    string
-	SourceType  EvidenceSourceType
-	SourceURI   *string
-	RawContent  string
-	Observation string
-	Reliability ReliabilityScore
-	CollectedBy MagiCode
-	CreatedAt   time.Time
+	ToolCallID          string
+	ToolName            string
+	SourceType          EvidenceSourceType
+	SourceURI           *string
+	RawContent          string
+	Observation         string
+	Reliability         ReliabilityScore
+	CollectedBy         MagiCode
+	CreatedAt           time.Time
 }
 
 type EvidenceSourceType string

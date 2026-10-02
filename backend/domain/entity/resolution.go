@@ -8,13 +8,13 @@ type Resolution struct {
 	CaseID              string
 	ExecutionGeneration int64
 	Consensus           ConsensusResult
-	FinalDecision  VoteDecision
-	FinalReport    string
-	KeyEvidenceIDs []string
-	KeyClaimIDs    []string
-	VoteIDs        []string
-	Evaluation     *Evaluation
-	CreatedAt      time.Time
+	FinalDecision       VoteDecision
+	FinalReport         string
+	KeyEvidenceIDs      []string
+	KeyClaimIDs         []string
+	VoteIDs             []string
+	Evaluation          *Evaluation
+	CreatedAt           time.Time
 }
 
 // Dissent is a structured minority position recorded for auditability.

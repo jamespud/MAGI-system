@@ -533,13 +533,19 @@ func (o *Orchestrator) persistArtifactValue(ctx context.Context, execution *enti
 	// bypass T2's worker/job/lease predicate through a legacy Create method.
 	switch v := value.(type) {
 	case *entity.AgentRun:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.AgentRunRepo().Create(ctx, v)
 	case *entity.EvidenceRecord:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.EvidenceRepo().Create(ctx, v)
 	case *entity.Claim:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.ClaimRepo().Create(ctx, v)
 	case *entity.Vote:
 		if v.ExecutionGeneration > 0 {
@@ -547,13 +553,19 @@ func (o *Orchestrator) persistArtifactValue(ctx context.Context, execution *enti
 		}
 		return o.repo.VoteRepo().Create(ctx, v)
 	case *entity.DebateRound:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.DebateRepo().Create(ctx, v)
 	case *entity.Reflection:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.ReflectionRepo().Create(ctx, v)
 	case *entity.ToolCall:
-		if v.ExecutionGeneration > 0 { return port.ErrLeaseLost }
+		if v.ExecutionGeneration > 0 {
+			return port.ErrLeaseLost
+		}
 		return o.repo.ToolCallRepo().Create(ctx, v)
 	default:
 		return fmt.Errorf("unsupported authoritative artifact type %T", value)
@@ -586,16 +598,16 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		cfg := o.configAt(i)
 		code := codeOf(cfg)
 		run := &entity.AgentRun{
-			ID:          executionRunID(case_.ID, code, case_.ExecutionGeneration, round, phase),
-			CaseID:      case_.ID,
+			ID:                  executionRunID(case_.ID, code, case_.ExecutionGeneration, round, phase),
+			CaseID:              case_.ID,
 			ExecutionGeneration: case_.ExecutionGeneration,
-			MagiCode:    code,
-			Round:       round,
-			Status:      agentRunStatus(r),
-			StartedAt:   now,
-			CompletedAt: &now,
-			Usage:       r.Usage,
-			Err:         errStr(r.Err),
+			MagiCode:            code,
+			Round:               round,
+			Status:              agentRunStatus(r),
+			StartedAt:           now,
+			CompletedAt:         &now,
+			Usage:               r.Usage,
+			Err:                 errStr(r.Err),
 		}
 		run.Environment = &entity.RunEnvironment{
 			ModelName:      cfg.Model.ModelName,
@@ -664,20 +676,20 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						evID = remapped
 					}
 					toolCall := &entity.ToolCall{
-						ID:         fmt.Sprintf("%s-tc%d", prefix, toolIdx),
-						CaseID:     case_.ID,
+						ID:                  fmt.Sprintf("%s-tc%d", prefix, toolIdx),
+						CaseID:              case_.ID,
 						ExecutionGeneration: case_.ExecutionGeneration,
-						AgentRunID: run.ID,
-						ToolCallID: tc.ToolCallID,
-						ToolName:   tc.ToolName,
-						Arguments:  tc.Arguments,
-						Valid:      tc.Valid,
-						Result:     tc.Result,
-						Err:        tc.Err,
-						ApprovedBy: tc.ApprovedBy,
-						EvidenceID: evID,
-						DurationMs: tc.Duration.Milliseconds(),
-						CreatedAt:  now,
+						AgentRunID:          run.ID,
+						ToolCallID:          tc.ToolCallID,
+						ToolName:            tc.ToolName,
+						Arguments:           tc.Arguments,
+						Valid:               tc.Valid,
+						Result:              tc.Result,
+						Err:                 tc.Err,
+						ApprovedBy:          tc.ApprovedBy,
+						EvidenceID:          evID,
+						DurationMs:          tc.Duration.Milliseconds(),
+						CreatedAt:           now,
 					}
 					if err := o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, func() error {
 						return o.persistArtifactValue(ctx, execution, toolCall)

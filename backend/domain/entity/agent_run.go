@@ -7,15 +7,15 @@ type AgentRun struct {
 	ID                  string
 	CaseID              string
 	ExecutionGeneration int64
-	MagiConfigID         string
-	MagiCode     MagiCode
-	Round        int
-	Status       AgentRunStatus
-	StartedAt    time.Time
-	CompletedAt  *time.Time
-	Usage        *Usage
-	Err          string
-	Environment  *RunEnvironment
+	MagiConfigID        string
+	MagiCode            MagiCode
+	Round               int
+	Status              AgentRunStatus
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	Usage               *Usage
+	Err                 string
+	Environment         *RunEnvironment
 }
 
 // RunEnvironment snapshots the configuration a Magi run executed under, so
@@ -58,10 +58,10 @@ type AgentState struct {
 	CaseID              string
 	ExecutionGeneration int64
 	Messages            []MessageRef
-	MessagesJSON string // full []*schema.Message JSON for non-lossy resume
-	StepCount    int
-	TokenUsed    int
-	Phase        string
+	MessagesJSON        string // full []*schema.Message JSON for non-lossy resume
+	StepCount           int
+	TokenUsed           int
+	Phase               string
 
 	// Snapshot V2 is the authoritative checkpoint payload. The legacy fields
 	// remain available while existing checkpoint rows are migrated.

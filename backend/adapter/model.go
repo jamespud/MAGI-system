@@ -32,17 +32,17 @@ type AgentRunModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"index;index:idx_agent_run_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_agent_run_case_generation,priority:2"`
-	MagiConfigID    string
-	MagiCode        string
-	Round           int
-	Status          string
-	UsageJSON       string `gorm:"type:text"`
-	EnvironmentJSON string `gorm:"type:text"`
-	Err             string `gorm:"type:text"`
-	CheckpointJSON  string `gorm:"type:text"`
-	SummaryJSON     string `gorm:"type:text"`
-	StartedAt       time.Time
-	CompletedAt     *time.Time
+	MagiConfigID        string
+	MagiCode            string
+	Round               int
+	Status              string
+	UsageJSON           string `gorm:"type:text"`
+	EnvironmentJSON     string `gorm:"type:text"`
+	Err                 string `gorm:"type:text"`
+	CheckpointJSON      string `gorm:"type:text"`
+	SummaryJSON         string `gorm:"type:text"`
+	StartedAt           time.Time
+	CompletedAt         *time.Time
 }
 
 func (AgentRunModel) TableName() string { return "magi_agent_run" }
@@ -115,14 +115,14 @@ type CheckpointModel struct {
 	ExecutionGeneration int64  `gorm:"primaryKey;not null;default:0;index:idx_checkpoint_case_generation,priority:2"`
 	CaseID              string `gorm:"size:64;not null;default:'';index:idx_checkpoint_case_generation,priority:1"`
 	MessagesJSON        string `gorm:"type:mediumtext"`
-	MessagesRefJSON string `gorm:"type:text"`
-	StepCount       int
-	TokenUsed       int
-	Phase           string
-	SnapshotVersion int       `gorm:"not null;default:1"`
-	SnapshotJSON    string    `gorm:"type:mediumtext"`
-	ManifestDigest  string    `gorm:"type:varchar(64);not null;default:''"`
-	UpdatedAt       time.Time `gorm:"not null;type:datetime;default:CURRENT_TIMESTAMP"`
+	MessagesRefJSON     string `gorm:"type:text"`
+	StepCount           int
+	TokenUsed           int
+	Phase               string
+	SnapshotVersion     int       `gorm:"not null;default:1"`
+	SnapshotJSON        string    `gorm:"type:mediumtext"`
+	ManifestDigest      string    `gorm:"type:varchar(64);not null;default:''"`
+	UpdatedAt           time.Time `gorm:"not null;type:datetime;default:CURRENT_TIMESTAMP"`
 }
 
 func (CheckpointModel) TableName() string { return "magi_agent_checkpoint" }
@@ -131,16 +131,16 @@ type EvidenceModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"index;index:idx_evidence_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_evidence_case_generation,priority:2"`
-	AgentRunID      string `gorm:"index"`
-	ToolCallID      string
-	ToolName        string
-	SourceType      string
-	SourceURI       string `gorm:"type:varchar(512)"`
-	RawContent      string `gorm:"type:text"`
-	Observation     string `gorm:"type:text"`
-	ReliabilityJSON string `gorm:"type:text"`
-	CollectedBy     string
-	CreatedAt       time.Time
+	AgentRunID          string `gorm:"index"`
+	ToolCallID          string
+	ToolName            string
+	SourceType          string
+	SourceURI           string `gorm:"type:varchar(512)"`
+	RawContent          string `gorm:"type:text"`
+	Observation         string `gorm:"type:text"`
+	ReliabilityJSON     string `gorm:"type:text"`
+	CollectedBy         string
+	CreatedAt           time.Time
 }
 
 func (EvidenceModel) TableName() string { return "evidence_record" }
@@ -149,13 +149,13 @@ type ClaimModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"index;index:idx_claim_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_claim_case_generation,priority:2"`
-	AgentRunID      string `gorm:"index"`
-	Statement       string `gorm:"type:text"`
-	SupportsJSON    string `gorm:"type:text"`
-	ContradictsJSON string `gorm:"type:text"`
-	Status          string
-	CreatedBy       string
-	CreatedAt       time.Time
+	AgentRunID          string `gorm:"index"`
+	Statement           string `gorm:"type:text"`
+	SupportsJSON        string `gorm:"type:text"`
+	ContradictsJSON     string `gorm:"type:text"`
+	Status              string
+	CreatedBy           string
+	CreatedAt           time.Time
 }
 
 func (ClaimModel) TableName() string { return "claim" }
@@ -164,16 +164,16 @@ type VoteModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"index;index:idx_vote_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_vote_case_generation,priority:2"`
-	AgentRunID        string
-	Round             int
-	Decision          string
-	Confidence        float64
-	UtilityScoresJSON string `gorm:"type:text"`
-	KeyClaimIDsJSON   string `gorm:"type:text"`
-	EvidenceIDsJSON   string `gorm:"type:text"`
-	ReasoningSummary  string `gorm:"type:text"`
-	ConditionsJSON    string `gorm:"type:text"`
-	CreatedAt         time.Time
+	AgentRunID          string
+	Round               int
+	Decision            string
+	Confidence          float64
+	UtilityScoresJSON   string `gorm:"type:text"`
+	KeyClaimIDsJSON     string `gorm:"type:text"`
+	EvidenceIDsJSON     string `gorm:"type:text"`
+	ReasoningSummary    string `gorm:"type:text"`
+	ConditionsJSON      string `gorm:"type:text"`
+	CreatedAt           time.Time
 }
 
 func (VoteModel) TableName() string { return "magi_vote" }
@@ -182,14 +182,14 @@ type ResolutionModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"uniqueIndex;size:64"`
 	ExecutionGeneration int64  `gorm:"not null;default:0"`
-	ConsensusJSON      string `gorm:"type:text"`
-	FinalDecision      string
-	FinalReport        string `gorm:"type:text"`
-	KeyEvidenceIDsJSON string `gorm:"type:text"`
-	KeyClaimIDsJSON    string `gorm:"type:text"`
-	VoteIDsJSON        string `gorm:"type:text"`
-	EvaluationJSON     string `gorm:"type:text"`
-	CreatedAt          time.Time
+	ConsensusJSON       string `gorm:"type:text"`
+	FinalDecision       string
+	FinalReport         string `gorm:"type:text"`
+	KeyEvidenceIDsJSON  string `gorm:"type:text"`
+	KeyClaimIDsJSON     string `gorm:"type:text"`
+	VoteIDsJSON         string `gorm:"type:text"`
+	EvaluationJSON      string `gorm:"type:text"`
+	CreatedAt           time.Time
 }
 
 func (ResolutionModel) TableName() string { return "resolution" }
@@ -218,10 +218,10 @@ type DebateRoundModel struct {
 	ID                  string `gorm:"primaryKey"`
 	CaseID              string `gorm:"index;index:idx_debate_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_debate_case_generation,priority:2"`
-	Round       int
-	PacketJSON  string `gorm:"type:mediumtext"`
-	StartedAt   time.Time
-	CompletedAt *time.Time
+	Round               int
+	PacketJSON          string `gorm:"type:mediumtext"`
+	StartedAt           time.Time
+	CompletedAt         *time.Time
 }
 
 func (DebateRoundModel) TableName() string { return "debate_round" }
@@ -231,15 +231,15 @@ type ReflectionModel struct {
 	CaseID              string `gorm:"size:64;not null;default:'';index:idx_reflection_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_reflection_case_generation,priority:2"`
 	AgentRunID          string `gorm:"index"`
-	Round              int
-	PreviousVoteID     string
-	PositionChange     string
-	AcceptedClaimsJSON string `gorm:"type:text"`
-	RejectedClaimsJSON string `gorm:"type:text"`
-	NewEvidenceIDsJSON string `gorm:"type:text"`
-	Reasoning          string `gorm:"type:text"`
-	ReadyToRevote      bool
-	CreatedAt          time.Time
+	Round               int
+	PreviousVoteID      string
+	PositionChange      string
+	AcceptedClaimsJSON  string `gorm:"type:text"`
+	RejectedClaimsJSON  string `gorm:"type:text"`
+	NewEvidenceIDsJSON  string `gorm:"type:text"`
+	Reasoning           string `gorm:"type:text"`
+	ReadyToRevote       bool
+	CreatedAt           time.Time
 }
 
 func (ReflectionModel) TableName() string { return "reflection" }
@@ -265,16 +265,16 @@ type ToolCallModel struct {
 	CaseID              string `gorm:"size:64;not null;default:'';index:idx_tool_call_case_generation,priority:1"`
 	ExecutionGeneration int64  `gorm:"not null;default:0;index:idx_tool_call_case_generation,priority:2"`
 	AgentRunID          string `gorm:"index"`
-	ToolCallID string
-	ToolName   string
-	Arguments  string `gorm:"type:text"`
-	Valid      bool
-	Result     string `gorm:"type:text"`
-	Err        string `gorm:"type:text"`
-	ApprovedBy string
-	EvidenceID string
-	DurationMs int64
-	CreatedAt  time.Time
+	ToolCallID          string
+	ToolName            string
+	Arguments           string `gorm:"type:text"`
+	Valid               bool
+	Result              string `gorm:"type:text"`
+	Err                 string `gorm:"type:text"`
+	ApprovedBy          string
+	EvidenceID          string
+	DurationMs          int64
+	CreatedAt           time.Time
 }
 
 func (ToolCallModel) TableName() string { return "magi_tool_call" }

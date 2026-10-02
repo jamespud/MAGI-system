@@ -20,7 +20,7 @@ import (
 // (and later the table-driven action dispatch) operates on one explicit state.
 type State struct {
 	MaxDebate int
-	Execution  *entity.ExecutionContext
+	Execution *entity.ExecutionContext
 	Task      *entity.DecisionTask
 	Results   []*runtime.LoopResult
 	Votes     []*entity.Vote
@@ -193,7 +193,7 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 	packet := o.debate.BuildPacket(derefVotes(st.Votes), allClaims, st.Round, allEvidence)
 	if o.repo != nil {
 		debateRound := &entity.DebateRound{
-			ID: fmt.Sprintf("deb-%s-g%d-r%d", case_.ID, case_.ExecutionGeneration, st.Round),
+			ID:     fmt.Sprintf("deb-%s-g%d-r%d", case_.ID, case_.ExecutionGeneration, st.Round),
 			CaseID: case_.ID, ExecutionGeneration: case_.ExecutionGeneration, Round: st.Round,
 			Packet: packet, StartedAt: time.Now(),
 		}

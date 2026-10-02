@@ -148,7 +148,7 @@ func TestMySQLMigration_S27ScopesArtifactsAndCheckpointsByGeneration(t *testing.
 
 	for _, table := range []string{"magi_agent_run", "evidence_record", "claim", "magi_vote", "debate_round", "reflection", "magi_tool_call", "resolution", "magi_agent_checkpoint"} {
 		var positives int64
-		if err := db.Raw("SELECT COUNT(*) FROM "+table+" WHERE execution_generation <> 0").Scan(&positives).Error; err != nil {
+		if err := db.Raw("SELECT COUNT(*) FROM " + table + " WHERE execution_generation <> 0").Scan(&positives).Error; err != nil {
 			t.Fatalf("count legacy generations in %s: %v", table, err)
 		}
 		if positives != 0 {
@@ -158,7 +158,7 @@ func TestMySQLMigration_S27ScopesArtifactsAndCheckpointsByGeneration(t *testing.
 
 	for _, table := range []string{"reflection", "magi_tool_call"} {
 		var caseID string
-		if err := db.Raw("SELECT case_id FROM "+table+" LIMIT 1").Scan(&caseID).Error; err != nil {
+		if err := db.Raw("SELECT case_id FROM " + table + " LIMIT 1").Scan(&caseID).Error; err != nil {
 			t.Fatalf("read %s.case_id: %v", table, err)
 		}
 		if caseID != "case-legacy" {

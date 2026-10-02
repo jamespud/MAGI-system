@@ -8,9 +8,9 @@ type DebateRound struct {
 	CaseID              string
 	ExecutionGeneration int64
 	Round               int
-	Packet      DebatePacket
-	StartedAt   time.Time
-	CompletedAt *time.Time
+	Packet              DebatePacket
+	StartedAt           time.Time
+	CompletedAt         *time.Time
 }
 
 // DebatePacket is sent to all three Magi (minority AND majority).

@@ -192,7 +192,9 @@ func (r *magiRepository) CreateEvidenceOwned(ctx context.Context, owner *entity.
 	}
 	e.ExecutionGeneration = owner.ExecutionGeneration
 	uri := ""
-	if e.SourceURI != nil { uri = *e.SourceURI }
+	if e.SourceURI != nil {
+		uri = *e.SourceURI
+	}
 	m := EvidenceModel{
 		ID: e.ID, CaseID: e.CaseID, ExecutionGeneration: e.ExecutionGeneration,
 		AgentRunID: e.AgentRunID, ToolCallID: e.ToolCallID, ToolName: e.ToolName,
@@ -327,7 +329,9 @@ func (r *magiRepository) ListEvidenceByGeneration(ctx context.Context, caseID st
 		return nil, err
 	}
 	out := make([]*entity.EvidenceRecord, len(models))
-	for i := range models { out[i] = evidenceFromModel(&models[i]) }
+	for i := range models {
+		out[i] = evidenceFromModel(&models[i])
+	}
 	return out, nil
 }
 
@@ -337,7 +341,9 @@ func (r *magiRepository) ListClaimsByGeneration(ctx context.Context, caseID stri
 		return nil, err
 	}
 	out := make([]*entity.Claim, len(models))
-	for i := range models { out[i] = claimFromModel(&models[i]) }
+	for i := range models {
+		out[i] = claimFromModel(&models[i])
+	}
 	return out, nil
 }
 
@@ -358,7 +364,9 @@ func (r *magiRepository) ListVotesByGeneration(ctx context.Context, caseID strin
 		return nil, err
 	}
 	out := make([]*entity.Vote, len(models))
-	for i := range models { out[i] = voteArtifactFromModel(&models[i]) }
+	for i := range models {
+		out[i] = voteArtifactFromModel(&models[i])
+	}
 	return out, nil
 }
 
@@ -385,7 +393,7 @@ func reflectionFromModel(m *ReflectionModel) *entity.Reflection {
 		AcceptedClaims: fromJSON[[]string](m.AcceptedClaimsJSON),
 		RejectedClaims: fromJSON[[]string](m.RejectedClaimsJSON),
 		NewEvidenceIDs: fromJSON[[]string](m.NewEvidenceIDsJSON),
-		Reasoning: m.Reasoning, ReadyToRevote: m.ReadyToRevote, CreatedAt: m.CreatedAt,
+		Reasoning:      m.Reasoning, ReadyToRevote: m.ReadyToRevote, CreatedAt: m.CreatedAt,
 	}
 }
 
@@ -395,7 +403,9 @@ func (r *magiRepository) ListReflectionsByGeneration(ctx context.Context, caseID
 		return nil, err
 	}
 	out := make([]*entity.Reflection, len(models))
-	for i := range models { out[i] = reflectionFromModel(&models[i]) }
+	for i := range models {
+		out[i] = reflectionFromModel(&models[i])
+	}
 	return out, nil
 }
 
@@ -415,7 +425,9 @@ func (r *magiRepository) ListToolCallsByGeneration(ctx context.Context, caseID s
 		return nil, err
 	}
 	out := make([]*entity.ToolCall, len(models))
-	for i := range models { out[i] = toolCallFromModel(&models[i]) }
+	for i := range models {
+		out[i] = toolCallFromModel(&models[i])
+	}
 	return out, nil
 }
 

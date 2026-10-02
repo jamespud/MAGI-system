@@ -9,12 +9,12 @@ type Claim struct {
 	CaseID              string
 	ExecutionGeneration int64
 	AgentRunID          string
-	Statement   string
-	Supports    []string // EV-IDs
-	Contradicts []string // Claim-IDs
-	Status      ClaimStatus
-	CreatedBy   MagiCode
-	CreatedAt   time.Time
+	Statement           string
+	Supports            []string // EV-IDs
+	Contradicts         []string // Claim-IDs
+	Status              ClaimStatus
+	CreatedBy           MagiCode
+	CreatedAt           time.Time
 }
 
 type ClaimStatus string
