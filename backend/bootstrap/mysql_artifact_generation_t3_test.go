@@ -2,6 +2,9 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"strings"
 	"errors"
 	"testing"
 	"time"
@@ -309,3 +312,126 @@ func TestMySQLArtifactGeneration_LegacyGenerationZeroRemainsHistory(t *testing.T
 	}
 }
 
+
+// TestMySQLArtifactGeneration_OwnerCheckAndInsertShareLinearization proves the
+// ownership predicate is held across the artifact INSERT itself. The INSERT
+// trigger blocks after withActiveExecution has locked the Job/Case rows. A
+// concurrent owner settlement must remain blocked until the INSERT transaction
+// is allowed to finish.
+func TestMySQLArtifactGeneration_OwnerCheckAndInsertShareLinearization(t *testing.T) {
+	db := provideDBForTest(t, newMySQLSchema(t))
+	repo, jobs, job := seedMySQLDecisionJob(t, db, "case-t3-linearization", 3)
+	owned := repo.(port.OwnedArtifactRepository)
+	ctx := context.Background()
+	worker := "worker-t3-linearization"
+	first, owner := claimT3Owner(t, jobs, job, worker)
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql DB: %v", err)
+	}
+	blocker, err := sqlDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("dedicated blocker connection: %v", err)
+	}
+	defer blocker.Close()
+
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	gateName := "t3_gate_" + suffix[:24]
+	enteredName := "t3_entered_" + suffix[:21]
+
+	var got int
+	if err := blocker.QueryRowContext(ctx, "SELECT GET_LOCK(?, 2)", gateName).Scan(&got); err != nil || got != 1 {
+		t.Fatalf("acquire trigger gate: got=%d err=%v", got, err)
+	}
+	defer func() {
+		var released sql.NullInt64
+		_ = blocker.QueryRowContext(context.Background(), "SELECT RELEASE_LOCK(?)", gateName).Scan(&released)
+	}()
+
+	trigger := fmt.Sprintf(`CREATE TRIGGER t3_block_evidence_insert
+		BEFORE INSERT ON evidence_record
+		FOR EACH ROW
+		BEGIN
+			SET @t3_entered = GET_LOCK('%s', 0);
+			SET @t3_gate = GET_LOCK('%s', 10);
+			SET @t3_release_gate = RELEASE_LOCK('%s');
+			SET @t3_release_entered = RELEASE_LOCK('%s');
+		END`, enteredName, gateName, gateName, enteredName)
+	if err := db.Exec(trigger).Error; err != nil {
+		t.Fatalf("create evidence barrier trigger: %v", err)
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- owned.CreateEvidenceOwned(ctx, owner, &entity.EvidenceRecord{
+			ID: "ev-linearized", CaseID: job.CaseID, CreatedAt: time.Now(),
+		})
+	}()
+
+	// The trigger first acquires enteredName and then waits on gateName.
+	// Observing enteredName therefore proves the INSERT has been reached while
+	// the repository transaction still owns its SELECT ... FOR UPDATE locks.
+	deadline := time.Now().Add(3 * time.Second)
+	entered := false
+	for time.Now().Before(deadline) {
+		var holder sql.NullInt64
+		if err := db.Raw("SELECT IS_USED_LOCK(?)", enteredName).Scan(&holder).Error; err != nil {
+			t.Fatalf("observe trigger entry lock: %v", err)
+		}
+		if holder.Valid {
+			entered = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !entered {
+		t.Fatal("artifact INSERT did not reach deterministic trigger barrier")
+	}
+
+	transitionDone := make(chan error, 1)
+	retryAt := time.Now().Add(-time.Second)
+	go func() {
+		transitionDone <- jobs.MarkFailed(ctx, first.ID, first.CaseID, worker, first.ExecutionGeneration, "linearization", &retryAt)
+	}()
+
+	select {
+	case err := <-transitionDone:
+		t.Fatalf("ownership transition completed while artifact INSERT was blocked: %v", err)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: the writer transaction still holds the DecisionJob row lock.
+	}
+
+	var released sql.NullInt64
+	if err := blocker.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", gateName).Scan(&released); err != nil {
+		t.Fatalf("release trigger gate: %v", err)
+	}
+	if !released.Valid || released.Int64 != 1 {
+		t.Fatalf("release trigger gate result = %+v", released)
+	}
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("artifact writer after gate release: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("artifact writer remained blocked after gate release")
+	}
+	select {
+	case err := <-transitionDone:
+		if err != nil {
+			t.Fatalf("ownership transition after writer commit: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ownership transition did not resume after artifact commit")
+	}
+
+	var rows int64
+	if err := db.Model(&magi.EvidenceModel{}).Where("id = ?", "ev-linearized").Count(&rows).Error; err != nil {
+		t.Fatalf("count linearized artifact: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("linearized artifact rows = %d, want 1", rows)
+	}
+}
