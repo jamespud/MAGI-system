@@ -4,9 +4,10 @@ import "time"
 
 // AgentRun is one Magi's run within a case (one round).
 type AgentRun struct {
-	ID           string
-	CaseID       string
-	MagiConfigID string
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	MagiConfigID         string
 	MagiCode     MagiCode
 	Round        int
 	Status       AgentRunStatus
@@ -53,8 +54,10 @@ const (
 
 // AgentState is a working-memory snapshot for checkpoint/resume.
 type AgentState struct {
-	RunID        string
-	Messages     []MessageRef
+	RunID               string
+	CaseID              string
+	ExecutionGeneration int64
+	Messages            []MessageRef
 	MessagesJSON string // full []*schema.Message JSON for non-lossy resume
 	StepCount    int
 	TokenUsed    int
