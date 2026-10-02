@@ -134,7 +134,7 @@ func TestArtifactGeneration_StaleWriterFencedAndReadsScopedOnMySQL(t *testing.T)
 
 	requeueArtifactOwner(t, jobs, first, worker)
 	second, owner2 := claimArtifactOwner(t, jobs, job, worker)
-	if second.ExecutionGeneration != first.ExecutionGeneration+1 {
+	if second.ExecutionGeneration != first.ExecutionGeneration + 1 {
 		t.Fatalf("generation = %d after %d, want +1", second.ExecutionGeneration, first.ExecutionGeneration)
 	}
 
