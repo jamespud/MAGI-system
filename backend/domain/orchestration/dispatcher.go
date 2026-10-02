@@ -211,19 +211,15 @@ func isCompleted(r *runtime.LoopResult) bool {
 	return r != nil && r.Status == runtime.LoopStatusCompleted && r.Err == nil && r.Vote != nil
 }
 
-// checkpointRunID is the stable identity of an agent's working memory for a
-// (case, agent, round, phase). Unlike executionRunID it deliberately excludes
-// the execution attempt so durable retries resume the same checkpoint.
+// checkpointRunID is the stable logical identity of an agent's working memory
+// for a (case, agent, round, phase). Durable storage scopes that logical ID by
+// execution_generation, so a newer owner never resumes an older generation.
 func checkpointRunID(caseID string, code entity.MagiCode, round int, phase string) string {
 	return fmt.Sprintf("%s-%s-r%d-%s", caseID, code, round, phase)
 }
 
-func executionRunID(caseID string, code entity.MagiCode, attempt, round int, phase string) string {
-	attemptPart := ""
-	if attempt > 0 {
-		attemptPart = fmt.Sprintf("-a%d", attempt)
-	}
-	return fmt.Sprintf("%s-%s%s-r%d-%s", caseID, code, attemptPart, round, phase)
+func executionRunID(caseID string, code entity.MagiCode, generation int64, round int, phase string) string {
+	return fmt.Sprintf("%s-%s-g%d-r%d-%s", caseID, code, generation, round, phase)
 }
 
 func derefTask(t *entity.DecisionTask) entity.DecisionTask {
