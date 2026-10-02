@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/entity"
@@ -310,4 +309,3 @@ func TestMySQLArtifactGeneration_LegacyGenerationZeroRemainsHistory(t *testing.T
 	}
 }
 
-var _ = gorm.ErrRecordNotFound
