@@ -745,6 +745,9 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 type agentRunRepo struct{ db *gorm.DB }
 
 func (r *agentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	if a != nil && a.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := AgentRunModel{
 		ID: a.ID, CaseID: a.CaseID, ExecutionGeneration: a.ExecutionGeneration, MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode),
 		Round: a.Round, Status: string(a.Status), UsageJSON: toJSON(a.Usage),
@@ -824,6 +827,9 @@ func (r *agentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64,
 type evidenceRepo struct{ db *gorm.DB }
 
 func (r *evidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	if e != nil && e.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	uri := ""
 	if e.SourceURI != nil {
 		uri = *e.SourceURI
@@ -869,6 +875,9 @@ func evidenceFromModel(m *EvidenceModel) *entity.EvidenceRecord {
 type claimRepo struct{ db *gorm.DB }
 
 func (r *claimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	if c != nil && c.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ClaimModel{
 		ID: c.ID, CaseID: c.CaseID, ExecutionGeneration: c.ExecutionGeneration, AgentRunID: c.AgentRunID, Statement: c.Statement,
 		SupportsJSON: toJSON(c.Supports), ContradictsJSON: toJSON(c.Contradicts), Status: string(c.Status),
@@ -908,6 +917,9 @@ func claimFromModel(m *ClaimModel) *entity.Claim {
 type voteRepo struct{ db *gorm.DB }
 
 func (r *voteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if v != nil && v.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := VoteModel{
 		ID: v.ID, CaseID: v.CaseID, ExecutionGeneration: v.ExecutionGeneration, AgentRunID: v.AgentRunID, Round: v.Round, Decision: string(v.Decision),
 		Confidence: v.Confidence, UtilityScoresJSON: toJSON(v.UtilityScores), KeyClaimIDsJSON: toJSON(v.KeyClaimIDs),
@@ -1065,6 +1077,9 @@ func (r *eventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq ui
 type debateRepo struct{ db *gorm.DB }
 
 func (r *debateRepo) Create(ctx context.Context, d *entity.DebateRound) error {
+	if d != nil && d.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := DebateRoundModel{
 		ID: d.ID, CaseID: d.CaseID, ExecutionGeneration: d.ExecutionGeneration, Round: d.Round, PacketJSON: toJSON(d.Packet),
 		StartedAt: d.StartedAt, CompletedAt: d.CompletedAt,
@@ -1090,6 +1105,9 @@ func (r *debateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.D
 type reflectionRepo struct{ db *gorm.DB }
 
 func (r *reflectionRepo) Create(ctx context.Context, rf *entity.Reflection) error {
+	if rf != nil && rf.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ReflectionModel{
 		ID: rf.ID, CaseID: rf.CaseID, ExecutionGeneration: rf.ExecutionGeneration, AgentRunID: rf.AgentRunID, Round: rf.Round, PreviousVoteID: rf.PreviousVoteID,
 		PositionChange: string(rf.PositionChange), AcceptedClaimsJSON: toJSON(rf.AcceptedClaims),
@@ -1292,6 +1310,9 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 type toolCallRepo struct{ db *gorm.DB }
 
 func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	if t != nil && t.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ToolCallModel{
 		ID: t.ID, CaseID: t.CaseID, ExecutionGeneration: t.ExecutionGeneration, AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
 		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err, ApprovedBy: t.ApprovedBy,
