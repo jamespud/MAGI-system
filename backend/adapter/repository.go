@@ -341,7 +341,7 @@ func (r *magiRepository) ListClaimsByGeneration(ctx context.Context, caseID stri
 	return out, nil
 }
 
-func voteFromModel(m *VoteModel) *entity.Vote {
+func voteArtifactFromModel(m *VoteModel) *entity.Vote {
 	return &entity.Vote{
 		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
 		AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
@@ -358,7 +358,7 @@ func (r *magiRepository) ListVotesByGeneration(ctx context.Context, caseID strin
 		return nil, err
 	}
 	out := make([]*entity.Vote, len(models))
-	for i := range models { out[i] = voteFromModel(&models[i]) }
+	for i := range models { out[i] = voteArtifactFromModel(&models[i]) }
 	return out, nil
 }
 
