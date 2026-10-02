@@ -757,6 +757,9 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 type agentRunRepo struct{ db *gorm.DB }
 
 func (r *agentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	if a == nil || a.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if a != nil && a.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -839,6 +842,9 @@ func (r *agentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64,
 type evidenceRepo struct{ db *gorm.DB }
 
 func (r *evidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	if e == nil || e.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if e != nil && e.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -887,6 +893,9 @@ func evidenceFromModel(m *EvidenceModel) *entity.EvidenceRecord {
 type claimRepo struct{ db *gorm.DB }
 
 func (r *claimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	if c == nil || c.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if c != nil && c.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -929,6 +938,9 @@ func claimFromModel(m *ClaimModel) *entity.Claim {
 type voteRepo struct{ db *gorm.DB }
 
 func (r *voteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if v == nil || v.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if v != nil && v.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -1089,6 +1101,9 @@ func (r *eventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq ui
 type debateRepo struct{ db *gorm.DB }
 
 func (r *debateRepo) Create(ctx context.Context, d *entity.DebateRound) error {
+	if d == nil || d.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if d != nil && d.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -1117,6 +1132,9 @@ func (r *debateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.D
 type reflectionRepo struct{ db *gorm.DB }
 
 func (r *reflectionRepo) Create(ctx context.Context, rf *entity.Reflection) error {
+	if rf == nil || rf.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if rf != nil && rf.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -1322,6 +1340,9 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 type toolCallRepo struct{ db *gorm.DB }
 
 func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	if t == nil || t.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	if t != nil && t.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
