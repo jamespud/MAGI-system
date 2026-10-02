@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"strings"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -47,7 +48,7 @@ CREATE TABLE magi_agent_checkpoint (
 
 func seedPreS27Artifacts(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	for _, statement := range splitSQLStatements(preS27ArtifactDDL) {
+	for _, statement := range splitS27SQLStatements(preS27ArtifactDDL) {
 		if err := db.Exec(statement).Error; err != nil {
 			t.Fatalf("seed pre-S27 schema: %v\n%s", err, statement)
 		}
@@ -81,7 +82,7 @@ func seedPreS27Artifacts(t *testing.T, db *gorm.DB) {
 	}
 }
 
-func splitSQLStatements(script string) []string {
+func splitS27SQLStatements(script string) []string {
 	var out []string
 	for _, part := range strings.Split(script, ";") {
 		part = strings.TrimSpace(part)
