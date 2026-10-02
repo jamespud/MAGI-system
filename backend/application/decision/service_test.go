@@ -436,7 +436,6 @@ func TestService_ListScoped_DelegatesToRepo(t *testing.T) {
 	}
 }
 
-
 type failingGenerationCaseRepo struct {
 	port.CaseRepository
 }
