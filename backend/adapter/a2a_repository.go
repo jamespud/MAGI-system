@@ -272,7 +272,7 @@ func loadConversationResolutions(tx *gorm.DB, messages []*entity.ConversationMes
 		model := &models[i]
 		out[model.CaseID] = &entity.Resolution{
 			ID: model.ID, CaseID: model.CaseID, ExecutionGeneration: model.ExecutionGeneration,
-			Consensus: fromJSON[entity.ConsensusResult](model.ConsensusJSON),
+			Consensus:     fromJSON[entity.ConsensusResult](model.ConsensusJSON),
 			FinalDecision: entity.VoteDecision(model.FinalDecision), FinalReport: model.FinalReport,
 			KeyEvidenceIDs: fromJSON[[]string](model.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](model.KeyClaimIDsJSON),
 			VoteIDs: fromJSON[[]string](model.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](model.EvaluationJSON), CreatedAt: model.CreatedAt,
