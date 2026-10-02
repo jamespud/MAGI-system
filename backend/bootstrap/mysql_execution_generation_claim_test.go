@@ -245,6 +245,15 @@ func (o *mysqlSuccessOrchestrator) Orchestrate(context.Context, *entity.Decision
 	return &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil
 }
 
+func (o *mysqlSuccessOrchestrator) OrchestrateForExecution(_ context.Context, c *entity.DecisionCase, owner *entity.ExecutionContext) (*entity.Resolution, error) {
+	if owner == nil || !owner.IsDurable() || c == nil || owner.CaseID != c.ID ||
+		owner.ExecutionGeneration != c.ExecutionGeneration {
+		return nil, port.ErrLeaseLost
+	}
+	o.calls.Add(1)
+	return &entity.Resolution{CaseID: c.ID, ExecutionGeneration: c.ExecutionGeneration, FinalDecision: entity.VoteDecisionApprove}, nil
+}
+
 func waitMySQLDecisionJobStatus(t *testing.T, jobs port.DecisionJobRepository, caseID string, want entity.DecisionJobStatus) *entity.DecisionJob {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
