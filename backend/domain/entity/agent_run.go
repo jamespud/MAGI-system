@@ -4,17 +4,18 @@ import "time"
 
 // AgentRun is one Magi's run within a case (one round).
 type AgentRun struct {
-	ID           string
-	CaseID       string
-	MagiConfigID string
-	MagiCode     MagiCode
-	Round        int
-	Status       AgentRunStatus
-	StartedAt    time.Time
-	CompletedAt  *time.Time
-	Usage        *Usage
-	Err          string
-	Environment  *RunEnvironment
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	MagiConfigID        string
+	MagiCode            MagiCode
+	Round               int
+	Status              AgentRunStatus
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	Usage               *Usage
+	Err                 string
+	Environment         *RunEnvironment
 }
 
 // RunEnvironment snapshots the configuration a Magi run executed under, so
@@ -53,12 +54,14 @@ const (
 
 // AgentState is a working-memory snapshot for checkpoint/resume.
 type AgentState struct {
-	RunID        string
-	Messages     []MessageRef
-	MessagesJSON string // full []*schema.Message JSON for non-lossy resume
-	StepCount    int
-	TokenUsed    int
-	Phase        string
+	RunID               string
+	CaseID              string
+	ExecutionGeneration int64
+	Messages            []MessageRef
+	MessagesJSON        string // full []*schema.Message JSON for non-lossy resume
+	StepCount           int
+	TokenUsed           int
+	Phase               string
 
 	// Snapshot V2 is the authoritative checkpoint payload. The legacy fields
 	// remain available while existing checkpoint rows are migrated.

@@ -25,6 +25,13 @@ type Orchestrator interface {
 	Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error)
 }
 
+// ExecutionOrchestrator is the durable-run capability that carries the exact
+// Claim owner into the domain/runtime persistence path. A positive-generation
+// worker must use this capability; generation alone is not authorization.
+type ExecutionOrchestrator interface {
+	OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error)
+}
+
 // ServiceConfig holds application-level config for DecisionService.
 type ServiceConfig struct {
 	MaxDebateRounds int
@@ -341,12 +348,44 @@ func (s *Service) Resolution(ctx context.Context, caseID string) (*entity.Resolu
 	return res, nil
 }
 
+func (s *Service) currentExecutionGeneration(ctx context.Context, caseID string) (int64, bool, error) {
+	if s.caseRepo == nil {
+		// Standalone/legacy mode has no durable Case generation to scope by.
+		return 0, false, nil
+	}
+	c, err := s.caseRepo.Get(ctx, caseID)
+	if err != nil {
+		return 0, true, fmt.Errorf("load current execution generation for case %s: %w", caseID, err)
+	}
+	if c == nil {
+		return 0, true, fmt.Errorf("load current execution generation for case %s: case not found", caseID)
+	}
+	return c.ExecutionGeneration, true, nil
+}
+
 // Evidence returns all evidence records for a case.
 func (s *Service) Evidence(ctx context.Context, caseID string) ([]*entity.EvidenceRecord, error) {
 	if s.evidenceRepo == nil {
 		return nil, nil
 	}
-	return s.evidenceRepo.ListByCase(ctx, caseID)
+	rows, err := s.evidenceRepo.ListByCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.ExecutionGeneration == generation {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	return rows, nil
 }
 
 // Claims returns all claims for a case.
@@ -354,7 +393,24 @@ func (s *Service) Claims(ctx context.Context, caseID string) ([]*entity.Claim, e
 	if s.claimRepo == nil {
 		return nil, nil
 	}
-	return s.claimRepo.ListByCase(ctx, caseID)
+	rows, err := s.claimRepo.ListByCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.ExecutionGeneration == generation {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	return rows, nil
 }
 
 // Votes returns all votes for a case.
@@ -362,7 +418,24 @@ func (s *Service) Votes(ctx context.Context, caseID string) ([]*entity.Vote, err
 	if s.voteRepo == nil {
 		return nil, nil
 	}
-	return s.voteRepo.ListByCase(ctx, caseID)
+	rows, err := s.voteRepo.ListByCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.ExecutionGeneration == generation {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	return rows, nil
 }
 
 // AgentRuns returns all agent runs for a case.
@@ -370,7 +443,24 @@ func (s *Service) AgentRuns(ctx context.Context, caseID string) ([]*entity.Agent
 	if s.agentRunRepo == nil {
 		return nil, nil
 	}
-	return s.agentRunRepo.ListByCase(ctx, caseID)
+	rows, err := s.agentRunRepo.ListByCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.ExecutionGeneration == generation {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	return rows, nil
 }
 
 // ToolCalls returns all tool-call records for a case.
@@ -378,7 +468,24 @@ func (s *Service) ToolCalls(ctx context.Context, caseID string) ([]*entity.ToolC
 	if s.toolCallRepo == nil {
 		return nil, nil
 	}
-	return s.toolCallRepo.ListByCase(ctx, caseID)
+	rows, err := s.toolCallRepo.ListByCase(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row.ExecutionGeneration == generation {
+				filtered = append(filtered, row)
+			}
+		}
+		return filtered, nil
+	}
+	return rows, nil
 }
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.

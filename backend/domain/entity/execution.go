@@ -13,6 +13,22 @@ type ExecutionIdentity struct {
 	AttemptID    string
 }
 
+// ExecutionContext is the explicit durable owner identity carried by one
+// execution. JobAttempt and RunID are diagnostic/runtime identities; fencing
+// uses CaseID + JobID + WorkerID + ExecutionGeneration and the durable lease.
+type ExecutionContext struct {
+	CaseID              string
+	JobID               string
+	RunID               string
+	WorkerID            string
+	JobAttempt          int
+	ExecutionGeneration int64
+}
+
+func (e *ExecutionContext) IsDurable() bool {
+	return e != nil && e.CaseID != "" && e.JobID != "" && e.WorkerID != "" && e.ExecutionGeneration > 0
+}
+
 type InvocationStatus string
 
 const (

@@ -406,7 +406,17 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		runStart := time.Now()
 		m.metrics.RunStart()
 		m.metrics.RunStartForUser(userIDString(c.UserID))
-		_, runErr := m.orch.Orchestrate(attemptCtx, c)
+		executionOrch, ownerAware := m.orch.(ExecutionOrchestrator)
+		var runErr error
+		if !ownerAware {
+			runErr = fmt.Errorf("run manager: durable orchestration requires execution-owner capability")
+		} else {
+			owner := &entity.ExecutionContext{
+				CaseID: c.ID, JobID: claimed.ID, WorkerID: m.workerID,
+				JobAttempt: claimed.Attempt, ExecutionGeneration: claimed.ExecutionGeneration,
+			}
+			_, runErr = executionOrch.OrchestrateForExecution(attemptCtx, c, owner)
+		}
 		stopHeartbeat()
 		finishMetrics := func(ok bool) {
 			m.metrics.RunFinish(ok)
