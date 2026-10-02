@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -432,5 +433,133 @@ func TestService_ListScoped_DelegatesToRepo(t *testing.T) {
 	}
 	if repo.lastUserID != 7 || repo.lastLimit != 25 || repo.lastOffset != 10 {
 		t.Fatalf("ListForUser not called with expected args: %d %d %d", repo.lastUserID, repo.lastLimit, repo.lastOffset)
+	}
+}
+
+
+type failingGenerationCaseRepo struct {
+	port.CaseRepository
+}
+
+func (f failingGenerationCaseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, error) {
+	return nil, errors.New("generation lookup unavailable")
+}
+
+func TestService_CurrentArtifactReadsAreGenerationScoped(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(
+		&magi.CaseModel{}, &magi.AgentRunModel{}, &magi.EvidenceModel{}, &magi.ClaimModel{},
+		&magi.VoteModel{}, &magi.ToolCallModel{},
+	); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	const caseID = "case-current-generation-read"
+	if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{
+		ID: caseID, Status: entity.CaseStatusDraft, ExecutionGeneration: 2,
+	}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	for _, generation := range []int64{1, 2} {
+		suffix := fmt.Sprintf("g%d", generation)
+		if err := db.Create(&magi.AgentRunModel{
+			ID: "run-" + suffix, CaseID: caseID, ExecutionGeneration: generation,
+		}).Error; err != nil {
+			t.Fatalf("seed agent run %s: %v", suffix, err)
+		}
+		if err := db.Create(&magi.EvidenceModel{
+			ID: "ev-" + suffix, CaseID: caseID, ExecutionGeneration: generation,
+		}).Error; err != nil {
+			t.Fatalf("seed evidence %s: %v", suffix, err)
+		}
+		if err := db.Create(&magi.ClaimModel{
+			ID: "cl-" + suffix, CaseID: caseID, ExecutionGeneration: generation,
+		}).Error; err != nil {
+			t.Fatalf("seed claim %s: %v", suffix, err)
+		}
+		if err := db.Create(&magi.VoteModel{
+			ID: "vote-" + suffix, CaseID: caseID, ExecutionGeneration: generation,
+		}).Error; err != nil {
+			t.Fatalf("seed vote %s: %v", suffix, err)
+		}
+		if err := db.Create(&magi.ToolCallModel{
+			ID: "tool-" + suffix, CaseID: caseID, ExecutionGeneration: generation,
+		}).Error; err != nil {
+			t.Fatalf("seed tool call %s: %v", suffix, err)
+		}
+	}
+
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{},
+		decision.WithCaseRepo(repo.CaseRepo()),
+		decision.WithAgentRunRepo(repo.AgentRunRepo()),
+		decision.WithEvidenceRepo(repo.EvidenceRepo()),
+		decision.WithClaimRepo(repo.ClaimRepo()),
+		decision.WithVoteRepo(repo.VoteRepo()),
+		decision.WithToolCallRepo(repo.ToolCallRepo()),
+	)
+
+	runs, err := svc.AgentRuns(ctx, caseID)
+	if err != nil || len(runs) != 1 || runs[0].ExecutionGeneration != 2 {
+		t.Fatalf("current agent runs = %+v err=%v", runs, err)
+	}
+	evidence, err := svc.Evidence(ctx, caseID)
+	if err != nil || len(evidence) != 1 || evidence[0].ExecutionGeneration != 2 {
+		t.Fatalf("current evidence = %+v err=%v", evidence, err)
+	}
+	claims, err := svc.Claims(ctx, caseID)
+	if err != nil || len(claims) != 1 || claims[0].ExecutionGeneration != 2 {
+		t.Fatalf("current claims = %+v err=%v", claims, err)
+	}
+	votes, err := svc.Votes(ctx, caseID)
+	if err != nil || len(votes) != 1 || votes[0].ExecutionGeneration != 2 {
+		t.Fatalf("current votes = %+v err=%v", votes, err)
+	}
+	tools, err := svc.ToolCalls(ctx, caseID)
+	if err != nil || len(tools) != 1 || tools[0].ExecutionGeneration != 2 {
+		t.Fatalf("current tool calls = %+v err=%v", tools, err)
+	}
+}
+
+func TestService_CurrentArtifactReadsFailClosedWhenGenerationLookupFails(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&magi.CaseModel{}, &magi.EvidenceModel{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	const caseID = "case-generation-read-failure"
+	if err := repo.CaseRepo().Create(ctx, &entity.DecisionCase{
+		ID: caseID, ExecutionGeneration: 2,
+	}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if err := db.Create(&magi.EvidenceModel{
+		ID: "ev-old", CaseID: caseID, ExecutionGeneration: 1,
+	}).Error; err != nil {
+		t.Fatalf("seed old evidence: %v", err)
+	}
+	if err := db.Create(&magi.EvidenceModel{
+		ID: "ev-current", CaseID: caseID, ExecutionGeneration: 2,
+	}).Error; err != nil {
+		t.Fatalf("seed current evidence: %v", err)
+	}
+
+	svc := decision.NewService(&stubOrchestrator{}, decision.ServiceConfig{},
+		decision.WithCaseRepo(failingGenerationCaseRepo{CaseRepository: repo.CaseRepo()}),
+		decision.WithEvidenceRepo(repo.EvidenceRepo()),
+	)
+	rows, err := svc.Evidence(ctx, caseID)
+	if err == nil {
+		t.Fatalf("generation lookup failure returned rows instead of failing closed: %+v", rows)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("generation lookup failure leaked history rows: %+v", rows)
 	}
 }
