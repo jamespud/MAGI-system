@@ -17,6 +17,7 @@ const s21MigrationPath = "../../docker/atlas/migrations/magi_s21_runtime_kernel.
 const s24MigrationPath = "../../docker/atlas/migrations/magi_s24_approval_intent_binding.sql"
 const s25MigrationPath = "../../docker/atlas/migrations/magi_s25_execution_generation.sql"
 const s26MigrationPath = "../../docker/atlas/migrations/magi_s26_claim_token.sql"
+const s27MigrationPath = "../../docker/atlas/migrations/magi_s27_artifact_generation.sql"
 
 // T1 (#19): the Case execution generation is persisted on both the Case and the
 // job that claims it. The Atlas migration and the GORM models must agree on the
@@ -85,6 +86,62 @@ func TestS26ClaimTokenMigrationMatchesModel(t *testing.T) {
 	tokenField, ok := reflect.TypeOf(magi.DecisionJobClaimModel{}).FieldByName("ClaimToken")
 	if !ok || !strings.Contains(tokenField.Tag.Get("gorm"), "primaryKey") || !strings.Contains(tokenField.Tag.Get("gorm"), "size:36") {
 		t.Fatalf("DecisionJobClaimModel.ClaimToken must be a size-36 primary key")
+	}
+}
+
+// T3 (#21): authoritative artifacts and checkpoints carry explicit Case
+// execution generation. Atlas and AutoMigrate must agree on BIGINT/zero legacy
+// semantics; checkpoint authority is keyed by logical RunID + generation.
+func TestS27ArtifactGenerationMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s27MigrationPath)
+	if err != nil {
+		t.Fatalf("read s27 migration: %v", err)
+	}
+	sql := string(raw)
+	for _, table := range []string{
+		"magi_agent_run", "evidence_record", "claim", "magi_vote",
+		"debate_round", "reflection", "magi_tool_call", "resolution",
+		"magi_agent_checkpoint",
+	} {
+		pattern := regexp.MustCompile(`(?i)ALTER TABLE\s+` + table + `[\s\S]*?ADD COLUMN\s+execution_generation\s+BIGINT\s+NOT NULL\s+DEFAULT\s+0`)
+		if pattern.FindString(sql) == "" {
+			t.Fatalf("S27 must add execution_generation BIGINT NOT NULL DEFAULT 0 to %s", table)
+		}
+	}
+	if regexp.MustCompile(`(?i)ADD PRIMARY KEY\s*\(\s*run_id\s*,\s*execution_generation\s*\)`).FindString(sql) == "" {
+		t.Fatal("S27 must make checkpoint primary key (run_id, execution_generation)")
+	}
+
+	for _, tc := range []struct {
+		model any
+		name  string
+	}{
+		{&magi.AgentRunModel{}, "AgentRunModel"},
+		{&magi.EvidenceModel{}, "EvidenceModel"},
+		{&magi.ClaimModel{}, "ClaimModel"},
+		{&magi.VoteModel{}, "VoteModel"},
+		{&magi.DebateRoundModel{}, "DebateRoundModel"},
+		{&magi.ReflectionModel{}, "ReflectionModel"},
+		{&magi.ToolCallModel{}, "ToolCallModel"},
+		{&magi.ResolutionModel{}, "ResolutionModel"},
+		{&magi.CheckpointModel{}, "CheckpointModel"},
+	} {
+		field, ok := reflect.TypeOf(tc.model).Elem().FieldByName("ExecutionGeneration")
+		if !ok {
+			t.Fatalf("%s is missing ExecutionGeneration", tc.name)
+		}
+		tag := field.Tag.Get("gorm")
+		if !strings.Contains(tag, "not null") || !strings.Contains(tag, "default:0") {
+			t.Fatalf("%s.ExecutionGeneration tag = %q, want not null and default:0", tc.name, tag)
+		}
+	}
+	runID, ok := reflect.TypeOf(magi.CheckpointModel{}).FieldByName("RunID")
+	if !ok || !strings.Contains(runID.Tag.Get("gorm"), "primaryKey") {
+		t.Fatal("CheckpointModel.RunID must remain part of the primary key")
+	}
+	generation, _ := reflect.TypeOf(magi.CheckpointModel{}).FieldByName("ExecutionGeneration")
+	if !strings.Contains(generation.Tag.Get("gorm"), "primaryKey") {
+		t.Fatal("CheckpointModel.ExecutionGeneration must be part of the primary key")
 	}
 }
 
