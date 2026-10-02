@@ -90,10 +90,25 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 }
 
 func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
+	return o.orchestrate(ctx, case_, nil)
+}
+
+// OrchestrateForExecution carries the exact durable Claim owner through every
+// authoritative artifact/checkpoint write. A positive generation without this
+// identity is not sufficient to authorize persistence.
+func (o *Orchestrator) OrchestrateForExecution(ctx context.Context, case_ *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error) {
+	if case_ == nil || execution == nil || !execution.IsDurable() ||
+		execution.CaseID != case_.ID || execution.ExecutionGeneration != case_.ExecutionGeneration {
+		return nil, port.ErrLeaseLost
+	}
+	return o.orchestrate(ctx, case_, execution)
+}
+
+func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error) {
 	if case_ == nil {
 		return nil, fmt.Errorf("nil case")
 	}
-	st := &State{MaxDebate: case_.MaxDebateRounds, Round: 1}
+	st := &State{MaxDebate: case_.MaxDebateRounds, Round: 1, Execution: execution}
 	if st.MaxDebate == 0 {
 		st.MaxDebate = 1
 	}
