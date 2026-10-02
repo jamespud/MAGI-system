@@ -273,10 +273,10 @@ func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.Decisio
 // evidence decided the case"; citing a row that was never persisted would make
 // that claim false, so the terminal commit must not happen.
 //
-// The cited ids embed the execution attempt, so checking them for existence is
-// also what keeps a retry from validating against artifacts of an older
-// attempt. This is the fallback path's guard; the database-backed
-// TerminalCommitter runs the same check inside its terminal transaction.
+// Artifact ID strings are only stable identities. Authority comes from the
+// persisted Case + execution_generation provenance: the fallback filters each
+// cited row to the Resolution generation, while the database-backed
+// TerminalCommitter performs the same check inside its terminal transaction.
 func (o *Orchestrator) verifyResolutionArtifacts(ctx context.Context, res *entity.Resolution) error {
 	if res == nil {
 		return nil
