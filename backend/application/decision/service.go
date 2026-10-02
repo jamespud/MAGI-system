@@ -348,15 +348,19 @@ func (s *Service) Resolution(ctx context.Context, caseID string) (*entity.Resolu
 	return res, nil
 }
 
-func (s *Service) currentExecutionGeneration(ctx context.Context, caseID string) (int64, bool) {
+func (s *Service) currentExecutionGeneration(ctx context.Context, caseID string) (int64, bool, error) {
 	if s.caseRepo == nil {
-		return 0, false
+		// Standalone/legacy mode has no durable Case generation to scope by.
+		return 0, false, nil
 	}
 	c, err := s.caseRepo.Get(ctx, caseID)
-	if err != nil || c == nil {
-		return 0, false
+	if err != nil {
+		return 0, true, fmt.Errorf("load current execution generation for case %s: %w", caseID, err)
 	}
-	return c.ExecutionGeneration, true
+	if c == nil {
+		return 0, true, fmt.Errorf("load current execution generation for case %s: case not found", caseID)
+	}
+	return c.ExecutionGeneration, true, nil
 }
 
 // Evidence returns all evidence records for a case.
@@ -368,7 +372,11 @@ func (s *Service) Evidence(ctx context.Context, caseID string) ([]*entity.Eviden
 	if err != nil {
 		return nil, err
 	}
-	if generation, ok := s.currentExecutionGeneration(ctx, caseID); ok {
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
 		filtered := rows[:0]
 		for _, row := range rows {
 			if row.ExecutionGeneration == generation {
@@ -389,7 +397,11 @@ func (s *Service) Claims(ctx context.Context, caseID string) ([]*entity.Claim, e
 	if err != nil {
 		return nil, err
 	}
-	if generation, ok := s.currentExecutionGeneration(ctx, caseID); ok {
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
 		filtered := rows[:0]
 		for _, row := range rows {
 			if row.ExecutionGeneration == generation {
@@ -410,7 +422,11 @@ func (s *Service) Votes(ctx context.Context, caseID string) ([]*entity.Vote, err
 	if err != nil {
 		return nil, err
 	}
-	if generation, ok := s.currentExecutionGeneration(ctx, caseID); ok {
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
 		filtered := rows[:0]
 		for _, row := range rows {
 			if row.ExecutionGeneration == generation {
@@ -431,7 +447,11 @@ func (s *Service) AgentRuns(ctx context.Context, caseID string) ([]*entity.Agent
 	if err != nil {
 		return nil, err
 	}
-	if generation, ok := s.currentExecutionGeneration(ctx, caseID); ok {
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
 		filtered := rows[:0]
 		for _, row := range rows {
 			if row.ExecutionGeneration == generation {
@@ -452,7 +472,11 @@ func (s *Service) ToolCalls(ctx context.Context, caseID string) ([]*entity.ToolC
 	if err != nil {
 		return nil, err
 	}
-	if generation, ok := s.currentExecutionGeneration(ctx, caseID); ok {
+	generation, scoped, err := s.currentExecutionGeneration(ctx, caseID)
+	if err != nil {
+		return nil, err
+	}
+	if scoped {
 		filtered := rows[:0]
 		for _, row := range rows {
 			if row.ExecutionGeneration == generation {
