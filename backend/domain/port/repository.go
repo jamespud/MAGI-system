@@ -161,6 +161,35 @@ type CaseListFilter interface {
 	ListForUser(ctx context.Context, userID int64, limit, offset int) ([]*entity.DecisionCase, error)
 }
 
+// OwnedArtifactRepository is the generation-aware authoritative artifact
+// capability. Durable workers must use these methods; the legacy sub-repository
+// Create/ListByCase methods remain generation-0/history compatibility APIs.
+type OwnedArtifactRepository interface {
+	CreateAgentRunOwned(ctx context.Context, owner *entity.ExecutionContext, r *entity.AgentRun) error
+	CreateEvidenceOwned(ctx context.Context, owner *entity.ExecutionContext, e *entity.EvidenceRecord) error
+	CreateClaimOwned(ctx context.Context, owner *entity.ExecutionContext, c *entity.Claim) error
+	CreateVoteOwned(ctx context.Context, owner *entity.ExecutionContext, v *entity.Vote) error
+	CreateDebateRoundOwned(ctx context.Context, owner *entity.ExecutionContext, d *entity.DebateRound) error
+	CreateReflectionOwned(ctx context.Context, owner *entity.ExecutionContext, r *entity.Reflection) error
+	CreateToolCallOwned(ctx context.Context, owner *entity.ExecutionContext, t *entity.ToolCall) error
+
+	ListAgentRunsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.AgentRun, error)
+	ListEvidenceByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.EvidenceRecord, error)
+	ListClaimsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Claim, error)
+	ListVotesByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Vote, error)
+	ListDebateRoundsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.DebateRound, error)
+	ListReflectionsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Reflection, error)
+	ListToolCallsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.ToolCall, error)
+}
+
+// GenerationCheckpointRepository keeps the logical RunID stable while scoping
+// durable checkpoint authority to one execution generation. Positive-generation
+// runtime code must not fall back to the legacy CheckpointRepository API.
+type GenerationCheckpointRepository interface {
+	SaveForExecution(ctx context.Context, owner *entity.ExecutionContext, s *entity.AgentState) error
+	LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error)
+}
+
 type AgentRunRepository interface {
 	Create(ctx context.Context, r *entity.AgentRun) error
 	Get(ctx context.Context, id string) (*entity.AgentRun, error)

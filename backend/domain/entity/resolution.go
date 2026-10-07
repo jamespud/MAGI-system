@@ -4,16 +4,17 @@ import "time"
 
 // Resolution is the final outcome of a DecisionCase.
 type Resolution struct {
-	ID             string
-	CaseID         string
-	Consensus      ConsensusResult
-	FinalDecision  VoteDecision
-	FinalReport    string
-	KeyEvidenceIDs []string
-	KeyClaimIDs    []string
-	VoteIDs        []string
-	Evaluation     *Evaluation
-	CreatedAt      time.Time
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	Consensus           ConsensusResult
+	FinalDecision       VoteDecision
+	FinalReport         string
+	KeyEvidenceIDs      []string
+	KeyClaimIDs         []string
+	VoteIDs             []string
+	Evaluation          *Evaluation
+	CreatedAt           time.Time
 }
 
 // Dissent is a structured minority position recorded for auditability.

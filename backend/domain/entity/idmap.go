@@ -110,7 +110,7 @@ func (m *ArtifactRemap) lookup(id string) string {
 }
 
 // CodeOfRun extracts the MagiCode from a persisted agent run ID. Run IDs are
-// deterministic: "<case>-<code>[-a<attempt>]-r<round>-<phase>".
+// deterministic: "<case>-<code>[-g<generation>|-a<attempt>]-r<round>-<phase>".
 func CodeOfRun(runID string) MagiCode {
 	if runID == "" {
 		return ""
@@ -124,7 +124,7 @@ func CodeOfRun(runID string) MagiCode {
 		if strings.HasPrefix(p, "r") && len(p) > 1 && isDigits(p[1:]) {
 			// Skip the trailing phase segment if present.
 			codeIdx := i - 1
-			if codeIdx-1 >= 0 && strings.HasPrefix(parts[codeIdx], "a") && isDigits(parts[codeIdx][1:]) {
+			if codeIdx-1 >= 0 && isExecutionMarker(parts[codeIdx]) {
 				codeIdx--
 			}
 			if codeIdx >= 0 {
@@ -133,6 +133,13 @@ func CodeOfRun(runID string) MagiCode {
 		}
 	}
 	return ""
+}
+
+func isExecutionMarker(s string) bool {
+	if len(s) < 2 || (s[0] != 'a' && s[0] != 'g') {
+		return false
+	}
+	return isDigits(s[1:])
 }
 
 func isDigits(s string) bool {
