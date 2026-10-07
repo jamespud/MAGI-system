@@ -84,3 +84,40 @@ func TestPersistArtifactFailsClosedOnlyForDurableOwner(t *testing.T) {
 		})
 	}
 }
+
+// legacyOnlyRepo is a port.Repository that deliberately does NOT implement
+// OwnedArtifactRepository. The embedded interface is nil, so any repository
+// method call would panic: the legacy generation guard has to reject the write
+// before touching storage.
+type legacyOnlyRepo struct{ port.Repository }
+
+// A caller that threads the durable owner through persistArtifact is only half
+// the defence. If a future positive-generation call site forgets to pass it, the
+// write still lands in persistArtifactValue with a nil execution, so the entity
+// generation must refuse the legacy Create path instead of degrading to the
+// log-and-continue contract.
+func TestPersistArtifactRefusesPositiveGenerationWithoutOwner(t *testing.T) {
+	o := &Orchestrator{repo: legacyOnlyRepo{}}
+	artifacts := []struct {
+		name  string
+		value any
+	}{
+		{"agent run", &entity.AgentRun{ID: "run-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"evidence", &entity.EvidenceRecord{ID: "ev-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"claim", &entity.Claim{ID: "cl-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"vote", &entity.Vote{ID: "vote-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"debate round", &entity.DebateRound{ID: "deb-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"reflection", &entity.Reflection{ID: "refl-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+		{"tool call", &entity.ToolCall{ID: "tc-g1", CaseID: "case-g1", ExecutionGeneration: 1}},
+	}
+	for _, tc := range artifacts {
+		t.Run(tc.name, func(t *testing.T) {
+			err := o.persistArtifact(context.Background(), metrics.ArtifactAgentRun, "case-g1", nil, func() error {
+				return o.persistArtifactValue(context.Background(), nil, tc.value)
+			})
+			if !errors.Is(err, port.ErrLeaseLost) {
+				t.Fatalf("ownerless positive-generation %T write = %v, want ErrLeaseLost", tc.value, err)
+			}
+		})
+	}
+}
