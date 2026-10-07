@@ -19,10 +19,10 @@ func TestRunIDsFitInvocationColumns(t *testing.T) {
 
 	for _, code := range codes {
 		for _, phase := range phases {
-			for attempt := 0; attempt <= 9; attempt++ {
+			for generation := int64(0); generation <= 9; generation++ {
 				for round := 1; round <= 3; round++ {
 					checkpoint := checkpointRunID(caseID, code, round, phase)
-					execution := executionRunID(caseID, code, attempt, round, phase)
+					execution := executionRunID(caseID, code, generation, round, phase)
 					// The dispatcher retry path appends -retryN to the checkpoint ID.
 					retry := checkpoint + "-retry9"
 					for _, id := range []string{checkpoint, execution, retry} {

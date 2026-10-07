@@ -384,3 +384,7 @@ func TestService_ReportLoadsResolution(t *testing.T) {
 		t.Fatal("Report for unknown case should be empty string")
 	}
 }
+
+func (b *blockingOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, _ *entity.ExecutionContext) (*entity.Resolution, error) {
+	return b.Orchestrate(ctx, c)
+}

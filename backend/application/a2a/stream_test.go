@@ -216,6 +216,13 @@ type retryTerminalOrchestrator struct {
 	calls          atomic.Int32
 }
 
+func (o *retryTerminalOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error) {
+	if execution == nil || !execution.IsDurable() || execution.CaseID != c.ID || execution.ExecutionGeneration != c.ExecutionGeneration {
+		return nil, port.ErrLeaseLost
+	}
+	return o.Orchestrate(ctx, c)
+}
+
 func (o *retryTerminalOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
 	if o.calls.Add(1) == 1 {
 		return nil, errors.New("transient")

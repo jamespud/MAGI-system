@@ -52,7 +52,7 @@ func TestEvaluationService_EvaluateCaseFromRepository(t *testing.T) {
 		t.Fatalf("evidence: %v", err)
 	}
 	if err := repo.ToolCallRepo().Create(context.Background(), &entity.ToolCall{
-		ID: "tc-1", AgentRunID: "run-1", Valid: true,
+		ID: "tc-1", CaseID: "case-1", AgentRunID: "run-1", Valid: true,
 	}); err != nil {
 		t.Fatalf("tool call: %v", err)
 	}
