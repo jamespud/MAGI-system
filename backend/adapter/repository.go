@@ -44,11 +44,9 @@ func NewRepository(db *gorm.DB) port.Repository {
 }
 
 // verifyResolutionReferences refuses a terminal commit whose resolution cites
-// artifacts that are not in the database. It runs inside the same transaction
-// that fences the terminal status, so a resolution can never be committed
-// alongside a missing ballot, evidence record or claim. The cited ids embed the
-// execution attempt, which keeps the check attempt-scoped: an older attempt's
-// artifacts cannot satisfy a newer attempt's resolution.
+// artifacts that are not in the same Case execution generation. It runs inside
+// the same transaction that fences the terminal status. ID strings are never
+// treated as ownership proof: case_id + execution_generation are authoritative.
 func verifyResolutionReferences(tx *gorm.DB, res *entity.Resolution) error {
 	checks := []struct {
 		kind  string
@@ -70,7 +68,7 @@ func verifyResolutionReferences(tx *gorm.DB, res *entity.Resolution) error {
 		var n int64
 		// Scope by case: an id that exists but belongs to another case must not
 		// satisfy this resolution's reference.
-		if err := tx.Model(check.model).Where("id IN ? AND case_id = ?", ids, res.CaseID).Count(&n).Error; err != nil {
+		if err := tx.Model(check.model).Where("id IN ? AND case_id = ? AND execution_generation = ?", ids, res.CaseID, res.ExecutionGeneration).Count(&n).Error; err != nil {
 			return fmt.Errorf("terminal commit: verify %s references: %w", check.kind, err)
 		}
 		if int(n) != len(ids) {
@@ -127,6 +125,315 @@ func (r *magiRepository) CleanupCaseArtifacts(ctx context.Context, caseID string
 		}
 		return tx.Where("case_id = ?", caseID).Delete(&AgentRunModel{}).Error
 	})
+}
+
+func (r *magiRepository) withActiveExecution(ctx context.Context, owner *entity.ExecutionContext, write func(*gorm.DB) error) error {
+	if r.db == nil || owner == nil || !owner.IsDurable() || write == nil {
+		return port.ErrLeaseLost
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		var job DecisionJobModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND case_id = ?", owner.JobID, owner.CaseID).First(&job).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return port.ErrLeaseLost
+			}
+			return err
+		}
+		if job.Status != string(entity.DecisionJobRunning) ||
+			job.WorkerID != owner.WorkerID ||
+			job.ExecutionGeneration != owner.ExecutionGeneration ||
+			job.LeaseUntil == nil || !job.LeaseUntil.After(now) {
+			return port.ErrLeaseLost
+		}
+		var caseModel CaseModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", owner.CaseID).First(&caseModel).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return port.ErrLeaseLost
+			}
+			return err
+		}
+		if caseModel.ExecutionGeneration != owner.ExecutionGeneration {
+			return port.ErrLeaseLost
+		}
+		return write(tx)
+	})
+}
+
+func validateArtifactOwner(owner *entity.ExecutionContext, caseID string, generation int64) error {
+	if owner == nil || !owner.IsDurable() || caseID != owner.CaseID {
+		return port.ErrLeaseLost
+	}
+	if generation != 0 && generation != owner.ExecutionGeneration {
+		return port.ErrLeaseLost
+	}
+	return nil
+}
+
+func (r *magiRepository) CreateAgentRunOwned(ctx context.Context, owner *entity.ExecutionContext, a *entity.AgentRun) error {
+	if a == nil || validateArtifactOwner(owner, a.CaseID, a.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	a.ExecutionGeneration = owner.ExecutionGeneration
+	m := AgentRunModel{
+		ID: a.ID, CaseID: a.CaseID, ExecutionGeneration: a.ExecutionGeneration,
+		MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode), Round: a.Round,
+		Status: string(a.Status), UsageJSON: toJSON(a.Usage), EnvironmentJSON: toJSON(a.Environment),
+		Err: a.Err, StartedAt: a.StartedAt, CompletedAt: a.CompletedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateEvidenceOwned(ctx context.Context, owner *entity.ExecutionContext, e *entity.EvidenceRecord) error {
+	if e == nil || validateArtifactOwner(owner, e.CaseID, e.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	e.ExecutionGeneration = owner.ExecutionGeneration
+	uri := ""
+	if e.SourceURI != nil {
+		uri = *e.SourceURI
+	}
+	m := EvidenceModel{
+		ID: e.ID, CaseID: e.CaseID, ExecutionGeneration: e.ExecutionGeneration,
+		AgentRunID: e.AgentRunID, ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+		SourceType: string(e.SourceType), SourceURI: uri, RawContent: e.RawContent,
+		Observation: e.Observation, ReliabilityJSON: toJSON(e.Reliability),
+		CollectedBy: string(e.CollectedBy), CreatedAt: e.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateClaimOwned(ctx context.Context, owner *entity.ExecutionContext, c *entity.Claim) error {
+	if c == nil || validateArtifactOwner(owner, c.CaseID, c.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	c.ExecutionGeneration = owner.ExecutionGeneration
+	m := ClaimModel{
+		ID: c.ID, CaseID: c.CaseID, ExecutionGeneration: c.ExecutionGeneration,
+		AgentRunID: c.AgentRunID, Statement: c.Statement, SupportsJSON: toJSON(c.Supports),
+		ContradictsJSON: toJSON(c.Contradicts), Status: string(c.Status),
+		CreatedBy: string(c.CreatedBy), CreatedAt: c.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateVoteOwned(ctx context.Context, owner *entity.ExecutionContext, v *entity.Vote) error {
+	if v == nil || validateArtifactOwner(owner, v.CaseID, v.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	v.ExecutionGeneration = owner.ExecutionGeneration
+	m := VoteModel{
+		ID: v.ID, CaseID: v.CaseID, ExecutionGeneration: v.ExecutionGeneration,
+		AgentRunID: v.AgentRunID, Round: v.Round, Decision: string(v.Decision),
+		Confidence: v.Confidence, UtilityScoresJSON: toJSON(v.UtilityScores),
+		KeyClaimIDsJSON: toJSON(v.KeyClaimIDs), EvidenceIDsJSON: toJSON(v.EvidenceIDs),
+		ReasoningSummary: v.ReasoningSummary, ConditionsJSON: toJSON(v.Conditions), CreatedAt: v.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateDebateRoundOwned(ctx context.Context, owner *entity.ExecutionContext, d *entity.DebateRound) error {
+	if d == nil || validateArtifactOwner(owner, d.CaseID, d.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	d.ExecutionGeneration = owner.ExecutionGeneration
+	m := DebateRoundModel{
+		ID: d.ID, CaseID: d.CaseID, ExecutionGeneration: d.ExecutionGeneration,
+		Round: d.Round, PacketJSON: toJSON(d.Packet), StartedAt: d.StartedAt, CompletedAt: d.CompletedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateReflectionOwned(ctx context.Context, owner *entity.ExecutionContext, rf *entity.Reflection) error {
+	if rf == nil || validateArtifactOwner(owner, rf.CaseID, rf.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	rf.ExecutionGeneration = owner.ExecutionGeneration
+	m := ReflectionModel{
+		ID: rf.ID, CaseID: rf.CaseID, ExecutionGeneration: rf.ExecutionGeneration,
+		AgentRunID: rf.AgentRunID, Round: rf.Round, PreviousVoteID: rf.PreviousVoteID,
+		PositionChange: string(rf.PositionChange), AcceptedClaimsJSON: toJSON(rf.AcceptedClaims),
+		RejectedClaimsJSON: toJSON(rf.RejectedClaims), NewEvidenceIDsJSON: toJSON(rf.NewEvidenceIDs),
+		Reasoning: rf.Reasoning, ReadyToRevote: rf.ReadyToRevote, CreatedAt: rf.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) CreateToolCallOwned(ctx context.Context, owner *entity.ExecutionContext, t *entity.ToolCall) error {
+	if t == nil || validateArtifactOwner(owner, t.CaseID, t.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	t.ExecutionGeneration = owner.ExecutionGeneration
+	m := ToolCallModel{
+		ID: t.ID, CaseID: t.CaseID, ExecutionGeneration: t.ExecutionGeneration,
+		AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
+		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err,
+		ApprovedBy: t.ApprovedBy, EvidenceID: t.EvidenceID, DurationMs: t.DurationMs, CreatedAt: t.CreatedAt,
+	}
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error { return tx.Create(&m).Error })
+}
+
+func (r *magiRepository) SaveForExecution(ctx context.Context, owner *entity.ExecutionContext, state *entity.AgentState) error {
+	if state == nil || state.RunID == "" || validateArtifactOwner(owner, state.CaseID, state.ExecutionGeneration) != nil {
+		return port.ErrLeaseLost
+	}
+	state.ExecutionGeneration = owner.ExecutionGeneration
+	m := checkpointModel(state)
+	return r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error {
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "run_id"}, {Name: "execution_generation"}},
+			UpdateAll: true,
+		}).Create(&m).Error
+	})
+}
+
+func (r *magiRepository) LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error) {
+	if runID == "" || owner == nil || !owner.IsDurable() {
+		return nil, port.ErrLeaseLost
+	}
+	var out *entity.AgentState
+	err := r.withActiveExecution(ctx, owner, func(tx *gorm.DB) error {
+		var m CheckpointModel
+		if err := tx.First(&m, "run_id = ? AND case_id = ? AND execution_generation = ?", runID, owner.CaseID, owner.ExecutionGeneration).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				out = nil
+				return nil
+			}
+			return err
+		}
+		out = checkpointFromModel(&m)
+		return nil
+	})
+	return out, err
+}
+
+func (r *magiRepository) ListAgentRunsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.AgentRun, error) {
+	var models []AgentRunModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).
+		Order("magi_code asc, round asc, started_at asc, id asc").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.AgentRun, len(models))
+	for i, m := range models {
+		out[i] = &entity.AgentRun{
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+			MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode), Round: m.Round,
+			Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
+			Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON), Err: m.Err,
+			StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+		}
+	}
+	return out, nil
+}
+
+func (r *magiRepository) ListEvidenceByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.EvidenceRecord, error) {
+	var models []EvidenceModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.EvidenceRecord, len(models))
+	for i := range models {
+		out[i] = evidenceFromModel(&models[i])
+	}
+	return out, nil
+}
+
+func (r *magiRepository) ListClaimsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Claim, error) {
+	var models []ClaimModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Claim, len(models))
+	for i := range models {
+		out[i] = claimFromModel(&models[i])
+	}
+	return out, nil
+}
+
+func voteArtifactFromModel(m *VoteModel) *entity.Vote {
+	return &entity.Vote{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
+		Confidence: m.Confidence, UtilityScores: fromJSON[[]entity.UtilityDimensionScore](m.UtilityScoresJSON),
+		KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON), EvidenceIDs: fromJSON[[]string](m.EvidenceIDsJSON),
+		ReasoningSummary: m.ReasoningSummary, Conditions: fromJSON[[]entity.DecisionCondition](m.ConditionsJSON),
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListVotesByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Vote, error) {
+	var models []VoteModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Vote, len(models))
+	for i := range models {
+		out[i] = voteArtifactFromModel(&models[i])
+	}
+	return out, nil
+}
+
+func (r *magiRepository) ListDebateRoundsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.DebateRound, error) {
+	var models []DebateRoundModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.DebateRound, len(models))
+	for i, m := range models {
+		out[i] = &entity.DebateRound{
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Round: m.Round,
+			Packet: fromJSON[entity.DebatePacket](m.PacketJSON), StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
+		}
+	}
+	return out, nil
+}
+
+func reflectionFromModel(m *ReflectionModel) *entity.Reflection {
+	return &entity.Reflection{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, Round: m.Round, PreviousVoteID: m.PreviousVoteID,
+		PositionChange: entity.PositionChange(m.PositionChange),
+		AcceptedClaims: fromJSON[[]string](m.AcceptedClaimsJSON),
+		RejectedClaims: fromJSON[[]string](m.RejectedClaimsJSON),
+		NewEvidenceIDs: fromJSON[[]string](m.NewEvidenceIDsJSON),
+		Reasoning:      m.Reasoning, ReadyToRevote: m.ReadyToRevote, CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListReflectionsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.Reflection, error) {
+	var models []ReflectionModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.Reflection, len(models))
+	for i := range models {
+		out[i] = reflectionFromModel(&models[i])
+	}
+	return out, nil
+}
+
+func toolCallFromModel(m *ToolCallModel) *entity.ToolCall {
+	return &entity.ToolCall{
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+		Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err,
+		ApprovedBy: m.ApprovedBy, EvidenceID: m.EvidenceID, DurationMs: m.DurationMs, CreatedAt: m.CreatedAt,
+	}
+}
+
+func (r *magiRepository) ListToolCallsByGeneration(ctx context.Context, caseID string, generation int64) ([]*entity.ToolCall, error) {
+	var models []ToolCallModel
+	if err := r.db.WithContext(ctx).Where("case_id = ? AND execution_generation = ?", caseID, generation).
+		Order("created_at ASC, id ASC").Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*entity.ToolCall, len(models))
+	for i := range models {
+		out[i] = toolCallFromModel(&models[i])
+	}
+	return out, nil
 }
 
 func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
@@ -220,6 +527,8 @@ func (r *magiRepository) CommitStatusTransition(ctx context.Context, caseID stri
 	return committed, nil
 }
 
+var _ port.OwnedArtifactRepository = (*magiRepository)(nil)
+var _ port.GenerationCheckpointRepository = (*magiRepository)(nil)
 var _ port.Repository = (*magiRepository)(nil)
 var _ port.TerminalCommitter = (*magiRepository)(nil)
 var _ port.StatusTransitionCommitter = (*magiRepository)(nil)
@@ -365,39 +674,32 @@ func (r *caseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived 
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// Delete removes a case and every artifact keyed by case_id (P2 D16). Tool
-// calls and reflections are keyed by agent_run_id, so they are removed via a
-// subquery against magi_agent_run.
+// Delete removes a Case and every persisted row attributed to it. S27 gave
+// ToolCall, Reflection and Checkpoint direct case_id provenance, so those rows
+// are removed by column.
+//
+// Checkpoints additionally keep the pre-S27 containment rule: magi_agent_run
+// rows still exist at this point, so a legacy checkpoint whose run_id names one
+// of this Case's runs is removed with it. That join is a deletion rule, not a
+// provenance claim -- the legacy checkpoint table recorded no Case at all, and
+// its run_id is the logical working-memory identity ("<case>-<agent>-r<n>-<phase>")
+// that only coincides with an AgentRun primary key for unqualified runs.
+//
+// A legacy checkpoint that matches neither column is left in place: it has
+// unknown provenance, so it is retained as legacy history instead of being
+// attributed to a Case by guesswork. Positive-generation readers cannot see it
+// because LoadForExecution requires an explicit case_id.
 func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return tx.Error
 	}
-	// Tool calls and reflections are keyed by agent_run_id, so they must be
-	// removed while magi_agent_run still exists. Deleting AgentRunModel first
-	// would make this subquery see an empty table and silently orphan them.
-	if err := tx.Where("agent_run_id IN (?)",
-		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
-	).Delete(&ToolCallModel{}).Error; err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Where("agent_run_id IN (?)",
-		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
-	).Delete(&ReflectionModel{}).Error; err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	// Working-memory checkpoints are keyed by agent_run_id, not case_id; they
-	// must be removed while magi_agent_run still exists, before the run rows
-	// are deleted below.
-	if err := tx.Where("run_id IN (?)",
-		tx.Model(&AgentRunModel{}).Select("id").Where("case_id = ?", id),
-	).Delete(&CheckpointModel{}).Error; err != nil {
+	if err := tx.Where("case_id = ? OR run_id IN (SELECT id FROM magi_agent_run WHERE case_id = ?)", id, id).Delete(&CheckpointModel{}).Error; err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	tables := []any{
+		&ToolCallModel{}, &ReflectionModel{},
 		&AgentRunModel{}, &EvidenceModel{}, &ClaimModel{}, &VoteModel{},
 		&ResolutionModel{}, &EventModel{}, &EventCursorModel{}, &DebateRoundModel{},
 		&MemoryProjectionModel{}, &DecisionJobModel{}, &ApprovalModel{}, &JudgeModel{},
@@ -453,8 +755,11 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 type agentRunRepo struct{ db *gorm.DB }
 
 func (r *agentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	if a == nil || a.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := AgentRunModel{
-		ID: a.ID, CaseID: a.CaseID, MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode),
+		ID: a.ID, CaseID: a.CaseID, ExecutionGeneration: a.ExecutionGeneration, MagiConfigID: a.MagiConfigID, MagiCode: string(a.MagiCode),
 		Round: a.Round, Status: string(a.Status), UsageJSON: toJSON(a.Usage),
 		EnvironmentJSON: toJSON(a.Environment), Err: a.Err,
 		StartedAt: a.StartedAt, CompletedAt: a.CompletedAt,
@@ -467,7 +772,7 @@ func (r *agentRunRepo) Get(ctx context.Context, id string) (*entity.AgentRun, er
 		return nil, err
 	}
 	return &entity.AgentRun{
-		ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
 		Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
 		Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
 		Err:         m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
@@ -485,7 +790,7 @@ func (r *agentRunRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	out := make([]*entity.AgentRun, len(models))
 	for i, m := range models {
 		out[i] = &entity.AgentRun{
-			ID: m.ID, CaseID: m.CaseID, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, MagiConfigID: m.MagiConfigID, MagiCode: entity.MagiCode(m.MagiCode),
 			Round: m.Round, Status: entity.AgentRunStatus(m.Status), Usage: fromJSON[*entity.Usage](m.UsageJSON),
 			Environment: fromJSON[*entity.RunEnvironment](m.EnvironmentJSON),
 			Err:         m.Err, StartedAt: m.StartedAt, CompletedAt: m.CompletedAt,
@@ -532,12 +837,15 @@ func (r *agentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64,
 type evidenceRepo struct{ db *gorm.DB }
 
 func (r *evidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	if e == nil || e.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	uri := ""
 	if e.SourceURI != nil {
 		uri = *e.SourceURI
 	}
 	m := EvidenceModel{
-		ID: e.ID, CaseID: e.CaseID, AgentRunID: e.AgentRunID, ToolCallID: e.ToolCallID, ToolName: e.ToolName,
+		ID: e.ID, CaseID: e.CaseID, ExecutionGeneration: e.ExecutionGeneration, AgentRunID: e.AgentRunID, ToolCallID: e.ToolCallID, ToolName: e.ToolName,
 		SourceType: string(e.SourceType), SourceURI: uri, RawContent: e.RawContent, Observation: e.Observation,
 		ReliabilityJSON: toJSON(e.Reliability), CollectedBy: string(e.CollectedBy), CreatedAt: e.CreatedAt,
 	}
@@ -565,7 +873,7 @@ func (r *evidenceRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 func evidenceFromModel(m *EvidenceModel) *entity.EvidenceRecord {
 	uri := m.SourceURI
 	return &entity.EvidenceRecord{
-		ID: m.ID, CaseID: m.CaseID, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
 		SourceType: entity.EvidenceSourceType(m.SourceType), SourceURI: &uri, RawContent: m.RawContent,
 		Observation: m.Observation, Reliability: fromJSON[entity.ReliabilityScore](m.ReliabilityJSON),
 		CollectedBy: entity.MagiCode(m.CollectedBy), CreatedAt: m.CreatedAt,
@@ -577,8 +885,11 @@ func evidenceFromModel(m *EvidenceModel) *entity.EvidenceRecord {
 type claimRepo struct{ db *gorm.DB }
 
 func (r *claimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	if c == nil || c.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ClaimModel{
-		ID: c.ID, CaseID: c.CaseID, AgentRunID: c.AgentRunID, Statement: c.Statement,
+		ID: c.ID, CaseID: c.CaseID, ExecutionGeneration: c.ExecutionGeneration, AgentRunID: c.AgentRunID, Statement: c.Statement,
 		SupportsJSON: toJSON(c.Supports), ContradictsJSON: toJSON(c.Contradicts), Status: string(c.Status),
 		CreatedBy: string(c.CreatedBy), CreatedAt: c.CreatedAt,
 	}
@@ -605,7 +916,7 @@ func (r *claimRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Cl
 
 func claimFromModel(m *ClaimModel) *entity.Claim {
 	return &entity.Claim{
-		ID: m.ID, CaseID: m.CaseID, AgentRunID: m.AgentRunID, Statement: m.Statement,
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, AgentRunID: m.AgentRunID, Statement: m.Statement,
 		Supports: fromJSON[[]string](m.SupportsJSON), Contradicts: fromJSON[[]string](m.ContradictsJSON),
 		Status: entity.ClaimStatus(m.Status), CreatedBy: entity.MagiCode(m.CreatedBy), CreatedAt: m.CreatedAt,
 	}
@@ -616,8 +927,11 @@ func claimFromModel(m *ClaimModel) *entity.Claim {
 type voteRepo struct{ db *gorm.DB }
 
 func (r *voteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if v == nil || v.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := VoteModel{
-		ID: v.ID, CaseID: v.CaseID, AgentRunID: v.AgentRunID, Round: v.Round, Decision: string(v.Decision),
+		ID: v.ID, CaseID: v.CaseID, ExecutionGeneration: v.ExecutionGeneration, AgentRunID: v.AgentRunID, Round: v.Round, Decision: string(v.Decision),
 		Confidence: v.Confidence, UtilityScoresJSON: toJSON(v.UtilityScores), KeyClaimIDsJSON: toJSON(v.KeyClaimIDs),
 		EvidenceIDsJSON: toJSON(v.EvidenceIDs), ReasoningSummary: v.ReasoningSummary, ConditionsJSON: toJSON(v.Conditions),
 		CreatedAt: v.CreatedAt,
@@ -633,7 +947,7 @@ func (r *voteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vot
 	for i := range models {
 		m := &models[i]
 		out[i] = &entity.Vote{
-			ID: m.ID, CaseID: m.CaseID, AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, AgentRunID: m.AgentRunID, Round: m.Round, Decision: entity.VoteDecision(m.Decision),
 			Confidence: m.Confidence, UtilityScores: fromJSON[[]entity.UtilityDimensionScore](m.UtilityScoresJSON),
 			KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON), EvidenceIDs: fromJSON[[]string](m.EvidenceIDsJSON),
 			ReasoningSummary: m.ReasoningSummary, Conditions: fromJSON[[]entity.DecisionCondition](m.ConditionsJSON),
@@ -654,7 +968,7 @@ func (r *resolutionRepo) Create(ctx context.Context, res *entity.Resolution) err
 
 func resolutionModel(res *entity.Resolution) ResolutionModel {
 	return ResolutionModel{
-		ID: res.ID, CaseID: res.CaseID, ConsensusJSON: toJSON(res.Consensus), FinalDecision: string(res.FinalDecision),
+		ID: res.ID, CaseID: res.CaseID, ExecutionGeneration: res.ExecutionGeneration, ConsensusJSON: toJSON(res.Consensus), FinalDecision: string(res.FinalDecision),
 		FinalReport: res.FinalReport, KeyEvidenceIDsJSON: toJSON(res.KeyEvidenceIDs), KeyClaimIDsJSON: toJSON(res.KeyClaimIDs),
 		VoteIDsJSON: toJSON(res.VoteIDs), EvaluationJSON: toJSON(res.Evaluation), CreatedAt: res.CreatedAt,
 	}
@@ -665,7 +979,7 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 		return nil, err
 	}
 	return &entity.Resolution{
-		ID: m.ID, CaseID: m.CaseID, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
+		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
 		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
 		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
 		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
@@ -773,8 +1087,11 @@ func (r *eventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq ui
 type debateRepo struct{ db *gorm.DB }
 
 func (r *debateRepo) Create(ctx context.Context, d *entity.DebateRound) error {
+	if d == nil || d.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := DebateRoundModel{
-		ID: d.ID, CaseID: d.CaseID, Round: d.Round, PacketJSON: toJSON(d.Packet),
+		ID: d.ID, CaseID: d.CaseID, ExecutionGeneration: d.ExecutionGeneration, Round: d.Round, PacketJSON: toJSON(d.Packet),
 		StartedAt: d.StartedAt, CompletedAt: d.CompletedAt,
 	}
 	return r.db.WithContext(ctx).Create(&m).Error
@@ -787,7 +1104,7 @@ func (r *debateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.D
 	out := make([]*entity.DebateRound, len(models))
 	for i := range models {
 		m := &models[i]
-		out[i] = &entity.DebateRound{ID: m.ID, CaseID: m.CaseID, Round: m.Round,
+		out[i] = &entity.DebateRound{ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Round: m.Round,
 			Packet: fromJSON[entity.DebatePacket](m.PacketJSON), StartedAt: m.StartedAt, CompletedAt: m.CompletedAt}
 	}
 	return out, nil
@@ -798,8 +1115,11 @@ func (r *debateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.D
 type reflectionRepo struct{ db *gorm.DB }
 
 func (r *reflectionRepo) Create(ctx context.Context, rf *entity.Reflection) error {
+	if rf == nil || rf.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ReflectionModel{
-		ID: rf.ID, AgentRunID: rf.AgentRunID, Round: rf.Round, PreviousVoteID: rf.PreviousVoteID,
+		ID: rf.ID, CaseID: rf.CaseID, ExecutionGeneration: rf.ExecutionGeneration, AgentRunID: rf.AgentRunID, Round: rf.Round, PreviousVoteID: rf.PreviousVoteID,
 		PositionChange: string(rf.PositionChange), AcceptedClaimsJSON: toJSON(rf.AcceptedClaims),
 		RejectedClaimsJSON: toJSON(rf.RejectedClaims), NewEvidenceIDsJSON: toJSON(rf.NewEvidenceIDs),
 		Reasoning: rf.Reasoning, ReadyToRevote: rf.ReadyToRevote, CreatedAt: rf.CreatedAt,
@@ -808,13 +1128,13 @@ func (r *reflectionRepo) Create(ctx context.Context, rf *entity.Reflection) erro
 }
 func (r *reflectionRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Reflection, error) {
 	var models []ReflectionModel
-	if err := r.db.WithContext(ctx).Joins("JOIN magi_agent_run ON magi_agent_run.id = reflection.agent_run_id").Where("magi_agent_run.case_id = ?", caseID).Find(&models).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("case_id = ?", caseID).Find(&models).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*entity.Reflection, len(models))
 	for i := range models {
 		m := &models[i]
-		out[i] = &entity.Reflection{ID: m.ID, AgentRunID: m.AgentRunID, Round: m.Round,
+		out[i] = &entity.Reflection{ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, AgentRunID: m.AgentRunID, Round: m.Round,
 			PreviousVoteID: m.PreviousVoteID, PositionChange: entity.PositionChange(m.PositionChange),
 			AcceptedClaims: fromJSON[[]string](m.AcceptedClaimsJSON), RejectedClaims: fromJSON[[]string](m.RejectedClaimsJSON),
 			NewEvidenceIDs: fromJSON[[]string](m.NewEvidenceIDsJSON), Reasoning: m.Reasoning, ReadyToRevote: m.ReadyToRevote, CreatedAt: m.CreatedAt}
@@ -830,19 +1150,14 @@ func (r *checkpointRepo) Save(ctx context.Context, state *entity.AgentState) err
 	if state == nil || state.RunID == "" {
 		return nil
 	}
-	m := CheckpointModel{
-		RunID:           state.RunID,
-		MessagesJSON:    state.MessagesJSON,
-		MessagesRefJSON: toJSON(state.Messages),
-		StepCount:       state.StepCount,
-		TokenUsed:       state.TokenUsed,
-		Phase:           state.Phase,
-		SnapshotVersion: state.SnapshotVersion,
-		SnapshotJSON:    state.SnapshotJSON,
-		ManifestDigest:  state.ManifestDigest,
+	if state.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
 	}
-	// Save is an upsert so every loop step has one durable snapshot per run.
-	return r.db.WithContext(ctx).Save(&m).Error
+	m := checkpointModel(state)
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "run_id"}, {Name: "execution_generation"}},
+		UpdateAll: true,
+	}).Create(&m).Error
 }
 
 func (r *checkpointRepo) Load(ctx context.Context, runID string) (*entity.AgentState, error) {
@@ -850,23 +1165,41 @@ func (r *checkpointRepo) Load(ctx context.Context, runID string) (*entity.AgentS
 		return nil, nil
 	}
 	var m CheckpointModel
-	if err := r.db.WithContext(ctx).First(&m, "run_id = ?", runID).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&m, "run_id = ? AND execution_generation = 0", runID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	return checkpointFromModel(&m), nil
+}
+
+func (r *checkpointRepo) SaveForExecution(ctx context.Context, owner *entity.ExecutionContext, state *entity.AgentState) error {
+	return (&magiRepository{db: r.db}).SaveForExecution(ctx, owner, state)
+}
+
+func (r *checkpointRepo) LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error) {
+	return (&magiRepository{db: r.db}).LoadForExecution(ctx, owner, runID)
+}
+
+func checkpointModel(state *entity.AgentState) CheckpointModel {
+	return CheckpointModel{
+		RunID: state.RunID, CaseID: state.CaseID, ExecutionGeneration: state.ExecutionGeneration,
+		MessagesJSON: state.MessagesJSON, MessagesRefJSON: toJSON(state.Messages),
+		StepCount: state.StepCount, TokenUsed: state.TokenUsed, Phase: state.Phase,
+		SnapshotVersion: state.SnapshotVersion, SnapshotJSON: state.SnapshotJSON,
+		ManifestDigest: state.ManifestDigest,
+	}
+}
+
+func checkpointFromModel(m *CheckpointModel) *entity.AgentState {
 	return &entity.AgentState{
-		RunID:           m.RunID,
-		Messages:        fromJSON[[]entity.MessageRef](m.MessagesRefJSON),
-		MessagesJSON:    m.MessagesJSON,
-		StepCount:       m.StepCount,
-		TokenUsed:       m.TokenUsed,
-		Phase:           m.Phase,
-		SnapshotVersion: m.SnapshotVersion,
-		SnapshotJSON:    m.SnapshotJSON,
-		ManifestDigest:  m.ManifestDigest,
-	}, nil
+		RunID: m.RunID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration,
+		Messages: fromJSON[[]entity.MessageRef](m.MessagesRefJSON), MessagesJSON: m.MessagesJSON,
+		StepCount: m.StepCount, TokenUsed: m.TokenUsed, Phase: m.Phase,
+		SnapshotVersion: m.SnapshotVersion, SnapshotJSON: m.SnapshotJSON,
+		ManifestDigest: m.ManifestDigest,
+	}
 }
 
 // --- MemoryRepository (DB) ---
@@ -990,8 +1323,11 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 type toolCallRepo struct{ db *gorm.DB }
 
 func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	if t == nil || t.ExecutionGeneration > 0 {
+		return port.ErrLeaseLost
+	}
 	m := ToolCallModel{
-		ID: t.ID, AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
+		ID: t.ID, CaseID: t.CaseID, ExecutionGeneration: t.ExecutionGeneration, AgentRunID: t.AgentRunID, ToolCallID: t.ToolCallID, ToolName: t.ToolName,
 		Arguments: t.Arguments, Valid: t.Valid, Result: t.Result, Err: t.Err, ApprovedBy: t.ApprovedBy,
 		EvidenceID: t.EvidenceID, DurationMs: t.DurationMs, CreatedAt: t.CreatedAt,
 	}
@@ -1001,8 +1337,7 @@ func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
 func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.ToolCall, error) {
 	var models []ToolCallModel
 	err := r.db.WithContext(ctx).
-		Joins("JOIN magi_agent_run ON magi_agent_run.id = magi_tool_call.agent_run_id").
-		Where("magi_agent_run.case_id = ?", caseID).
+		Where("case_id = ?", caseID).
 		Order("magi_tool_call.created_at ASC, magi_tool_call.id ASC").
 		Find(&models).Error
 	if err != nil {
@@ -1011,7 +1346,7 @@ func (r *toolCallRepo) ListByCase(ctx context.Context, caseID string) ([]*entity
 	out := make([]*entity.ToolCall, len(models))
 	for i, m := range models {
 		out[i] = &entity.ToolCall{
-			ID: m.ID, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
+			ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, AgentRunID: m.AgentRunID, ToolCallID: m.ToolCallID, ToolName: m.ToolName,
 			Arguments: m.Arguments, Valid: m.Valid, Result: m.Result, Err: m.Err, ApprovedBy: m.ApprovedBy,
 			EvidenceID: m.EvidenceID, DurationMs: m.DurationMs, CreatedAt: m.CreatedAt,
 		}
@@ -1024,6 +1359,7 @@ var _ port.ConditionalCaseStatusWriter = (*caseRepo)(nil)
 var _ port.CaseListFilter = (*caseRepo)(nil)
 var _ port.EventRepository = (*eventRepo)(nil)
 var _ port.ToolCallRepository = (*toolCallRepo)(nil)
+var _ port.GenerationCheckpointRepository = (*checkpointRepo)(nil)
 
 // CountCasesByUser returns the number of cases per owner (SQL GROUP BY). It
 // backs admin.Usage so a large case history is never fully loaded into memory.

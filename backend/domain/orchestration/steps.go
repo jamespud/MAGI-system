@@ -20,6 +20,7 @@ import (
 // (and later the table-driven action dispatch) operates on one explicit state.
 type State struct {
 	MaxDebate int
+	Execution *entity.ExecutionContext
 	Task      *entity.DecisionTask
 	Results   []*runtime.LoopResult
 	Votes     []*entity.Vote
@@ -104,7 +105,7 @@ func (o *Orchestrator) stepNormalize(ctx context.Context, case_ *entity.Decision
 	if o.caseRepo != nil {
 		// task_json is a cache of the normalized task, not an audit artifact:
 		// losing it is tolerable, but it must still be visible.
-		o.persistArtifact(ctx, metrics.ArtifactTaskSnapshot, case_.ID, func() error {
+		o.persistArtifact(ctx, metrics.ArtifactTaskSnapshot, case_.ID, nil, func() error {
 			return o.caseRepo.UpdateTask(ctx, case_.ID, t)
 		})
 	}
@@ -123,8 +124,8 @@ func (o *Orchestrator) stepRetrieveMemory(ctx context.Context, case_ *entity.Dec
 
 func (o *Orchestrator) stepInvestigate(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	o.publish(ctx, case_, entity.EventAgentStarted, map[string]any{"round": st.Round})
-	st.Results = o.dispatcher.Dispatch(ctx, case_, st.Task, o.configs, st.Round)
-	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "investigate")
+	st.Results = o.dispatcher.DispatchForExecution(ctx, case_, st.Task, o.configs, st.Round, st.Execution)
+	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "investigate", st.Execution)
 	return entity.CaseStatusEvidenceGating, false, nil
 }
 
@@ -141,7 +142,10 @@ func (o *Orchestrator) stepCollectVotes(ctx context.Context, case_ *entity.Decis
 	if o.failPolicy.Mode == "fail_case" && len(st.Absences) > 0 {
 		return "", false, fmt.Errorf("%w: %s", ErrAgentFailed, absencesMsg(st.Absences))
 	}
-	remap := o.persistArtifacts(ctx, case_, st.Results, st.Votes, st.Round, "investigate")
+	remap, err := o.persistArtifacts(ctx, case_, st.Results, st.Votes, st.Round, "investigate", st.Execution)
+	if err != nil {
+		return "", false, err
+	}
 	st.AllRemaps = append(st.AllRemaps, remap)
 	payload := map[string]any{"round": st.Round, "votes": ballotCount(st.Votes)}
 	if len(st.Absences) > 0 {
@@ -188,15 +192,19 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 	allEvidence := o.collectEvidence(st.Results)
 	packet := o.debate.BuildPacket(derefVotes(st.Votes), allClaims, st.Round, allEvidence)
 	if o.repo != nil {
-		o.persistArtifact(ctx, metrics.ArtifactDebateRound, case_.ID, func() error {
-			return o.repo.DebateRepo().Create(ctx, &entity.DebateRound{
-				ID: fmt.Sprintf("deb-%s-r%d", case_.ID, st.Round), CaseID: case_.ID, Round: st.Round,
-				Packet: packet, StartedAt: time.Now(),
-			})
-		})
+		debateRound := &entity.DebateRound{
+			ID:     fmt.Sprintf("deb-%s-g%d-r%d", case_.ID, case_.ExecutionGeneration, st.Round),
+			CaseID: case_.ID, ExecutionGeneration: case_.ExecutionGeneration, Round: st.Round,
+			Packet: packet, StartedAt: time.Now(),
+		}
+		if err := o.persistArtifact(ctx, metrics.ArtifactDebateRound, case_.ID, st.Execution, func() error {
+			return o.persistArtifactValue(ctx, st.Execution, debateRound)
+		}); err != nil {
+			return "", false, err
+		}
 	}
-	st.Results = o.dispatcher.DispatchReconsider(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round)
-	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "reconsider")
+	st.Results = o.dispatcher.DispatchReconsiderForExecution(ctx, case_, st.Task, packet, st.Results, o.configs, st.Round, st.Execution)
+	st.Results = o.retryFailedAgents(ctx, case_, st.Task, st.Results, st.Round, "reconsider", st.Execution)
 	return entity.CaseStatusReflecting, false, nil
 }
 
@@ -208,21 +216,28 @@ func (o *Orchestrator) stepReflect(ctx context.Context, case_ *entity.DecisionCa
 func (o *Orchestrator) stepRevote(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
 	o.publish(ctx, case_, entity.EventRevoteSubmitted, map[string]any{"round": st.Round})
 	newVotes, newAbsences := o.collectBallots(st.Results)
-	remap := o.persistArtifacts(ctx, case_, st.Results, newVotes, st.Round, "reconsider")
+	remap, err := o.persistArtifacts(ctx, case_, st.Results, newVotes, st.Round, "reconsider", st.Execution)
+	if err != nil {
+		return "", false, err
+	}
 	st.AllRemaps = append(st.AllRemaps, remap)
 	reflections := EnforceReflectionRule(st.Votes, newVotes, st.Results, o.configs, st.Round)
 	if o.repo != nil {
 		for idx, rf := range reflections {
 			// IDs must be unique per case/attempt/round/agent: inferred
 			// reflections are re-created on every retry attempt.
-			rf.ID = fmt.Sprintf("refl-%s-a%d-r%d-%d", case_.ID, case_.ExecutionAttempt, rf.Round, idx)
+			rf.ID = fmt.Sprintf("refl-%s-g%d-r%d-%d", case_.ID, case_.ExecutionGeneration, rf.Round, idx)
+			rf.CaseID = case_.ID
+			rf.ExecutionGeneration = case_.ExecutionGeneration
 			if rf.AgentRunID == "" && idx < len(newVotes) && newVotes[idx] != nil {
 				rf.AgentRunID = newVotes[idx].AgentRunID
 			}
 			remapReflection(rf, remap)
-			o.persistArtifact(ctx, metrics.ArtifactReflection, case_.ID, func() error {
-				return o.repo.ReflectionRepo().Create(ctx, rf)
-			})
+			if err := o.persistArtifact(ctx, metrics.ArtifactReflection, case_.ID, st.Execution, func() error {
+				return o.persistArtifactValue(ctx, st.Execution, rf)
+			}); err != nil {
+				return "", false, err
+			}
 		}
 	}
 	st.Votes = newVotes
@@ -245,6 +260,7 @@ func (o *Orchestrator) stepResolve(ctx context.Context, case_ *entity.DecisionCa
 	}
 	res.ID = fmt.Sprintf("res-%s", case_.ID)
 	res.CaseID = case_.ID
+	res.ExecutionGeneration = case_.ExecutionGeneration
 	res.CreatedAt = time.Now()
 	st.Resolution = res
 	return entity.CaseStatusGeneratingReport, false, nil
@@ -271,7 +287,7 @@ func (o *Orchestrator) stepSaveMemory(ctx context.Context, case_ *entity.Decisio
 		// after indexing actually completes (sync) or by the async worker.
 		// The projection is best-effort (the background indexer retries), but a
 		// persistent failure should be visible.
-		o.persistArtifact(ctx, metrics.ArtifactMemoryProjection, case_.ID, func() error {
+		o.persistArtifact(ctx, metrics.ArtifactMemoryProjection, case_.ID, nil, func() error {
 			_, err := o.knowledge.Store(ctx, proj)
 			return err
 		})

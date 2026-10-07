@@ -347,3 +347,15 @@ func TestRunManager_DBLimitAcrossInstances(t *testing.T) {
 	close(orch.release)
 	rm.Cancel("c1")
 }
+
+func (o *retryResetOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, _ *entity.ExecutionContext) (*entity.Resolution, error) {
+	return o.Orchestrate(ctx, c)
+}
+
+func (o *failThenSucceedCaseOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, _ *entity.ExecutionContext) (*entity.Resolution, error) {
+	return o.Orchestrate(ctx, c)
+}
+
+func (o *remoteCancelOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, _ *entity.ExecutionContext) (*entity.Resolution, error) {
+	return o.Orchestrate(ctx, c)
+}

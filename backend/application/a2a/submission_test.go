@@ -58,6 +58,10 @@ func (b *blockingOrch) Orchestrate(ctx context.Context, c *entity.DecisionCase) 
 	return nil, ctx.Err()
 }
 
+func (b *blockingOrch) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, _ *entity.ExecutionContext) (*entity.Resolution, error) {
+	return b.Orchestrate(ctx, c)
+}
+
 // fakeJobRepo is a deterministic in-memory DecisionJobRepository for
 // SubmissionService tests.
 type fakeJobRepo struct {

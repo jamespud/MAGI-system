@@ -4,12 +4,13 @@ import "time"
 
 // DebateRound is one round of structured debate over conflicting claims.
 type DebateRound struct {
-	ID          string
-	CaseID      string
-	Round       int
-	Packet      DebatePacket
-	StartedAt   time.Time
-	CompletedAt *time.Time
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	Round               int
+	Packet              DebatePacket
+	StartedAt           time.Time
+	CompletedAt         *time.Time
 }
 
 // DebatePacket is sent to all three Magi (minority AND majority).

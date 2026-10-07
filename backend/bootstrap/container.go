@@ -822,6 +822,9 @@ func provideDecisionService(
 		decision.WithToolCallRepo(repo.ToolCallRepo()),
 		decision.WithRunManager(rm),
 	}
+	if owned, ok := repo.(port.OwnedArtifactRepository); ok {
+		opts = append(opts, decision.WithOwnedArtifactRepository(owned))
+	}
 	if tt, ok := ttRepo.(port.TaskTreeCleaner); ok {
 		opts = append(opts, decision.WithTaskTreeCleaner(tt))
 	}

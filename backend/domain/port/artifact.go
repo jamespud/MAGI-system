@@ -2,9 +2,9 @@ package port
 
 import "context"
 
-// ArtifactCleaner removes the persisted artifacts of a previous execution
-// attempt so a durable retry that resumes from checkpoints does not duplicate
-// agent runs, evidence, claims, votes or tool calls.
+// ArtifactCleaner is the legacy generation-0 cleanup hook. Generation-aware
+// retries must not depend on or invoke case-wide deletion for correctness;
+// T5 replaces this surface with generation-scoped retention/GC.
 type ArtifactCleaner interface {
 	CleanupCaseArtifacts(ctx context.Context, caseID string) error
 }

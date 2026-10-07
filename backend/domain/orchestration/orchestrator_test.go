@@ -611,13 +611,15 @@ func TestOrchestrate_CountsDebatePersistFailure(t *testing.T) {
 // A tolerated artifact write failure must be counted instead of vanishing: the
 // stock-mcp incident produced complete-looking cases whose tool-call/evidence
 // rows never persisted.
+//
+// This exercises the legacy/non-durable generation-0 path, where writes stay
+// best effort and the counter is the only trace. On the durable path T3 makes
+// tool calls an authoritative generation-scoped artifact, so the same failure
+// aborts the execution instead of being tolerated; that contract is pinned by
+// TestOrchestrateForExecution_DurableArtifactFailureAbortsExecution.
 func TestOrchestrate_CountsToleratedPersistFailure(t *testing.T) {
 	reg := metrics.New()
 	repo := newStubRepo()
-	// A tool-call trace is operational telemetry, not the decision's basis, so a
-	// failed write stays tolerated and only the counter records it. The
-	// authoritative artifacts (votes, evidence, claims) are covered by
-	// TestOrchestrate_RequiredArtifactFailureBlocksTerminalSuccess instead.
 	repo.toolCallErr = errors.New("data too long for column 'result'")
 
 	orch := orchestration.NewOrchestrator(orchestration.OrchestratorDeps{

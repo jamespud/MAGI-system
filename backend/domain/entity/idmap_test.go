@@ -40,6 +40,7 @@ func TestCodeOfRun(t *testing.T) {
 	}{
 		{"case-abc-melchior-r1-investigate", MagiCodeMelchior},
 		{"case-abc-balthasar-a2-r1-reconsider", MagiCodeBalthasar},
+		{"case-abc-balthasar-g7-r1-reconsider", MagiCodeBalthasar},
 		{"case-abc-casper-r2-investigate", MagiCodeCasper},
 		{"", ""},
 		{"case-abc", ""},

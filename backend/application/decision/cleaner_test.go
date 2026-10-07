@@ -3,7 +3,6 @@ package decision_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,7 +25,7 @@ func (c *recordingCleaner) CleanupCaseArtifacts(_ context.Context, caseID string
 	return nil
 }
 
-func TestRunManager_RetryCleansPreviousAttemptArtifacts(t *testing.T) {
+func TestRunManager_GenerationRetryDoesNotUseCaseWideCleanup(t *testing.T) {
 	db := openJobDB(t)
 	repo := magi.NewRepository(db)
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: "case-clean"}); err != nil {
@@ -48,8 +47,8 @@ func TestRunManager_RetryCleansPreviousAttemptArtifacts(t *testing.T) {
 	}
 	cleaner.mu.Lock()
 	defer cleaner.mu.Unlock()
-	if len(cleaner.calls) != 1 || cleaner.calls[0] != "case-clean" {
-		t.Fatalf("cleaner calls: %v", cleaner.calls)
+	if len(cleaner.calls) != 0 {
+		t.Fatalf("generation-aware retry must not invoke case-wide cleaner: %v", cleaner.calls)
 	}
 }
 
@@ -65,9 +64,10 @@ func (c *failingCleaner) CleanupCaseArtifacts(_ context.Context, caseID string) 
 	return errors.New("cleanup unavailable")
 }
 
-// TestRunManager_RetryAbortsWhenCleanupFails proves the retry cleanup is a
-// barrier: if attempt N-1 artifacts cannot be removed, attempt N must not start.
-func TestRunManager_RetryAbortsWhenCleanupFails(t *testing.T) {
+// TestRunManager_GenerationRetryIgnoresLegacyCleanupFailure proves T3
+// correctness no longer depends on case-wide cleanup. The cleaner is unsafe for
+// positive generations and is reserved for generation-0 compatibility until T5.
+func TestRunManager_GenerationRetryIgnoresLegacyCleanupFailure(t *testing.T) {
 	db := openJobDB(t)
 	repo := magi.NewRepository(db)
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: "case-bad-clean"}); err != nil {
@@ -83,34 +83,16 @@ func TestRunManager_RetryAbortsWhenCleanupFails(t *testing.T) {
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-bad-clean"}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// The job must reach a terminal FAILED state via the fenced settlement, not
-	// sit in RUNNING until its lease expires.
-	job := waitJobStatus(t, jobs, "case-bad-clean", entity.DecisionJobFailed)
-	if job.Status != entity.DecisionJobFailed {
-		t.Fatalf("job status = %s, want %s", job.Status, entity.DecisionJobFailed)
+	job := waitJobStatus(t, jobs, "case-bad-clean", entity.DecisionJobSucceeded)
+	if job.Attempt != 2 || job.ExecutionGeneration != 2 {
+		t.Fatalf("retry result = %+v, want attempt=2 generation=2", job)
 	}
-	if !strings.Contains(job.LastError, "retry cleanup failed") {
-		t.Fatalf("last error = %q, want it to record the cleanup failure", job.LastError)
-	}
-	if job.WorkerID != "" {
-		t.Fatalf("worker id = %q, want it cleared on settlement", job.WorkerID)
-	}
-	// resetCaseForRetry already moved the persisted Case to DRAFT before the
-	// cleanup failed, so the abort must settle Case + Job together rather than
-	// leaving Case=DRAFT next to Job=FAILED.
-	cs, err := repo.CaseRepo().Get(context.Background(), "case-bad-clean")
-	if err != nil {
-		t.Fatalf("reload case: %v", err)
-	}
-	if cs.Status != entity.CaseStatusFailed {
-		t.Fatalf("case status = %s, want %s (must not be left DRAFT)", cs.Status, entity.CaseStatusFailed)
-	}
-	if got := atomic.LoadInt32(&orch.calls); got != 1 {
-		t.Fatalf("orchestrator calls = %d, want 1 (retry must not run after a failed cleanup)", got)
+	if got := atomic.LoadInt32(&orch.calls); got != 2 {
+		t.Fatalf("orchestrator calls = %d, want 2", got)
 	}
 	cleaner.mu.Lock()
 	defer cleaner.mu.Unlock()
-	if len(cleaner.calls) != 1 {
-		t.Fatalf("cleaner calls = %v, want exactly one", cleaner.calls)
+	if len(cleaner.calls) != 0 {
+		t.Fatalf("generation-aware retry invoked legacy cleaner: %v", cleaner.calls)
 	}
 }
