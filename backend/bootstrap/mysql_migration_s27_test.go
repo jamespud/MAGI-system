@@ -1,10 +1,16 @@
 package bootstrap
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	magi "github.com/jamespud/magi/backend/adapter"
+	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 	"gorm.io/gorm"
 )
 
@@ -79,6 +85,19 @@ func seedPreS27Artifacts(t *testing.T, db *gorm.DB) {
 	}
 	if err := db.Exec(`INSERT INTO magi_agent_checkpoint (run_id) VALUES ('checkpoint-legacy')`).Error; err != nil {
 		t.Fatalf("seed legacy checkpoint: %v", err)
+	}
+	// A legacy checkpoint whose RunID happens to equal a magi_agent_run primary
+	// key. Pre-S27 checkpoints have no Case column at all, so this coincidence
+	// must not be read as provenance by the migration.
+	if err := db.Exec(`INSERT INTO magi_agent_checkpoint (run_id) VALUES ('run-legacy')`).Error; err != nil {
+		t.Fatalf("seed RunID-colliding legacy checkpoint: %v", err)
+	}
+	// Pre-existing orphan history: no magi_agent_run row ever recorded.
+	if err := db.Exec(`INSERT INTO reflection (id, agent_run_id) VALUES ('refl-orphan', 'run-missing')`).Error; err != nil {
+		t.Fatalf("seed orphan reflection: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO magi_tool_call (id, agent_run_id) VALUES ('tool-orphan', 'run-missing')`).Error; err != nil {
+		t.Fatalf("seed orphan tool call: %v", err)
 	}
 }
 
@@ -156,13 +175,51 @@ func TestMySQLMigration_S27ScopesArtifactsAndCheckpointsByGeneration(t *testing.
 		}
 	}
 
-	for _, table := range []string{"reflection", "magi_tool_call"} {
+	// Relational backfill: the linked legacy row takes the Case of its AgentRun.
+	for _, tc := range []struct{ table, id string }{
+		{"reflection", "refl-legacy"},
+		{"magi_tool_call", "tool-legacy"},
+	} {
 		var caseID string
-		if err := db.Raw("SELECT case_id FROM " + table + " LIMIT 1").Scan(&caseID).Error; err != nil {
-			t.Fatalf("read %s.case_id: %v", table, err)
+		if err := db.Raw("SELECT case_id FROM "+tc.table+" WHERE id = ?", tc.id).Scan(&caseID).Error; err != nil {
+			t.Fatalf("read %s.case_id: %v", tc.table, err)
 		}
 		if caseID != "case-legacy" {
-			t.Fatalf("%s legacy case_id = %q, want relational backfill case-legacy", table, caseID)
+			t.Fatalf("%s %s case_id = %q, want relational backfill case-legacy", tc.table, tc.id, caseID)
+		}
+	}
+
+	// Broken relationships and checkpoints keep unknown provenance rather than
+	// failing the upgrade or being attributed to a Case by guesswork.
+	for _, tc := range []struct{ table, id string }{
+		{"reflection", "refl-orphan"},
+		{"magi_tool_call", "tool-orphan"},
+	} {
+		var caseID string
+		if err := db.Raw("SELECT case_id FROM "+tc.table+" WHERE id = ?", tc.id).Scan(&caseID).Error; err != nil {
+			t.Fatalf("read orphan %s.case_id: %v", tc.table, err)
+		}
+		if caseID != "" {
+			t.Fatalf("orphan %s %s case_id = %q, want unknown provenance", tc.table, tc.id, caseID)
+		}
+	}
+
+	// Every legacy checkpoint keeps case_id empty, including the one whose RunID
+	// collides with a magi_agent_run primary key: the pre-S27 table recorded no
+	// Case, and RunID is a logical identity, not a reference.
+	var checkpointCases []struct {
+		RunID  string `gorm:"column:run_id"`
+		CaseID string `gorm:"column:case_id"`
+	}
+	if err := db.Raw("SELECT run_id, case_id FROM magi_agent_checkpoint ORDER BY run_id").Scan(&checkpointCases).Error; err != nil {
+		t.Fatalf("read checkpoint provenance: %v", err)
+	}
+	if len(checkpointCases) != 2 {
+		t.Fatalf("legacy checkpoints = %d, want 2", len(checkpointCases))
+	}
+	for _, row := range checkpointCases {
+		if row.CaseID != "" {
+			t.Fatalf("legacy checkpoint %s case_id = %q, want unknown provenance", row.RunID, row.CaseID)
 		}
 	}
 
@@ -195,5 +252,111 @@ func TestMySQLMigration_S27ScopesArtifactsAndCheckpointsByGeneration(t *testing.
 	if !fresh.Migrator().HasColumn(&magi.ReflectionModel{}, "case_id") ||
 		!fresh.Migrator().HasColumn(&magi.ToolCallModel{}, "case_id") {
 		t.Fatal("fresh schema must persist direct case provenance for reflection/tool calls")
+	}
+}
+
+// T3 / S27 legacy checkpoints carry no recorded Case provenance: the pre-S27
+// table stored only run_id and snapshot state, and run_id is the logical
+// working-memory identity rather than a declared reference to magi_agent_run.
+// This pins the downstream contract on real MySQL: the generation-scoped loader
+// never serves a legacy row, Delete removes the rows it can attribute (direct
+// case_id, or the pre-S27 run_id containment rule), and a legacy row that
+// matches neither is retained as unknown-provenance history instead of being
+// guessed into a Case.
+func TestMySQLMigration_S27LegacyCheckpointRetention(t *testing.T) {
+	db := provideDBForTest(t, newMySQLSchema(t))
+	const caseID = "case-s27-retention"
+	repo, jobs, job := seedMySQLDecisionJob(t, db, caseID, 3)
+	checkpoints, ok := repo.CheckpointRepo().(port.GenerationCheckpointRepository)
+	if !ok {
+		t.Fatal("checkpoint repository missing GenerationCheckpointRepository")
+	}
+	ctx := context.Background()
+	worker := "worker-s27-retention"
+	claimed, ok, err := jobs.Claim(ctx, job.ID, worker, uuid.NewString(), time.Now().Add(time.Minute))
+	if err != nil || !ok || claimed == nil {
+		t.Fatalf("claim: job=%+v ok=%v err=%v", claimed, ok, err)
+	}
+	owner := &entity.ExecutionContext{
+		CaseID: claimed.CaseID, JobID: claimed.ID, WorkerID: worker,
+		JobAttempt: claimed.Attempt, ExecutionGeneration: claimed.ExecutionGeneration,
+	}
+
+	// Two upgraded pre-S27 rows: one keeps the purely logical identity (matches
+	// nothing), the other equals a magi_agent_run primary key of this Case and
+	// is therefore inside the pre-S27 deletion containment rule.
+	logicalRunID := caseID + "-melchior-r1-investigate"
+	matchedRunID := "run-s27-matched"
+	if err := db.Create(&magi.AgentRunModel{
+		ID: matchedRunID, CaseID: caseID, ExecutionGeneration: owner.ExecutionGeneration,
+		StartedAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatalf("seed matched agent run: %v", err)
+	}
+	for _, runID := range []string{logicalRunID, matchedRunID} {
+		if err := db.Create(&magi.CheckpointModel{RunID: runID, ExecutionGeneration: 0, CaseID: ""}).Error; err != nil {
+			t.Fatalf("seed legacy checkpoint %s: %v", runID, err)
+		}
+	}
+	positiveRunID := caseID + "-casper-g1-r1-investigate"
+	if err := checkpoints.SaveForExecution(ctx, owner, &entity.AgentState{
+		RunID: positiveRunID, CaseID: caseID,
+		ExecutionGeneration: owner.ExecutionGeneration, StepCount: 1, Phase: "gather",
+	}); err != nil {
+		t.Fatalf("save generation-scoped checkpoint: %v", err)
+	}
+
+	// The current API is generation-scoped and must not answer a legacy row,
+	// even while the Case and its owner are alive.
+	for _, runID := range []string{logicalRunID, matchedRunID} {
+		if got, err := checkpoints.LoadForExecution(ctx, owner, runID); err != nil || got != nil {
+			t.Fatalf("LoadForExecution(%s) = %+v err=%v, want empty", runID, got, err)
+		}
+		legacy, err := repo.CheckpointRepo().Load(ctx, runID)
+		if err != nil || legacy == nil {
+			t.Fatalf("legacy Load(%s) = %+v err=%v, want the generation-0 row", runID, legacy, err)
+		}
+		if legacy.CaseID != "" || legacy.ExecutionGeneration != 0 {
+			t.Fatalf("legacy checkpoint %s provenance = case %q generation %d, want unknown",
+				runID, legacy.CaseID, legacy.ExecutionGeneration)
+		}
+	}
+
+	if err := repo.CaseRepo().Delete(ctx, caseID); err != nil {
+		t.Fatalf("delete case: %v", err)
+	}
+
+	var positiveRows int64
+	if err := db.Model(&magi.CheckpointModel{}).Where("run_id = ?", positiveRunID).Count(&positiveRows).Error; err != nil {
+		t.Fatalf("count generation-scoped checkpoint: %v", err)
+	}
+	if positiveRows != 0 {
+		t.Fatalf("generation-scoped checkpoint rows after delete = %d, want 0", positiveRows)
+	}
+	var matchedRows int64
+	if err := db.Model(&magi.CheckpointModel{}).Where("run_id = ?", matchedRunID).Count(&matchedRows).Error; err != nil {
+		t.Fatalf("count matched legacy checkpoint: %v", err)
+	}
+	if matchedRows != 0 {
+		t.Fatalf("checkpoint matching a Case AgentRun survived the delete: %d", matchedRows)
+	}
+	var retained struct {
+		CaseID     string `gorm:"column:case_id"`
+		Generation int64  `gorm:"column:execution_generation"`
+	}
+	if err := db.Raw("SELECT case_id, execution_generation FROM magi_agent_checkpoint WHERE run_id = ?", logicalRunID).
+		Scan(&retained).Error; err != nil {
+		t.Fatalf("read retained legacy checkpoint: %v", err)
+	}
+	if retained.CaseID != "" || retained.Generation != 0 {
+		t.Fatalf("retained legacy checkpoint provenance = case %q generation %d, want unknown",
+			retained.CaseID, retained.Generation)
+	}
+	var runs int64
+	if err := db.Model(&magi.AgentRunModel{}).Where("case_id = ?", caseID).Count(&runs).Error; err != nil {
+		t.Fatalf("count agent runs: %v", err)
+	}
+	if runs != 0 {
+		t.Fatalf("agent runs after delete = %d, want 0", runs)
 	}
 }

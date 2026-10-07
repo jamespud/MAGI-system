@@ -674,17 +674,26 @@ func (r *caseRepo) UpdateFlags(ctx context.Context, id string, pinned, archived 
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// Delete removes a case and every persisted row directly attributed to it.
-// S27 gives ToolCall, Reflection and Checkpoint direct case provenance, so
-// deletion no longer depends on AgentRun joins or on checkpoint RunID shape.
+// Delete removes a Case and every persisted row attributed to it. S27 gave
+// ToolCall, Reflection and Checkpoint direct case_id provenance, so those rows
+// are removed by column.
+//
+// Checkpoints additionally keep the pre-S27 containment rule: magi_agent_run
+// rows still exist at this point, so a legacy checkpoint whose run_id names one
+// of this Case's runs is removed with it. That join is a deletion rule, not a
+// provenance claim -- the legacy checkpoint table recorded no Case at all, and
+// its run_id is the logical working-memory identity ("<case>-<agent>-r<n>-<phase>")
+// that only coincides with an AgentRun primary key for unqualified runs.
+//
+// A legacy checkpoint that matches neither column is left in place: it has
+// unknown provenance, so it is retained as legacy history instead of being
+// attributed to a Case by guesswork. Positive-generation readers cannot see it
+// because LoadForExecution requires an explicit case_id.
 func (r *caseRepo) Delete(ctx context.Context, id string) error {
 	tx := r.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return tx.Error
 	}
-	// Legacy generation-0 checkpoints may predate direct case_id provenance.
-	// Remove both directly-scoped checkpoints and those linked by RunID to this
-	// Case's AgentRun before deleting the runs themselves.
 	if err := tx.Where("case_id = ? OR run_id IN (SELECT id FROM magi_agent_run WHERE case_id = ?)", id, id).Delete(&CheckpointModel{}).Error; err != nil {
 		_ = tx.Rollback()
 		return err

@@ -208,3 +208,80 @@ func TestCaseRepository_DeleteRemovesAgentRunCheckpoint(t *testing.T) {
 		t.Fatalf("keep checkpoint lost: %d", keepCheckpoint)
 	}
 }
+
+// T3 / S27: magi_agent_checkpoint gained direct Case provenance, but the rows
+// that predate it have none -- the legacy table stored no Case column, and
+// run_id is the logical working-memory identity
+// ("<case>-<agent>-r<round>-<phase>"), not the magi_agent_run primary key.
+// Delete therefore keeps two buckets: rows with direct provenance, and legacy
+// rows whose run_id names one of the Case's runs (the pre-S27 containment rule).
+// A legacy row that matches neither is retained as unknown-provenance history
+// instead of being attributed to a Case by guesswork.
+func TestCaseRepository_DeleteRetainsUnmatchedLegacyCheckpoints(t *testing.T) {
+	db := openCaseDB(t)
+	repo := magi.NewRepository(db)
+	cr := repo.CaseRepo()
+	ctx := context.Background()
+
+	const caseID = "case-checkpoint-retention"
+	if err := cr.Create(ctx, &entity.DecisionCase{ID: caseID, Question: "q", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	ownedRunID := caseID + "-melchior-g4-r1-investigate"
+	if err := repo.AgentRunRepo().Create(ctx, &entity.AgentRun{ID: ownedRunID, CaseID: caseID, StartedAt: time.Now()}); err != nil {
+		t.Fatalf("create agent run: %v", err)
+	}
+	// A legacy row whose run_id coincides with the AgentRun primary key: the
+	// pre-S27 deletion rule removes it with the Case.
+	matchedLegacyRunID := "run-victim-" + caseID
+	if err := repo.AgentRunRepo().Create(ctx, &entity.AgentRun{ID: matchedLegacyRunID, CaseID: caseID, StartedAt: time.Now()}); err != nil {
+		t.Fatalf("create matched legacy run: %v", err)
+	}
+	// A purely logical legacy identity matches no run and no Case column.
+	unmatchedRunID := caseID + "-melchior-r1-investigate"
+
+	for _, m := range []magi.CheckpointModel{
+		{RunID: ownedRunID, CaseID: caseID, ExecutionGeneration: 4},
+		{RunID: matchedLegacyRunID},
+		{RunID: unmatchedRunID},
+	} {
+		row := m
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("seed checkpoint %s: %v", row.RunID, err)
+		}
+	}
+
+	if err := cr.Delete(ctx, caseID); err != nil {
+		t.Fatalf("delete case: %v", err)
+	}
+
+	for _, runID := range []string{ownedRunID, matchedLegacyRunID} {
+		var left int64
+		if err := db.Model(&magi.CheckpointModel{}).Where("run_id = ?", runID).Count(&left).Error; err != nil {
+			t.Fatalf("count checkpoint %s: %v", runID, err)
+		}
+		if left != 0 {
+			t.Fatalf("checkpoint %s survived the delete", runID)
+		}
+	}
+	var runs int64
+	if err := db.Model(&magi.AgentRunModel{}).Where("case_id = ?", caseID).Count(&runs).Error; err != nil {
+		t.Fatalf("count agent runs: %v", err)
+	}
+	if runs != 0 {
+		t.Fatalf("agent runs after delete = %d, want 0", runs)
+	}
+
+	var retained struct {
+		CaseID     string `gorm:"column:case_id"`
+		Generation int64  `gorm:"column:execution_generation"`
+	}
+	if err := db.Raw("SELECT case_id, execution_generation FROM magi_agent_checkpoint WHERE run_id = ?", unmatchedRunID).
+		Scan(&retained).Error; err != nil {
+		t.Fatalf("read retained checkpoint: %v", err)
+	}
+	if retained.CaseID != "" || retained.Generation != 0 {
+		t.Fatalf("retained checkpoint provenance = case %q generation %d, want unknown",
+			retained.CaseID, retained.Generation)
+	}
+}
