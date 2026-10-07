@@ -166,8 +166,10 @@ var artifactKinds = [...]ArtifactKind{
 	ArtifactDebateRound, ArtifactReflection, ArtifactTaskSnapshot, ArtifactMemoryProjection,
 }
 
-// IncArtifactPersistFailure records a durable write that failed and was
-// tolerated. The kind must be one of the fixed constants above.
+// IncArtifactPersistFailure records one artifact write that returned an error.
+// On a durable owner path the caller escalates that error and aborts the
+// execution; on the legacy/best-effort path the write is tolerated and the
+// counter is the only trace. The kind must be one of the fixed constants above.
 func (r *Registry) IncArtifactPersistFailure(kind ArtifactKind) {
 	if r == nil {
 		return

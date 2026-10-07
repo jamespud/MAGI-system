@@ -145,7 +145,7 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	for {
 		if o.blueprint != nil && prevStatus != "" && prevStatus != status {
 			if violations := o.blueprint.ValidatePath([]string{string(prevStatus), string(status)}); len(violations) > 0 {
-				return o.fail(ctx, case_, fmt.Sprintf("fsm blueprint violation: %s", violations[0]))
+				return o.fail(ctx, case_, fmt.Errorf("fsm blueprint violation: %s", violations[0]))
 			}
 		}
 		next, done, err := o.dispatch(ctx, case_, prevStatus, status, st)
@@ -153,7 +153,7 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			if errors.Is(err, port.ErrLeaseLost) {
 				return nil, err
 			}
-			return o.fail(ctx, case_, err.Error())
+			return o.fail(ctx, case_, err)
 		}
 		prevStatus = status
 		if isNormalTerminal(next) {
@@ -630,7 +630,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		for _, tb := range cfg.Tools {
 			run.Environment.Tools = append(run.Environment.Tools, string(tb.Source)+":"+tb.ToolName)
 		}
-		if err := o.persistArtifact(ctx, metrics.ArtifactAgentRun, case_.ID, func() error {
+		if err := o.persistArtifact(ctx, metrics.ArtifactAgentRun, case_.ID, execution, func() error {
 			return o.persistArtifactValue(ctx, execution, run)
 		}); err != nil {
 			return remap, err
@@ -649,7 +649,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.CaseID = case_.ID
 				cp.ExecutionGeneration = case_.ExecutionGeneration
 				cp.AgentRunID = run.ID
-				if err := o.persistArtifact(ctx, metrics.ArtifactEvidence, case_.ID, func() error {
+				if err := o.persistArtifact(ctx, metrics.ArtifactEvidence, case_.ID, execution, func() error {
 					return o.persistArtifactValue(ctx, execution, &cp)
 				}); err != nil {
 					return remap, err
@@ -668,7 +668,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 				cp.AgentRunID = run.ID
 				cp.Supports = remapRefs(cl.Supports, remap.EvidenceMap())
 				cp.Contradicts = remapRefs(cl.Contradicts, remap.ClaimMap())
-				if err := o.persistArtifact(ctx, metrics.ArtifactClaim, case_.ID, func() error {
+				if err := o.persistArtifact(ctx, metrics.ArtifactClaim, case_.ID, execution, func() error {
 					return o.persistArtifactValue(ctx, execution, &cp)
 				}); err != nil {
 					return remap, err
@@ -703,7 +703,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 						DurationMs:          tc.Duration.Milliseconds(),
 						CreatedAt:           now,
 					}
-					if err := o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, func() error {
+					if err := o.persistArtifact(ctx, metrics.ArtifactToolCall, case_.ID, execution, func() error {
 						return o.persistArtifactValue(ctx, execution, toolCall)
 					}); err != nil {
 						return remap, err
@@ -731,7 +731,7 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 		v.CaseID = case_.ID
 		v.ExecutionGeneration = case_.ExecutionGeneration
 		v.Round = round
-		if err := o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, func() error {
+		if err := o.persistArtifact(ctx, metrics.ArtifactVote, case_.ID, execution, func() error {
 			return o.persistArtifactValue(ctx, execution, v)
 		}); err != nil {
 			return remap, err
@@ -740,11 +740,24 @@ func (o *Orchestrator) persistArtifacts(ctx context.Context, case_ *entity.Decis
 	return remap, nil
 }
 
-// persistArtifact runs one durable artifact write. Failures are counted and
-// logged rather than silently dropped: a missing vote/evidence/tool-call row is
-// an audit hole, and the stock-mcp incident showed it can show up as a complete
-// case with no trace of the tool call.
-func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.ArtifactKind, caseID string, write func() error) error {
+// persistArtifact runs one artifact write and classifies its failure by the
+// authority of the write.
+//
+// owner carries the durable execution that authorizes an authoritative,
+// generation-scoped artifact (AgentRun/Evidence/Claim/Vote/DebateRound/
+// Reflection/ToolCall). On that path any repository or storage error is
+// fail-closed: once the database cannot prove the authoritative write landed,
+// the execution must not continue and report success. A commit whose result is
+// unknown is treated the same way: the generation is abandoned and a later
+// generation recovers, rather than continuing on a guessed outcome.
+//
+// owner == nil keeps the historical best-effort contract for non-authoritative
+// writes (task-snapshot cache, memory projection) and for legacy generation-0
+// storage: the failure is logged and counted, and ErrLeaseLost still
+// propagates. Omitting the owner cannot smuggle a positive-generation artifact
+// past the fence: persistArtifactValue refuses that combination with
+// ErrLeaseLost, which this function escalates on either path.
+func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.ArtifactKind, caseID string, owner *entity.ExecutionContext, write func() error) error {
 	if write == nil {
 		return nil
 	}
@@ -753,6 +766,9 @@ func (o *Orchestrator) persistArtifact(ctx context.Context, kind metrics.Artifac
 		o.metrics.IncArtifactPersistFailure(kind)
 		if errors.Is(err, port.ErrLeaseLost) {
 			return port.ErrLeaseLost
+		}
+		if owner != nil && owner.IsDurable() {
+			return err
 		}
 	}
 	return nil
@@ -932,16 +948,19 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 	return o.eventPub.Publish(ctx, entity.NewEvent(case_.ID, "", nil, et, payload))
 }
 
-func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg string) (*entity.Resolution, error) {
-	runErr := fmt.Errorf("%s", msg)
+// fail records a synchronous orchestration failure. The cause is returned
+// unchanged rather than flattened to a string so a caller can still classify it
+// (for example with errors.Is), which is what lets a durable worker distinguish
+// a storage failure from a lease loss.
+func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, cause error) (*entity.Resolution, error) {
 	if isPublicTerminalCaseStatus(case_.Status) {
 		if case_.ExecutionAttempt > 0 {
-			return nil, runErr
+			return nil, cause
 		}
 		return nil, port.ErrLeaseLost
 	}
 	if case_.ExecutionAttempt > 0 {
-		return nil, runErr
+		return nil, cause
 	}
 	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseFailed,
 		map[string]any{"status": string(entity.CaseStatusFailed)})
@@ -949,7 +968,7 @@ func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, msg
 		return nil, err
 	}
 	case_.Status = entity.CaseStatusFailed
-	return nil, runErr
+	return nil, cause
 }
 
 func isPublicTerminalCaseStatus(status entity.CaseStatus) bool {

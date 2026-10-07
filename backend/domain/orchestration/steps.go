@@ -105,7 +105,7 @@ func (o *Orchestrator) stepNormalize(ctx context.Context, case_ *entity.Decision
 	if o.caseRepo != nil {
 		// task_json is a cache of the normalized task, not an audit artifact:
 		// losing it is tolerable, but it must still be visible.
-		o.persistArtifact(ctx, metrics.ArtifactTaskSnapshot, case_.ID, func() error {
+		o.persistArtifact(ctx, metrics.ArtifactTaskSnapshot, case_.ID, nil, func() error {
 			return o.caseRepo.UpdateTask(ctx, case_.ID, t)
 		})
 	}
@@ -197,7 +197,7 @@ func (o *Orchestrator) stepDebate(ctx context.Context, case_ *entity.DecisionCas
 			CaseID: case_.ID, ExecutionGeneration: case_.ExecutionGeneration, Round: st.Round,
 			Packet: packet, StartedAt: time.Now(),
 		}
-		if err := o.persistArtifact(ctx, metrics.ArtifactDebateRound, case_.ID, func() error {
+		if err := o.persistArtifact(ctx, metrics.ArtifactDebateRound, case_.ID, st.Execution, func() error {
 			return o.persistArtifactValue(ctx, st.Execution, debateRound)
 		}); err != nil {
 			return "", false, err
@@ -233,7 +233,7 @@ func (o *Orchestrator) stepRevote(ctx context.Context, case_ *entity.DecisionCas
 				rf.AgentRunID = newVotes[idx].AgentRunID
 			}
 			remapReflection(rf, remap)
-			if err := o.persistArtifact(ctx, metrics.ArtifactReflection, case_.ID, func() error {
+			if err := o.persistArtifact(ctx, metrics.ArtifactReflection, case_.ID, st.Execution, func() error {
 				return o.persistArtifactValue(ctx, st.Execution, rf)
 			}); err != nil {
 				return "", false, err
@@ -287,7 +287,7 @@ func (o *Orchestrator) stepSaveMemory(ctx context.Context, case_ *entity.Decisio
 		// after indexing actually completes (sync) or by the async worker.
 		// The projection is best-effort (the background indexer retries), but a
 		// persistent failure should be visible.
-		o.persistArtifact(ctx, metrics.ArtifactMemoryProjection, case_.ID, func() error {
+		o.persistArtifact(ctx, metrics.ArtifactMemoryProjection, case_.ID, nil, func() error {
 			_, err := o.knowledge.Store(ctx, proj)
 			return err
 		})
