@@ -386,16 +386,17 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				m.releaseRejectedRetryClaim(claimed)
 				return
 			}
-			if m.cleaner != nil {
-				// Cleanup is a correctness barrier for the retry: a partial
-				// cleanup would leave attempt N-1 artifacts (votes, evidence,
-				// claims) mixed with attempt N, so a failure aborts the retry
-				// rather than being silently ignored.
+			if c.ExecutionGeneration == 0 && m.cleaner != nil {
+				// Legacy generation-0 retries still depend on the historical
+				// case-wide cleanup. Positive generations are isolated by T3
+				// read/write fencing and MUST NOT invoke this unsafe delete:
+				// a delayed case-wide cleaner could erase a newer generation.
+				// T5 replaces the legacy cleaner with generation-scoped GC.
 				cleanupCtx, cancelCleanup := detachedContext(ctx)
 				cleanupErr := m.cleaner.CleanupCaseArtifacts(cleanupCtx, c.ID)
 				cancelCleanup()
 				if cleanupErr != nil {
-					log.Printf("run manager: retry cleanup for case %s failed, aborting retry: %v", c.ID, cleanupErr)
+					log.Printf("run manager: legacy retry cleanup for case %s failed, aborting retry: %v", c.ID, cleanupErr)
 					m.settleRetryCleanupFailure(claimed, c, cleanupErr)
 					return
 				}
@@ -406,7 +407,17 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		runStart := time.Now()
 		m.metrics.RunStart()
 		m.metrics.RunStartForUser(userIDString(c.UserID))
-		_, runErr := m.orch.Orchestrate(attemptCtx, c)
+		executionOrch, ownerAware := m.orch.(ExecutionOrchestrator)
+		var runErr error
+		if !ownerAware {
+			runErr = fmt.Errorf("run manager: durable orchestration requires execution-owner capability")
+		} else {
+			owner := &entity.ExecutionContext{
+				CaseID: c.ID, JobID: claimed.ID, WorkerID: m.workerID,
+				JobAttempt: claimed.Attempt, ExecutionGeneration: claimed.ExecutionGeneration,
+			}
+			_, runErr = executionOrch.OrchestrateForExecution(attemptCtx, c, owner)
+		}
 		stopHeartbeat()
 		finishMetrics := func(ok bool) {
 			m.metrics.RunFinish(ok)

@@ -85,8 +85,20 @@ func (d *Dispatcher) Dispatch(
 	configs []*entity.MagiConfig,
 	round int,
 ) []*runtime.LoopResult {
+	return d.DispatchForExecution(ctx, case_, task, configs, round, nil)
+}
+
+func (d *Dispatcher) DispatchForExecution(
+	ctx context.Context,
+	case_ *entity.DecisionCase,
+	task *entity.DecisionTask,
+	configs []*entity.MagiConfig,
+	round int,
+	execution *entity.ExecutionContext,
+) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
+	base.Execution = execution
 	var wg sync.WaitGroup
 	wg.Add(len(configs))
 	for i, cfg := range configs {
@@ -119,8 +131,22 @@ func (d *Dispatcher) DispatchReconsider(
 	configs []*entity.MagiConfig,
 	round int,
 ) []*runtime.LoopResult {
+	return d.DispatchReconsiderForExecution(ctx, case_, task, packet, prevResults, configs, round, nil)
+}
+
+func (d *Dispatcher) DispatchReconsiderForExecution(
+	ctx context.Context,
+	case_ *entity.DecisionCase,
+	task *entity.DecisionTask,
+	packet entity.DebatePacket,
+	prevResults []*runtime.LoopResult,
+	configs []*entity.MagiConfig,
+	round int,
+	execution *entity.ExecutionContext,
+) []*runtime.LoopResult {
 	results := make([]*runtime.LoopResult, len(configs))
 	base := d.buildBase(ctx, case_, task)
+	base.Execution = execution
 	var wg sync.WaitGroup
 	wg.Add(len(configs))
 	for i, cfg := range configs {
@@ -156,7 +182,20 @@ func (d *Dispatcher) RetryAgent(
 	round, attempt int,
 	phase string,
 ) *runtime.LoopResult {
+	return d.RetryAgentForExecution(ctx, case_, task, cfg, round, attempt, phase, nil)
+}
+
+func (d *Dispatcher) RetryAgentForExecution(
+	ctx context.Context,
+	case_ *entity.DecisionCase,
+	task *entity.DecisionTask,
+	cfg *entity.MagiConfig,
+	round, attempt int,
+	phase string,
+	execution *entity.ExecutionContext,
+) *runtime.LoopResult {
 	base := d.buildBase(ctx, case_, task)
+	base.Execution = execution
 	actx := *base
 	actx.RunID = checkpointRunID(case_.ID, entity.MagiCode(cfg.Code), round, phase) + fmt.Sprintf("-retry%d", attempt)
 	r, _ := d.agentLoop.Run(ctx, cfg, &actx)
@@ -172,19 +211,15 @@ func isCompleted(r *runtime.LoopResult) bool {
 	return r != nil && r.Status == runtime.LoopStatusCompleted && r.Err == nil && r.Vote != nil
 }
 
-// checkpointRunID is the stable identity of an agent's working memory for a
-// (case, agent, round, phase). Unlike executionRunID it deliberately excludes
-// the execution attempt so durable retries resume the same checkpoint.
+// checkpointRunID is the stable logical identity of an agent's working memory
+// for a (case, agent, round, phase). Durable storage scopes that logical ID by
+// execution_generation, so a newer owner never resumes an older generation.
 func checkpointRunID(caseID string, code entity.MagiCode, round int, phase string) string {
 	return fmt.Sprintf("%s-%s-r%d-%s", caseID, code, round, phase)
 }
 
-func executionRunID(caseID string, code entity.MagiCode, attempt, round int, phase string) string {
-	attemptPart := ""
-	if attempt > 0 {
-		attemptPart = fmt.Sprintf("-a%d", attempt)
-	}
-	return fmt.Sprintf("%s-%s%s-r%d-%s", caseID, code, attemptPart, round, phase)
+func executionRunID(caseID string, code entity.MagiCode, generation int64, round int, phase string) string {
+	return fmt.Sprintf("%s-%s-g%d-r%d-%s", caseID, code, generation, round, phase)
 }
 
 func derefTask(t *entity.DecisionTask) entity.DecisionTask {

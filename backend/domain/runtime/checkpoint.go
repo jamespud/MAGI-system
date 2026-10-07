@@ -32,15 +32,49 @@ func (s *CheckpointService) Load(ctx context.Context, runID string) (*entity.Age
 	return s.repo.Load(ctx, runID)
 }
 
+// LoadForExecution loads only the checkpoint owned by the supplied durable
+// generation. Positive-generation callers may not fall back to legacy RunID-only
+// lookup because that would resurrect a superseded worker snapshot.
+func (s *CheckpointService) LoadForExecution(ctx context.Context, owner *entity.ExecutionContext, runID string) (*entity.AgentState, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil
+	}
+	if owner == nil || !owner.IsDurable() {
+		return s.repo.Load(ctx, runID)
+	}
+	generationRepo, ok := s.repo.(port.GenerationCheckpointRepository)
+	if !ok {
+		return nil, port.ErrLeaseLost
+	}
+	return generationRepo.LoadForExecution(ctx, owner, runID)
+}
+
 // Commit persists a checkpoint snapshot and records a durable execution-history
 // event. A configured repository Save error or a CHECKPOINT_COMMITTED record
 // failure stops the caller (fail closed). A nil repository is stateless.
 func (s *CheckpointService) Commit(ctx context.Context, caseID, runID string, agentCode entity.MagiCode, state *entity.AgentState) error {
+	return s.CommitForExecution(ctx, nil, caseID, runID, agentCode, state)
+}
+
+// CommitForExecution persists one generation-scoped checkpoint through the
+// same active-owner predicate as authoritative artifacts.
+func (s *CheckpointService) CommitForExecution(ctx context.Context, owner *entity.ExecutionContext, caseID, runID string, agentCode entity.MagiCode, state *entity.AgentState) error {
 	if s == nil || s.repo == nil || state == nil {
 		return nil
 	}
 	ac := agentCode
-	if err := s.repo.Save(ctx, state); err != nil {
+	var err error
+	if owner != nil && owner.IsDurable() {
+		generationRepo, ok := s.repo.(port.GenerationCheckpointRepository)
+		if !ok {
+			err = port.ErrLeaseLost
+		} else {
+			err = generationRepo.SaveForExecution(ctx, owner, state)
+		}
+	} else {
+		err = s.repo.Save(ctx, state)
+	}
+	if err != nil {
 		if s.recorder != nil {
 			_ = s.recorder.Critical(ctx, entity.NewEvent(caseID, runID, &ac, entity.EventCheckpointFailed, map[string]any{"step": state.StepCount + 1, "error": err.Error()}))
 		}

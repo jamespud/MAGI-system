@@ -64,15 +64,10 @@ type AgentContext struct {
 	Execution *ExecutionContext
 }
 
-// ExecutionContext identifies a worker-owned job attempt. JobID and RunID are
-// the durable identities; WorkerID and JobAttempt are the physical worker/lease
-// fencing fields used to reject late commits after a lease loss.
-type ExecutionContext struct {
-	JobID      string
-	RunID      string
-	WorkerID   string
-	JobAttempt int
-}
+// ExecutionContext is kept as a runtime alias so existing runtime callers use
+// the same owner value while repository ports can depend on the lower entity
+// layer without a package cycle.
+type ExecutionContext = entity.ExecutionContext
 
 type DebateContext struct {
 	Packet       entity.DebatePacket
