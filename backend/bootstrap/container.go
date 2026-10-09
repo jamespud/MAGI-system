@@ -797,8 +797,9 @@ func toolQuotaEnabled(cfg *Config) bool {
 
 func provideRunManager(orch *orchestration.Orchestrator, repo port.Repository, jobs port.DecisionJobRepository, eventPub port.EventPublisher, reg *metrics.Registry, cfg *Config, budget decision.BudgetChecker) *decision.RunManager {
 	live, _ := eventPub.(port.LiveEventPublisher)
+	owned, _ := repo.(port.OwnedCaseCommitter)
 	return decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: repo.CaseRepo(), Metrics: reg,
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), OwnedCases: owned, Metrics: reg,
 		LiveEvents:               live,
 		MaxConcurrentRunsPerUser: cfg.Limits.MaxConcurrentRunsPerUser,
 		BudgetChecker:            budget,
@@ -1139,7 +1140,14 @@ func ensureEventSequenceSchema(db *gorm.DB) error {
 	case !hasEvents && !hasCursor:
 		return db.AutoMigrate(&magi.EventModel{}, &magi.EventCursorModel{})
 	case hasEvents && hasCursor:
-		return verifyEventSequenceContract(db)
+		if err := verifyEventSequenceContract(db); err != nil {
+			return err
+		}
+		// Add only T4 provenance after the existing S16 contract is verified.
+		if !db.Migrator().HasColumn(&magi.EventModel{}, "ExecutionGeneration") {
+			return db.Migrator().AddColumn(&magi.EventModel{}, "ExecutionGeneration")
+		}
+		return nil
 	default:
 		return fmt.Errorf("partial event sequence schema detected; apply the complete Atlas S16 migration before starting the service")
 	}

@@ -237,6 +237,7 @@ func (r *mysqlReplyLossJobRepo) GetByClaimToken(ctx context.Context, claimToken 
 }
 
 type mysqlSuccessOrchestrator struct {
+	repo  port.Repository
 	calls atomic.Int32
 }
 
@@ -251,7 +252,18 @@ func (o *mysqlSuccessOrchestrator) OrchestrateForExecution(_ context.Context, c 
 		return nil, port.ErrLeaseLost
 	}
 	o.calls.Add(1)
-	return &entity.Resolution{CaseID: c.ID, ExecutionGeneration: c.ExecutionGeneration, FinalDecision: entity.VoteDecisionApprove}, nil
+	res := &entity.Resolution{ID: uuid.NewString(), CaseID: c.ID, ExecutionGeneration: c.ExecutionGeneration, FinalDecision: entity.VoteDecisionApprove}
+	event := entity.NewEvent(c.ID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	event.ExecutionGeneration = owner.ExecutionGeneration
+	committed, err := o.repo.(port.OwnedCaseCommitter).CommitTerminalOwned(context.Background(), owner, c.Status, entity.CaseStatusResolved, res, &event)
+	if err != nil {
+		return nil, err
+	}
+	if !committed {
+		return nil, port.ErrLeaseLost
+	}
+	c.Status = entity.CaseStatusResolved
+	return res, nil
 }
 
 func waitMySQLDecisionJobStatus(t *testing.T, jobs port.DecisionJobRepository, caseID string, want entity.DecisionJobStatus) *entity.DecisionJob {
@@ -278,9 +290,9 @@ func TestMySQLRunManager_ClaimReplyLossRecoversSameGeneration(t *testing.T) {
 	}
 	baseJobs := magi.NewDecisionJobRepository(db)
 	lossy := &mysqlReplyLossJobRepo{DecisionJobRepository: baseJobs}
-	orch := &mysqlSuccessOrchestrator{}
+	orch := &mysqlSuccessOrchestrator{repo: repo}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: lossy, CaseRepo: repo.CaseRepo(), WorkerID: "worker-reply-loss", LeaseDuration: time.Minute, MaxAttempts: 1,
+		JobRepo: lossy, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "worker-reply-loss", LeaseDuration: time.Minute, MaxAttempts: 1,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("start: %v", err)
@@ -318,9 +330,9 @@ func TestMySQLRunManager_ClaimReplyLossDoesNotResurrectCancelledOwner(t *testing
 		}
 		return baseJobs.Cancel(ctx, job.ID)
 	}
-	orch := &mysqlSuccessOrchestrator{}
+	orch := &mysqlSuccessOrchestrator{repo: repo}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: lossy, CaseRepo: repo.CaseRepo(), WorkerID: "worker-reply-loss-cancel", LeaseDuration: time.Minute, MaxAttempts: 1,
+		JobRepo: lossy, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "worker-reply-loss-cancel", LeaseDuration: time.Minute, MaxAttempts: 1,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("start: %v", err)

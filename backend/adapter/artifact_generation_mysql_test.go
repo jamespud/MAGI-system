@@ -292,7 +292,7 @@ func TestArtifactGeneration_TerminalReferencesRequireSameGenerationOnMySQL(t *te
 	db := openArtifactGenerationMySQL(t)
 	repo, jobs, job := seedArtifactGenerationJob(t, db)
 	owned := repo.(port.OwnedArtifactRepository)
-	committer := repo.(port.TerminalCommitter)
+	committer := repo.(port.OwnedCaseCommitter)
 	ctx := context.Background()
 	worker := "worker-term-" + uuid.NewString()
 	first, owner1 := claimArtifactOwner(t, jobs, job, worker)
@@ -320,7 +320,8 @@ func TestArtifactGeneration_TerminalReferencesRequireSameGenerationOnMySQL(t *te
 	} {
 		t.Run(name, func(t *testing.T) {
 			event := entity.NewEvent(job.CaseID, "", nil, entity.EventCaseCompleted, map[string]any{"kind": name})
-			committed, err := committer.CommitTerminal(ctx, job.CaseID, entity.CaseStatusDraft, entity.CaseStatusResolved, res, &event)
+			event.ExecutionGeneration = owner2.ExecutionGeneration
+			committed, err := committer.CommitTerminalOwned(ctx, owner2, entity.CaseStatusDraft, entity.CaseStatusResolved, res, &event)
 			if err == nil || committed {
 				t.Fatalf("cross-generation reference committed=%v err=%v", committed, err)
 			}
@@ -345,7 +346,8 @@ func TestArtifactGeneration_TerminalReferencesRequireSameGenerationOnMySQL(t *te
 		FinalDecision: entity.VoteDecisionApprove, CreatedAt: now,
 	}
 	event := entity.NewEvent(job.CaseID, "", nil, entity.EventCaseCompleted, nil)
-	committed, err := committer.CommitTerminal(ctx, job.CaseID, entity.CaseStatusDraft, entity.CaseStatusResolved, res, &event)
+	event.ExecutionGeneration = owner2.ExecutionGeneration
+	committed, err := committer.CommitTerminalOwned(ctx, owner2, entity.CaseStatusDraft, entity.CaseStatusResolved, res, &event)
 	if err != nil || !committed {
 		t.Fatalf("same-generation terminal commit=%v err=%v", committed, err)
 	}

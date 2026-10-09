@@ -200,6 +200,16 @@ func TestRunManager_TerminalCaseFailureSettlesRunningJob(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusResolved}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
+	if err := db.AutoMigrate(&magi.ResolutionModel{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ResolutionRepo().Create(context.Background(), &entity.Resolution{ID: "res-legacy-terminal", CaseID: caseID}); err != nil {
+		t.Fatal(err)
+	}
+	completion := entity.NewEvent(caseID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	if err := repo.EventRepo().Create(context.Background(), &completion); err != nil {
+		t.Fatal(err)
+	}
 	rm := decision.NewRunManager(terminalCaseErrorOrchestrator{}, decision.RunManagerDeps{
 		JobRepo: jobs, WorkerID: "terminal-settler", MaxAttempts: 1,
 	})
@@ -207,6 +217,9 @@ func TestRunManager_TerminalCaseFailureSettlesRunningJob(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 	job := waitJobStatus(t, jobs, caseID, entity.DecisionJobSucceeded)
+	if job.ExecutionGeneration != 0 || job.Attempt != 0 {
+		t.Fatalf("terminal legacy reconciliation allocated generation: %+v", job)
+	}
 	if job.Status == entity.DecisionJobRunning {
 		t.Fatalf("terminal case left job running: %+v", job)
 	}
@@ -636,6 +649,11 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 	if err := repo.CaseRepo().UpdateStatus(ctx, "case-deadlocked", entity.CaseStatusDeadlocked); err != nil {
 		t.Fatalf("mark deadlocked: %v", err)
 	}
+	completion := entity.NewEvent("case-deadlocked", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusDeadlocked)})
+	if err := repo.EventRepo().Create(ctx, &completion); err != nil {
+		t.Fatal(err)
+	}
+
 	orch := &countingRecoveryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-b", MaxAttempts: 3, RetryBase: time.Millisecond,
@@ -643,8 +661,11 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
-	waitJobStatus(t, jobs, "case-deadlocked", entity.DecisionJobSucceeded)
-	if events, _ := repo.EventRepo().ListByCase(ctx, "case-deadlocked"); len(events) != 0 {
+	settled := waitJobStatus(t, jobs, "case-deadlocked", entity.DecisionJobSucceeded)
+	if settled.ExecutionGeneration != 1 || settled.Attempt != 1 {
+		t.Fatalf("terminal reconciliation allocated ownership: %+v", settled)
+	}
+	if events, _ := repo.EventRepo().ListByCase(ctx, "case-deadlocked"); len(events) != 1 {
 		t.Fatalf("unexpected events for deadlocked settlement: %+v", events)
 	}
 	if at := orch.calls.Load(); at != 0 {
@@ -656,6 +677,9 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 // invariant for a resolved terminal case.
 func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	db := openJobDB(t)
+	if err := db.AutoMigrate(&magi.ResolutionModel{}); err != nil {
+		t.Fatal(err)
+	}
 	repo := magi.NewRepository(db)
 	seedDecisionCase(t, db, "case-resolved-terminal", 0)
 	jobs := magi.NewDecisionJobRepository(db)
@@ -673,6 +697,14 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	if err := repo.CaseRepo().UpdateStatus(ctx, "case-resolved-terminal", entity.CaseStatusResolved); err != nil {
 		t.Fatalf("mark resolved: %v", err)
 	}
+	completion := entity.NewEvent("case-resolved-terminal", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
+	if err := repo.EventRepo().Create(ctx, &completion); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&magi.ResolutionModel{ID: "res-historical", CaseID: "case-resolved-terminal", ExecutionGeneration: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+
 	orch := &countingRecoveryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-b", MaxAttempts: 3,
@@ -680,7 +712,10 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
-	waitJobStatus(t, jobs, "case-resolved-terminal", entity.DecisionJobSucceeded)
+	settled := waitJobStatus(t, jobs, "case-resolved-terminal", entity.DecisionJobSucceeded)
+	if settled.ExecutionGeneration != 1 || settled.Attempt != 1 {
+		t.Fatalf("terminal reconciliation allocated ownership: %+v", settled)
+	}
 	if at := orch.calls.Load(); at != 0 {
 		t.Fatalf("orchestrator invoked %d times for a resolved case", at)
 	}

@@ -174,6 +174,7 @@ func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken
 		return nil, false, fmt.Errorf("decision job: invalid claim token: %w", err)
 	}
 	var claimed DecisionJobModel
+	claimDenied := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing DecisionJobClaimModel
 		if err := tx.Where("claim_token = ?", claimToken).First(&existing).Error; err == nil {
@@ -200,6 +201,10 @@ func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken
 			caseQuery = caseQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := caseQuery.First(&caseModel).Error; err != nil {
+			return err
+		}
+		if terminal, err := reconcileTerminalJob(tx, &claimed, &caseModel); terminal {
+			claimDenied = true
 			return err
 		}
 		if caseModel.ExecutionGeneration != claimed.ExecutionGeneration {
@@ -272,6 +277,9 @@ func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken
 			return nil, false, nil
 		}
 		return nil, false, err
+	}
+	if claimDenied {
+		return nil, false, nil
 	}
 	return jobFromModel(&claimed), true, nil
 }
@@ -498,6 +506,38 @@ var errFinalFailureFence = errors.New("decision job: final failure fence lost")
 // attempt. The job lease, case status, event cursor, and CASE_FAILED event all
 // commit or roll back together.
 func (r *decisionJobRepo) CommitFinalFailure(ctx context.Context, jobID, workerID string, generation int64, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
+	owner := &entity.ExecutionContext{JobID: jobID, CaseID: caseID, WorkerID: workerID, ExecutionGeneration: generation}
+	if generation == 0 {
+		return r.commitFinalFailureLegacy(ctx, jobID, workerID, generation, caseID, expectedCaseStatuses, lastError, event)
+	}
+	if event != nil && event.ExecutionGeneration == 0 {
+		event.ExecutionGeneration = generation
+	}
+	if err := validateOwnedEvent(owner, event); err != nil {
+		return false, err
+	}
+	if event.Type != entity.EventCaseFailed {
+		return false, fmt.Errorf("final failure: invalid event type")
+	}
+	return (&magiRepository{db: r.db}).caseCommit(ctx, owner, event, entity.CaseStatusFailed, true, nil, func(tx *gorm.DB, job *DecisionJobModel, c *CaseModel) error {
+		if !expectedCaseStatus(c, expectedCaseStatuses) || isPublicTerminalCaseStatus(entity.CaseStatus(c.Status)) || c.Status == string(entity.CaseStatusPaused) {
+			return port.ErrLeaseLost
+		}
+		result := tx.Model(&CaseModel{}).Where("id = ? AND execution_generation = ? AND status = ?", caseID, generation, c.Status).Updates(map[string]any{"status": string(entity.CaseStatusFailed), "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return port.ErrLeaseLost
+		}
+		if err := createEventInTx(tx, event); err != nil {
+			return err
+		}
+		return settleExecutionJob(tx, job, entity.DecisionJobFailed, lastError)
+	})
+}
+
+func (r *decisionJobRepo) commitFinalFailureLegacy(ctx context.Context, jobID, workerID string, generation int64, caseID string, expectedCaseStatuses []entity.CaseStatus, lastError string, event *entity.MagiEvent) (bool, error) {
 	if event == nil {
 		return false, fmt.Errorf("decision job: final failure event is required")
 	}
