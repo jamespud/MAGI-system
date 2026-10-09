@@ -11,6 +11,7 @@ import (
 	magi "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/domain/entity"
+	"github.com/jamespud/magi/backend/domain/port"
 )
 
 type recordingCleaner struct {
@@ -77,7 +78,7 @@ func TestRunManager_GenerationRetryIgnoresLegacyCleanupFailure(t *testing.T) {
 	orch := &durableRetryOrchestrator{}
 	cleaner := &failingCleaner{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-bad-clean",
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "worker-bad-clean",
 		MaxAttempts: 3, RetryBase: 10 * time.Millisecond, Cleaner: cleaner,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-bad-clean"}); err != nil {

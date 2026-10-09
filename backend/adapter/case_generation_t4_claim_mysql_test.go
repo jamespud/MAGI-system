@@ -15,10 +15,10 @@ import (
 func TestCaseGeneration_ConcurrentRetryClaimWinsOnMySQL(t *testing.T) {
 	db := openArtifactGenerationMySQL(t)
 	repo, jobs, job := seedArtifactGenerationJob(t, db)
-	first, old := claimArtifactOwner(t, jobs, job, "same-worker")
 	if err := repo.CaseRepo().UpdateStatus(context.Background(), job.CaseID, entity.CaseStatusInvestigating); err != nil {
 		t.Fatal(err)
 	}
+	first, old := claimArtifactOwner(t, jobs, job, "same-worker")
 	requeueArtifactOwner(t, jobs, first, "same-worker")
 	locked, release, lateStarted := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var once, releaseOnce, lateOnce sync.Once
@@ -128,13 +128,60 @@ func TestCaseGeneration_HistoricalTerminalReconciliationOnMySQL(t *testing.T) {
 	}
 }
 
+func TestCaseGeneration_ReviewHistoricalTerminalClassificationOnMySQL(t *testing.T) {
+	for _, tc := range []struct {
+		status entity.CaseStatus
+		job    entity.DecisionJobStatus
+	}{
+		{entity.CaseStatusMemoryIndexed, entity.DecisionJobSucceeded},
+		{entity.CaseStatusInsufficientEv, entity.DecisionJobSucceeded},
+		{entity.CaseStatusFailed, entity.DecisionJobFailed},
+		{entity.CaseStatusTimedOut, entity.DecisionJobFailed},
+		{entity.CaseStatusCancelled, entity.DecisionJobCancelled},
+		{entity.CaseStatusPaused, entity.DecisionJobPaused},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			ctx := context.Background()
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "crashed-worker")
+			// Explicitly reconstruct historical state; public legacy APIs must
+			// not be able to create this window for a positive generation.
+			if err := db.Model(&magi.CaseModel{}).Where("id = ?", owner.CaseID).Update("status", string(tc.status)).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&magi.DecisionJobModel{}).Where("id = ?", owner.JobID).Update("lease_until", time.Now().Add(-time.Hour)).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			claimed, ok, err := jobs.Claim(ctx, job.ID, "replacement-worker", uuid.NewString(), time.Now().Add(time.Minute))
+			if err != nil || ok || claimed != nil {
+				t.Fatalf("historical replacement=%+v ok=%v err=%v", claimed, ok, err)
+			}
+			assertT4State(t, db, owner, tc.status, tc.job, nil, nil)
+			current, err := jobs.GetByCase(ctx, job.CaseID)
+			if err != nil || current.Attempt != 1 {
+				t.Fatalf("reconciliation allocated attempt: %+v err=%v", current, err)
+			}
+			var count int64
+			if err := db.Model(&magi.DecisionJobClaimModel{}).Where("case_id = ?", owner.CaseID).Count(&count).Error; err != nil || count != 1 {
+				t.Fatalf("reconciliation created Claim count=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
 func TestCaseGeneration_TerminalWithoutReceiptCannotClaimOnMySQL(t *testing.T) {
 	ctx := context.Background()
 	db := openArtifactGenerationMySQL(t)
-	repo, jobs, job := seedArtifactGenerationJob(t, db)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
 	first, owner := claimArtifactOwner(t, jobs, job, "crashed-worker")
 	requeueArtifactOwner(t, jobs, first, "crashed-worker")
-	if err := repo.CaseRepo().UpdateStatus(ctx, owner.CaseID, entity.CaseStatusResolved); err != nil {
+	// Deliberately seed an incomplete historical terminal row through SQL;
+	// generation-0 APIs must reject creating it after ownership was claimed.
+	if err := db.Model(&magi.CaseModel{}).Where("id = ?", owner.CaseID).Update("status", string(entity.CaseStatusResolved)).Error; err != nil {
 		t.Fatal(err)
 	}
 	claimed, ok, err := jobs.Claim(ctx, job.ID, "replacement-worker", uuid.NewString(), time.Now().Add(time.Minute))

@@ -97,11 +97,9 @@ func TestCaseGeneration_TerminalABAOnMySQL(t *testing.T) {
 	first, old := claimArtifactOwner(t, jobs, job, "same-worker")
 	requeueArtifactOwner(t, jobs, first, "same-worker")
 	_, current := claimArtifactOwner(t, jobs, job, "same-worker")
-	if err := repo.CaseRepo().UpdateStatus(ctx, job.CaseID, entity.CaseStatusEvaluating); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.CaseRepo().UpdateStatus(ctx, job.CaseID, entity.CaseStatusDraft); err != nil {
-		t.Fatal(err)
+	baseline := transitionT4Case(t, repo, current, entity.CaseStatusDraft, entity.CaseStatusEvaluating)
+	if ok, err := t4Committer(repo).ResetCaseForRetryOwned(ctx, current, []entity.CaseStatus{entity.CaseStatusEvaluating}); err != nil || !ok {
+		t.Fatalf("current retry reset=%v err=%v", ok, err)
 	}
 	event := t4Completion(old, entity.CaseStatusResolved)
 	seq := event.Seq
@@ -112,14 +110,14 @@ func TestCaseGeneration_TerminalABAOnMySQL(t *testing.T) {
 	if event.Seq != seq {
 		t.Fatalf("rejected seq=%d want=%d", event.Seq, seq)
 	}
-	assertT4State(t, db, current, entity.CaseStatusDraft, entity.DecisionJobRunning, nil, nil)
+	assertT4State(t, db, current, entity.CaseStatusDraft, entity.DecisionJobRunning, nil, []string{baseline.ID})
 	res := t4Resolution(current)
 	event = t4Completion(current, entity.CaseStatusResolved)
 	committed, err = t4Committer(repo).CommitTerminalOwned(ctx, current, entity.CaseStatusDraft, entity.CaseStatusResolved, res, &event)
 	if err != nil || !committed {
 		t.Fatalf("current terminal=%v err=%v", committed, err)
 	}
-	assertT4State(t, db, current, entity.CaseStatusResolved, entity.DecisionJobSucceeded, []string{res.ID}, []string{event.ID})
+	assertT4State(t, db, current, entity.CaseStatusResolved, entity.DecisionJobSucceeded, []string{res.ID}, []string{baseline.ID, event.ID})
 }
 
 func TestCaseGeneration_SameWorkerFinalFailureABAOnMySQL(t *testing.T) {

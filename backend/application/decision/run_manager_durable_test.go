@@ -165,6 +165,24 @@ func seedDecisionCase(t *testing.T, db *gorm.DB, id string, userID int64) {
 	}
 }
 
+func seedHistoricalTerminalReceipt(t *testing.T, db *gorm.DB, caseID string, status entity.CaseStatus) {
+	t.Helper()
+	// Reconstruct a pre-T4 split settlement explicitly. Public legacy writes
+	// must reject this after a positive generation has been allocated.
+	event := entity.NewEvent(caseID, "", nil, entity.EventCaseCompleted, map[string]any{"status": string(status)})
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&magi.CaseModel{}).Where("id = ?", caseID).Update("status", string(status)).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&magi.EventModel{ID: event.ID, CaseID: caseID, Seq: 1, Type: string(event.Type), PayloadJSON: string(event.Payload), Timestamp: event.Timestamp}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&magi.EventCursorModel{CaseID: caseID, NextSeq: 2}).Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunManager_DurableControlErrorsAreReported(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-control-error", 0)
@@ -404,7 +422,7 @@ func TestRunManager_RecoverQueuedJob(t *testing.T) {
 	}
 	orch := &durableRetryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(), WorkerID: "worker-recover", MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
+		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(), OwnedCases: magi.NewRepository(db).(port.OwnedCaseCommitter), WorkerID: "worker-recover", MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
 	})
 	if err := rm.Recover(context.Background()); err != nil {
 		t.Fatalf("recover: %v", err)
@@ -422,7 +440,8 @@ func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 	orch := &blockingUserOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(),
-		WorkerID: "worker-pause", MaxAttempts: 2, RetryBase: time.Millisecond,
+		OwnedCases: magi.NewRepository(db).(port.OwnedCaseCommitter),
+		WorkerID:   "worker-pause", MaxAttempts: 2, RetryBase: time.Millisecond,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-pause"}); err != nil {
 		t.Fatalf("start: %v", err)
@@ -577,7 +596,8 @@ func TestRunManager_RunRecoversLeaseExpiredAfterStartup(t *testing.T) {
 	orch := &countingRecoveryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(),
-		WorkerID: "worker-b", MaxAttempts: 2, RecoveryInterval: 10 * time.Millisecond,
+		OwnedCases: magi.NewRepository(db).(port.OwnedCaseCommitter),
+		WorkerID:   "worker-b", MaxAttempts: 2, RecoveryInterval: 10 * time.Millisecond,
 	})
 	recoveryCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -646,13 +666,7 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
 		t.Fatalf("requeue: %v", err)
 	}
-	if err := repo.CaseRepo().UpdateStatus(ctx, "case-deadlocked", entity.CaseStatusDeadlocked); err != nil {
-		t.Fatalf("mark deadlocked: %v", err)
-	}
-	completion := entity.NewEvent("case-deadlocked", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusDeadlocked)})
-	if err := repo.EventRepo().Create(ctx, &completion); err != nil {
-		t.Fatal(err)
-	}
+	seedHistoricalTerminalReceipt(t, db, "case-deadlocked", entity.CaseStatusDeadlocked)
 
 	orch := &countingRecoveryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -694,13 +708,7 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	if err := jobs.RequeueExpired(ctx, time.Now()); err != nil {
 		t.Fatalf("requeue: %v", err)
 	}
-	if err := repo.CaseRepo().UpdateStatus(ctx, "case-resolved-terminal", entity.CaseStatusResolved); err != nil {
-		t.Fatalf("mark resolved: %v", err)
-	}
-	completion := entity.NewEvent("case-resolved-terminal", "", nil, entity.EventCaseCompleted, map[string]any{"status": string(entity.CaseStatusResolved)})
-	if err := repo.EventRepo().Create(ctx, &completion); err != nil {
-		t.Fatal(err)
-	}
+	seedHistoricalTerminalReceipt(t, db, "case-resolved-terminal", entity.CaseStatusResolved)
 	if err := db.Create(&magi.ResolutionModel{ID: "res-historical", CaseID: "case-resolved-terminal", ExecutionGeneration: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -826,7 +834,7 @@ func TestRunManager_RetryPreservesExecutionAttemptAcrossReload(t *testing.T) {
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &attemptRecordingOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "worker-attempt",
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "worker-attempt",
 		MaxAttempts: 2, RetryBase: 10 * time.Millisecond,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-attempt-reload"}); err != nil {

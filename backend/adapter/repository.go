@@ -538,7 +538,14 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 	return caseFromModel(&m), nil
 }
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
-	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("status", string(status)).Error
+	result := r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ? AND execution_generation = 0", id).Update("status", string(status))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return port.ErrLeaseLost
+	}
+	return nil
 }
 
 func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
@@ -550,7 +557,7 @@ func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []
 		statuses[i] = string(status)
 	}
 	result := r.db.WithContext(ctx).Model(&CaseModel{}).
-		Where("id = ? AND status IN ?", id, statuses).
+		Where("id = ? AND execution_generation = 0 AND status IN ?", id, statuses).
 		Updates(map[string]any{"status": string(to), "updated_at": time.Now()})
 	if result.Error != nil {
 		return false, result.Error
@@ -558,10 +565,17 @@ func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []
 	return result.RowsAffected == 1, nil
 }
 func (r *caseRepo) UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error {
-	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).
+	result := r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ? AND execution_generation = 0", id).
 		Updates(map[string]any{
 			"status": string(status), "paused_from_status": string(pausedFrom), "updated_at": time.Now(),
-		}).Error
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return port.ErrLeaseLost
+	}
+	return nil
 }
 func (r *caseRepo) UpdateTask(ctx context.Context, id string, task *entity.DecisionTask) error {
 	return r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ?", id).Update("task_json", toJSON(task)).Error
@@ -980,11 +994,28 @@ func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	if e == nil {
 		return fmt.Errorf("event is required")
 	}
-	if e.ExecutionGeneration > 0 && (e.Type == entity.EventCaseCompleted || e.Type == entity.EventCaseStatusChanged || e.Type == entity.EventCaseFailed) {
+	authoritative := e.Type == entity.EventCaseCompleted || e.Type == entity.EventCaseStatusChanged || e.Type == entity.EventCaseFailed
+	if authoritative && e.ExecutionGeneration != 0 {
 		return port.ErrLeaseLost
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if authoritative {
+				// A legacy event may precede a Case row, and narrow SQLite
+				// fixtures may have only the event tables. Existing Case rows
+				// must be locked here so Claim cannot advance their generation
+				// between this check and the event/cursor insertion.
+				if tx.Dialector.Name() != "sqlite" || tx.Migrator().HasTable(&CaseModel{}) {
+					var c CaseModel
+					err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", e.CaseID).First(&c).Error
+					if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+					if err == nil && c.ExecutionGeneration != 0 {
+						return port.ErrLeaseLost
+					}
+				}
+			}
 			return createEventInTx(tx, e)
 		})
 		if err == nil {

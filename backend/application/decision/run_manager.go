@@ -668,7 +668,7 @@ func (m *RunManager) allowsNonAtomicExecution() bool {
 }
 
 func (m *RunManager) resetCaseForRetry(ctx context.Context, c *entity.DecisionCase, owner *entity.ExecutionContext) (bool, error) {
-	if (c.ExecutionGeneration > 0 || (owner != nil && owner.ExecutionGeneration > 0)) && !m.allowsNonAtomicExecution() {
+	if (c.ExecutionGeneration > 0 || (owner != nil && owner.ExecutionGeneration > 0)) && (m.ownedCases != nil || !m.allowsNonAtomicExecution()) {
 		if m.ownedCases == nil || !owner.IsDurable() || owner.CaseID != c.ID || owner.ExecutionGeneration != c.ExecutionGeneration {
 			return false, port.ErrLeaseLost
 		}

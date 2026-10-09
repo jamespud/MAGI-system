@@ -160,6 +160,10 @@ func reconcileTerminalJob(tx *gorm.DB, job *DecisionJobModel, c *CaseModel) (boo
 		target = entity.DecisionJobPaused
 	case entity.CaseStatusCancelled:
 		target = entity.DecisionJobCancelled
+	case entity.CaseStatusMemoryIndexed, entity.CaseStatusInsufficientEv:
+		// These historical terminal states already settle as success in
+		// RunManager; reconciliation must preserve that classification.
+		target = entity.DecisionJobSucceeded
 	case entity.CaseStatusResolved, entity.CaseStatusDeadlocked:
 		target = entity.DecisionJobSucceeded
 		var count int64

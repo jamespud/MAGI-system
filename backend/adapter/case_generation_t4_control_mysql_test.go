@@ -110,11 +110,8 @@ func TestCaseGeneration_ControlWinsOnMySQL(t *testing.T) {
 			if target == entity.CaseStatusPaused {
 				// Returning to the pre-pause state with the same worker is
 				// another ABA; only the newly claimed generation may continue.
-				if err := repo.CaseRepo().UpdateStatus(ctx, owner.CaseID, entity.CaseStatusDraft); err != nil {
-					t.Fatal(err)
-				}
-				if err := jobs.ResumeQueued(ctx, owner.JobID); err != nil {
-					t.Fatal(err)
+				if ok, err := repo.(port.CaseResumeCommitter).ResumeCaseControl(ctx, owner.CaseID); err != nil || !ok {
+					t.Fatalf("resume control=%v err=%v", ok, err)
 				}
 				_, next := claimArtifactOwner(t, jobs, job, owner.WorkerID)
 				ok, err = t4Committer(repo).CommitTerminalOwned(ctx, owner, entity.CaseStatusDraft, entity.CaseStatusResolved, t4Resolution(owner), &terminalEvent)
