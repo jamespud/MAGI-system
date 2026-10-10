@@ -195,13 +195,13 @@ func verifyWriterPrivileges(ctx context.Context, db *gorm.DB, account string) er
 		return err
 	}
 	quote := func(s string) string { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
-	allowed := map[string]string{}
+	required := map[string]string{}
 	for _, table := range tables {
 		privileges := "SELECT, INSERT, UPDATE, DELETE"
 		if table == "decision_writer_contract" {
 			privileges = "SELECT"
 		}
-		allowed[quote(schema)+"."+quote(table)] = privileges
+		required[quote(schema)+"."+quote(table)] = privileges
 	}
 	var grants []string
 	if err = db.WithContext(ctx).Raw("SHOW GRANTS FOR " + a).Scan(&grants).Error; err != nil {
@@ -216,9 +216,15 @@ func verifyWriterPrivileges(ctx context.Context, db *gorm.DB, account string) er
 			return port.ErrDecisionWriterIdentity
 		}
 		target := strings.SplitN(parts[1], " TO ", 2)
-		if len(target) != 2 || allowed[target[0]] != strings.TrimPrefix(parts[0], "GRANT ") || strings.Contains(target[1], "WITH GRANT OPTION") {
+		if len(target) != 2 || required[target[0]] != strings.TrimPrefix(parts[0], "GRANT ") || strings.Contains(target[1], "WITH GRANT OPTION") {
 			return port.ErrDecisionWriterIdentity
 		}
+		delete(required, target[0])
+	}
+	// Validating only the grants present also accepts USAGE-only accounts or
+	// omitted tables. Every required table must have its exact privilege set.
+	if len(required) != 0 {
+		return port.ErrDecisionWriterIdentity
 	}
 	return nil
 }
