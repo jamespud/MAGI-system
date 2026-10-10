@@ -124,7 +124,8 @@ func (s *stubDatasetRepo) ListItems(ctx context.Context, datasetID string) ([]*e
 func (s *stubDatasetRepo) CreateRun(ctx context.Context, r *entity.BenchmarkRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.runs[r.ID] = r
+	cp := *r
+	s.runs[r.ID] = &cp
 	return nil
 }
 func (s *stubDatasetRepo) ClaimRun(ctx context.Context, runID, owner string, leaseUntil *time.Time) (bool, error) {
@@ -157,7 +158,8 @@ func (s *stubDatasetRepo) ExpireRunLeases(ctx context.Context, now time.Time) er
 func (s *stubDatasetRepo) UpdateRun(ctx context.Context, r *entity.BenchmarkRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.runs[r.ID] = r
+	cp := *r
+	s.runs[r.ID] = &cp
 	return nil
 }
 func (s *stubDatasetRepo) GetRun(ctx context.Context, id string) (*entity.BenchmarkRun, error) {
@@ -664,16 +666,52 @@ func TestService_SummaryAggregatesRuns(t *testing.T) {
 	}
 }
 
+type gatedAutoRegressionOrch struct {
+	stubOrch
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (o *gatedAutoRegressionOrch) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
+	o.once.Do(func() {
+		close(o.entered)
+		<-o.release
+	})
+	return o.stubOrch.Orchestrate(ctx, c)
+}
+
 func TestService_RunAutoRegressionSeedsAndStartsRun(t *testing.T) {
 	repo := newStubDatasetRepo()
 	reg := metrics.New()
-	svc := dataset.NewService(repo, nil, &stubOrch{}, 2,
-		dataset.WithRunsPerItem(1), dataset.WithMetrics(reg))
+	orch := &gatedAutoRegressionOrch{entered: make(chan struct{}), release: make(chan struct{})}
+	svc := dataset.NewService(repo, nil, orch, 2,
+		dataset.WithRunsPerItem(1), dataset.WithMetrics(reg), dataset.WithRunPollInterval(time.Millisecond))
 	ctx := context.Background()
+	var releaseOnce sync.Once
+	var runID string
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(orch.release) })
+		if runID != "" {
+			cleanupCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if _, err := svc.AwaitRun(cleanupCtx, runID); err != nil {
+				t.Errorf("await worker cleanup: %v", err)
+			}
+		}
+	})
 
 	run, err := svc.RunAutoRegression(ctx, 1, 0.5)
 	if err != nil {
 		t.Fatalf("auto regression: %v", err)
+	}
+	if run != nil {
+		runID = run.ID
+	}
+	select {
+	case <-orch.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("benchmark worker did not reach orchestration")
 	}
 	if run == nil || run.Status != entity.BenchmarkRunQueued {
 		t.Fatalf("run = %+v", run)
@@ -685,8 +723,18 @@ func TestService_RunAutoRegressionSeedsAndStartsRun(t *testing.T) {
 		t.Fatalf("auto run metric = %d", reg.BenchmarkAutoRuns.Load())
 	}
 
-	// Second immediate run is skipped because the first is still active.
+	// The first run is blocked in orchestration, so it remains active until
+	// this assertion has completed regardless of worker scheduling.
 	if _, err := svc.RunAutoRegression(ctx, 1, 0.5); !errors.Is(err, dataset.ErrRunActive) {
 		t.Fatalf("expected ErrRunActive, got %v", err)
+	}
+	releaseOnce.Do(func() { close(orch.release) })
+	finishCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := svc.AwaitRun(finishCtx, run.ID); err != nil {
+		t.Fatalf("await completed run: %v", err)
+	}
+	if run.Status != entity.BenchmarkRunQueued || run.LeaseOwner != "" || run.LeaseUntil != nil {
+		t.Fatalf("worker changed the returned enqueue snapshot: %+v", run)
 	}
 }

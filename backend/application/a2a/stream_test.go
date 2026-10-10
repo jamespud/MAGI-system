@@ -210,34 +210,31 @@ type streamCollector struct {
 }
 
 type retryTerminalOrchestrator struct {
-	caseRepo       port.CaseRepository
-	resolutionRepo port.ResolutionRepository
-	events         port.EventRepository
-	calls          atomic.Int32
+	owned port.OwnedCaseCommitter
+	calls atomic.Int32
 }
 
-func (o *retryTerminalOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, execution *entity.ExecutionContext) (*entity.Resolution, error) {
-	if execution == nil || !execution.IsDurable() || execution.CaseID != c.ID || execution.ExecutionGeneration != c.ExecutionGeneration {
+func (o *retryTerminalOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
+	return nil, port.ErrLeaseLost
+}
+func (o *retryTerminalOrchestrator) OrchestrateForExecution(ctx context.Context, c *entity.DecisionCase, owner *entity.ExecutionContext) (*entity.Resolution, error) {
+	if !owner.IsDurable() || owner.CaseID != c.ID || owner.ExecutionGeneration != c.ExecutionGeneration {
 		return nil, port.ErrLeaseLost
 	}
-	return o.Orchestrate(ctx, c)
-}
-
-func (o *retryTerminalOrchestrator) Orchestrate(ctx context.Context, c *entity.DecisionCase) (*entity.Resolution, error) {
 	if o.calls.Add(1) == 1 {
 		return nil, errors.New("transient")
 	}
-	if err := o.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusResolved); err != nil {
-		return nil, err
-	}
-	resolution := &entity.Resolution{ID: "res-" + c.ID, CaseID: c.ID, FinalDecision: entity.VoteDecisionApprove}
-	if err := o.resolutionRepo.Create(ctx, resolution); err != nil {
-		return nil, err
-	}
+	resolution := &entity.Resolution{ID: "res-" + c.ID, CaseID: c.ID, ExecutionGeneration: owner.ExecutionGeneration, FinalDecision: entity.VoteDecisionApprove}
 	completed := entity.NewEvent(c.ID, "", nil, entity.EventCaseCompleted, map[string]any{"status": "RESOLVED"})
-	if err := o.events.Create(ctx, &completed); err != nil {
+	completed.ExecutionGeneration = owner.ExecutionGeneration
+	committed, err := o.owned.CommitTerminalOwned(ctx, owner, c.Status, entity.CaseStatusResolved, resolution, &completed)
+	if err != nil {
 		return nil, err
 	}
+	if !committed {
+		return nil, port.ErrLeaseLost
+	}
+	c.Status = entity.CaseStatusResolved
 	return resolution, nil
 }
 
@@ -369,12 +366,10 @@ func TestRunManager_RetryDoesNotCloseA2AStreamBeforeSuccess(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return len(collector.snapshot()) >= 1 })
 
 	orch := &retryTerminalOrchestrator{
-		caseRepo:       aggregate.CaseRepo(),
-		resolutionRepo: aggregate.ResolutionRepo(),
-		events:         aggregate.EventRepo(),
+		owned: aggregate.(port.OwnedCaseCommitter),
 	}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: aggregate.CaseRepo(), WorkerID: "retry-stream-worker",
+		JobRepo: jobs, CaseRepo: aggregate.CaseRepo(), OwnedCases: aggregate.(port.OwnedCaseCommitter), WorkerID: "retry-stream-worker",
 		MaxAttempts: 2, RetryBase: 100 * time.Millisecond,
 	})
 	// The assertion below watches the stream, which can observe completion

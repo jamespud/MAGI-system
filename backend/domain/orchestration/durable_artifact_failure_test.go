@@ -224,3 +224,21 @@ func TestOrchestrateForExecution_DurableArtifactFailureStopsGeneration(t *testin
 			len(repo.votes), len(repo.evidence), len(repo.claims))
 	}
 }
+
+func (r *durableArtifactRepo) CommitStatusTransitionOwned(_ context.Context, owner *entity.ExecutionContext, expected []entity.CaseStatus, target entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
+	if !owner.IsDurable() || event.ExecutionGeneration != owner.ExecutionGeneration {
+		return false, port.ErrLeaseLost
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statuses[owner.CaseID] = target
+	return true, nil
+}
+func (r *durableArtifactRepo) CommitTerminalOwned(context.Context, *entity.ExecutionContext, entity.CaseStatus, entity.CaseStatus, *entity.Resolution, *entity.MagiEvent) (bool, error) {
+	return false, errors.New("unexpected terminal in artifact-failure fixture")
+}
+func (r *durableArtifactRepo) ResetCaseForRetryOwned(context.Context, *entity.ExecutionContext, []entity.CaseStatus) (bool, error) {
+	return false, errors.New("unexpected retry reset in artifact-failure fixture")
+}
+
+var _ port.OwnedCaseCommitter = (*durableArtifactRepo)(nil)

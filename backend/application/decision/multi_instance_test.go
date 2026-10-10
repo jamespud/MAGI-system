@@ -100,15 +100,8 @@ func TestRunManager_RemoteCancelStopsWorkerAndFencesLateTerminalWrite(t *testing
 	defer rmB.Cancel(caseID)
 	<-orch.started
 
-	job, err := jobs.GetByCase(context.Background(), caseID)
-	if err != nil {
-		t.Fatalf("get job: %v", err)
-	}
-	if err := jobs.Cancel(context.Background(), job.ID); err != nil {
-		t.Fatalf("replica A cancel job: %v", err)
-	}
-	if err := repo.CaseRepo().UpdateStatus(context.Background(), caseID, entity.CaseStatusCancelled); err != nil {
-		t.Fatalf("replica A cancel case: %v", err)
+	if ok, err := repo.(port.CaseControlCommitter).CommitCaseControl(context.Background(), caseID, entity.CaseStatusCancelled); err != nil || !ok {
+		t.Fatalf("replica A cancel=%v err=%v", ok, err)
 	}
 
 	select {
@@ -163,17 +156,14 @@ func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 	decoratedJobs := &retryClaimCancellingRepo{
 		DecisionJobRepository: jobs,
 		cancelAfterClaim: func() {
-			if err := jobs.Cancel(context.Background(), job.ID); err != nil {
-				t.Errorf("remote cancel job: %v", err)
-			}
-			if err := repo.CaseRepo().UpdateStatus(context.Background(), caseID, entity.CaseStatusCancelled); err != nil {
-				t.Errorf("remote cancel case: %v", err)
+			if ok, err := repo.(port.CaseControlCommitter).CommitCaseControl(context.Background(), caseID, entity.CaseStatusCancelled); err != nil || !ok {
+				t.Errorf("remote cancel=%v err=%v", ok, err)
 			}
 		},
 	}
 	orch := &retryResetOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: decoratedJobs, CaseRepo: repo.CaseRepo(), WorkerID: "late-worker", MaxAttempts: 2,
+		JobRepo: decoratedJobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "late-worker", MaxAttempts: 2,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("start retry: %v", err)
@@ -208,7 +198,7 @@ func TestRunManager_RetryKeepsTransientCaseNonterminalWithConditionalWriter(t *t
 	}
 	orch := &failThenSucceedCaseOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, CaseRepo: repo.CaseRepo(), WorkerID: "retry-failed", MaxAttempts: 2, RetryBase: time.Millisecond,
+		JobRepo: jobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "retry-failed", MaxAttempts: 2, RetryBase: time.Millisecond,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("start: %v", err)
@@ -246,17 +236,14 @@ func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 	decoratedJobs := &retryClaimCancellingRepo{
 		DecisionJobRepository: jobs,
 		cancelAfterClaim: func() {
-			if err := jobs.MarkPaused(context.Background(), job.ID); err != nil {
-				t.Errorf("remote pause job: %v", err)
-			}
-			if err := repo.CaseRepo().UpdateStatus(context.Background(), caseID, entity.CaseStatusPaused); err != nil {
-				t.Errorf("remote pause case: %v", err)
+			if ok, err := repo.(port.CaseControlCommitter).CommitCaseControl(context.Background(), caseID, entity.CaseStatusPaused); err != nil || !ok {
+				t.Errorf("remote pause=%v err=%v", ok, err)
 			}
 		},
 	}
 	orch := &retryResetOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: decoratedJobs, CaseRepo: repo.CaseRepo(), WorkerID: "late-paused-worker", MaxAttempts: 2,
+		JobRepo: decoratedJobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter), WorkerID: "late-paused-worker", MaxAttempts: 2,
 	})
 	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("start retry: %v", err)

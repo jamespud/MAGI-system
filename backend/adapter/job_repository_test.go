@@ -543,7 +543,10 @@ func TestDecisionJobRepository_CommitFinalFailureFenceLossRollsBack(t *testing.T
 
 func TestDecisionJobRepository_CommitFinalFailureEventInsertRollback(t *testing.T) {
 	db, repo, jobs, job := newFinalFailureFixture(t, "case-final-event-rollback")
-	duplicate := entity.NewEvent("case-final-event-rollback", "", nil, entity.EventCaseStatusChanged, map[string]any{"status": "INVESTIGATING"})
+	// Occupy the ID with an informational event. Seeding a worker-owned
+	// status event through the legacy Event API must now be refused.
+	duplicate := entity.NewEvent("case-final-event-rollback", "", nil, entity.EventAgentStarted, nil)
+	duplicate.ExecutionGeneration = job.ExecutionGeneration
 	if err := repo.EventRepo().Create(context.Background(), &duplicate); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

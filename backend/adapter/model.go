@@ -195,14 +195,15 @@ type ResolutionModel struct {
 func (ResolutionModel) TableName() string { return "resolution" }
 
 type EventModel struct {
-	ID          string `gorm:"primaryKey"`
-	CaseID      string `gorm:"index:idx_event_case_seq,priority:1;size:64"`
-	Seq         uint64 `gorm:"not null;uniqueIndex:idx_event_case_seq,priority:2"`
-	RunID       string
-	AgentCode   string
-	Type        string
-	PayloadJSON string `gorm:"type:text"`
-	Timestamp   time.Time
+	ID                  string `gorm:"primaryKey"`
+	CaseID              string `gorm:"index:idx_event_case_seq,priority:1;size:64"`
+	ExecutionGeneration int64  `gorm:"not null;default:0"`
+	Seq                 uint64 `gorm:"not null;uniqueIndex:idx_event_case_seq,priority:2"`
+	RunID               string
+	AgentCode           string
+	Type                string
+	PayloadJSON         string `gorm:"type:text"`
+	Timestamp           time.Time
 }
 
 func (EventModel) TableName() string { return "magi_event" }

@@ -69,6 +69,7 @@ type runHandle struct {
 
 type RunManagerDeps struct {
 	JobRepo                  port.DecisionJobRepository
+	OwnedCases               port.OwnedCaseCommitter
 	CaseRepo                 port.CaseRepository
 	WorkerID                 string
 	LeaseDuration            time.Duration
@@ -88,6 +89,7 @@ type RunManagerDeps struct {
 type RunManager struct {
 	orch                 Orchestrator
 	jobRepo              port.DecisionJobRepository
+	ownedCases           port.OwnedCaseCommitter
 	caseRepo             port.CaseRepository
 	workerID             string
 	lease                time.Duration
@@ -126,7 +128,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 		d.RecoveryInterval = 2 * time.Second
 	}
 	return &RunManager{
-		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo,
+		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo, ownedCases: d.OwnedCases,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
 		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
 		recoveryInterval: d.RecoveryInterval,
@@ -255,6 +257,10 @@ func budgetDetail(info *BudgetExceededInfo) string {
 }
 
 func (m *RunManager) launch(c *entity.DecisionCase, job *entity.DecisionJob) bool {
+	if job != nil && !m.allowsNonAtomicExecution() {
+		runtimeCase := *c
+		c = &runtimeCase
+	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	h := &runHandle{cancel: cancel, done: make(chan struct{})}
 	m.mu.Lock()
@@ -381,8 +387,13 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		if m.settleClaimedCaseIfTerminal(c, claimed) {
 			return
 		}
+		owner := &entity.ExecutionContext{CaseID: c.ID, JobID: claimed.ID, WorkerID: m.workerID, JobAttempt: claimed.Attempt, ExecutionGeneration: claimed.ExecutionGeneration}
 		if claimed.Attempt > 1 && c.Status != entity.CaseStatusResolved {
-			if !m.resetCaseForRetry(ctx, c) {
+			if reset, err := m.resetCaseForRetry(ctx, c, owner); err != nil || !reset {
+				if errors.Is(err, port.ErrCommitOutcomeUnknown) {
+					log.Printf("run manager: retry reset outcome unknown: %v", err)
+					return
+				}
 				m.releaseRejectedRetryClaim(claimed)
 				return
 			}
@@ -412,10 +423,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		if !ownerAware {
 			runErr = fmt.Errorf("run manager: durable orchestration requires execution-owner capability")
 		} else {
-			owner := &entity.ExecutionContext{
-				CaseID: c.ID, JobID: claimed.ID, WorkerID: m.workerID,
-				JobAttempt: claimed.Attempt, ExecutionGeneration: claimed.ExecutionGeneration,
-			}
+
 			_, runErr = executionOrch.OrchestrateForExecution(attemptCtx, c, owner)
 		}
 		stopHeartbeat()
@@ -426,6 +434,24 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		}
 
 		if runErr == nil {
+			if claimed.ExecutionGeneration > 0 && !m.allowsNonAtomicExecution() {
+				reader, ok := m.ownedCases.(port.ExecutionSettlementReader)
+				settled := false
+				var err error
+				if ok {
+					confirmCtx, cancel := detachedContext(ctx)
+					settled, err = reader.ExecutionSettled(confirmCtx, owner)
+					cancel()
+				}
+				if !ok || err != nil || !settled {
+					attemptCancel(port.ErrLeaseLost)
+					finishMetrics(false)
+					log.Printf("run manager: successful execution lacks confirmed terminal settlement: case=%s err=%v", c.ID, err)
+				} else {
+					finishMetrics(true)
+				}
+				return
+			}
 			if errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
 				finishMetrics(false)
 				return
@@ -439,7 +465,7 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 			return
 		}
 		finishMetrics(false)
-		if errors.Is(runErr, port.ErrLeaseLost) || errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
+		if errors.Is(runErr, port.ErrCommitOutcomeUnknown) || errors.Is(runErr, port.ErrLeaseLost) || errors.Is(context.Cause(attemptCtx), port.ErrLeaseLost) {
 			return
 		}
 		if ctx.Err() != nil {
@@ -630,25 +656,43 @@ func (m *RunManager) releaseRejectedRetryClaim(job *entity.DecisionJob) {
 	}
 	err := m.markJobFailed(job.ID, job.CaseID, job.ExecutionGeneration, "retry reset fenced", nil)
 	if err != nil && !errors.Is(err, port.ErrLeaseLost) {
-		_ = m.cancelJob(job.ID)
+		log.Printf("run manager: release rejected retry claim %s: %v", job.ID, err)
 	}
 }
 
-func (m *RunManager) resetCaseForRetry(ctx context.Context, c *entity.DecisionCase) bool {
+// Non-durable orchestration fakes must opt in explicitly. A positive
+// generation never implicitly selects the non-atomic compatibility path.
+func (m *RunManager) allowsNonAtomicExecution() bool {
+	legacy, ok := m.orch.(port.NonAtomicTerminalRepository)
+	return ok && legacy.AllowsNonAtomicTerminalCommit()
+}
+
+func (m *RunManager) resetCaseForRetry(ctx context.Context, c *entity.DecisionCase, owner *entity.ExecutionContext) (bool, error) {
+	if (c.ExecutionGeneration > 0 || (owner != nil && owner.ExecutionGeneration > 0)) && (m.ownedCases != nil || !m.allowsNonAtomicExecution()) {
+		if m.ownedCases == nil || !owner.IsDurable() || owner.CaseID != c.ID || owner.ExecutionGeneration != c.ExecutionGeneration {
+			return false, port.ErrLeaseLost
+		}
+		updated, err := m.ownedCases.ResetCaseForRetryOwned(ctx, owner, retryableCaseStatuses())
+		if err != nil || !updated {
+			return false, err
+		}
+		c.Status = entity.CaseStatusDraft
+		return true, nil
+	}
 	if m.caseRepo == nil {
 		c.Status = entity.CaseStatusDraft
-		return true
+		return true, nil
 	}
 	if writer, ok := m.caseRepo.(port.ConditionalCaseStatusWriter); ok {
 		updated, err := writer.UpdateStatusIfCurrent(ctx, c.ID, retryableCaseStatuses(), entity.CaseStatusDraft)
 		if err != nil || !updated {
-			return false
+			return false, err
 		}
 	} else if err := m.caseRepo.UpdateStatus(ctx, c.ID, entity.CaseStatusDraft); err != nil {
-		return false
+		return false, err
 	}
 	c.Status = entity.CaseStatusDraft
-	return true
+	return true, nil
 }
 
 func retryableCaseStatuses() []entity.CaseStatus {
@@ -874,6 +918,16 @@ func (m *RunManager) Cancel(caseID string) bool {
 // A local context cancellation is not reported as success when the durable job
 // could not be invalidated.
 func (m *RunManager) CancelWithError(caseID string) (bool, error) {
+	if control, ok := m.caseRepo.(port.CaseControlCommitter); ok {
+		ctx, cancel := detachedContext(context.Background())
+		controlled, err := control.CommitCaseControl(ctx, caseID, entity.CaseStatusCancelled)
+		cancel()
+		if err != nil || !controlled {
+			return false, err
+		}
+		m.CancelLocal(caseID)
+		return true, nil
+	}
 	m.mu.Lock()
 	_, local := m.runs[caseID]
 	m.mu.Unlock()
@@ -917,6 +971,18 @@ func (m *RunManager) WaitStopped(caseID string, timeout time.Duration) bool {
 	}
 }
 
+// PauseLocal delivers an already-committed external pause to this process.
+func (m *RunManager) PauseLocal(caseID string) bool {
+	m.mu.Lock()
+	h, local := m.runs[caseID]
+	m.paused[caseID] = true
+	m.mu.Unlock()
+	if local {
+		h.cancel()
+	}
+	return local
+}
+
 // Pause stops a running case but keeps its durable job parked instead of
 // cancelled, so a later Resume can wake it from its checkpoint. Returns true
 // when a local worker or durable job was stopped.
@@ -928,6 +994,16 @@ func (m *RunManager) Pause(caseID string) bool {
 // PauseWithError requires durable ownership invalidation to succeed before the
 // local worker is cancelled or the Case is reported paused.
 func (m *RunManager) PauseWithError(caseID string) (bool, error) {
+	if control, ok := m.caseRepo.(port.CaseControlCommitter); ok {
+		ctx, cancel := detachedContext(context.Background())
+		controlled, err := control.CommitCaseControl(ctx, caseID, entity.CaseStatusPaused)
+		cancel()
+		if err != nil || !controlled {
+			return false, err
+		}
+		m.PauseLocal(caseID)
+		return true, nil
+	}
 	m.mu.Lock()
 	h, local := m.runs[caseID]
 	m.mu.Unlock()
@@ -959,6 +1035,15 @@ func (m *RunManager) PauseWithError(caseID string) (bool, error) {
 // the worker when the previous one has fully exited. Local-only runs (no
 // durable job) cannot be resumed and return false.
 func (m *RunManager) Resume(caseID string) bool {
+	if control, ok := m.caseRepo.(port.CaseResumeCommitter); ok {
+		ctx, cancel := detachedContext(context.Background())
+		resumed, err := control.ResumeCaseControl(ctx, caseID)
+		cancel()
+		if err != nil || !resumed {
+			return false
+		}
+		return m.ResumeLocal(caseID)
+	}
 	if m.jobRepo == nil {
 		return false
 	}
@@ -967,6 +1052,15 @@ func (m *RunManager) Resume(caseID string) bool {
 		return false
 	}
 	if err := m.resumeJob(job.ID); err != nil {
+		return false
+	}
+	return m.ResumeLocal(caseID)
+}
+
+// ResumeLocal launches a Job whose external resume already committed.
+func (m *RunManager) ResumeLocal(caseID string) bool {
+	job, err := m.getJobByCase(caseID)
+	if err != nil || job == nil || job.Status != entity.DecisionJobQueued {
 		return false
 	}
 	m.mu.Lock()

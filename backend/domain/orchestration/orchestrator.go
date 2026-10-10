@@ -110,6 +110,9 @@ func (o *Orchestrator) OrchestrateForExecution(ctx context.Context, case_ *entit
 	if _, ok := o.repo.(port.OwnedArtifactRepository); !ok {
 		return nil, port.ErrLeaseLost
 	}
+	if _, ok := o.repo.(port.OwnedCaseCommitter); !ok {
+		return nil, port.ErrLeaseLost
+	}
 	return o.orchestrate(ctx, case_, execution)
 }
 
@@ -125,6 +128,30 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 	status := case_.Status
 	if status == "" {
 		status = entity.CaseStatusDraft
+	}
+	if execution.IsDurable() && (status == entity.CaseStatusResolved || status == entity.CaseStatusDeadlocked) {
+		reader, ok := o.repo.(port.ExecutionSettlementReader)
+		if !ok {
+			return nil, port.ErrLeaseLost
+		}
+		settled, err := reader.ExecutionSettled(ctx, execution)
+		if err != nil {
+			return nil, err
+		}
+		if !settled {
+			return nil, port.ErrLeaseLost
+		}
+		if status == entity.CaseStatusDeadlocked {
+			return nil, nil
+		}
+		existing, err := o.repo.ResolutionRepo().Get(ctx, case_.ID)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil || existing.ExecutionGeneration != execution.ExecutionGeneration {
+			return nil, port.ErrLeaseLost
+		}
+		return existing, nil
 	}
 	if status == entity.CaseStatusResolved && o.repo != nil {
 		if existing, err := o.repo.ResolutionRepo().Get(ctx, case_.ID); err == nil && existing != nil {
@@ -150,7 +177,7 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		}
 		next, done, err := o.dispatch(ctx, case_, prevStatus, status, st)
 		if err != nil {
-			if errors.Is(err, port.ErrLeaseLost) {
+			if errors.Is(err, port.ErrLeaseLost) || errors.Is(err, port.ErrCommitOutcomeUnknown) {
 				return nil, err
 			}
 			return o.fail(ctx, case_, err)
@@ -162,7 +189,7 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 			// completion event land in a single transaction. No
 			// CASE_STATUS_CHANGED is published first, so an A2A subscriber can
 			// never observe a completed Task before its Resolution exists.
-			if err := o.commitTerminal(ctx, case_, status, next, st.Resolution, terminalCompletionEvent(case_, next, st)); err != nil {
+			if err := o.commitTerminal(ctx, case_, status, next, st.Resolution, terminalCompletionEvent(case_, next, st), st.Execution); err != nil {
 				return nil, err
 			}
 			case_.Status = next
@@ -170,13 +197,13 @@ func (o *Orchestrator) orchestrate(ctx context.Context, case_ *entity.DecisionCa
 		}
 		if done {
 			if next != status {
-				if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round); err != nil {
+				if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round, st.Execution); err != nil {
 					return nil, err
 				}
 			}
 			return st.Resolution, nil
 		}
-		if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round); err != nil {
+		if err := o.advanceStatus(ctx, case_, []entity.CaseStatus{status}, next, st.Round, st.Execution); err != nil {
 			return nil, err
 		}
 		status = next
@@ -207,7 +234,25 @@ func (o *Orchestrator) confirmCurrentStatus(ctx context.Context, case_ *entity.D
 // commitTerminal writes the terminal artifacts behind one production
 // transaction fence. Test/in-memory repositories retain the historical
 // conditional-status fallback so their narrow fakes need no DB transaction.
-func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.DecisionCase, expected, target entity.CaseStatus, resolution *entity.Resolution, event entity.MagiEvent) error {
+func (o *Orchestrator) commitTerminal(ctx context.Context, case_ *entity.DecisionCase, expected, target entity.CaseStatus, resolution *entity.Resolution, event entity.MagiEvent, owner *entity.ExecutionContext) error {
+	if case_.ExecutionGeneration > 0 || (owner != nil && owner.ExecutionGeneration > 0) {
+		committer, ok := o.repo.(port.OwnedCaseCommitter)
+		if !ok || !owner.IsDurable() || owner.CaseID != case_.ID || owner.ExecutionGeneration != case_.ExecutionGeneration {
+			return port.ErrLeaseLost
+		}
+		event.ExecutionGeneration = owner.ExecutionGeneration
+		committed, err := committer.CommitTerminalOwned(ctx, owner, expected, target, resolution, &event)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return port.ErrLeaseLost
+		}
+		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
+			_ = live.PublishLive(ctx, event)
+		}
+		return nil
+	}
 	if committer, ok := o.repo.(port.TerminalCommitter); ok {
 		committed, err := committer.CommitTerminal(ctx, case_.ID, expected, target, resolution, &event)
 		if err != nil {
@@ -381,7 +426,7 @@ func terminalCompletionEvent(case_ *entity.DecisionCase, target entity.CaseStatu
 // advanceStatus persists the FSM transition before exposing it in memory or
 // events. Database-backed repositories compare against the expected source
 // state, so a remote cancellation or other owner transition fences late work.
-func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.DecisionCase, from []entity.CaseStatus, to entity.CaseStatus, round int) error {
+func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.DecisionCase, from []entity.CaseStatus, to entity.CaseStatus, round int, owner *entity.ExecutionContext) error {
 	allowed := make([]entity.CaseStatus, 0, len(from))
 	for _, status := range from {
 		switch status {
@@ -402,6 +447,25 @@ func (o *Orchestrator) advanceStatus(ctx context.Context, case_ *entity.Decision
 	}
 	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseStatusChanged,
 		map[string]any{"status": string(to), "round": round})
+	if case_.ExecutionGeneration > 0 || (owner != nil && owner.ExecutionGeneration > 0) {
+		committer, ok := o.repo.(port.OwnedCaseCommitter)
+		if !ok || !owner.IsDurable() || owner.CaseID != case_.ID || owner.ExecutionGeneration != case_.ExecutionGeneration {
+			return port.ErrLeaseLost
+		}
+		event.ExecutionGeneration = owner.ExecutionGeneration
+		committed, err := committer.CommitStatusTransitionOwned(ctx, owner, allowed, to, &event)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return port.ErrLeaseLost
+		}
+		case_.Status = to
+		if live, ok := o.eventPub.(port.LiveEventPublisher); ok {
+			_ = live.PublishLive(ctx, event)
+		}
+		return nil
+	}
 	if committer, ok := o.repo.(port.StatusTransitionCommitter); ok {
 		committed, err := committer.CommitStatusTransition(ctx, case_.ID, allowed, to, &event)
 		if err != nil {
@@ -954,17 +1018,17 @@ func (o *Orchestrator) publish(ctx context.Context, case_ *entity.DecisionCase, 
 // a storage failure from a lease loss.
 func (o *Orchestrator) fail(ctx context.Context, case_ *entity.DecisionCase, cause error) (*entity.Resolution, error) {
 	if isPublicTerminalCaseStatus(case_.Status) {
-		if case_.ExecutionAttempt > 0 {
+		if case_.ExecutionAttempt > 0 || case_.ExecutionGeneration > 0 {
 			return nil, cause
 		}
 		return nil, port.ErrLeaseLost
 	}
-	if case_.ExecutionAttempt > 0 {
+	if case_.ExecutionAttempt > 0 || case_.ExecutionGeneration > 0 {
 		return nil, cause
 	}
 	event := entity.NewEvent(case_.ID, "", nil, entity.EventCaseFailed,
 		map[string]any{"status": string(entity.CaseStatusFailed)})
-	if err := o.commitTerminal(ctx, case_, case_.Status, entity.CaseStatusFailed, nil, event); err != nil {
+	if err := o.commitTerminal(ctx, case_, case_.Status, entity.CaseStatusFailed, nil, event, nil); err != nil {
 		return nil, err
 	}
 	case_.Status = entity.CaseStatusFailed

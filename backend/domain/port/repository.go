@@ -17,6 +17,10 @@ var ErrLeaseLost = errors.New("decision job lease lost")
 // ownership credential.
 var ErrClaimTokenConflict = errors.New("decision job claim token conflict")
 
+// ErrCommitOutcomeUnknown means COMMIT was attempted but its exact write set
+// could not be confirmed. Callers must not replay or settle it as a failure.
+var ErrCommitOutcomeUnknown = errors.New("decision commit outcome unknown")
+
 // Repository is the aggregate persistence port (S6 DB-backed impl; S1-S5 in-memory/test stubs).
 type Repository interface {
 	CaseRepo() CaseRepository
@@ -141,6 +145,32 @@ type NonAtomicTerminalRepository interface {
 // the event.
 type StatusTransitionCommitter interface {
 	CommitStatusTransition(ctx context.Context, caseID string, expected []entity.CaseStatus, target entity.CaseStatus, event *entity.MagiEvent) (bool, error)
+}
+
+// OwnedCaseCommitter binds every worker-driven Case write to its active Job
+// and Case generation in one transaction. Successful terminal commits also
+// settle the Job; legacy interfaces remain generation-0 compatibility APIs.
+type OwnedCaseCommitter interface {
+	CommitStatusTransitionOwned(ctx context.Context, owner *entity.ExecutionContext, expected []entity.CaseStatus, target entity.CaseStatus, event *entity.MagiEvent) (bool, error)
+	CommitTerminalOwned(ctx context.Context, owner *entity.ExecutionContext, expected, target entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error)
+	ResetCaseForRetryOwned(ctx context.Context, owner *entity.ExecutionContext, expected []entity.CaseStatus) (bool, error)
+}
+
+// CaseControlCommitter is external authority: it needs no worker credentials.
+// Pause/Cancel atomically modify Case and invalidate Job ownership.
+type CaseControlCommitter interface {
+	CommitCaseControl(ctx context.Context, caseID string, target entity.CaseStatus) (bool, error)
+}
+
+// CaseResumeCommitter restores a paused Case and queues its Job atomically.
+type CaseResumeCommitter interface {
+	ResumeCaseControl(ctx context.Context, caseID string) (bool, error)
+}
+
+// ExecutionSettlementReader verifies the durable settlement of one generation.
+// It does not require an active lease, which settlement deliberately clears.
+type ExecutionSettlementReader interface {
+	ExecutionSettled(ctx context.Context, owner *entity.ExecutionContext) (bool, error)
 }
 
 // PauseStatusWriter is an optional CaseRepository capability that persists

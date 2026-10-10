@@ -185,6 +185,11 @@ func (s *Service) StartRun(ctx context.Context, case_ *entity.DecisionCase) erro
 	if err := s.runs.Start(ctx, case_); err != nil {
 		return err
 	}
+	if _, durable := s.caseRepo.(port.CaseControlCommitter); durable {
+		// The worker owns every durable status transition. A delayed Start
+		// response must not overwrite a terminal commit with NORMALIZING.
+		return nil
+	}
 	// Execution is asynchronous; surface an in-progress status so the caller
 	// (and the sidebar) sees the case as running immediately.
 	case_.Status = entity.CaseStatusNormalizing
@@ -513,6 +518,19 @@ func (s *Service) ToolCalls(ctx context.Context, caseID string) ([]*entity.ToolC
 
 // Cancel cancels a DecisionCase by setting its status to CANCELLED.
 func (s *Service) Cancel(ctx context.Context, id string) error {
+	if control, ok := s.caseRepo.(port.CaseControlCommitter); ok {
+		controlled, err := control.CommitCaseControl(ctx, id, entity.CaseStatusCancelled)
+		if err != nil {
+			return err
+		}
+		if !controlled {
+			return fmt.Errorf("case is not controllable")
+		}
+		if local, ok := s.runs.(interface{ CancelLocal(string) bool }); ok {
+			local.CancelLocal(id)
+		}
+		return nil
+	}
 	if s.caseRepo == nil {
 		return fmt.Errorf("case repository not configured")
 	}
@@ -559,6 +577,19 @@ func cancellableCaseStatuses() []entity.CaseStatus {
 // status is set to PAUSED with the pre-pause status remembered, and the
 // durable job is marked paused so it is not retried automatically.
 func (s *Service) Pause(ctx context.Context, id string) error {
+	if control, ok := s.caseRepo.(port.CaseControlCommitter); ok {
+		controlled, err := control.CommitCaseControl(ctx, id, entity.CaseStatusPaused)
+		if err != nil {
+			return err
+		}
+		if !controlled {
+			return fmt.Errorf("case is not controllable")
+		}
+		if local, ok := s.runs.(interface{ PauseLocal(string) bool }); ok {
+			local.PauseLocal(id)
+		}
+		return nil
+	}
 	if s.caseRepo == nil {
 		return fmt.Errorf("case repository not configured")
 	}
@@ -588,6 +619,19 @@ func (s *Service) Pause(ctx context.Context, id string) error {
 // Resume wakes a paused case back to the FSM status it had before pausing and
 // re-queues its durable job so the worker continues from its checkpoint.
 func (s *Service) Resume(ctx context.Context, id string) error {
+	if control, ok := s.caseRepo.(port.CaseResumeCommitter); ok {
+		resumed, err := control.ResumeCaseControl(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !resumed {
+			return fmt.Errorf("case is not paused")
+		}
+		if local, ok := s.runs.(interface{ ResumeLocal(string) bool }); ok {
+			local.ResumeLocal(id)
+		}
+		return nil
+	}
 	if s.caseRepo == nil {
 		return fmt.Errorf("case repository not configured")
 	}

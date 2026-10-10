@@ -11,14 +11,15 @@ var eventSequence uint64
 
 // MagiEvent is the unified domain event for trace/audit/replay/SSE (ADR-008).
 type MagiEvent struct {
-	ID        string
-	CaseID    string
-	RunID     string
-	AgentCode *MagiCode
-	Type      EventType
-	Payload   json.RawMessage
-	Seq       uint64
-	Timestamp time.Time
+	ID                  string
+	CaseID              string
+	ExecutionGeneration int64
+	RunID               string
+	AgentCode           *MagiCode
+	Type                EventType
+	Payload             json.RawMessage
+	Seq                 uint64
+	Timestamp           time.Time
 }
 
 type EventType string
