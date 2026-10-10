@@ -3,6 +3,7 @@ package a2aapp_test
 import (
 	"context"
 	"errors"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -568,6 +569,7 @@ func TestSubmissionService_RecoverSettlesExistingTerminalJobsOnce(t *testing.T) 
 			}).Error; err != nil {
 				t.Fatal(err)
 			}
+			testwriter.Enable(t, db)
 			jobs := &countingDecisionJobRepo{DecisionJobRepository: magi.NewDecisionJobRepository(db)}
 			rm := decision.NewRunManager(newBlockingOrch(), decision.RunManagerDeps{JobRepo: jobs})
 			t.Cleanup(rm.Shutdown)

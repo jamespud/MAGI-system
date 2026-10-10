@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -176,6 +177,7 @@ func seedHistoricalTerminalReceipt(t *testing.T, db *gorm.DB, caseID string, sta
 func TestRunManager_DurableControlErrorsAreReported(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-control-error", 0)
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	if _, admitted, err := baseJobs.Admit(context.Background(), "case-control-error", 2, 0); err != nil || !admitted {
 		t.Fatalf("admit: admitted=%v err=%v", admitted, err)
@@ -203,6 +205,7 @@ func TestRunManager_DurableControlErrorsAreReported(t *testing.T) {
 func TestRunManager_TerminalCaseFailureSettlesRunningJob(t *testing.T) {
 	db := openJobDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-terminal-job-settlement"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusResolved}); err != nil {
@@ -253,6 +256,7 @@ func waitJobStatus(t *testing.T, repo interface {
 func TestRunManager_DurableRetry(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-retry", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &durableRetryOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -270,6 +274,7 @@ func TestRunManager_DurableRetry(t *testing.T) {
 func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-heartbeat-blocked", 0)
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &blockingHeartbeatRepo{
 		DecisionJobRepository: baseJobs,
@@ -311,6 +316,7 @@ func TestRunManager_BlockingHeartbeatCancelsAttemptAtLeaseExpiry(t *testing.T) {
 func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-success-error", 0)
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &markSucceededErrorRepo{DecisionJobRepository: baseJobs, err: errors.New("storage unavailable")}
 	orch := &successThenObserveCancellationOrchestrator{observed: make(chan struct{}), release: make(chan struct{})}
@@ -349,6 +355,7 @@ func TestRunManager_MarkSucceededErrorCancelsAttemptWithoutRetry(t *testing.T) {
 func TestRunManager_LeaseLossBeforeLateSuccessDoesNotMarkSucceeded(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-lease-lost-before-success", 0)
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	jobs := &leaseLossBeforeSuccessRepo{DecisionJobRepository: baseJobs}
 	lease := 30 * time.Millisecond
@@ -384,6 +391,7 @@ func TestRunManager_LeaseLossBeforeLateSuccessDoesNotMarkSucceeded(t *testing.T)
 func TestRunManager_RecoverQueuedJob(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-recover", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	if _, admitted, err := jobs.Admit(context.Background(), "case-recover", 2, 0); err != nil || !admitted {
 		t.Fatalf("admit recover: admitted=%v err=%v", admitted, err)
@@ -404,6 +412,7 @@ func TestRunManager_RecoverQueuedJob(t *testing.T) {
 func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-pause", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &blockingUserOrchestrator{started: make(chan struct{}), release: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -437,6 +446,7 @@ func TestRunManager_PauseParksAndResumeWakesDurableJob(t *testing.T) {
 func TestRunManager_ResumeIgnoresNonPausedJobs(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-active", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	rm := decision.NewRunManager(&durableRetryOrchestrator{}, decision.RunManagerDeps{
 		JobRepo: jobs, WorkerID: "worker-resume", MaxAttempts: 2, RetryBase: time.Millisecond,
@@ -473,6 +483,7 @@ func openJobAdmissionDB(t *testing.T) *gorm.DB {
 // decremented before a new run for the same user can be admitted.
 func TestRunManager_CrashedProcessDoesNotLeakConcurrencySlot(t *testing.T) {
 	db := openJobAdmissionDB(t)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	if err := db.Create(&magi.CaseModel{ID: "case-crash-1", UserID: 42, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
@@ -551,6 +562,7 @@ func (o *countingRecoveryOrchestrator) Orchestrate(context.Context, *entity.Deci
 func TestRunManager_RunRecoversLeaseExpiredAfterStartup(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-takeover", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	job, admitted, err := jobs.Admit(ctx, "case-takeover", 2, 0)
@@ -595,6 +607,7 @@ func TestRunManager_RunRecoversLeaseExpiredAfterStartup(t *testing.T) {
 
 func TestRunManager_RunStopsWhenContextCanceled(t *testing.T) {
 	db := openJobDB(t)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	rm := decision.NewRunManager(&countingRecoveryOrchestrator{}, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: magi.NewRepository(db).CaseRepo(), RecoveryInterval: 10 * time.Millisecond,
@@ -622,6 +635,7 @@ func TestRunManager_ClaimedDeadlockedCaseSettlesSucceededBeforeRetryReset(t *tes
 	db := openJobDB(t)
 	repo := magi.NewRepository(db)
 	seedDecisionCase(t, db, "case-deadlocked", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	job, _, err := jobs.Admit(ctx, "case-deadlocked", 3, 0)
@@ -664,6 +678,7 @@ func TestRunManager_ClaimedTerminalCaseDoesNotInvokeOrchestrator(t *testing.T) {
 	}
 	repo := magi.NewRepository(db)
 	seedDecisionCase(t, db, "case-resolved-terminal", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	job, _, err := jobs.Admit(ctx, "case-resolved-terminal", 3, 0)
@@ -742,6 +757,7 @@ func (o *shutdownBlockingOrchestrator) Orchestrate(ctx context.Context, c *entit
 func TestRunManager_ShutdownCancelsWorkers(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-shutdown", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &shutdownBlockingOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -768,6 +784,7 @@ func TestRunManager_ShutdownCancelsWorkers(t *testing.T) {
 func TestRunManager_WaitStoppedDrainsWorker(t *testing.T) {
 	db := openJobDB(t)
 	seedDecisionCase(t, db, "case-waitstop", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &shutdownBlockingOrchestrator{started: make(chan struct{}), cancelled: make(chan struct{})}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
@@ -799,6 +816,7 @@ func TestRunManager_RetryPreservesExecutionAttemptAcrossReload(t *testing.T) {
 	db := openJobDB(t)
 	repo := magi.NewRepository(db)
 	seedDecisionCase(t, db, "case-attempt-reload", 0)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	orch := &attemptRecordingOrchestrator{}
 	rm := decision.NewRunManager(orch, decision.RunManagerDeps{

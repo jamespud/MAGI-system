@@ -465,6 +465,9 @@ func (s *Service) StartRun(ctx context.Context, ownerID int64, datasetID string)
 }
 
 func (s *Service) StartRunWithOptions(ctx context.Context, ownerID int64, datasetID string, opts RunOptions) (*entity.BenchmarkRun, error) {
+	if err := s.checkWriter(ctx); err != nil {
+		return nil, err
+	}
 	ds, err := s.requireDataset(ctx, ownerID, datasetID)
 	if err != nil {
 		return nil, err
@@ -647,6 +650,13 @@ func (s *Service) processRun(runID string, items []*entity.BenchmarkItem, ownerI
 					break
 				}
 			}
+			if policy, ok := s.cases.(port.ExecutionOwnerPolicy); ok && policy.RequiresExecutionOwner() {
+				runner, owned := s.orch.(port.ExecutionOwnerPolicy)
+				if !owned || !runner.RequiresExecutionOwner() {
+					res.Error = port.ErrExecutionOwnerRequired.Error()
+					break
+				}
+			}
 			resolution, runErr := s.orch.Orchestrate(ctx, case_)
 			if runErr != nil {
 				res.Error = runErr.Error()
@@ -772,6 +782,9 @@ func (s *Service) RunDetail(ctx context.Context, ownerID int64, runID string) (*
 // RecoverOrphanRuns marks queued/running runs as failed; called at startup to
 // clean up runs interrupted by a process restart.
 func (s *Service) RecoverOrphanRuns(ctx context.Context) error {
+	if err := s.checkWriter(ctx); err != nil {
+		return err
+	}
 	if err := s.datasets.ExpireRunLeases(ctx, time.Now()); err != nil {
 		return fmt.Errorf("dataset: expire run leases: %w", err)
 	}
@@ -792,6 +805,20 @@ func (s *Service) RecoverOrphanRuns(ctx context.Context) error {
 			continue
 		}
 		go s.processRun(r.ID, items, ds.OwnerID, RunOptions{RunsPerItem: r.RunsPerItem, RegressionThreshold: r.RegressionThreshold})
+	}
+	return nil
+}
+
+// Strict production benchmarks require both owner execution and admission
+// capabilities before persisting/launching a benchmark worker.
+func (s *Service) checkWriter(ctx context.Context) error {
+	if policy, ok := s.cases.(port.ExecutionOwnerPolicy); ok && policy.RequiresExecutionOwner() {
+		runner, owned := s.orch.(port.ExecutionOwnerPolicy)
+		guard, gated := s.orch.(port.DecisionWriterGuard)
+		if !owned || !runner.RequiresExecutionOwner() || !gated {
+			return port.ErrExecutionOwnerRequired
+		}
+		return guard.CheckDecisionWriter(ctx)
 	}
 	return nil
 }

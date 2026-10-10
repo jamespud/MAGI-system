@@ -2,6 +2,7 @@ package magi_test
 
 import (
 	"context"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"testing"
 
 	magi "github.com/jamespud/magi/backend/adapter"
@@ -76,6 +77,8 @@ func TestDecisionJobRepository_ExecutionGenerationRoundTrip(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("seed job: %v", err)
 	}
+
+	testwriter.Enable(t, db)
 
 	repo := magi.NewDecisionJobRepository(db)
 	got, err := repo.GetByCase(ctx, caseID)

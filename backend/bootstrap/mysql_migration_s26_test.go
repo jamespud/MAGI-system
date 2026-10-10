@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"sort"
 	"strings"
 	"testing"
@@ -121,6 +122,7 @@ func TestMySQLMigration_S26AddsClaimRecoveryIdentity(t *testing.T) {
 	if nulls != 2 {
 		t.Fatalf("legacy NULL claim_token rows = %d, want 2", nulls)
 	}
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	if recovered, err := jobs.GetByClaimToken(context.Background(), uuid.NewString()); !errors.Is(err, gorm.ErrRecordNotFound) || recovered != nil {
 		t.Fatalf("legacy NULL-token row recovered by token lookup: job=%+v err=%v", recovered, err)

@@ -28,6 +28,10 @@ func NewDecisionJobRepository(db *gorm.DB) port.DecisionJobRepository {
 	return &decisionJobRepo{db: db}
 }
 
+func (r *decisionJobRepo) CheckDecisionWriter(ctx context.Context) error {
+	return r.db.WithContext(ctx).Transaction(lockDecisionWriterGate)
+}
+
 // Admit atomically enqueues or requeues a decision job under a per-user limit.
 // It takes a per-user database row lock so two replicas cannot both pass the
 // limit, then derives the authority concurrency truth from queued/running
@@ -42,6 +46,9 @@ func (r *decisionJobRepo) Admit(ctx context.Context, caseID string, maxAttempts,
 	var jobEntity *entity.DecisionJob
 	admitted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockDecisionWriterGate(tx); err != nil {
+			return err
+		}
 		// Read the authoritative owner for the case.
 		// On MySQL this must be a locking read: a plain consistent read would
 		// establish this transaction's REPEATABLE READ snapshot before the
@@ -176,6 +183,9 @@ func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken
 	var claimed DecisionJobModel
 	claimDenied := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockDecisionWriterGate(tx); err != nil {
+			return err
+		}
 		var existing DecisionJobClaimModel
 		if err := tx.Where("claim_token = ?", claimToken).First(&existing).Error; err == nil {
 			if existing.JobID != jobID {
@@ -257,6 +267,9 @@ func (r *decisionJobRepo) Claim(ctx context.Context, jobID, workerID, claimToken
 		return nil
 	})
 	if err != nil {
+		if IsDecisionWriterDenied(err) {
+			return nil, false, err
+		}
 		// A commit may have succeeded even when its reply was lost. A stable
 		// token lets the caller/repository recover that exact Claim rather than
 		// blindly allocating another generation.

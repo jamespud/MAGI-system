@@ -353,7 +353,7 @@ func provideTaskTreeRepository(db *gorm.DB) port.TaskTreeRepository {
 }
 
 func provideCaseRepository(db *gorm.DB) port.CaseRepository {
-	return magi.NewRepository(db).CaseRepo()
+	return magi.NewDecisionWriterRepository(db).CaseRepo()
 }
 
 func provideTaskTreeRecorder(db *gorm.DB) port.TaskTreeRecorder {
@@ -920,8 +920,8 @@ func provideDatasetRepository(db *gorm.DB) port.DatasetRepository {
 	return magi.NewDatasetRepository(db)
 }
 
-func provideDatasetService(datasets port.DatasetRepository, orch *orchestration.Orchestrator, repo port.Repository, cfg *Config, reg *metrics.Registry) *dataset.Service {
-	return dataset.NewService(datasets, repo.CaseRepo(), orch, cfg.Magi.MaxDebateRounds,
+func provideDatasetService(datasets port.DatasetRepository, rm *decision.RunManager, jobs port.DecisionJobRepository, repo port.Repository, cfg *Config, reg *metrics.Registry) *dataset.Service {
+	return dataset.NewService(datasets, repo.CaseRepo(), &benchmarkExecutor{runs: rm, repo: repo, jobs: jobs}, cfg.Magi.MaxDebateRounds,
 		dataset.WithRunsPerItem(cfg.Benchmark.RunsPerItem),
 		dataset.WithRegressionThreshold(cfg.Benchmark.RegressionThreshold),
 		dataset.WithMetrics(reg))
@@ -1370,7 +1370,7 @@ func gormLogLevel(s string) logger.LogLevel {
 }
 
 func provideRepository(db *gorm.DB) port.Repository {
-	return magi.NewRepository(db)
+	return magi.NewDecisionWriterRepository(db)
 }
 
 // provideSessionAuthorizer builds the store-backed revalidation used for OIDC
@@ -1530,11 +1530,14 @@ func provideRecurringService(repo port.RecurringRepository, agg port.Repository,
 	return recurring.NewService(repo, agg.CaseRepo(), rm, cfg.Magi.MaxDebateRounds)
 }
 
-func registerScheduler(lc fx.Lifecycle, svc *recurring.Service, lock port.SchedulerLock) {
+func registerScheduler(lc fx.Lifecycle, svc *recurring.Service, lock port.SchedulerLock, rm *decision.RunManager) {
 	ctx, cancel := context.WithCancel(context.Background())
 	owner := "scheduler-" + uuid.NewString()
 	lc.Append(fx.Hook{
 		OnStart: func(startCtx context.Context) error {
+			if err := rm.CheckDecisionWriter(startCtx); err != nil {
+				return err
+			}
 			go recurring.NewSchedulerWithLock(svc, time.Minute, lock, owner).Run(ctx)
 			return nil
 		},

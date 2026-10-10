@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func TestRunManager_RetryRetainsPreviousGenerationEvidence(t *testing.T) {
 	if err := repo.CaseRepo().Create(ctx, c); err != nil {
 		t.Fatal(err)
 	}
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	manager := decision.NewRunManager(&retainingRetryOrchestrator{repo: repo}, decision.RunManagerDeps{
 		JobRepo: jobs, CaseRepo: repo.CaseRepo(), OwnedCases: repo.(port.OwnedCaseCommitter),

@@ -152,6 +152,9 @@ func userIDString(userID int64) string {
 // deliberately not used for execution, so request cancellation cannot kill a
 // submitted decision.
 func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
+	if err := m.CheckDecisionWriter(ctx); err != nil {
+		return err
+	}
 	if c == nil || c.ID == "" {
 		return fmt.Errorf("run manager: case is required")
 	}
@@ -208,6 +211,9 @@ func (m *RunManager) Start(ctx context.Context, c *entity.DecisionCase) error {
 // terminal result; it never resets a completed case or enqueues a second job.
 // A fresh start still runs the authority budget/concurrency checks.
 func (m *RunManager) EnsureStarted(ctx context.Context, c *entity.DecisionCase) error {
+	if err := m.CheckDecisionWriter(ctx); err != nil {
+		return err
+	}
 	if c == nil || c.ID == "" {
 		return fmt.Errorf("run manager: case is required")
 	}
@@ -328,6 +334,9 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 		claimToken := uuid.NewString()
 		claimed, ok, err := m.jobRepo.Claim(ctx, job.ID, m.workerID, claimToken, leaseUntil)
 		if err != nil {
+			if errors.Is(err, port.ErrDecisionWriterBlocked) || errors.Is(err, port.ErrDecisionWriterVersion) || errors.Is(err, port.ErrDecisionWriterIdentity) {
+				return
+			}
 			// The transaction may have committed even though its reply was lost.
 			// Recover only by the exact caller-generated token; never infer a
 			// Claim from workerID/attempt/lease fields. The authoritative reread
@@ -799,6 +808,9 @@ func (m *RunManager) Recover(ctx context.Context) error {
 // relaunch runnable work. Per-job Case load failures (e.g. a deleted Case) are
 // logged and skipped so one bad row cannot stall the rest of the sweep.
 func (m *RunManager) RecoverOnce(ctx context.Context) error {
+	if err := m.CheckDecisionWriter(ctx); err != nil {
+		return err
+	}
 	if m.jobRepo == nil {
 		return nil
 	}
@@ -1095,5 +1107,34 @@ func (m *RunManager) Shutdown() {
 		case <-time.After(remaining):
 			return
 		}
+	}
+}
+
+// CheckDecisionWriter checks launch eligibility; Claim remains the transactional fence.
+func (m *RunManager) CheckDecisionWriter(ctx context.Context) error {
+	if m.jobRepo == nil {
+		if p, ok := m.caseRepo.(port.ExecutionOwnerPolicy); ok && p.RequiresExecutionOwner() {
+			return port.ErrExecutionOwnerRequired
+		}
+	}
+	if guard, ok := m.jobRepo.(port.DecisionWriterGuard); ok {
+		return guard.CheckDecisionWriter(ctx)
+	}
+	return nil
+}
+
+// WaitExecution waits for local settlement without a fixed benchmark timeout.
+func (m *RunManager) WaitExecution(ctx context.Context, caseID string) error {
+	m.mu.Lock()
+	h := m.runs[caseID]
+	m.mu.Unlock()
+	if h == nil {
+		return nil
+	}
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

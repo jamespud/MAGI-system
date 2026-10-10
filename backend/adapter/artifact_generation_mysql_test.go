@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,7 @@ func seedArtifactGenerationJob(t *testing.T, db *gorm.DB) (port.Repository, port
 			_ = db.Exec("DELETE FROM "+table+" WHERE "+cleanupPredicate(table), caseID).Error
 		}
 	})
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	job, err := jobs.GetByCase(ctx, caseID)
 	if err != nil {

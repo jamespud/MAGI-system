@@ -163,6 +163,9 @@ func (s *Service) Create(ctx context.Context, userID int64, question, background
 
 // Run executes the orchestrator on a DecisionCase.
 func (s *Service) Run(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
+	if policy, ok := s.caseRepo.(port.ExecutionOwnerPolicy); ok && policy.RequiresExecutionOwner() {
+		return nil, port.ErrExecutionOwnerRequired
+	}
 	ctx, span := tracing.Start(ctx, "decision.run",
 		attribute.String("case.id", case_.ID), attribute.Int64("user.id", case_.UserID))
 	defer span.End()

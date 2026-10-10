@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,6 +33,7 @@ func seedMySQLDecisionJob(t *testing.T, db *gorm.DB, caseID string, maxAttempts 
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	job, admitted, err := jobs.Admit(context.Background(), caseID, maxAttempts, 0)
 	if err != nil || !admitted {
@@ -288,6 +290,7 @@ func TestMySQLRunManager_ClaimReplyLossRecoversSameGeneration(t *testing.T) {
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	lossy := &mysqlReplyLossJobRepo{DecisionJobRepository: baseJobs}
 	orch := &mysqlSuccessOrchestrator{repo: repo}
@@ -321,6 +324,7 @@ func TestMySQLRunManager_ClaimReplyLossDoesNotResurrectCancelledOwner(t *testing
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
+	testwriter.Enable(t, db)
 	baseJobs := magi.NewDecisionJobRepository(db)
 	lossy := &mysqlReplyLossJobRepo{DecisionJobRepository: baseJobs}
 	lossy.beforeRecovery = func(ctx context.Context, _ string) error {

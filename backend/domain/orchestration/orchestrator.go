@@ -90,6 +90,11 @@ func NewOrchestrator(d OrchestratorDeps) *Orchestrator {
 }
 
 func (o *Orchestrator) Orchestrate(ctx context.Context, case_ *entity.DecisionCase) (*entity.Resolution, error) {
+	for _, persistence := range []any{o.repo, o.caseRepo} {
+		if policy, ok := persistence.(port.ExecutionOwnerPolicy); ok && policy.RequiresExecutionOwner() {
+			return nil, port.ErrExecutionOwnerRequired
+		}
+	}
 	if case_ != nil && case_.ExecutionGeneration > 0 {
 		return nil, port.ErrLeaseLost
 	}
