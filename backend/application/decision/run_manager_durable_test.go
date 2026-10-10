@@ -25,15 +25,6 @@ type durableRetryOrchestrator struct {
 	calls int32
 }
 
-type countingArtifactCleaner struct {
-	calls atomic.Int32
-}
-
-func (c *countingArtifactCleaner) CleanupCaseArtifacts(context.Context, string) error {
-	c.calls.Add(1)
-	return nil
-}
-
 type terminalCaseErrorOrchestrator struct{}
 
 func (terminalCaseErrorOrchestrator) Orchestrate(context.Context, *entity.DecisionCase) (*entity.Resolution, error) {
@@ -145,9 +136,8 @@ func openJobDB(t *testing.T) *gorm.DB {
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	// EventModel/EventCursorModel are needed because CommitFinalFailure (used by
-	// the retry-cleanup-failure path) writes the case event and bumps the
-	// per-case sequence cursor in the same transaction.
+	// CommitFinalFailure writes the case event and advances its sequence
+	// cursor in the same transaction as the final failed attempt.
 	if err := db.AutoMigrate(
 		&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{},
 		&magi.EventModel{}, &magi.EventCursorModel{},
@@ -274,28 +264,6 @@ func TestRunManager_DurableRetry(t *testing.T) {
 	job := waitJobStatus(t, jobs, "case-retry", entity.DecisionJobSucceeded)
 	if job.Attempt != 2 || atomic.LoadInt32(&orch.calls) != 2 {
 		t.Fatalf("retry result: job=%+v calls=%d", job, orch.calls)
-	}
-}
-
-func TestRunManager_GenerationAwareRetryDoesNotCallCaseWideCleaner(t *testing.T) {
-	db := openJobDB(t)
-	seedDecisionCase(t, db, "case-retry-no-cleanup", 0)
-	jobs := magi.NewDecisionJobRepository(db)
-	orch := &durableRetryOrchestrator{}
-	cleaner := &countingArtifactCleaner{}
-	rm := decision.NewRunManager(orch, decision.RunManagerDeps{
-		JobRepo: jobs, WorkerID: "worker-no-cleanup", MaxAttempts: 2,
-		RetryBase: 10 * time.Millisecond, Cleaner: cleaner,
-	})
-	if err := rm.Start(context.Background(), &entity.DecisionCase{ID: "case-retry-no-cleanup"}); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	job := waitJobStatus(t, jobs, "case-retry-no-cleanup", entity.DecisionJobSucceeded)
-	if job.Attempt != 2 || atomic.LoadInt32(&orch.calls) != 2 {
-		t.Fatalf("retry result: job=%+v calls=%d", job, orch.calls)
-	}
-	if got := cleaner.calls.Load(); got != 0 {
-		t.Fatalf("case-wide cleanup calls = %d, want 0 for generation-aware retry", got)
 	}
 }
 

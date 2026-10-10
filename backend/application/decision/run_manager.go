@@ -77,7 +77,6 @@ type RunManagerDeps struct {
 	RetryBase                time.Duration
 	RecoveryInterval         time.Duration
 	Metrics                  *metrics.Registry
-	Cleaner                  port.ArtifactCleaner
 	MaxConcurrentRunsPerUser int
 	BudgetChecker            BudgetChecker
 	LiveEvents               port.LiveEventPublisher
@@ -96,7 +95,6 @@ type RunManager struct {
 	maxAttempts          int
 	retryBase            time.Duration
 	metrics              *metrics.Registry
-	cleaner              port.ArtifactCleaner
 	maxConcurrentPerUser int
 	recoveryInterval     time.Duration
 	budgetChecker        BudgetChecker
@@ -130,7 +128,7 @@ func NewRunManager(orch Orchestrator, deps ...RunManagerDeps) *RunManager {
 	return &RunManager{
 		orch: orch, jobRepo: d.JobRepo, caseRepo: d.CaseRepo, ownedCases: d.OwnedCases,
 		workerID: d.WorkerID, lease: d.LeaseDuration, maxAttempts: d.MaxAttempts,
-		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser, cleaner: d.Cleaner,
+		retryBase: d.RetryBase, metrics: d.Metrics, maxConcurrentPerUser: d.MaxConcurrentRunsPerUser,
 		recoveryInterval: d.RecoveryInterval,
 		budgetChecker:    d.BudgetChecker,
 		liveEvents:       d.LiveEvents,
@@ -397,21 +395,6 @@ func (m *RunManager) execute(ctx context.Context, c *entity.DecisionCase, job *e
 				m.releaseRejectedRetryClaim(claimed)
 				return
 			}
-			if c.ExecutionGeneration == 0 && m.cleaner != nil {
-				// Legacy generation-0 retries still depend on the historical
-				// case-wide cleanup. Positive generations are isolated by T3
-				// read/write fencing and MUST NOT invoke this unsafe delete:
-				// a delayed case-wide cleaner could erase a newer generation.
-				// T5 replaces the legacy cleaner with generation-scoped GC.
-				cleanupCtx, cancelCleanup := detachedContext(ctx)
-				cleanupErr := m.cleaner.CleanupCaseArtifacts(cleanupCtx, c.ID)
-				cancelCleanup()
-				if cleanupErr != nil {
-					log.Printf("run manager: legacy retry cleanup for case %s failed, aborting retry: %v", c.ID, cleanupErr)
-					m.settleRetryCleanupFailure(claimed, c, cleanupErr)
-					return
-				}
-			}
 		}
 		attemptCtx, attemptCancel := context.WithCancelCause(ctx)
 		stopHeartbeat := m.startHeartbeat(attemptCtx, attemptCancel, claimed.ID, c.ID, claimed.ExecutionGeneration, leaseUntil)
@@ -575,35 +558,6 @@ func (m *RunManager) publishLive(event entity.MagiEvent) {
 	ctx, cancel := detachedContext(context.Background())
 	defer cancel()
 	_ = m.liveEvents.PublishLive(ctx, event)
-}
-
-// settleRetryCleanupFailure settles a retry that was aborted because the
-// previous attempt's artifacts could not be removed. resetCaseForRetry has
-// already moved the persisted Case to DRAFT, so settling only the Job would
-// leave Case=DRAFT next to Job=FAILED. CommitFinalFailure CASes the Case
-// (DRAFT -> FAILED) and fences the Job in one transaction, and records the
-// CASE_FAILED event, so the abort is a single atomic terminal settlement.
-func (m *RunManager) settleRetryCleanupFailure(claimed *entity.DecisionJob, c *entity.DecisionCase, cause error) {
-	event := entity.NewEvent(c.ID, "", nil, entity.EventCaseFailed, map[string]any{
-		"status": string(entity.CaseStatusFailed),
-		"reason": "retry cleanup failed",
-	})
-	statuses := []entity.CaseStatus{c.Status}
-	if c.Status == entity.CaseStatusDraft {
-		statuses = append(statuses, "")
-	}
-	committed, err := m.commitFinalFailure(claimed.ID, claimed.ExecutionGeneration, c.ID, statuses, "retry cleanup failed: "+cause.Error(), &event)
-	if err != nil {
-		log.Printf("run manager: settle retry cleanup failure for case %s: %v", c.ID, err)
-		return
-	}
-	if !committed {
-		// Another replica moved the Case first; the job fence is the loser, so
-		// its settlement belongs to whichever write won.
-		return
-	}
-	c.Status = entity.CaseStatusFailed
-	m.publishLive(event)
 }
 
 // settleTerminalCaseJob closes a still-running owner claim when the Case has
