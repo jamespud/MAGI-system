@@ -12,6 +12,8 @@ COPY . ./
 # longer depends on a local vendor dir or a local coze-studio checkout.
 RUN CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w" -o magi-server ./cmd/magi-server
 
+RUN CGO_ENABLED=0 go build -mod=mod -ldflags="-s -w" -o decision-admin ./cmd/decision-admin
+
 FROM alpine:3.21
 
 # ca-certificates: outbound HTTPS (model API/Tavily). python3+deno run the
@@ -23,6 +25,7 @@ RUN printf '%s/v3.21/main\n%s/v3.21/community\n' "$ALPINE_MIRROR" "$ALPINE_MIRRO
 RUN apk add --no-cache ca-certificates python3 deno
 
 COPY --from=builder /app/magi-server /app/magi-server
+COPY --from=builder /app/decision-admin /app/decision-admin
 # Vendored Coze sandbox orchestrator (see backend/sandbox.py header for provenance).
 COPY --from=builder /app/sandbox.py /app/sandbox.py
 # Bake only the structural config (placeholder secrets). Real secrets/DSN are

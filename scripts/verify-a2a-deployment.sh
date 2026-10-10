@@ -5,6 +5,10 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
 
+# Render-only identities/digest; no deploy or credential creation.
+export MAGI_WRITER_IMAGE="render-only@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+export MAGI_WRITER_DB_USER=render_only
+export MAGI_WRITER_DB_PASSWORD=render_only
 compose_out="$tmp_dir/compose.yml"
 MAGI_A2A_ENABLED=true \
 MAGI_AUTH_ENABLED=true \
@@ -19,6 +23,7 @@ rg -q 'MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA' "$compose_out"
 
 helm_out="$tmp_dir/helm.yml"
 helm template magi "$repo_root/deploy/magi" \
+  --set-string backend.image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --set-string secret.values.dbDSN=render-only \
   --set-string secret.values.modelApiKey=render-only \
   --set-string secret.values.authAPIKeys='1:admin:test:render-only-random-secret' \
@@ -35,6 +40,7 @@ rg -q 'MAGI_AUTH_API_KEYS' "$helm_out"
 rg -q 'MAGI_A2A_MAX_STREAMS_PER_USER_PER_REPLICA' "$helm_out"
 
 if helm template magi "$repo_root/deploy/magi" \
+  --set-string backend.image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --set-string secret.values.dbDSN=render-only \
   --set-string secret.values.modelApiKey=render-only \
   --set-string configuration.a2a.enabled=true \
@@ -44,6 +50,7 @@ if helm template magi "$repo_root/deploy/magi" \
 fi
 
 if helm template magi "$repo_root/deploy/magi" \
+  --set-string backend.image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --set-string secret.values.dbDSN=render-only \
   --set-string secret.values.modelApiKey=render-only \
   --set-string configuration.a2a.enabled=true \

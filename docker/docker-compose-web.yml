@@ -34,10 +34,8 @@ services:
 
   magi-server:
     container_name: magi-web-server
-    build:
-      context: ./backend
-      args:
-        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    # Build separately, pin the digest, and distribute only the new identity.
+    image: ${MAGI_WRITER_IMAGE:?Set a verified immutable writer image for T6}
     depends_on:
       mysql:
         condition: service_healthy
@@ -47,7 +45,7 @@ services:
         condition: service_healthy
     environment:
       MAGI_ENV: production
-      MAGI_DB_DSN: "${DB_USER:-magi}:${DB_PASS:-magi123}@tcp(mysql:3306)/${DB_NAME:-magi}?charset=utf8mb4&parseTime=True"
+      MAGI_DB_DSN: "${MAGI_WRITER_DB_USER:?Set the new writer user}:${MAGI_WRITER_DB_PASSWORD:?Set the new writer password}@tcp(mysql:3306)/${DB_NAME:-magi}?charset=utf8mb4&parseTime=True"
       MAGI_DB_DRIVER: mysql
       MAGI_MODEL_API_KEY: ${MAGI_MODEL_API_KEY:-}
       MAGI_MODEL_BASE_URL: ${MAGI_MODEL_BASE_URL:-https://api.deepseek.com}

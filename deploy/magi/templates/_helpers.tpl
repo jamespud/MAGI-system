@@ -48,8 +48,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "magi.backendImage" -}}
-{{- $tag := default .Chart.AppVersion .Values.backend.image.tag -}}
-{{- printf "%s:%s" .Values.backend.image.repository $tag -}}
+{{- $digest := required "backend.image.digest must pin the verified T6 writer image" .Values.backend.image.digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail "backend.image.digest must be sha256 followed by 64 lowercase hex digits" -}}
+{{- end -}}
+{{- printf "%s@%s" .Values.backend.image.repository $digest -}}
 {{- end -}}
 
 {{- define "magi.frontendImage" -}}
