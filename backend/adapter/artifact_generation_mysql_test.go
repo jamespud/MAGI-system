@@ -146,8 +146,8 @@ func TestArtifactGeneration_StaleWriterFencedAndReadsScopedOnMySQL(t *testing.T)
 		})
 	}
 
-	// Intentionally do not call CleanupCaseArtifacts here. T3 correctness
-	// must come from generation fencing/read scoping; cleanup becomes GC in T5.
+	// Retain every generation. Correctness comes from generation fencing and
+	// scoped reads; retry execution has no artifact cleanup capability.
 	requeueArtifactOwner(t, jobs, first, worker)
 	second, owner2 := claimArtifactOwner(t, jobs, job, worker)
 	if second.ExecutionGeneration != first.ExecutionGeneration+1 {

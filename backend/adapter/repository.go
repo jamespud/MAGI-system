@@ -97,36 +97,6 @@ func citedArtifactIDs(kind string, ids []string) ([]string, error) {
 	return out, nil
 }
 
-// CleanupCaseArtifacts removes the persisted artifacts of a previous execution
-// attempt so a resumed retry does not leave duplicate evidence/claims/votes.
-// Checkpoints, events, approval history and resolutions are preserved.
-func (r *magiRepository) CleanupCaseArtifacts(ctx context.Context, caseID string) error {
-	if r.db == nil {
-		return nil
-	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("case_id = ?", caseID).Delete(&ToolCallModel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("case_id = ?", caseID).Delete(&VoteModel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("case_id = ?", caseID).Delete(&ClaimModel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("case_id = ?", caseID).Delete(&EvidenceModel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("case_id = ?", caseID).Delete(&DebateRoundModel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("agent_run_id IN (SELECT id FROM magi_agent_run WHERE case_id = ?)", caseID).Delete(&ReflectionModel{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("case_id = ?", caseID).Delete(&AgentRunModel{}).Error
-	})
-}
-
 func (r *magiRepository) withActiveExecution(ctx context.Context, owner *entity.ExecutionContext, write func(*gorm.DB) error) error {
 	if r.db == nil || owner == nil || !owner.IsDurable() || write == nil {
 		return port.ErrLeaseLost
