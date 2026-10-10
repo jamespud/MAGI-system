@@ -204,3 +204,12 @@ completes, and never roll back the binary to a pre-S16 writer once S16 has run.
 - A full rollback means restoring the pre-S16 backup and then redeploying the
   matching older binary, as one coordinated operation, not an in-place
   downgrade.
+
+
+### ExecutionGeneration writer upgrades
+
+Before upgrading the backend, follow [the T6 cutover runbook](../../docs/execution-generation-cutover.md).
+Set `backend.image.digest` to the verified immutable sha256 digest and use a
+fresh writer Secret. The backend uses Recreate; credential revocation, session
+termination and admission cutover remain mandatory before starting the new
+deployment. Runtime no longer performs schema migration.

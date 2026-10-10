@@ -36,12 +36,21 @@ func fromJSON[T any](s string) T {
 // --- aggregate ---
 
 type magiRepository struct {
-	db *gorm.DB
+	db           *gorm.DB
+	requireOwner bool
 }
 
 func NewRepository(db *gorm.DB) port.Repository {
 	return &magiRepository{db: db}
 }
+
+// NewDecisionWriterRepository is the production persistence boundary. NewRepository
+// is reserved for historical compatibility fixtures and offline data preparation.
+func NewDecisionWriterRepository(db *gorm.DB) port.Repository {
+	return &magiRepository{db: db, requireOwner: true}
+}
+func (r *magiRepository) RequiresExecutionOwner() bool { return r.requireOwner }
+func (r *caseRepo) RequiresExecutionOwner() bool       { return r.requireOwner }
 
 // verifyResolutionReferences refuses a terminal commit whose resolution cites
 // artifacts that are not in the same Case execution generation. It runs inside
@@ -383,21 +392,46 @@ func (r *magiRepository) ListToolCallsByGeneration(ctx context.Context, caseID s
 	return out, nil
 }
 
-func (r *magiRepository) CaseRepo() port.CaseRepository             { return &caseRepo{db: r.db} }
-func (r *magiRepository) AgentRunRepo() port.AgentRunRepository     { return &agentRunRepo{db: r.db} }
-func (r *magiRepository) EvidenceRepo() port.EvidenceRepository     { return &evidenceRepo{db: r.db} }
-func (r *magiRepository) ClaimRepo() port.ClaimRepository           { return &claimRepo{db: r.db} }
-func (r *magiRepository) VoteRepo() port.VoteRepository             { return &voteRepo{db: r.db} }
-func (r *magiRepository) DebateRepo() port.DebateRepository         { return &debateRepo{db: r.db} }
-func (r *magiRepository) ReflectionRepo() port.ReflectionRepository { return &reflectionRepo{db: r.db} }
-func (r *magiRepository) ResolutionRepo() port.ResolutionRepository { return &resolutionRepo{db: r.db} }
-func (r *magiRepository) EventRepo() port.EventRepository           { return &eventRepo{db: r.db} }
-func (r *magiRepository) CheckpointRepo() port.CheckpointRepository { return &checkpointRepo{db: r.db} }
-func (r *magiRepository) MemoryRepo() port.MemoryRepository         { return &memoryRepo{db: r.db} }
-func (r *magiRepository) ToolCallRepo() port.ToolCallRepository     { return &toolCallRepo{db: r.db} }
-func (r *magiRepository) PromptRepo() port.PromptRepository         { return NewPromptRepository(r.db) }
+func (r *magiRepository) CaseRepo() port.CaseRepository {
+	return &caseRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) AgentRunRepo() port.AgentRunRepository {
+	return &agentRunRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) EvidenceRepo() port.EvidenceRepository {
+	return &evidenceRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) ClaimRepo() port.ClaimRepository {
+	return &claimRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) VoteRepo() port.VoteRepository {
+	return &voteRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) DebateRepo() port.DebateRepository {
+	return &debateRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) ReflectionRepo() port.ReflectionRepository {
+	return &reflectionRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) ResolutionRepo() port.ResolutionRepository {
+	return &resolutionRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) EventRepo() port.EventRepository {
+	return &eventRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) CheckpointRepo() port.CheckpointRepository {
+	return &checkpointRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) MemoryRepo() port.MemoryRepository { return &memoryRepo{db: r.db} }
+func (r *magiRepository) ToolCallRepo() port.ToolCallRepository {
+	return &toolCallRepo{db: r.db, requireOwner: r.requireOwner}
+}
+func (r *magiRepository) PromptRepo() port.PromptRepository { return NewPromptRepository(r.db) }
 
 func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expectedStatus entity.CaseStatus, targetStatus entity.CaseStatus, resolution *entity.Resolution, event *entity.MagiEvent) (bool, error) {
+	if r.requireOwner {
+		return false, port.ErrExecutionOwnerRequired
+	}
 	if event == nil {
 		return false, fmt.Errorf("terminal commit: event is required")
 	}
@@ -440,6 +474,9 @@ func (r *magiRepository) CommitTerminal(ctx context.Context, caseID string, expe
 // CASE_STATUS_CHANGED event in one transaction. A false result means the case
 // status moved first and nothing was written.
 func (r *magiRepository) CommitStatusTransition(ctx context.Context, caseID string, expected []entity.CaseStatus, target entity.CaseStatus, event *entity.MagiEvent) (bool, error) {
+	if r.requireOwner {
+		return false, port.ErrExecutionOwnerRequired
+	}
 	if event == nil {
 		return false, fmt.Errorf("status transition commit: event is required")
 	}
@@ -488,9 +525,15 @@ var _ port.StatusTransitionCommitter = (*magiRepository)(nil)
 
 // --- CaseRepository ---
 
-type caseRepo struct{ db *gorm.DB }
+type caseRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *caseRepo) Create(ctx context.Context, c *entity.DecisionCase) error {
+	if r.requireOwner && (c == nil || c.Status != entity.CaseStatusDraft || c.ExecutionGeneration != 0) {
+		return port.ErrExecutionOwnerRequired
+	}
 	// The generation is an ownership epoch, so persist nothing that later fencing
 	// predicates would have to interpret: a negative value is rejected here, at
 	// the storage boundary, not only when a caller validates explicitly.
@@ -508,6 +551,9 @@ func (r *caseRepo) Get(ctx context.Context, id string) (*entity.DecisionCase, er
 	return caseFromModel(&m), nil
 }
 func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.CaseStatus) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	result := r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ? AND execution_generation = 0", id).Update("status", string(status))
 	if result.Error != nil {
 		return result.Error
@@ -519,6 +565,9 @@ func (r *caseRepo) UpdateStatus(ctx context.Context, id string, status entity.Ca
 }
 
 func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []entity.CaseStatus, to entity.CaseStatus) (bool, error) {
+	if r.requireOwner {
+		return false, port.ErrExecutionOwnerRequired
+	}
 	if len(from) == 0 {
 		return false, nil
 	}
@@ -535,6 +584,9 @@ func (r *caseRepo) UpdateStatusIfCurrent(ctx context.Context, id string, from []
 	return result.RowsAffected == 1, nil
 }
 func (r *caseRepo) UpdatePaused(ctx context.Context, id string, status, pausedFrom entity.CaseStatus) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	result := r.db.WithContext(ctx).Model(&CaseModel{}).Where("id = ? AND execution_generation = 0", id).
 		Updates(map[string]any{
 			"status": string(status), "paused_from_status": string(pausedFrom), "updated_at": time.Now(),
@@ -719,9 +771,15 @@ func caseFromModel(m *CaseModel) *entity.DecisionCase {
 
 // --- AgentRunRepository ---
 
-type agentRunRepo struct{ db *gorm.DB }
+type agentRunRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *agentRunRepo) Create(ctx context.Context, a *entity.AgentRun) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if a == nil || a.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -801,9 +859,15 @@ func (r *agentRunRepo) SumUsageByUser(ctx context.Context, userID int64) (int64,
 
 // --- EvidenceRepository ---
 
-type evidenceRepo struct{ db *gorm.DB }
+type evidenceRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *evidenceRepo) Create(ctx context.Context, e *entity.EvidenceRecord) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if e == nil || e.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -849,9 +913,15 @@ func evidenceFromModel(m *EvidenceModel) *entity.EvidenceRecord {
 
 // --- ClaimRepository ---
 
-type claimRepo struct{ db *gorm.DB }
+type claimRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *claimRepo) Create(ctx context.Context, c *entity.Claim) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if c == nil || c.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -891,9 +961,15 @@ func claimFromModel(m *ClaimModel) *entity.Claim {
 
 // --- VoteRepository ---
 
-type voteRepo struct{ db *gorm.DB }
+type voteRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *voteRepo) Create(ctx context.Context, v *entity.Vote) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if v == nil || v.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -926,9 +1002,15 @@ func (r *voteRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.Vot
 
 // --- ResolutionRepository ---
 
-type resolutionRepo struct{ db *gorm.DB }
+type resolutionRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *resolutionRepo) Create(ctx context.Context, res *entity.Resolution) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if res == nil || res.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -958,13 +1040,19 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 
 // --- EventRepository ---
 
-type eventRepo struct{ db *gorm.DB }
+type eventRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *eventRepo) Create(ctx context.Context, e *entity.MagiEvent) error {
 	if e == nil {
 		return fmt.Errorf("event is required")
 	}
 	authoritative := e.Type == entity.EventCaseCompleted || e.Type == entity.EventCaseStatusChanged || e.Type == entity.EventCaseFailed
+	if authoritative && r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if authoritative && e.ExecutionGeneration != 0 {
 		return port.ErrLeaseLost
 	}
@@ -1077,9 +1165,15 @@ func (r *eventRepo) ListAfterSeq(ctx context.Context, caseID string, afterSeq ui
 
 // --- DebateRepository (DB) ---
 
-type debateRepo struct{ db *gorm.DB }
+type debateRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *debateRepo) Create(ctx context.Context, d *entity.DebateRound) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if d == nil || d.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -1105,9 +1199,15 @@ func (r *debateRepo) ListByCase(ctx context.Context, caseID string) ([]*entity.D
 
 // --- ReflectionRepository (DB) ---
 
-type reflectionRepo struct{ db *gorm.DB }
+type reflectionRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *reflectionRepo) Create(ctx context.Context, rf *entity.Reflection) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if rf == nil || rf.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}
@@ -1137,9 +1237,15 @@ func (r *reflectionRepo) ListByCase(ctx context.Context, caseID string) ([]*enti
 
 // --- CheckpointRepository ---
 
-type checkpointRepo struct{ db *gorm.DB }
+type checkpointRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *checkpointRepo) Save(ctx context.Context, state *entity.AgentState) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if state == nil || state.RunID == "" {
 		return nil
 	}
@@ -1313,9 +1419,15 @@ func (r *memoryRepo) Search(ctx context.Context, query string, limit int) ([]*en
 
 // --- ToolCallRepository ---
 
-type toolCallRepo struct{ db *gorm.DB }
+type toolCallRepo struct {
+	db           *gorm.DB
+	requireOwner bool
+}
 
 func (r *toolCallRepo) Create(ctx context.Context, t *entity.ToolCall) error {
+	if r.requireOwner {
+		return port.ErrExecutionOwnerRequired
+	}
 	if t == nil || t.ExecutionGeneration > 0 {
 		return port.ErrLeaseLost
 	}

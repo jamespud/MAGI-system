@@ -3,6 +3,7 @@ package magi_test
 import (
 	"context"
 	"errors"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ func TestDecisionJobRepository_LifecycleAndRetry(t *testing.T) {
 	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	testwriter.Enable(t, db)
 	repo := magi.NewDecisionJobRepository(db)
 	if err := db.Create(&magi.CaseModel{ID: "case-1"}).Error; err != nil {
 		t.Fatalf("seed case: %v", err)
@@ -70,6 +72,7 @@ func TestDecisionJobRepository_OwnerMutationsReportLeaseLoss(t *testing.T) {
 	if err := db.AutoMigrate(&magi.DecisionJobModel{}, &magi.DecisionJobClaimModel{}, &magi.CaseModel{}, &magi.RunAdmissionLockModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	testwriter.Enable(t, db)
 	repo := magi.NewDecisionJobRepository(db)
 	if err := db.Create(&magi.CaseModel{ID: "case-lease-loss"}).Error; err != nil {
 		t.Fatalf("seed case: %v", err)
@@ -119,6 +122,7 @@ func openAdmissionDB(t *testing.T) *gorm.DB {
 
 func TestDecisionJobRepo_AdmitWithinLimitIsAtomic(t *testing.T) {
 	db := openAdmissionDB(t)
+	testwriter.Enable(t, db)
 	repo := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	if err := db.Create(&magi.CaseModel{ID: "case-admit-1", UserID: 7, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
@@ -145,6 +149,7 @@ func TestDecisionJobRepo_AdmitWithinLimitIsAtomic(t *testing.T) {
 
 func TestDecisionJobRepo_AdmitExistingActiveJobIsIdempotent(t *testing.T) {
 	db := openAdmissionDB(t)
+	testwriter.Enable(t, db)
 	repo := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	if err := db.Create(&magi.CaseModel{ID: "case-existing", UserID: 9, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
@@ -168,6 +173,7 @@ func TestDecisionJobRepo_AdmitExistingActiveJobIsIdempotent(t *testing.T) {
 
 func TestDecisionJobRepo_TerminalJobDoesNotConsumeCapacity(t *testing.T) {
 	db := openAdmissionDB(t)
+	testwriter.Enable(t, db)
 	repo := magi.NewDecisionJobRepository(db)
 	ctx := context.Background()
 	if err := db.Create(&magi.CaseModel{ID: "case-term-1", UserID: 11, Status: string(entity.CaseStatusDraft)}).Error; err != nil {
@@ -477,6 +483,7 @@ func newFinalFailureFixture(t *testing.T, caseID string) (*gorm.DB, port.Reposit
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusInvestigating}); err != nil {
 		t.Fatalf("create case: %v", err)
 	}
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	job, _, err := jobs.Admit(context.Background(), caseID, 1, 0)
 	if err != nil {

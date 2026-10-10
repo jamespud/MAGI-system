@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"iter"
 	"strings"
 	"sync"
@@ -356,6 +357,7 @@ func TestStreamProjector_SubscribeTerminalClosesImmediately(t *testing.T) {
 func TestRunManager_RetryDoesNotCloseA2AStreamBeforeSuccess(t *testing.T) {
 	stream, db, repo, broker := newStreamHarness(t, 8)
 	aggregate := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	stream = a2aapp.NewDurableStreamProjector(repo, aggregate.EventRepo(), broker, a2aapp.NewTaskProjector(redact.New("sk-secret")), 8, 10*time.Millisecond)
 	seedStreamTask(t, db, repo, "case-retry-stream", "conv-retry", entity.CaseStatusDraft, nil)

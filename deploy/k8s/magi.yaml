@@ -224,6 +224,8 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: backend
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:
@@ -244,7 +246,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: magi-server
-          image: example.com/magi-server:0.1.0
+          image: example.com/magi-server@sha256:REPLACE_WITH_VERIFIED_WRITER_DIGEST
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

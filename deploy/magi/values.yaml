@@ -13,8 +13,8 @@ backend:
 
   image:
     repository: magi-server
-    # Overrides .Chart.AppVersion when set.
-    tag: ""
+    # Required sha256 digest of the verified T6 writer image.
+    digest: ""
     pullPolicy: IfNotPresent
 
   service:

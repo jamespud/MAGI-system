@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"os"
 	"sync"
 	"testing"
@@ -82,6 +83,7 @@ func TestA2ASubmission_ConcurrentSameMessageOnMySQL(t *testing.T) {
 	assertMySQLCountWhere(t, db, &magi.ConversationMessageModel{}, "conversation_id = ?", []any{cmd.ContextID}, 2)
 
 	// The durable job's case_id unique key also collapses concurrent enqueues.
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	jobErrCh := make(chan error, callers)
 	for i := 0; i < callers; i++ {
@@ -208,6 +210,7 @@ func TestA2ASubmission_ConcurrentSubmitSameMessageOnMySQL(t *testing.T) {
 	_ = db.Exec("DELETE FROM a2a_submission WHERE message_id = ?", messageID)
 
 	repo := magi.NewA2ASubmissionRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	rm := decision.NewRunManager(instantOrch{}, decision.RunManagerDeps{
 		JobRepo: jobs, MaxConcurrentRunsPerUser: 100,
@@ -410,7 +413,9 @@ func TestMySQLDecisionJobAdmissionAcrossReplicas(t *testing.T) {
 	}
 
 	// Two independent GORM handles share the same MySQL schema.
+	testwriter.Enable(t, db)
 	handleA := magi.NewDecisionJobRepository(db)
+	testwriter.Enable(t, db)
 	handleB := magi.NewDecisionJobRepository(db)
 	start := make(chan struct{})
 	result := make(chan struct {

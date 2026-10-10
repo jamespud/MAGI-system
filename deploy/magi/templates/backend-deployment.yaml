@@ -6,6 +6,9 @@ metadata:
     {{- include "magi.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
+  # T6 forbids rolling mixed writer versions; still perform identity cutover.
+  strategy:
+    type: Recreate
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}

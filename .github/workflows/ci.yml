@@ -59,6 +59,15 @@ jobs:
         run: |
           bash -n scripts/backup.sh
           bash -n scripts/restore.sh
+          bash -n scripts/deploy.sh
+          bash -n scripts/decision-cutover.sh
+          bash -n scripts/build-t6-legacy-probe.sh
+
+      - name: Writer cutover ordering and failure containment
+        run: python3 scripts/test-decision-cutover.py
+
+      - name: Writer cutover plan
+        run: scripts/decision-cutover.sh --dry-run
 
       - name: Smoke-test backup planning
         run: scripts/backup.sh --output "$RUNNER_TEMP/magi-backups" --dry-run
@@ -216,3 +225,47 @@ jobs:
         run: >-
           go test -p 1 -count=1 -v ./adapter/
           -run '^TestArtifactGeneration_'
+
+
+  decision-writer-cutover:
+    name: Decision writer cutover (MySQL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: magi_t6
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=20s
+    env:
+      MAGI_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/magi_t6?charset=utf8mb4&parseTime=True
+    steps:
+      - name: Check out full history for the pinned pre-T1 binary
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Build actual pre-T1 writer probe
+        run: |
+          ../scripts/build-t6-legacy-probe.sh "$RUNNER_TEMP/magi-pre-t1"
+          echo "MAGI_T6_LEGACY_PROBE=$RUNNER_TEMP/magi-pre-t1/legacy-probe" >> "$GITHUB_ENV"
+
+      - name: Schema refusal, gate linearization, owner execution, identity exclusion and cutover
+        run: go test -race -p 1 -count=1 -v ./bootstrap/ -run '^TestMySQLDecisionWriter_'

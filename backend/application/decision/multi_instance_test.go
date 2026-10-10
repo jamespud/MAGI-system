@@ -3,6 +3,7 @@ package decision_test
 import (
 	"context"
 	"errors"
+	"github.com/jamespud/magi/backend/internal/testwriter"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -84,6 +85,7 @@ func (o *remoteCancelOrchestrator) Orchestrate(ctx context.Context, c *entity.De
 func TestRunManager_RemoteCancelStopsWorkerAndFencesLateTerminalWrite(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-remote-cancel"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
@@ -135,6 +137,7 @@ func TestRunManager_RemoteCancelStopsWorkerAndFencesLateTerminalWrite(t *testing
 func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-retry-reset-fenced"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
@@ -191,6 +194,7 @@ func TestRunManager_RetryResetDoesNotReviveRemoteCancelledCase(t *testing.T) {
 func TestRunManager_RetryKeepsTransientCaseNonterminalWithConditionalWriter(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-retry-from-failed"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
@@ -216,6 +220,7 @@ func TestRunManager_RetryKeepsTransientCaseNonterminalWithConditionalWriter(t *t
 func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-retry-reset-paused"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
@@ -271,6 +276,7 @@ func TestRunManager_RetryResetDoesNotReviveRemotePausedCase(t *testing.T) {
 func TestRunManager_RetryResetFenceDoesNotLeaveClaimRunning(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	caseID := "case-retry-reset-rejected"
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: caseID, Status: entity.CaseStatusDraft}); err != nil {
@@ -303,6 +309,7 @@ func TestRunManager_RetryResetFenceDoesNotLeaveClaimRunning(t *testing.T) {
 func TestRunManager_DBLimitAcrossInstances(t *testing.T) {
 	db := openMultiDB(t)
 	repo := magi.NewRepository(db)
+	testwriter.Enable(t, db)
 	jobs := magi.NewDecisionJobRepository(db)
 	if err := repo.CaseRepo().Create(context.Background(), &entity.DecisionCase{ID: "c1", UserID: 1, Status: entity.CaseStatusDraft}); err != nil {
 		t.Fatalf("create case: %v", err)
