@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
@@ -1120,17 +1121,42 @@ func provideDB(cfg *Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
-	// S16's event sequence schema must be applied by Atlas first; GORM
-	// AutoMigrate must not attempt to alter the existing event table before its
-	// nullable expand/backfill/contract sequence is complete.
-	models := append(magi.AllModelsWithoutEventSequence(), rag.AllModels()...)
-	if err := db.AutoMigrate(models...); err != nil {
-		return nil, fmt.Errorf("failed to migrate: %w", err)
+	if err := VerifyDecisionWriterSchema(context.Background(), db); err != nil {
+		if pool, e := db.DB(); e == nil {
+			_ = pool.Close()
+		}
+		return nil, err
 	}
-	if err := ensureEventSequenceSchema(db); err != nil {
-		return nil, fmt.Errorf("failed to prepare event sequence schema: %w", err)
+	if err := magi.NewDecisionWriterGuard(db).CheckDecisionWriter(context.Background()); err != nil {
+		if pool, e := db.DB(); e == nil {
+			_ = pool.Close()
+		}
+		return nil, err
 	}
 	return db, nil
+}
+
+// PrepareDecisionWriterDatabase initializes only a provably empty MySQL schema.
+// Runtime never calls it; existing databases use explicit offline migrations.
+func PrepareDecisionWriterDatabase(ctx context.Context, db *gorm.DB) error {
+	var count int64
+	if err := db.WithContext(ctx).Raw("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()").Scan(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 {
+		return fmt.Errorf("%w: initialization requires an empty database; apply explicit offline migrations to existing schemas", port.ErrCutoverPrecondition)
+	}
+	return prepareDecisionWriterFixtureDatabase(ctx, db)
+}
+func prepareDecisionWriterFixtureDatabase(ctx context.Context, db *gorm.DB) error {
+	models := append(magi.AllModelsWithoutEventSequence(), rag.AllModels()...)
+	if err := db.WithContext(ctx).AutoMigrate(models...); err != nil {
+		return err
+	}
+	if err := ensureEventSequenceSchema(db.WithContext(ctx)); err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&magi.DecisionWriterContractModel{ID: 1}).Error
 }
 
 func ensureEventSequenceSchema(db *gorm.DB) error {

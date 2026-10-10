@@ -137,19 +137,24 @@ func shortSchemaSuffix(testName string) string {
 	return s
 }
 
-// provideDBForTest runs the REAL production startup path: AutoMigrate over the
-// safe model list plus the event-sequence bootstrap/verifier.
+// provideDBForTest explicitly prepares migrations, then uses the read-only
+// writer runtime startup. Only fixtures open their own admission directly.
 func provideDBForTest(t *testing.T, dsn string) *gorm.DB {
 	t.Helper()
-	cfg := &Config{}
-	cfg.Database.Driver = "mysql"
-	cfg.Database.DSN = dsn
-	cfg.Database.LogLevel = "silent"
-	db, err := provideDB(cfg)
-	if err != nil {
-		t.Fatalf("provideDB: %v", err)
+	db := openSchema(t, dsn)
+	if err := prepareDecisionWriterFixtureDatabase(context.Background(), db); err != nil {
+		t.Fatal(err)
 	}
-	return db
+	if err := db.Exec("UPDATE decision_writer_contract SET admission_state='ENABLED',cutover_epoch=1,legacy_rollback_forbidden=1,writer_account=CURRENT_USER() WHERE id=1").Error; err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	cfg.Database.Driver, cfg.Database.DSN, cfg.Database.LogLevel = "mysql", dsn, "silent"
+	result, err := provideDB(cfg)
+	if err != nil {
+		t.Fatalf("writer runtime startup: %v", err)
+	}
+	return result
 }
 
 func openSchema(t *testing.T, dsn string) *gorm.DB {

@@ -497,6 +497,7 @@ func (SelfImproveModel) TableName() string { return "self_improve_suggestion" }
 // AllModels returns all GORM models for AutoMigrate.
 func AllModels() []any {
 	return []any{
+		&DecisionWriterContractModel{},
 		&CaseModel{}, &AgentRunModel{}, &DecisionJobModel{}, &DecisionJobClaimModel{}, &RagIndexJobModel{}, &CheckpointModel{}, &EvidenceModel{}, &ClaimModel{},
 		&VoteModel{}, &ResolutionModel{}, &EventModel{}, &EventCursorModel{},
 		&DebateRoundModel{}, &ReflectionModel{}, &MemoryProjectionModel{},
