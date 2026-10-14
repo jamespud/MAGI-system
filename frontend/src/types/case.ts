@@ -69,6 +69,9 @@ export interface Case {
   status: CaseStatus;
   round: number;
   consensus: ConsensusState | null;
+  // UNKNOWN means the minority record was never persisted (legacy); it must not
+  // be presented as a confirmed "no dissent".
+  dissentState?: 'UNKNOWN' | 'NONE' | 'PRESENT';
   dissent?: Dissent[];
   confidence: number;
   finalDecision: string;

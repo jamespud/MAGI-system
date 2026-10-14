@@ -58,6 +58,80 @@ func (s *scriptedChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCalli
 	return s, nil
 }
 
+// citingCommanderModel answers the normalize call with a canned task and the
+// report call with a report that cites the first authoritative ID offered in
+// the prompt. The strict citation validator (issue #13) requires the report to
+// reference the frozen set, whose namespaced IDs a scripted model cannot know
+// ahead of time.
+type citingCommanderModel struct {
+	mu    sync.Mutex
+	calls int
+}
+
+var _ model.ToolCallingChatModel = (*citingCommanderModel)(nil)
+
+func (m *citingCommanderModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	var text strings.Builder
+	for _, msg := range in {
+		if msg != nil {
+			text.WriteString(msg.Content)
+			text.WriteString("\n")
+		}
+	}
+	if strings.Contains(text.String(), "FinalReportData") {
+		return schema.AssistantMessage(citingReportJSON(text.String()), nil), nil
+	}
+	return schema.AssistantMessage(`{"canonical_question":"compute"}`, nil), nil
+}
+
+func (m *citingCommanderModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *citingCommanderModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+// citingReportJSON emits a valid FinalReportData, citing the first evidence ID
+// in the prompt's authoritative list when one is offered.
+func citingReportJSON(prompt string) string {
+	body := map[string]any{
+		"summary":     "decision report summary",
+		"key_reasons": []string{"r1"},
+		"risks":       []string{},
+		"next_steps":  []string{},
+	}
+	if id := firstListedID(prompt, "Available evidence IDs: ["); id != "" {
+		body["key_evidence_ids"] = []string{id}
+	} else if id := firstListedID(prompt, "Available claim IDs: ["); id != "" {
+		body["key_claim_ids"] = []string{id}
+	}
+	raw, _ := json.Marshal(body)
+	return string(raw)
+}
+
+// firstListedID returns the first whitespace-separated token inside the list
+// that follows marker, or "" when the marker is absent or the list is empty.
+func firstListedID(prompt, marker string) string {
+	i := strings.Index(prompt, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := prompt[i+len(marker):]
+	j := strings.IndexByte(rest, ']')
+	if j < 0 {
+		return ""
+	}
+	fields := strings.Fields(rest[:j])
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
 type stubModelPort struct{ m model.ToolCallingChatModel }
 
 func (s *stubModelPort) Build(ctx context.Context, ref entity.ModelRef) (model.ToolCallingChatModel, error) {
@@ -155,10 +229,7 @@ func newCommanderWith(t *testing.T, cycle bool) *service.Commander {
 	t.Helper()
 	gen := validation.NewReflectSchemaGenerator()
 	val := validation.NewJSONSchemaValidator()
-	cm := &scriptedChatModel{responses: []*schema.Message{
-		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"]}`, nil),
-	}, cycle: cycle}
+	cm := &citingCommanderModel{}
 	cmd, err := service.NewCommander(service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"}, &stubModelPort{m: cm}, gen, val)
 	if err != nil {
 		t.Fatalf("commander: %v", err)

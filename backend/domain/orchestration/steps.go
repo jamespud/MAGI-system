@@ -262,19 +262,46 @@ func (o *Orchestrator) stepResolve(ctx context.Context, case_ *entity.DecisionCa
 	res.CaseID = case_.ID
 	res.ExecutionGeneration = case_.ExecutionGeneration
 	res.CreatedAt = time.Now()
+	// Bind the frozen round's minority positions now, from the same ballots the
+	// consensus was computed over. Storing them on the resolution means the
+	// report, HTTP/A2A and export read one authoritative record instead of
+	// re-deriving dissent from mutable vote joins (issue #13).
 	st.Resolution = res
+	dissent, err := o.extractDissent(st)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve dissent: %w", err)
+	}
+	res.Dissent = dissent
 	return entity.CaseStatusGeneratingReport, false, nil
 }
 
 func (o *Orchestrator) stepGenerateReport(ctx context.Context, case_ *entity.DecisionCase, st *State) (entity.CaseStatus, bool, error) {
+	// Provenance of the frozen citation set handed to the report model:
+	// st.Resolution.KeyEvidenceIDs/KeyClaimIDs were built in stepResolve from
+	// THIS round's ledgers and rewritten through the round's ArtifactRemap, so
+	// every ID carries the current execution generation's run prefix
+	// ("<case>-<code>-g<gen>-r<round>-<phase>-<id>"). They are the same durable
+	// rows the terminal committer re-verifies (generation-scoped, all present)
+	// before it publishes the resolution, so the report can never be published
+	// citing a different generation's artifact.
 	report, err := o.commander.GenerateReport(ctx, case_, st.Resolution, st.Votes,
 		st.Resolution.KeyEvidenceIDs, st.Resolution.KeyClaimIDs)
 	if err != nil {
 		return "", false, fmt.Errorf("report generation: %w", err)
 	}
-	// The report body cites IDs as free text; rewrite them to the persisted
-	// namespaced forms so citations resolve in the DB.
-	st.Resolution.FinalReport = mergeRemaps(st.AllRemaps).RemapText(report)
+	// The report is validated against the frozen namespaced ID set before it is
+	// returned, so its structured citations already resolve in the DB. RemapText
+	// still rewrites any bare IDs that appear in the model's prose; it is
+	// idempotent so an already-namespaced citation is not doubled into
+	// "...-EV-001" twice.
+	report = mergeRemaps(st.AllRemaps).RemapText(report)
+	// Persist the deterministic dissent section inside the canonical report so
+	// every read path (HTTP, A2A, export) returns the same bytes and none of
+	// them can silently drop minority positions by skipping a re-derivation.
+	if section := service.RenderDissent(st.Resolution.Dissent); section != "" {
+		report += "\n\n--- Dissent ---\n" + section
+	}
+	st.Resolution.FinalReport = report
 	o.publish(ctx, case_, entity.EventResolutionCreated, map[string]any{"final_decision": string(st.Resolution.FinalDecision)})
 	return entity.CaseStatusSavingMemory, false, nil
 }

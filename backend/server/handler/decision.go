@@ -12,7 +12,6 @@ import (
 	"github.com/jamespud/magi/backend/application/decision"
 	"github.com/jamespud/magi/backend/application/metrics"
 	"github.com/jamespud/magi/backend/domain/entity"
-	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -25,17 +24,15 @@ type DecisionHandler struct {
 	metrics *metrics.Registry
 }
 
+// dissent returns the authoritative minority record persisted with the
+// resolution. It never re-derives dissent from the vote tables: a legacy
+// resolution without a persisted record reports no dissent rather than a
+// reconstructed, unprovable one (issue #13).
 func (h *DecisionHandler) dissent(ctx context.Context, id string, res *entity.Resolution) []entity.Dissent {
 	if res == nil {
 		return nil
 	}
-	votes, _ := h.svc.Votes(ctx, id)
-	runs, _ := h.svc.AgentRuns(ctx, id)
-	codes := make(map[string]entity.MagiCode, len(runs))
-	for _, r := range runs {
-		codes[r.ID] = r.MagiCode
-	}
-	return domainservice.ExtractDissent(res.FinalDecision, votes, codes)
+	return res.Dissent
 }
 
 func NewDecisionHandler(svc *decision.Service, regs ...*metrics.Registry) *DecisionHandler {
@@ -225,11 +222,9 @@ func (h *DecisionHandler) Report(ctx context.Context, c *app.RequestContext) {
 		Forbidden(c)
 		return
 	}
-	res, _ := h.svc.Resolution(ctx, id)
+	// The persisted FinalReport already contains the deterministic dissent
+	// section, so HTTP returns the canonical bytes verbatim.
 	report := h.svc.Report(ctx, id)
-	if ds := h.dissent(ctx, id, res); len(ds) > 0 {
-		report += "\n\n--- Dissent ---\n" + domainservice.RenderDissent(ds)
-	}
 	c.JSON(consts.StatusOK, dto.DecisionReport{Report: report})
 }
 

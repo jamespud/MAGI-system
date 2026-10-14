@@ -182,6 +182,13 @@ func resolvedRecord() *TaskRecord {
 			},
 			FinalDecision: entity.VoteDecisionApprove, FinalReport: "# Final report",
 			KeyEvidenceIDs: []string{"EV-2", "EV-1"}, KeyClaimIDs: []string{"CL-2", "CL-1"},
+			// New-format resolutions persist the authoritative dissent record;
+			// the projector reads it instead of re-deriving from the votes.
+			Dissent: []entity.Dissent{{
+				AgentCode: entity.MagiCodeCasper, Decision: entity.VoteDecisionReject,
+				Reasoning: "too risky", EvidenceIDs: []string{"EV-1"},
+				Conditions: []entity.DecisionCondition{{Statement: "require rollback plan", MustHold: true}},
+			}},
 		},
 		Evidence: []*entity.EvidenceRecord{{ID: "EV-1"}, {ID: "EV-2"}},
 		Claims:   []*entity.Claim{{ID: "CL-1"}, {ID: "CL-2"}},
@@ -244,6 +251,51 @@ func TestTaskProjector_ResolvedArtifactsAreDeterministic(t *testing.T) {
 	}
 	if len(result.Dissent) != 1 || result.Dissent[0].Decision != "reject" {
 		t.Fatalf("dissent = %+v", result.Dissent)
+	}
+	if len(result.Dissent[0].Conditions) != 1 || result.Dissent[0].Conditions[0] != "require rollback plan" {
+		t.Fatalf("dissent conditions = %+v", result.Dissent[0].Conditions)
+	}
+}
+
+// A resolution's dissent must project the tri-state distinctly: null for a
+// legacy "not recorded", [] for an explicit "recorded none", and a populated
+// array for a recorded minority. The projector must not fabricate dissent by
+// re-deriving it from the vote rows (issue #13).
+func TestTaskProjector_DissentTriState(t *testing.T) {
+	cases := []struct {
+		name      string
+		dissent   []entity.Dissent
+		wantState string
+		wantNull  bool
+	}{
+		{"legacy unknown", nil, "UNKNOWN", true},
+		{"recorded none", []entity.Dissent{}, "NONE", false},
+		{"recorded present", []entity.Dissent{{AgentCode: entity.MagiCodeCasper, Decision: entity.VoteDecisionReject, Reasoning: "risk"}}, "PRESENT", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := resolvedRecord()
+			rec.Resolution.Dissent = tc.dissent
+			proj := NewTaskProjector(redact.New("sk-secret"))
+			artifacts := proj.Project(rec, 1, true).Artifacts
+			jsonText, _ := json.Marshal(artifacts[1].Parts[0].Data())
+			var probe struct {
+				DissentState string          `json:"dissentState"`
+				Dissent      json.RawMessage `json:"dissent"`
+			}
+			if err := json.Unmarshal(jsonText, &probe); err != nil {
+				t.Fatal(err)
+			}
+			if probe.DissentState != tc.wantState {
+				t.Fatalf("dissentState = %q, want %q", probe.DissentState, tc.wantState)
+			}
+			if tc.wantNull && string(probe.Dissent) != "null" {
+				t.Fatalf("legacy dissent JSON = %s, want null", probe.Dissent)
+			}
+			if !tc.wantNull && string(probe.Dissent) == "null" {
+				t.Fatalf("recorded dissent JSON = null, want an array")
+			}
+		})
 	}
 }
 

@@ -1,6 +1,9 @@
 package entity
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // ArtifactRemap maps in-memory ledger IDs (EV-001/CL-001) to the namespaced
 // IDs persisted for one dispatch round ("<runID>-<oldID>"). It is the single
@@ -66,21 +69,106 @@ func (m *ArtifactRemap) RemapList(ids []string) []string {
 // RemapText replaces every known in-memory ID inside a text blob with its
 // persisted form. Used for the final report body, whose citations are
 // free-form text rather than structured fields.
+//
+// It is a single left-to-right pass, which makes it idempotent and safe:
+//
+//   - Already-persisted (namespaced) values are matched first and copied
+//     verbatim, so a namespaced ID that contains its bare form as a suffix is
+//     never rewritten into a doubled prefix.
+//   - Bare IDs are replaced longest-match-first and only on token boundaries,
+//     so "EV-001" can neither partially rewrite "EV-0012" nor rewrite the
+//     "EV-001" inside an unrelated "...-EV-001" identifier.
+//   - Matching does not use sentinel/placeholder tokens, so control characters
+//     or other text in the report can never collide with the rewriting.
 func (m *ArtifactRemap) RemapText(s string) string {
 	if m == nil || s == "" {
 		return s
 	}
-	for old, new := range m.evidence {
-		if old != "" {
-			s = strings.ReplaceAll(s, old, new)
+	namespaced := make(map[byte][]string, len(m.evidence)+len(m.claims))
+	bare := make(map[byte][]remapPair, len(m.evidence)+len(m.claims))
+	add := func(old, new string) {
+		if old == "" || new == "" || old == new {
+			return
 		}
+		namespaced[new[0]] = append(namespaced[new[0]], new)
+		bare[old[0]] = append(bare[old[0]], remapPair{old: old, new: new})
+	}
+	for old, new := range m.evidence {
+		add(old, new)
 	}
 	for old, new := range m.claims {
-		if old != "" {
-			s = strings.ReplaceAll(s, old, new)
+		add(old, new)
+	}
+	for b := range namespaced {
+		sort.Slice(namespaced[b], func(i, j int) bool { return len(namespaced[b][i]) > len(namespaced[b][j]) })
+	}
+	for b := range bare {
+		sort.Slice(bare[b], func(i, j int) bool { return len(bare[b][i].old) > len(bare[b][j].old) })
+	}
+
+	out := make([]byte, 0, len(s))
+	i := 0
+	for i < len(s) {
+		if new, ok := matchNamespaced(s, i, namespaced[s[i]]); ok {
+			out = append(out, new...)
+			i += len(new)
+			continue
+		}
+		if pair, ok := matchBare(s, i, bare[s[i]]); ok {
+			out = append(out, pair.new...)
+			i += len(pair.old)
+			continue
+		}
+		out = append(out, s[i])
+		i++
+	}
+	return string(out)
+}
+
+type remapPair struct{ old, new string }
+
+// matchNamespaced returns the longest already-persisted id that starts at i on
+// a token boundary.
+func matchNamespaced(s string, i int, candidates []string) (string, bool) {
+	for _, cand := range candidates {
+		if strings.HasPrefix(s[i:], cand) && idTokenBoundary(s, i, len(cand)) {
+			return cand, true
 		}
 	}
-	return s
+	return "", false
+}
+
+// matchBare returns the longest bare id that starts at i on a token boundary.
+func matchBare(s string, i int, candidates []remapPair) (remapPair, bool) {
+	for _, cand := range candidates {
+		if strings.HasPrefix(s[i:], cand.old) && idTokenBoundary(s, i, len(cand.old)) {
+			return cand, true
+		}
+	}
+	return remapPair{}, false
+}
+
+// idTokenBoundary reports whether the substring s[i:i+n] is delimited by
+// characters that cannot be part of an artifact id.
+func idTokenBoundary(s string, i, n int) bool {
+	if i > 0 && isIDByte(s[i-1]) {
+		return false
+	}
+	if j := i + n; j < len(s) && isIDByte(s[j]) {
+		return false
+	}
+	return true
+}
+
+func isIDByte(b byte) bool {
+	switch {
+	case b >= '0' && b <= '9', b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z':
+		return true
+	case b == '-' || b == '_':
+		return true
+	default:
+		return false
+	}
 }
 
 // Merge folds other's mappings into m.

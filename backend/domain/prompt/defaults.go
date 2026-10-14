@@ -35,7 +35,6 @@ Constraints: {{CONSTRAINTS}}`,
 		KeyCommanderReport: `{{PERSONA}}
 
 Generate a FinalReportData JSON for this decision. You MUST include ALL fields:
-- decision: the final decision (approve/reject/conditional_approve)
 - summary: a one-paragraph summary of the decision
 - key_reasons: main reasoning points (array of strings)
 - risks: risks or dissenting points (array of strings)
@@ -46,7 +45,7 @@ Generate a FinalReportData JSON for this decision. You MUST include ALL fields:
 Question: {{QUESTION}}. Consensus: {{CONSENSUS}}. Votes: {{VOTES}}.
 Available evidence IDs: {{EVIDENCE_IDS}}
 Available claim IDs: {{CLAIM_IDS}}
-When evidence or claim IDs are available you MUST cite at least one of them in key_evidence_ids/key_claim_ids.`,
+When evidence or claim IDs are available you MUST cite at least one of them in key_evidence_ids/key_claim_ids, using ONLY the IDs listed above. Do not state the final decision yourself; the deterministic resolver supplies it.`,
 		KeyAgentWorkflowTools: `Workflow: gather evidence via tool calls; limit yourself to AT MOST 3 tool calls. Once you have gathered enough evidence, STOP calling tools and output an EvidenceSummary JSON (no tool calls) citing real EV-IDs; after the gate passes, output a Vote JSON. Do not keep searching past 3 calls -- converge to a decision.
 
 You may also submit claims incrementally during the gather phase:

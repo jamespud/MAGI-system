@@ -9,7 +9,6 @@ import (
 	a2a "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/jamespud/magi/backend/application/redact"
 	"github.com/jamespud/magi/backend/domain/entity"
-	"github.com/jamespud/magi/backend/domain/service"
 )
 
 // JobNone marks "no durable job row" inside a StatusGroup. The adapter turns it
@@ -361,7 +360,8 @@ func (p *TaskProjector) artifactParts(rec *TaskRecord) (*a2a.Part, *a2a.Part) {
 		md := &a2a.Part{Content: a2a.Text(summary), Filename: "decision-report.md", MediaType: "text/markdown"}
 		result := &a2a.Part{Content: a2a.Data{Value: decisionResultJSON{
 			SchemaVersion: "1", CaseID: rec.Case.ID, ContextID: rec.Submission.ContextID,
-			Outcome: outcome, Dissent: []dissentJSON{}, EvidenceRefs: []string{}, ClaimRefs: []string{},
+			Outcome: outcome, DissentState: string(entity.DissentUnknown),
+			Dissent: nil, EvidenceRefs: []string{}, ClaimRefs: []string{},
 		}}, Filename: "decision-result.json", MediaType: "application/json"}
 		return md, result
 	}
@@ -377,17 +377,30 @@ func (p *TaskProjector) decisionResult(rec *TaskRecord) decisionResultJSON {
 	decision := string(res.FinalDecision)
 	confidence := decisionConfidence(res)
 	consensus := &consensusJSON{Outcome: string(res.Consensus.Outcome), Round: res.Consensus.Round}
-	dissent := make([]dissentJSON, 0)
-	for _, d := range service.ExtractDissent(res.FinalDecision, resolutionVotes(res), nil) {
-		dissent = append(dissent, dissentJSON{
-			AgentCode: string(d.AgentCode), Decision: string(d.Decision),
-			Reasoning: p.redactor.String(d.Reasoning), EvidenceRefs: d.EvidenceIDs, ClaimRefs: d.ClaimIDs,
-		})
+	// Dissent is read from the authoritative record persisted with the
+	// resolution, not re-derived from the vote list (issue #13). Its nil-ness
+	// encodes the tri-state: nil -> not recorded, [] -> recorded none.
+	dissentState := res.DissentState()
+	var dissent []dissentJSON
+	if res.Dissent != nil {
+		dissent = make([]dissentJSON, 0, len(res.Dissent))
+		for _, d := range res.Dissent {
+			conds := make([]string, 0, len(d.Conditions))
+			for _, c := range d.Conditions {
+				conds = append(conds, p.redactor.String(c.Statement))
+			}
+			dissent = append(dissent, dissentJSON{
+				AgentCode: string(d.AgentCode), Decision: string(d.Decision),
+				Reasoning: p.redactor.String(d.Reasoning), EvidenceRefs: d.EvidenceIDs, ClaimRefs: d.ClaimIDs,
+				Conditions: conds,
+			})
+		}
 	}
 	return decisionResultJSON{
 		SchemaVersion: "1", CaseID: rec.Case.ID, ContextID: rec.Submission.ContextID,
 		Outcome: "resolved", Decision: &decision, Consensus: consensus, Confidence: &confidence,
-		Dissent: dissent, EvidenceRefs: sortedCopy(res.KeyEvidenceIDs), ClaimRefs: sortedCopy(res.KeyClaimIDs),
+		DissentState: string(dissentState), Dissent: dissent,
+		EvidenceRefs: sortedCopy(res.KeyEvidenceIDs), ClaimRefs: sortedCopy(res.KeyClaimIDs),
 	}
 }
 
@@ -439,9 +452,13 @@ type decisionResultJSON struct {
 	Decision      *string        `json:"decision"`
 	Consensus     *consensusJSON `json:"consensus,omitempty"`
 	Confidence    *float64       `json:"confidence"`
-	Dissent       []dissentJSON  `json:"dissent"`
-	EvidenceRefs  []string       `json:"evidenceRefs"`
-	ClaimRefs     []string       `json:"claimRefs"`
+	// DissentState is UNKNOWN (never recorded), NONE (recorded no dissent) or
+	// PRESENT. Dissent is null for UNKNOWN, [] for NONE and the minority list
+	// for PRESENT (issue #13).
+	DissentState string        `json:"dissentState"`
+	Dissent      []dissentJSON `json:"dissent"`
+	EvidenceRefs []string      `json:"evidenceRefs"`
+	ClaimRefs    []string      `json:"claimRefs"`
 }
 
 type consensusJSON struct {
@@ -455,4 +472,5 @@ type dissentJSON struct {
 	Reasoning    string   `json:"reasoning,omitempty"`
 	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
 	ClaimRefs    []string `json:"claimRefs,omitempty"`
+	Conditions   []string `json:"conditions,omitempty"`
 }

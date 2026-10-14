@@ -187,9 +187,13 @@ type ResolutionModel struct {
 	FinalReport         string `gorm:"type:text"`
 	KeyEvidenceIDsJSON  string `gorm:"type:text"`
 	KeyClaimIDsJSON     string `gorm:"type:text"`
-	VoteIDsJSON         string `gorm:"type:text"`
-	EvaluationJSON      string `gorm:"type:text"`
-	CreatedAt           time.Time
+	// DissentJSON is nullable on purpose: NULL means the minority record was
+	// never persisted (legacy/uncommitted), while "[]" is an explicit recorded
+	// "no dissent". The distinction is part of the REPORT-01 contract.
+	DissentJSON    *string `gorm:"type:text"`
+	VoteIDsJSON    string  `gorm:"type:text"`
+	EvaluationJSON string  `gorm:"type:text"`
+	CreatedAt      time.Time
 }
 
 func (ResolutionModel) TableName() string { return "resolution" }

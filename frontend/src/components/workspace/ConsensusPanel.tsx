@@ -11,6 +11,7 @@ export default function ConsensusPanel() {
   const status = useCaseStore((s) => s.case?.status ?? 'DRAFT');
   const agents = useAgentStore((s) => s.agents);
   const dissent = useCaseStore((s) => s.case?.dissent ?? []);
+  const dissentState = useCaseStore((s) => s.case?.dissentState);
 
   const renderVoteIcon = (stance: string | undefined) => {
     const s = normalizeStance(stance);
@@ -138,6 +139,15 @@ export default function ConsensusPanel() {
           );
         })}
       </div>
+
+      {dissentState === 'UNKNOWN' && dissent.length === 0 && (
+        <div className="mt-4 pt-4 border-t border-border-dim">
+          <h4 className="font-mono text-xs font-semibold text-text-muted uppercase tracking-wider">Dissent</h4>
+          <p className="mt-2 text-xs text-text-muted">
+            Not recorded: this resolution predates structured dissent persistence, so minority positions cannot be confirmed.
+          </p>
+        </div>
+      )}
 
       {dissent.length > 0 && (
         <div className="mt-4 pt-4 border-t border-border-dim">
