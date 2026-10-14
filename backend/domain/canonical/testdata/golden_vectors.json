@@ -1,0 +1,183 @@
+{
+  "profile": "magi-cj/1",
+  "digest_alg": "sha256",
+  "positive": [
+    {
+      "name": "keys_sorted_basic",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"b\":1,\"a\":2}",
+      "canonical_bytes_hex": "7b2261223a322c2262223a317d",
+      "digest": "aa4e75e9b8c5b48b3c5a139dce86c490e250ff114182364abb86af70ecc43291"
+    },
+    {
+      "name": "nested_arrays_objects",
+      "artifact_type": "ballot_set",
+      "input_json": "{\"z\":[3,1,2],\"a\":{\"c\":true,\"b\":null}}",
+      "canonical_bytes_hex": "7b2261223a7b2262223a6e756c6c2c2263223a747275657d2c227a223a5b332c312c325d7d",
+      "digest": "ecd2d5c2c21e4225cba18374d6474b05307b255d38dc72a4fe854d91c810fdd4"
+    },
+    {
+      "name": "int_max_safe",
+      "artifact_type": "decision_record",
+      "input_json": "{\"n\":9007199254740991}",
+      "canonical_bytes_hex": "7b226e223a393030373139393235343734303939317d",
+      "digest": "b34b4f3b64fbe2cd67a578cd733671c5332283f68283fdc4e2e30ac4f4e27b25"
+    },
+    {
+      "name": "int_min_safe",
+      "artifact_type": "decision_record",
+      "input_json": "{\"n\":-9007199254740991}",
+      "canonical_bytes_hex": "7b226e223a2d393030373139393235343734303939317d",
+      "digest": "0b3210adc0e0b2b5ffe176f09b71f9e3a26e80d71a8bb59f18c8b80b1fde7b20"
+    },
+    {
+      "name": "explicit_null",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"a\":null}",
+      "canonical_bytes_hex": "7b2261223a6e756c6c7d",
+      "digest": "173a407312f3ada79e345dccfdb2b79576daffb21a561bae235d18ca2247250d"
+    },
+    {
+      "name": "empty_object",
+      "artifact_type": "decision_charter",
+      "input_json": "{}",
+      "canonical_bytes_hex": "7b7d",
+      "digest": "7f6f979cdb58201e2e9329250a2ab0119caae74e367c59cbcbd448eb29d08ddd"
+    },
+    {
+      "name": "empty_array",
+      "artifact_type": "candidate_snapshot",
+      "input_json": "[]",
+      "canonical_bytes_hex": "5b5d",
+      "digest": "a8b2389ad2c6972a2dbd159b5a39389d1b09d1467c97033ac3f15e60ef6d954f"
+    },
+    {
+      "name": "empty_string",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"s\":\"\"}",
+      "canonical_bytes_hex": "7b2273223a22227d",
+      "digest": "51d84571b101a18bc594125901252fd6735f0882457484f1ea01c512a5882e73"
+    },
+    {
+      "name": "html_chars_not_escaped",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"s\":\"<a>&<b>\"}",
+      "canonical_bytes_hex": "7b2273223a223c613e263c623e227d",
+      "digest": "d6f2d49a5d4d969a00be3ccaf33b4ff16ca8e7ab5dd67df937ca541ea989c290"
+    },
+    {
+      "name": "control_chars_escaped",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"s\":\"a\\nb\\tc\\u0001d\"}",
+      "canonical_bytes_hex": "7b2273223a22615c6e625c74635c753030303164227d",
+      "digest": "1818f58155267250a3c95ceb3027711e44e831ffac66dada7c98a98586deb44f"
+    },
+    {
+      "name": "utf16_key_order_non_ascii",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"😀\":1,\"é\":2,\"a\":3,\"Z\":4}",
+      "canonical_bytes_hex": "7b225a223a342c2261223a332c22c3a9223a322c22f09f9880223a317d",
+      "digest": "036a68713510b0d35118eaacce7cc969b9f092dca644477ca9723951376d76ce"
+    },
+    {
+      "name": "surrogate_pair_string",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"s\":\"\\ud83d\\ude00\"}",
+      "canonical_bytes_hex": "7b2273223a22f09f9880227d",
+      "digest": "0cc082f90e0c2e58ec5ca8b17f3360c3f11b5c54c0922e31a321900f9324e08c"
+    },
+    {
+      "name": "key_order_variant_a",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"a\":1,\"b\":2}",
+      "canonical_bytes_hex": "7b2261223a312c2262223a327d",
+      "digest": "839408e5a62bce9124c451c877081c2e64e1be120d5cf96f191c69e41c09f724"
+    },
+    {
+      "name": "key_order_variant_b",
+      "artifact_type": "decision_charter",
+      "input_json": "{\"b\":2,\"a\":1}",
+      "canonical_bytes_hex": "7b2261223a312c2262223a327d",
+      "digest": "839408e5a62bce9124c451c877081c2e64e1be120d5cf96f191c69e41c09f724"
+    },
+    {
+      "name": "deep_nesting",
+      "artifact_type": "decision_record",
+      "input_json": "{\"a\":{\"b\":{\"c\":[{\"d\":1}]}}}",
+      "canonical_bytes_hex": "7b2261223a7b2262223a7b2263223a5b7b2264223a317d5d7d7d7d",
+      "digest": "db3a23ffbcf28a6a963c055605b9c8fe94f8f37d2c128b180b1c25090437d085"
+    }
+  ],
+  "negative": [
+    {
+      "name": "dup_key_literal",
+      "input_json": "{\"a\":1,\"a\":2}",
+      "expected_error_kind": "duplicate_key"
+    },
+    {
+      "name": "dup_key_escaped",
+      "input_json": "{\"a\":1,\"\\u0061\":2}",
+      "expected_error_kind": "duplicate_key"
+    },
+    {
+      "name": "dup_key_nested",
+      "input_json": "{\"x\":{\"a\":1,\"a\":2}}",
+      "expected_error_kind": "duplicate_key"
+    },
+    {
+      "name": "float_fraction",
+      "input_json": "{\"n\":1.0}",
+      "expected_error_kind": "float_number"
+    },
+    {
+      "name": "float_exponent",
+      "input_json": "{\"n\":1e0}",
+      "expected_error_kind": "float_number"
+    },
+    {
+      "name": "negative_zero",
+      "input_json": "{\"n\":-0}",
+      "expected_error_kind": "negative_zero"
+    },
+    {
+      "name": "nan_constant",
+      "input_json": "{\"n\":NaN}",
+      "expected_error_kind": "float_number"
+    },
+    {
+      "name": "infinity_constant",
+      "input_json": "{\"n\":Infinity}",
+      "expected_error_kind": "float_number"
+    },
+    {
+      "name": "int_out_of_range",
+      "input_json": "{\"n\":9007199254740992}",
+      "expected_error_kind": "integer_out_of_range"
+    },
+    {
+      "name": "not_nfc",
+      "input_json": "{\"s\":\"e\\u0301\"}",
+      "expected_error_kind": "not_nfc"
+    },
+    {
+      "name": "lone_surrogate",
+      "input_json": "{\"s\":\"\\ud800\"}",
+      "expected_error_kind": "lone_surrogate"
+    },
+    {
+      "name": "invalid_json",
+      "input_json": "{",
+      "expected_error_kind": "invalid_json"
+    },
+    {
+      "name": "trailing_data",
+      "input_json": "{\"a\":1} {\"b\":2}",
+      "expected_error_kind": "invalid_json"
+    },
+    {
+      "name": "bad_number_form",
+      "input_json": "{\"n\":.5}",
+      "expected_error_kind": "invalid_json"
+    }
+  ]
+}
