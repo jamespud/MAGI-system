@@ -91,7 +91,7 @@ the MAGI restrictions marked **[MAGI]**. Anything marked **[MAGI]** is our choic
    `\t` etc. Whether a field may contain them is decided by that field's schema, so a
    string-level ban MUST NOT be attributed to JCS.
 
-## 4. Digest and identity
+## 4. Digest and identity (safe by construction)
 
 ```text
 domain_separator = "magi:canonical:v1:" + artifact_type + "\n"
@@ -100,59 +100,124 @@ digest           = lowercase hex(digest_bytes)            # 64 chars
 artifact_id      = <type_prefix> + "_" + digest            # derived, never supplied
 ```
 
+- **The identity API only accepts a canonical value.** `Canonical` is an opaque
+  type whose payload can only be produced by the parsers in this package, and
+  `Digest`/`ArtifactID` are methods on it. A caller cannot hash arbitrary bytes.
+- **`Adopt`** is the path for bytes read back from storage: it re-parses and then
+  requires **byte-for-byte equality** with the canonical form, so a reordered,
+  duplicate-keyed, float-bearing or otherwise non-canonical row is an error
+  (`non_canonical`) instead of silently yielding a different identity.
 - **`artifact_type` is a closed whitelist** (`decision_charter`, `domain_profile`,
-  `persona_spec`, `context_manifest`, `candidate_snapshot`, `sealed_ballot`, `ballot_set`,
-  `decision_record`, `authority_proof`, `action_intent`, `audit_receipt`, `send_record`,
-  `acceptance_manifest`). Unknown types are an error. Type strings are `[a-z][a-z0-9_]*`;
-  they can never contain `\n` or other separators, so the preimage is unambiguous.
-- The digest is determined by **profile version + artifact type + canonical bytes** together.
+  `persona_spec`, `context_manifest`, `candidate_snapshot`, `sealed_ballot`,
+  `ballot_set`, `decision_record`, `authority_proof`, `action_intent`,
+  `audit_receipt`, `send_record`, `acceptance_manifest`). Unknown types are an
+  error; type strings are `[a-z][a-z0-9_]*`, never containing `\n`.
+- The digest is determined by **profile version + artifact type + canonical bytes**.
 - **Every authoritative field participates**, including `schema_version`. Only the
   artifact's **own** circular derived fields (`artifact_id`, `digest`,
-  `canonical_profile`, `digest_alg`) are excluded. No other identity field may be excluded.
-- **`artifact_id` is derived from the full digest**; a caller-supplied id is not accepted.
-- A digest proves **content equality only**. Signature validity, authorization validity,
-  freshness/revocation and execution success are separate checks and MUST NOT be inferred.
+  `canonical_profile`, `digest_alg`) are excluded.
+- A digest proves **content equality only**. Signature validity, authorization
+  validity, freshness/revocation and execution success are separate checks.
 
-## 5. Parsing rules (strict, fail-closed, explicit errors)
+## 5. Two validation layers (responsibility split)
 
-Parsing MUST return a specific error — never `panic`, never a silent overwrite — for:
+C0 deliberately does **not** re-implement JSON-Schema validation. The rejection
+rules are split, and the split is part of the frozen interface:
 
-- **duplicate object keys**, including keys that only collide *after* unescaping
-  (`{"a":1,"\u0061":2}` is a duplicate). Go's `encoding/json` keeps the last value, so it
-  must not be used directly on untrusted artifact JSON;
-- unknown fields (schemas are `additionalProperties: false`) and unknown enum values;
-- unknown `schema_version` or unknown artifact type;
-- non-NFC canonical text fields (§3.4), lone surrogates, and invalid UTF-8;
-- floats, exponents, `-0`, `NaN`/`Inf`, and integers outside ±(2^53-1);
-- timestamps that are not UTC RFC 3339 with exactly three fractional digits;
-- trailing data after the JSON value, and payloads over the per-type byte ceiling.
+### 5.1 C0 public layer — enforced by `domain/canonical`
+
+Lossless strict parsing and encoding, independent of artifact semantics:
+
+- duplicate object keys, including keys that collide only after unescaping
+  (`{"a":1,"\u0061":2}`);
+- invalid UTF-8, raw control bytes inside strings, malformed escapes, lone
+  surrogates, trailing data;
+- non-integer numbers, `-0`, `NaN`/`Infinity`/`-Infinity`, integers outside
+  ±(2^53-1);
+- non-NFC canonical text (verified, never normalized);
+- **resource ceilings** (§5.3);
+- canonical form, domain separation and identity derivation (§3–§4).
+
+The in-memory entry point (`CanonicalizeStruct`) additionally rejects values whose
+JSON rendering would be lossy — floats, invalid UTF-8 strings, `[]byte` (implicit
+base64), custom `json.Marshaler`/`MarshalText` implementations and unsupported
+kinds — **before** marshalling, because `encoding/json` would otherwise render
+`float64(1.0)` as `1` and replace invalid UTF-8 with U+FFFD.
+
+### 5.2 Artifact layer — owned by C1/C2/C3, reusing `domain/validation`
+
+Not C0's job, and MUST NOT be claimed as implemented here:
+
+- field whitelist (`additionalProperties: false`), required/optional/nullable;
+- `schema_version` acceptance and unknown-version rejection;
+- artifact type membership beyond the C0 whitelist;
+- time **field** semantics (the C0 layer only guarantees a string is NFC/UTF-8;
+  "must be UTC RFC 3339 with exactly 3 fractional digits" is a field rule);
+- per-artifact byte/member/string ceilings;
+- authorization, delegation and execution semantics.
+
+### 5.3 Frozen call order
+
+Before an artifact may be treated as authoritative:
+
+```text
+1. C0: strict parse + canonicalize           (Canonicalize / CanonicalizeStruct)
+2. Artifact layer: schema + field semantics  (domain/validation, C1/C2/C3)
+3. C0: identity                              (Canonical.Digest / ArtifactID)
+4. publish / persist
+```
+
+Steps 1 and 3 must happen in that order on the same byte string; hashing before
+schema validation, or trusting stored bytes without `Adopt`, is a contract
+violation.
+
+### 5.4 Resource ceilings
+
+`Limits{MaxBytes, MaxDepth, MaxMembers, MaxStringBytes}` bounds every parse.
+Defaults (1 MiB / depth 32 / 4096 members / 256 KiB per string) are **C0
+implementation defaults**, not domain thresholds; `CanonicalizeWithLimits` lets an
+artifact contract freeze its own tighter ceiling. Untrusted input MUST NOT be
+parsed without a ceiling, and exceeding one is an explicit `*Error`
+(`payload_too_large` / `too_deep` / `too_many_members` / `string_too_long`) rather
+than an unbounded allocation.
 
 ## 6. Golden vectors and RED evidence
 
 `backend/domain/canonical/testdata/golden_vectors.json` holds
-`{algorithm, artifact_type, input_json, canonical_bytes_hex, digest|null}` triples plus
-negative cases `{input_json, expected_error_kind}`. C0 is not complete until:
+`{artifact_type, input_json, canonical_bytes_hex, digest}` triples plus negative
+`{input_json, expected_error_kind}` cases. C0 is not complete until:
 
-- every §3–§5 rule has a positive and a negative vector;
-- an **independent implementation** reproduces every canonical byte string and digest from
-  the same vector file, covering non-ASCII UTF-16 ordering, surrogate pairs, lone surrogates,
-  and nested objects/arrays — not just ASCII fields;
-- mutations of authoritative fields change the digest; mutations confined to non-authoritative
-  display fields do not (or are documented as authoritative);
-- the same semantic input with reordered object keys or equivalent but non-canonical number
-  spellings yields the same canonical bytes.
+- every rule in §3–§5.1 has a positive and a negative vector;
+- an **independent implementation** reproduces every canonical byte string and
+  digest from the same file, covering non-ASCII UTF-16 ordering, surrogate pairs,
+  lone surrogates and nested objects/arrays — not just ASCII fields;
+- authoritative-field mutations change the digest;
+- reordered keys / equivalent spellings converge to the same canonical bytes.
 
-**RED evidence must show a real violation, not a profile difference.** The following are
-*positive invariants of the new encoder*, not historical bugs — Go decodes into a struct and
-re-marshals, so key reordering and `\u003c`-vs-`<` may well produce identical legacy output:
+**Cross-language verification is a CI gate.** The Python reference
+(`testdata/verify_golden.py`) runs as an explicit CI step that must pass; the Go
+unit test may skip when `python3` is absent, but the gate may not.
+
+**Unicode data policy.** NFC acceptance depends on the Unicode data version
+compiled into `golang.org/x/text/unicode/norm` and into CPython's `unicodedata`.
+The frozen vector set is the compatibility contract between them: the cross-language
+gate compares both implementations on every vector, and any divergence introduced by
+a library upgrade must be resolved by an explicit profile decision (new vectors or a
+new profile version) rather than by accepting a different string set.
+
+**RED evidence must show a real violation, not a profile difference.** The
+following are *positive invariants of the new encoder*, not historical bugs — Go
+decodes into a struct and re-marshals, so key reordering and `\u003c`-vs-`<` may
+well produce identical legacy output:
 
 - reordered object keys producing the same digest;
 - `\u003c` and `<` producing the same digest.
 
-The RED cases that must fail before the fix are: duplicate-key acceptance; wrong JSON types;
-float/exponent/`-0`/`NaN` acceptance; out-of-range integers; non-NFC acceptance; cross-type
-identity reuse (the legacy A2A hash has no domain separator); and the pre-agreed
-cross-language golden vector disagreeing with the legacy digest.
+RED cases that must fail before the fix: duplicate-key acceptance; wrong JSON
+types; float/exponent/`-0`/`NaN` acceptance; out-of-range integers; non-NFC
+acceptance; raw control bytes; cross-type identity reuse; lossy in-memory
+marshalling (`float64(1.0)`, invalid UTF-8); identity computed over non-canonical
+bytes; and unbounded payloads.
 
 ## 7. Downstream obligations
 

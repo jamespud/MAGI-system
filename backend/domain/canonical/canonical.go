@@ -6,6 +6,10 @@
 // digest helpers in domain/execution and application/a2a, whose bytes are frozen
 // for backward compatibility (`legacy-manifest/v1`, `legacy-approval-intent/v1`,
 // `legacy-a2a-request/v1`).
+//
+// The identity API is safe by construction: Canonical is an opaque value that
+// only this package can create, so Digest/ArtifactID can never be applied to
+// arbitrary caller-supplied bytes.
 package canonical
 
 import (
@@ -13,8 +17,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -46,6 +52,13 @@ const (
 	KindLoneSurrogate     = "lone_surrogate"
 	KindUnknownType       = "unknown_type"
 	KindUnsupportedValue  = "unsupported_value"
+	KindInvalidUTF8       = "invalid_utf8"
+	KindCustomMarshaler   = "custom_marshaler"
+	KindPayloadTooLarge   = "payload_too_large"
+	KindTooDeep           = "too_deep"
+	KindTooManyMembers    = "too_many_members"
+	KindStringTooLong     = "string_too_long"
+	KindNonCanonical      = "non_canonical"
 )
 
 // Error is a canonicalization failure. It is always returned, never panicked.
@@ -65,6 +78,53 @@ func (e *Error) Error() string {
 func errf(kind, path, format string, args ...any) *Error {
 	return &Error{Kind: kind, Path: path, Detail: fmt.Sprintf(format, args...)}
 }
+
+// Limits bounds the resources a single parse/canonicalize call may consume.
+// The defaults are C0 implementation defaults; artifact-specific ceilings are
+// frozen by the owning artifact contract (C1/C2/C3) and passed explicitly via
+// CanonicalizeWithLimits. Untrusted input MUST NOT be parsed without a ceiling.
+type Limits struct {
+	MaxBytes       int // total input size
+	MaxDepth       int // nesting depth (root = 1)
+	MaxMembers     int // total object keys + array elements
+	MaxStringBytes int // length of any single string (value or key)
+}
+
+// DefaultLimits returns the C0 defaults (1 MiB payload, depth 32, 4096 members,
+// 256 KiB per string).
+func DefaultLimits() Limits {
+	return Limits{MaxBytes: 1 << 20, MaxDepth: 32, MaxMembers: 4096, MaxStringBytes: 256 << 10}
+}
+
+func (l Limits) withDefaults() Limits {
+	d := DefaultLimits()
+	if l.MaxBytes <= 0 {
+		l.MaxBytes = d.MaxBytes
+	}
+	if l.MaxDepth <= 0 {
+		l.MaxDepth = d.MaxDepth
+	}
+	if l.MaxMembers <= 0 {
+		l.MaxMembers = d.MaxMembers
+	}
+	if l.MaxStringBytes <= 0 {
+		l.MaxStringBytes = d.MaxStringBytes
+	}
+	return l
+}
+
+// Canonical is canonical UTF-8 bytes produced by this package. The field is
+// unexported so a caller cannot fabricate the precondition Digest relies on.
+type Canonical struct{ b []byte }
+
+// Bytes returns a copy of the canonical bytes.
+func (c Canonical) Bytes() []byte { return append([]byte(nil), c.b...) }
+
+// String returns the canonical bytes as a string.
+func (c Canonical) String() string { return string(c.b) }
+
+// IsZero reports whether the value was not produced by this package.
+func (c Canonical) IsZero() bool { return c.b == nil }
 
 // ArtifactType identifies the kind of authoritative artifact. The set is closed:
 // unknown types are rejected, and the domain separator is built from it.
@@ -103,77 +163,310 @@ var typePrefixes = map[ArtifactType]string{
 	TypeAcceptanceManifest: "aman",
 }
 
-// Schema-valid identifier for an artifact type: lowercase, digits and underscore.
-var typeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-
 // ValidType reports whether t is in the closed artifact-type whitelist.
 func ValidType(t ArtifactType) bool {
 	_, ok := typePrefixes[t]
 	return ok
 }
 
-// Canonicalize parses raw JSON strictly and returns its `magi-cj/1` canonical
-// bytes. Duplicate keys, floats, negative zero, out-of-range integers, non-NFC
-// strings, lone surrogates and invalid UTF-8 are rejected with an *Error.
-func Canonicalize(raw []byte) ([]byte, error) {
+// Canonicalize strictly parses raw JSON under DefaultLimits and returns its
+// `magi-cj/1` canonical bytes. Duplicate keys, floats, negative zero,
+// out-of-range integers, non-NFC strings, lone surrogates, invalid UTF-8,
+// raw control bytes and oversized payloads are rejected with an *Error.
+func Canonicalize(raw []byte) (Canonical, error) {
+	return CanonicalizeWithLimits(raw, DefaultLimits())
+}
+
+// CanonicalizeWithLimits is Canonicalize with explicit resource ceilings.
+func CanonicalizeWithLimits(raw []byte, limits Limits) (Canonical, error) {
+	limits = limits.withDefaults()
+	if len(raw) > limits.MaxBytes {
+		return Canonical{}, errf(KindPayloadTooLarge, "$", "input is %d bytes, limit is %d", len(raw), limits.MaxBytes)
+	}
 	if err := prevalidate(raw); err != nil {
-		return nil, err
+		return Canonical{}, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	value, err := decodeValue(dec, "$")
+	p := &parser{dec: json.NewDecoder(bytes.NewReader(raw)), lim: limits}
+	p.dec.UseNumber()
+	value, err := p.value("$", 1)
 	if err != nil {
-		return nil, err
+		return Canonical{}, err
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, errf(KindInvalidJSON, "$", "trailing data after the JSON value")
+	if _, err := p.dec.Token(); err != io.EOF {
+		return Canonical{}, errf(KindInvalidJSON, "$", "trailing data after the JSON value")
 	}
 	var buf bytes.Buffer
 	if err := emit(&buf, value); err != nil {
-		return nil, err
+		return Canonical{}, err
 	}
-	return buf.Bytes(), nil
+	return Canonical{b: buf.Bytes()}, nil
 }
 
-// CanonicalizeStruct canonicalizes the JSON form of an in-memory value, so there
-// is exactly one canonicalization path for artifacts (marshal, then Canonicalize).
-func CanonicalizeStruct(v any) ([]byte, error) {
+// Adopt validates that raw bytes are already canonical and returns them as a
+// Canonical value. Use it for bytes read from storage: it both re-parses and
+// requires byte-for-byte equality, so a non-canonical or corrupt row is an error
+// rather than a silently different identity.
+func Adopt(raw []byte) (Canonical, error) {
+	canon, err := Canonicalize(raw)
+	if err != nil {
+		return Canonical{}, err
+	}
+	if !bytes.Equal(canon.b, raw) {
+		return Canonical{}, errf(KindNonCanonical, "$", "input bytes are valid JSON but not canonical")
+	}
+	return canon, nil
+}
+
+// CanonicalizeStruct canonicalizes an in-memory value. The value is validated
+// recursively BEFORE marshalling, because encoding/json is lossy: it renders
+// float64(1.0) as `1` and replaces invalid UTF-8 with U+FFFD, which would hide an
+// input the contract must reject.
+func CanonicalizeStruct(v any) (Canonical, error) {
+	return CanonicalizeStructWithLimits(v, DefaultLimits())
+}
+
+// CanonicalizeStructWithLimits is CanonicalizeStruct with explicit ceilings.
+func CanonicalizeStructWithLimits(v any, limits Limits) (Canonical, error) {
+	limits = limits.withDefaults()
+	if err := validateInMemory(reflect.ValueOf(v), "$", 1, limits); err != nil {
+		return Canonical{}, err
+	}
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return nil, errf(KindUnsupportedValue, "$", "marshal failed: %v", err)
+		return Canonical{}, errf(KindUnsupportedValue, "$", "marshal failed: %v", err)
 	}
-	return Canonicalize(raw)
+	return CanonicalizeWithLimits(raw, limits)
 }
 
-// Digest returns the domain-separated sha256 of already-canonical bytes.
-func Digest(t ArtifactType, canonicalBytes []byte) (string, error) {
+// Digest returns the domain-separated sha256 of this canonical value.
+func (c Canonical) Digest(t ArtifactType) (string, error) {
+	if c.b == nil {
+		return "", errf(KindNonCanonical, "$", "empty Canonical value")
+	}
 	if !ValidType(t) {
 		return "", errf(KindUnknownType, "$", "artifact type %q is not in the whitelist", string(t))
 	}
 	h := sha256.New()
 	h.Write([]byte("magi:canonical:v1:" + string(t) + "\n"))
-	h.Write(canonicalBytes)
+	h.Write(c.b)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // ArtifactID derives the artifact identifier from the full digest. Callers can
 // never supply an id: it is always <type_prefix>_<digest>.
-func ArtifactID(t ArtifactType, canonicalBytes []byte) (string, error) {
-	digest, err := Digest(t, canonicalBytes)
+func (c Canonical) ArtifactID(t ArtifactType) (string, error) {
+	digest, err := c.Digest(t)
 	if err != nil {
 		return "", err
 	}
 	return typePrefixes[t] + "_" + digest, nil
 }
 
+// --- in-memory validation (lossless-marshal precondition) -----------------
+
+var (
+	jsonMarshalerType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+	textMarshalerType = reflect.TypeOf((*interface{ MarshalText() ([]byte, error) })(nil)).Elem()
+)
+
+// validateInMemory rejects values whose JSON rendering would silently differ
+// from the in-memory value (floats, invalid UTF-8, custom marshalers) and
+// unsupported types, mirroring the strict JSON rules.
+func validateInMemory(v reflect.Value, path string, depth int, lim Limits) error {
+	if depth > lim.MaxDepth {
+		return errf(KindTooDeep, path, "value nesting exceeds %d", lim.MaxDepth)
+	}
+	if !v.IsValid() {
+		return nil
+	}
+	if v.CanInterface() {
+		if v.Type().Implements(jsonMarshalerType) || v.Type().Implements(textMarshalerType) {
+			return errf(KindCustomMarshaler, path, "type %s implements a custom marshaller; encode it explicitly", v.Type())
+		}
+	}
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if v.IsNil() {
+			return nil
+		}
+		return validateInMemory(v.Elem(), path, depth, lim)
+	case reflect.Bool:
+		return nil
+	case reflect.String:
+		s := v.String()
+		if !utf8.ValidString(s) {
+			return errf(KindInvalidUTF8, path, "string is not valid UTF-8")
+		}
+		if len(s) > lim.MaxStringBytes {
+			return errf(KindStringTooLong, path, "string is %d bytes, limit is %d", len(s), lim.MaxStringBytes)
+		}
+		return checkNFC(s, path)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n := v.Int()
+		if n > MaxSafeInteger || n < -MaxSafeInteger {
+			return errf(KindIntegerOutOfRange, path, "integer %d is outside ±%d", n, MaxSafeInteger)
+		}
+		return nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if v.Uint() > uint64(MaxSafeInteger) {
+			return errf(KindIntegerOutOfRange, path, "integer %d is outside ±%d", v.Uint(), MaxSafeInteger)
+		}
+		return nil
+	case reflect.Float32, reflect.Float64:
+		return errf(KindFloatNumber, path, "floating point values are not allowed in authoritative artifacts")
+	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
+			return errf(KindUnsupportedValue, path, "[]byte is implicitly base64-encoded by encoding/json; use an explicit string or array")
+		}
+		for i := 0; i < v.Len(); i++ {
+			if err := validateInMemory(v.Index(i), fmt.Sprintf("%s[%d]", path, i), depth+1, lim); err != nil {
+				return err
+			}
+		}
+		return nil
+	case reflect.Map:
+		if v.Type().Key().Kind() != reflect.String {
+			return errf(KindUnsupportedValue, path, "map keys must be strings, got %s", v.Type().Key())
+		}
+		iter := v.MapRange()
+		for iter.Next() {
+			key := iter.Key().String()
+			if !utf8.ValidString(key) {
+				return errf(KindInvalidUTF8, path, "map key is not valid UTF-8")
+			}
+			if err := checkNFC(key, path); err != nil {
+				return err
+			}
+			if err := validateInMemory(iter.Value(), path+"."+key, depth+1, lim); err != nil {
+				return err
+			}
+		}
+		return nil
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Type().Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			if err := validateInMemory(v.Field(i), path+"."+field.Name, depth+1, lim); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return errf(KindUnsupportedValue, path, "unsupported value kind %s", v.Kind())
+	}
+}
+
 // --- strict parsing -------------------------------------------------------
+
+type parser struct {
+	dec     *json.Decoder
+	lim     Limits
+	members int
+}
+
+func (p *parser) value(path string, depth int) (any, error) {
+	if depth > p.lim.MaxDepth {
+		return nil, errf(KindTooDeep, path, "value nesting exceeds %d", p.lim.MaxDepth)
+	}
+	tok, err := p.dec.Token()
+	if err != nil {
+		return nil, errf(KindInvalidJSON, path, "%v", err)
+	}
+	switch t := tok.(type) {
+	case json.Delim:
+		switch t {
+		case '{':
+			return p.object(path, depth)
+		case '[':
+			return p.array(path, depth)
+		default:
+			return nil, errf(KindInvalidJSON, path, "unexpected delimiter %q", t)
+		}
+	case string:
+		if err := checkStringLimits(t, path, p.lim); err != nil {
+			return nil, err
+		}
+		return t, nil
+	case json.Number:
+		return canonicalInteger(t, path)
+	case bool:
+		return t, nil
+	case nil:
+		return nil, nil
+	default:
+		return nil, errf(KindInvalidJSON, path, "unexpected token %v", t)
+	}
+}
+
+func (p *parser) countMember(path string) error {
+	p.members++
+	if p.members > p.lim.MaxMembers {
+		return errf(KindTooManyMembers, path, "member count exceeds %d", p.lim.MaxMembers)
+	}
+	return nil
+}
+
+func (p *parser) object(path string, depth int) (any, error) {
+	obj := map[string]any{}
+	seen := map[string]struct{}{}
+	for p.dec.More() {
+		if err := p.countMember(path); err != nil {
+			return nil, err
+		}
+		keyTok, err := p.dec.Token()
+		if err != nil {
+			return nil, errf(KindInvalidJSON, path, "%v", err)
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return nil, errf(KindInvalidJSON, path, "object key is not a string")
+		}
+		// encoding/json unescapes keys, so {"a":1,"\u0061":2} collides here.
+		if _, dup := seen[key]; dup {
+			return nil, errf(KindDuplicateKey, path, "duplicate object key %q", key)
+		}
+		seen[key] = struct{}{}
+		if err := checkStringLimits(key, path, p.lim); err != nil {
+			return nil, err
+		}
+		val, err := p.value(path+"."+key, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		obj[key] = val
+	}
+	if _, err := p.dec.Token(); err != nil { // consume '}'
+		return nil, errf(KindInvalidJSON, path, "%v", err)
+	}
+	return obj, nil
+}
+
+func (p *parser) array(path string, depth int) (any, error) {
+	arr := []any{}
+	for p.dec.More() {
+		if err := p.countMember(path); err != nil {
+			return nil, err
+		}
+		val, err := p.value(fmt.Sprintf("%s[%d]", path, len(arr)), depth+1)
+		if err != nil {
+			return nil, err
+		}
+		arr = append(arr, val)
+	}
+	if _, err := p.dec.Token(); err != nil { // consume ']'
+		return nil, errf(KindInvalidJSON, path, "%v", err)
+	}
+	return arr, nil
+}
 
 // prevalidate enforces the byte-level rules that encoding/json would otherwise
 // silently "fix": invalid UTF-8, raw control characters inside strings, malformed
 // escapes and lone UTF-16 surrogates.
 func prevalidate(raw []byte) error {
 	if !utf8.Valid(raw) {
-		return errf(KindInvalidJSON, "$", "input is not valid UTF-8")
+		return errf(KindInvalidUTF8, "$", "input is not valid UTF-8")
 	}
 	inString := false
 	for i := 0; i < len(raw); i++ {
@@ -183,8 +476,6 @@ func prevalidate(raw []byte) error {
 				inString = true
 				continue
 			}
-			// Non-standard JSON number constants are a MAGI float violation, not
-			// structural noise; report them as such.
 			rest := raw[i:]
 			if bytes.HasPrefix(rest, []byte("NaN")) || bytes.HasPrefix(rest, []byte("Infinity")) ||
 				bytes.HasPrefix(rest, []byte("-Infinity")) {
@@ -212,7 +503,7 @@ func prevalidate(raw []byte) error {
 					return errf(KindInvalidJSON, "$", "invalid \\u escape")
 				}
 				i += 4
-				if cp >= 0xD800 && cp <= 0xDBFF { // high surrogate needs a low one
+				if cp >= 0xD800 && cp <= 0xDBFF {
 					if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
 						return errf(KindLoneSurrogate, "$", "high surrogate without a low surrogate")
 					}
@@ -258,86 +549,6 @@ func parseHex4(b []byte) (rune, bool) {
 	return v, true
 }
 
-func decodeValue(dec *json.Decoder, path string) (any, error) {
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, errf(KindInvalidJSON, path, "%v", err)
-	}
-	switch t := tok.(type) {
-	case json.Delim:
-		switch t {
-		case '{':
-			return decodeObject(dec, path)
-		case '[':
-			return decodeArray(dec, path)
-		default:
-			return nil, errf(KindInvalidJSON, path, "unexpected delimiter %q", t)
-		}
-	case string:
-		if err := checkNFC(t, path); err != nil {
-			return nil, err
-		}
-		return t, nil
-	case json.Number:
-		return canonicalInteger(t, path)
-	case bool:
-		return t, nil
-	case nil:
-		return nil, nil
-	default:
-		return nil, errf(KindInvalidJSON, path, "unexpected token %v", t)
-	}
-}
-
-func decodeObject(dec *json.Decoder, path string) (any, error) {
-	obj := map[string]any{}
-	seen := map[string]struct{}{}
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return nil, errf(KindInvalidJSON, path, "%v", err)
-		}
-		key, ok := keyTok.(string)
-		if !ok {
-			return nil, errf(KindInvalidJSON, path, "object key is not a string")
-		}
-		// encoding/json unescapes keys, so {"a":1,"\u0061":2} collides here.
-		if _, dup := seen[key]; dup {
-			return nil, errf(KindDuplicateKey, path, "duplicate object key %q", key)
-		}
-		seen[key] = struct{}{}
-		if err := checkNFC(key, path); err != nil {
-			return nil, err
-		}
-		val, err := decodeValue(dec, path+"."+key)
-		if err != nil {
-			return nil, err
-		}
-		obj[key] = val
-	}
-	if _, err := dec.Token(); err != nil { // consume '}'
-		return nil, errf(KindInvalidJSON, path, "%v", err)
-	}
-	return obj, nil
-}
-
-func decodeArray(dec *json.Decoder, path string) (any, error) {
-	arr := []any{}
-	idx := 0
-	for dec.More() {
-		val, err := decodeValue(dec, fmt.Sprintf("%s[%d]", path, idx))
-		if err != nil {
-			return nil, err
-		}
-		arr = append(arr, val)
-		idx++
-	}
-	if _, err := dec.Token(); err != nil { // consume ']'
-		return nil, errf(KindInvalidJSON, path, "%v", err)
-	}
-	return arr, nil
-}
-
 var integerPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 
 // canonicalInteger applies the MAGI number restrictions: integer literals only,
@@ -358,6 +569,13 @@ func canonicalInteger(n json.Number, path string) (int64, error) {
 		return 0, errf(KindIntegerOutOfRange, path, "integer %q is outside ±%d", s, MaxSafeInteger)
 	}
 	return v, nil
+}
+
+func checkStringLimits(s, path string, lim Limits) error {
+	if len(s) > lim.MaxStringBytes {
+		return errf(KindStringTooLong, path, "string is %d bytes, limit is %d", len(s), lim.MaxStringBytes)
+	}
+	return checkNFC(s, path)
 }
 
 // checkNFC enforces the MAGI rule that canonical text is NFC *verified*, never
@@ -452,8 +670,7 @@ func writeString(buf *bytes.Buffer, s string) {
 }
 
 // lessUTF16 orders strings by UTF-16 code units, as RFC 8785 requires. Go strings
-// are UTF-8, so we must translate before comparing (a byte-wise compare would
-// order non-ASCII keys differently).
+// are UTF-8, so we must translate before comparing.
 func lessUTF16(a, b string) bool {
 	ua := utf16.Encode([]rune(a))
 	ub := utf16.Encode([]rune(b))
@@ -463,4 +680,13 @@ func lessUTF16(a, b string) bool {
 		}
 	}
 	return len(ua) < len(ub)
+}
+
+// Errors is exported for errors.Is-style checks by kind.
+func KindOf(err error) string {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Kind
+	}
+	return ""
 }

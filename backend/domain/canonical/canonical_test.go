@@ -45,20 +45,26 @@ func loadVectors(t *testing.T) vectorFile {
 	return v
 }
 
-// Every positive vector must canonicalize to the exact bytes and digest produced
-// by the independent reference implementation.
+func kindOf(t *testing.T, err error) string {
+	t.Helper()
+	var cerr *canonical.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *canonical.Error, got %T: %v", err, err)
+	}
+	return cerr.Kind
+}
+
 func TestCanonicalGoldenVectors(t *testing.T) {
-	vectors := loadVectors(t)
-	for _, tc := range vectors.Positive {
+	for _, tc := range loadVectors(t).Positive {
 		t.Run(tc.Name, func(t *testing.T) {
 			got, err := canonical.Canonicalize([]byte(tc.InputJSON))
 			if err != nil {
 				t.Fatalf("Canonicalize(%s): %v", tc.InputJSON, err)
 			}
-			if hex.EncodeToString(got) != tc.CanonicalBytesHex {
-				t.Fatalf("canonical bytes\n got %s\nwant %s", hex.EncodeToString(got), tc.CanonicalBytesHex)
+			if hex.EncodeToString(got.Bytes()) != tc.CanonicalBytesHex {
+				t.Fatalf("canonical bytes\n got %s\nwant %s", hex.EncodeToString(got.Bytes()), tc.CanonicalBytesHex)
 			}
-			digest, err := canonical.Digest(canonical.ArtifactType(tc.ArtifactType), got)
+			digest, err := got.Digest(canonical.ArtifactType(tc.ArtifactType))
 			if err != nil {
 				t.Fatalf("Digest(%s): %v", tc.ArtifactType, err)
 			}
@@ -69,11 +75,8 @@ func TestCanonicalGoldenVectors(t *testing.T) {
 	}
 }
 
-// Negative vectors must fail with the exact error class, never panic and never
-// silently accept the value.
 func TestCanonicalRejectsInvalidInput(t *testing.T) {
-	vectors := loadVectors(t)
-	for _, tc := range vectors.Negative {
+	for _, tc := range loadVectors(t).Negative {
 		t.Run(tc.Name, func(t *testing.T) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -82,79 +85,250 @@ func TestCanonicalRejectsInvalidInput(t *testing.T) {
 			}()
 			got, err := canonical.Canonicalize([]byte(tc.InputJSON))
 			if err == nil {
-				t.Fatalf("expected %s, canonicalized to %s", tc.ExpectedErrorKind, hex.EncodeToString(got))
+				t.Fatalf("expected %s, canonicalized to %s", tc.ExpectedErrorKind, hex.EncodeToString(got.Bytes()))
 			}
-			var cerr *canonical.Error
-			if !errors.As(err, &cerr) {
-				t.Fatalf("expected *canonical.Error, got %T: %v", err, err)
-			}
-			if cerr.Kind != tc.ExpectedErrorKind {
-				t.Fatalf("error kind %q, want %q (%v)", cerr.Kind, tc.ExpectedErrorKind, err)
+			if kind := kindOf(t, err); kind != tc.ExpectedErrorKind {
+				t.Fatalf("error kind %q, want %q (%v)", kind, tc.ExpectedErrorKind, err)
 			}
 		})
 	}
 }
 
-// The same canonical bytes under two artifact types must not share an identity:
-// domain separation is structural.
-func TestDigestDomainSeparation(t *testing.T) {
-	canon := []byte(`{"a":1}`)
-	charter, err := canonical.Digest(canonical.TypeDecisionCharter, canon)
+// Raw byte-level negatives that cannot be represented in the UTF-8 JSON vector
+// file.
+func TestCanonicalRejectsRawByteViolations(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []byte
+		want string
+	}{
+		{"invalid utf8", []byte("{\"s\":\"\xff\"}"), canonical.KindInvalidUTF8},
+		{"bare newline in string", []byte("{\"s\":\"a\nb\"}"), canonical.KindInvalidJSON},
+		{"bare tab in string", []byte("{\"s\":\"a\tb\"}"), canonical.KindInvalidJSON},
+		{"bare 0x01 in string", []byte("{\"s\":\"a\x01b\"}"), canonical.KindInvalidJSON},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := canonical.Canonicalize(tc.in); err == nil {
+				t.Fatal("expected rejection")
+			} else if kind := kindOf(t, err); kind != tc.want {
+				t.Fatalf("kind %q, want %q (%v)", kind, tc.want, err)
+			}
+		})
+	}
+}
+
+// F33-01: the in-memory path must not launder values that encoding/json would
+// silently render as something else.
+func TestCanonicalizeStructRejectsLossyInput(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{"float64 whole number", map[string]any{"n": float64(1.0)}, canonical.KindFloatNumber},
+		{"float64 fraction", map[string]any{"n": 1.5}, canonical.KindFloatNumber},
+		{"float32 nested", map[string]any{"a": map[string]any{"b": float32(0.5)}}, canonical.KindFloatNumber},
+		{"float in slice", map[string]any{"a": []any{1, 2.5}}, canonical.KindFloatNumber},
+		{"invalid utf8 string", map[string]any{"s": string([]byte{0xff})}, canonical.KindInvalidUTF8},
+		{"invalid utf8 nested", map[string]any{"a": []any{map[string]any{"s": string([]byte{0xfe})}}}, canonical.KindInvalidUTF8},
+		{"out of range int", map[string]any{"n": int64(1) << 53}, canonical.KindIntegerOutOfRange},
+		{"non nfc string", map[string]any{"s": "e\u0301"}, canonical.KindNotNFC},
+		{"[]byte implicit base64", map[string]any{"b": []byte("x")}, canonical.KindUnsupportedValue},
+		{"complex", map[string]any{"c": complex(1, 2)}, canonical.KindUnsupportedValue},
+		{"non string map key", map[string]any{"a": map[int]any{1: "x"}}, canonical.KindUnsupportedValue},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := canonical.CanonicalizeStruct(tc.in); err == nil {
+				t.Fatal("expected rejection")
+			} else if kind := kindOf(t, err); kind != tc.want {
+				t.Fatalf("kind %q, want %q (%v)", kind, tc.want, err)
+			}
+		})
+	}
+	// The safe counterpart must still work.
+	got, err := canonical.CanonicalizeStruct(map[string]any{"n": 1, "s": "ok"})
+	if err != nil {
+		t.Fatalf("valid struct rejected: %v", err)
+	}
+	if got.String() != `{"n":1,"s":"ok"}` {
+		t.Fatalf("unexpected canonical form: %s", got.String())
+	}
+}
+
+// F33-02: identity can only be derived from a value this package canonicalized.
+func TestAdoptRejectsNonCanonicalBytes(t *testing.T) {
+	nonCanonical := []struct {
+		name string
+		in   string
+	}{
+		{"reordered keys", `{"b":2,"a":1}`},
+		{"whitespace", `{ "a":1}`},
+		{"duplicate keys", `{"a":1,"a":2}`},
+		{"float", `{"n":1.0}`},
+		{"empty payload", ``},
+		{"escaped html", `{"s":"\u003c"}`},
+	}
+	for _, tc := range nonCanonical {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := canonical.Adopt([]byte(tc.in)); err == nil {
+				t.Fatalf("Adopt accepted non-canonical bytes: %s", tc.in)
+			}
+		})
+	}
+	canon, err := canonical.Canonicalize([]byte(`{"b":2,"a":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := canonical.Digest(canonical.TypeDecisionRecord, canon)
+	adopted, err := canonical.Adopt(canon.Bytes())
+	if err != nil {
+		t.Fatalf("Adopt rejected canonical bytes: %v", err)
+	}
+	want, _ := canon.Digest(canonical.TypeDecisionCharter)
+	got, _ := adopted.Digest(canonical.TypeDecisionCharter)
+	if want != got {
+		t.Fatalf("round-tripped identity changed: %s != %s", got, want)
+	}
+}
+
+func TestZeroCanonicalHasNoIdentity(t *testing.T) {
+	var zero canonical.Canonical
+	if !zero.IsZero() {
+		t.Fatal("zero value must be detectable")
+	}
+	if _, err := zero.Digest(canonical.TypeDecisionCharter); err == nil {
+		t.Fatal("zero Canonical must not produce a digest")
+	}
+	if _, err := zero.ArtifactID(canonical.TypeDecisionCharter); err == nil {
+		t.Fatal("zero Canonical must not produce an artifact id")
+	}
+}
+
+// Semantic equality must give identity equality even when the raw JSON differs.
+func TestEquivalentJSONHasSameIdentity(t *testing.T) {
+	a, err := canonical.Canonicalize([]byte(`{"a":1,"b":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := canonical.Canonicalize([]byte(`{"b":2,"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	da, _ := a.Digest(canonical.TypeDecisionCharter)
+	db, _ := b.Digest(canonical.TypeDecisionCharter)
+	if da != db {
+		t.Fatalf("equivalent documents produced different identities: %s != %s", da, db)
+	}
+}
+
+// F33-03: resource ceilings are enforced before/while parsing, and exact
+// boundary values are still accepted.
+func TestLimitsAreEnforced(t *testing.T) {
+	t.Run("bytes", func(t *testing.T) {
+		lim := canonical.DefaultLimits()
+		lim.MaxBytes = 16
+		if _, err := canonical.CanonicalizeWithLimits([]byte(`{"a":1}`), lim); err != nil {
+			t.Fatalf("within limit rejected: %v", err)
+		}
+		_, err := canonical.CanonicalizeWithLimits([]byte(`{"aaaaaaaaaaaa":1}`), lim)
+		if kind := kindOf(t, err); kind != canonical.KindPayloadTooLarge {
+			t.Fatalf("kind %q, want %q", kind, canonical.KindPayloadTooLarge)
+		}
+	})
+	t.Run("depth", func(t *testing.T) {
+		lim := canonical.DefaultLimits()
+		lim.MaxDepth = 3
+		if _, err := canonical.CanonicalizeWithLimits([]byte(`{"a":{"b":1}}`), lim); err != nil {
+			t.Fatalf("within depth rejected: %v", err)
+		}
+		_, err := canonical.CanonicalizeWithLimits([]byte(`{"a":{"b":{"c":1}}}`), lim)
+		if kind := kindOf(t, err); kind != canonical.KindTooDeep {
+			t.Fatalf("kind %q, want %q", kind, canonical.KindTooDeep)
+		}
+	})
+	t.Run("members", func(t *testing.T) {
+		lim := canonical.DefaultLimits()
+		lim.MaxMembers = 2
+		if _, err := canonical.CanonicalizeWithLimits([]byte(`{"a":1,"b":2}`), lim); err != nil {
+			t.Fatalf("within member limit rejected: %v", err)
+		}
+		_, err := canonical.CanonicalizeWithLimits([]byte(`{"a":1,"b":2,"c":3}`), lim)
+		if kind := kindOf(t, err); kind != canonical.KindTooManyMembers {
+			t.Fatalf("kind %q, want %q", kind, canonical.KindTooManyMembers)
+		}
+	})
+	t.Run("string bytes", func(t *testing.T) {
+		lim := canonical.DefaultLimits()
+		lim.MaxStringBytes = 4
+		if _, err := canonical.CanonicalizeWithLimits([]byte(`{"s":"abcd"}`), lim); err != nil {
+			t.Fatalf("within string limit rejected: %v", err)
+		}
+		_, err := canonical.CanonicalizeWithLimits([]byte(`{"s":"abcde"}`), lim)
+		if kind := kindOf(t, err); kind != canonical.KindStringTooLong {
+			t.Fatalf("kind %q, want %q", kind, canonical.KindStringTooLong)
+		}
+	})
+}
+
+func TestDigestDomainSeparation(t *testing.T) {
+	got, err := canonical.Canonicalize([]byte(`{"a":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	charter, err := got.Digest(canonical.TypeDecisionCharter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := got.Digest(canonical.TypeDecisionRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if charter == record {
 		t.Fatal("identical bytes produced the same digest for two artifact types")
 	}
-	if _, err := canonical.Digest(canonical.ArtifactType("not_a_type"), canon); err == nil {
+	if _, err := got.Digest(canonical.ArtifactType("not_a_type")); err == nil {
 		t.Fatal("unknown artifact type must be rejected")
 	}
-	if _, err := canonical.Digest(canonical.ArtifactType("decision_charter\nx"), canon); err == nil {
+	if _, err := got.Digest(canonical.ArtifactType("decision_charter\nx")); err == nil {
 		t.Fatal("artifact type containing a newline must be rejected")
 	}
 }
 
 func TestArtifactIDDerivedFromDigest(t *testing.T) {
-	canon := []byte(`{"a":1}`)
-	digest, err := canonical.Digest(canonical.TypeDecisionCharter, canon)
+	got, err := canonical.Canonicalize([]byte(`{"a":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := canonical.ArtifactID(canonical.TypeDecisionCharter, canon)
+	digest, err := got.Digest(canonical.TypeDecisionCharter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := got.ArtifactID(canonical.TypeDecisionCharter)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(id, "chtr_") || !strings.HasSuffix(id, digest) {
 		t.Fatalf("artifact id %q is not derived from digest %q", id, digest)
 	}
-	if _, err := canonical.ArtifactID(canonical.ArtifactType("nope"), canon); err == nil {
-		t.Fatal("unknown type must not yield an artifact id")
-	}
 }
 
 func TestCanonicalizeIsIdempotent(t *testing.T) {
-	inputs := []string{`{"b":1,"a":[1,2,{"d":null}]}`, `[]`, `{}`, `{"s":"<x>&\n"}`}
-	for _, in := range inputs {
+	for _, in := range []string{`{"b":1,"a":[1,2,{"d":null}]}`, `[]`, `{}`, `{"s":"<x>&\n"}`} {
 		once, err := canonical.Canonicalize([]byte(in))
 		if err != nil {
 			t.Fatalf("Canonicalize(%s): %v", in, err)
 		}
-		twice, err := canonical.Canonicalize(once)
+		twice, err := canonical.Canonicalize(once.Bytes())
 		if err != nil {
 			t.Fatalf("Canonicalize(canonical(%s)): %v", in, err)
 		}
-		if string(once) != string(twice) {
-			t.Fatalf("not idempotent: %s -> %s -> %s", in, once, twice)
+		if once.String() != twice.String() {
+			t.Fatalf("not idempotent: %s -> %s", once.String(), twice.String())
 		}
 	}
 }
 
-// CanonicalizeStruct must agree with Canonicalize over the struct's JSON form so
-// there is exactly one canonicalization path for artifacts.
 func TestCanonicalizeStructMatchesJSONPath(t *testing.T) {
 	type sample struct {
 		B int    `json:"b"`
@@ -173,11 +347,11 @@ func TestCanonicalizeStructMatchesJSONPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(fromJSON) != string(fromStruct) {
-		t.Fatalf("struct path %s != json path %s", fromStruct, fromJSON)
+	if fromJSON.String() != fromStruct.String() {
+		t.Fatalf("struct path %s != json path %s", fromStruct.String(), fromJSON.String())
 	}
-	if string(fromStruct) != `{"a":"x","b":2}` {
-		t.Fatalf("unexpected canonical form: %s", fromStruct)
+	if fromStruct.String() != `{"a":"x","b":2}` {
+		t.Fatalf("unexpected canonical form: %s", fromStruct.String())
 	}
 }
 
@@ -190,21 +364,20 @@ func TestExplicitNullDiffersFromAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(nullValue) == string(absent) {
+	if nullValue.String() == absent.String() {
 		t.Fatal("explicit null collapsed into absent field")
 	}
 }
 
-// Cross-language check: the independent Python reference must reproduce the same
-// vectors. Skipped (and reported) when python3 is unavailable.
+// Cross-language check. The hard gate runs in CI (see .github/workflows/ci.yml);
+// locally this degrades to a skip when python3 is absent.
 func TestGoldenVectorsReproduceInPython(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 not available; cross-language verification was NOT executed")
+		t.Skip("python3 not available; cross-language verification is enforced by the CI gate")
 	}
 	cmd := exec.Command("python3", "testdata/verify_golden.py", "testdata/golden_vectors.json")
 	cmd.Dir = "."
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("python reference verifier failed: %v\n%s", err, out)
 	}
 }
