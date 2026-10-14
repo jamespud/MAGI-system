@@ -80,3 +80,32 @@ func TestResolutionRepo_CorruptDissentRecordFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// A well-formed JSON array can still contain elements that are not valid
+// dissent records. Those must fail closed instead of being reported as PRESENT.
+func TestResolutionRepo_InvalidDissentElementsFailClosed(t *testing.T) {
+	db := openConversationDB(t)
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	res := &entity.Resolution{ID: "res-elem", CaseID: "c-elem", FinalDecision: entity.VoteDecisionApprove, FinalReport: "# r",
+		Dissent: []entity.Dissent{{AgentCode: entity.MagiCodeCasper, Decision: entity.VoteDecisionReject, Reasoning: "risk"}}}
+	if err := repo.ResolutionRepo().Create(ctx, res); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, bad := range []string{
+		`[null]`,
+		`[{}]`,
+		`[{"agent_code":"nobody","decision":"reject"}]`,
+		`[{"agent_code":"casper","decision":"maybe"}]`,
+		`[{"decision":"reject"}]`,
+		`[{"agent_code":"casper"}]`,
+	} {
+		if err := db.Exec("UPDATE resolution SET dissent_json = ? WHERE case_id = ?", bad, "c-elem").Error; err != nil {
+			t.Fatalf("corrupt row: %v", err)
+		}
+		got, err := repo.ResolutionRepo().Get(ctx, "c-elem")
+		if err == nil {
+			t.Fatalf("dissent_json=%s must fail closed, got %+v (state=%s)", bad, got, got.DissentState())
+		}
+	}
+}

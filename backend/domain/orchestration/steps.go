@@ -267,7 +267,11 @@ func (o *Orchestrator) stepResolve(ctx context.Context, case_ *entity.DecisionCa
 	// report, HTTP/A2A and export read one authoritative record instead of
 	// re-deriving dissent from mutable vote joins (issue #13).
 	st.Resolution = res
-	res.Dissent = o.extractDissent(st)
+	dissent, err := o.extractDissent(st)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve dissent: %w", err)
+	}
+	res.Dissent = dissent
 	return entity.CaseStatusGeneratingReport, false, nil
 }
 

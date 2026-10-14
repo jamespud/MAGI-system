@@ -73,6 +73,11 @@ func decodeDissent(raw *string) ([]entity.Dissent, error) {
 	if out == nil {
 		return nil, fmt.Errorf(`resolution.dissent_json must be a JSON array; use SQL NULL for "not recorded", got %q`, trimmed)
 	}
+	for i, d := range out {
+		if err := entity.ValidateDissent(d); err != nil {
+			return nil, fmt.Errorf("resolution.dissent_json element %d is invalid: %w", i, err)
+		}
+	}
 	return out, nil
 }
 

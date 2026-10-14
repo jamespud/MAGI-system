@@ -1,6 +1,9 @@
 package entity
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Resolution is the final outcome of a DecisionCase.
 type Resolution struct {
@@ -64,6 +67,23 @@ func (r *Resolution) DissentState() DissentState {
 		return DissentUnknown
 	}
 	return DissentStateOf(r.Dissent)
+}
+
+// ValidateDissent rejects a dissent record that cannot be trusted as a
+// structured minority position: a voting persona must be identified and the
+// decision must be a defined vote value. A well-formed JSON array can still
+// contain `null` or `{}` elements, which must never be reported as a real
+// minority position.
+func ValidateDissent(d Dissent) error {
+	switch d.AgentCode {
+	case MagiCodeMelchior, MagiCodeBalthasar, MagiCodeCasper:
+	default:
+		return fmt.Errorf("dissent agent code %q is not a voting persona", d.AgentCode)
+	}
+	if !IsValidVoteDecision(d.Decision) {
+		return fmt.Errorf("dissent decision %q is not a valid vote decision", d.Decision)
+	}
+	return nil
 }
 
 // Dissent is a structured minority position recorded for auditability.

@@ -536,14 +536,22 @@ func (o *Orchestrator) collectBallots(results []*runtime.LoopResult) ([]*entity.
 // Votes and results stay index-aligned with the config slice, so an agent code
 // is read from the same position that produced the ballot. A nil vote slot is a
 // missing ballot, never a dissent.
-func (o *Orchestrator) extractDissent(st *State) []entity.Dissent {
+func (o *Orchestrator) extractDissent(st *State) ([]entity.Dissent, error) {
 	codes := make([]entity.MagiCode, len(st.Votes))
 	for i := range st.Votes {
 		if st.Votes[i] != nil {
 			codes[i] = codeOf(o.configAt(i))
 		}
 	}
-	return service.ExtractDissent(st.Resolution.FinalDecision, st.Votes, codes)
+	dissent := service.ExtractDissent(st.Resolution.FinalDecision, st.Votes, codes)
+	// Never persist a record the read path would reject: an unattributable or
+	// malformed minority position is a case failure, not a silent drop.
+	for i, d := range dissent {
+		if err := entity.ValidateDissent(d); err != nil {
+			return nil, fmt.Errorf("dissent %d: %w", i, err)
+		}
+	}
+	return dissent, nil
 }
 
 // absencesMsg renders the non-votes for a case-failure message.
