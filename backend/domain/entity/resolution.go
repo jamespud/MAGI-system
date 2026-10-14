@@ -83,17 +83,27 @@ func ValidateDissent(d Dissent) error {
 	if !IsValidVoteDecision(d.Decision) {
 		return fmt.Errorf("dissent decision %q is not a valid vote decision", d.Decision)
 	}
+	// A valid vote value is not automatically a valid minority position: an
+	// abstention is not dissent (ExtractDissent never emits one). The legacy
+	// conditional_approve value stays acceptable here because the current
+	// single-candidate VoteDecision still defines it.
+	if d.Decision == VoteDecisionAbstain {
+		return fmt.Errorf("dissent decision %q is an abstention, which is not a minority position", d.Decision)
+	}
 	return nil
 }
 
-// Dissent is a structured minority position recorded for auditability.
+// Dissent is a structured minority position recorded for auditability. It is
+// persisted in resolution.dissent_json, so these tags define the stored
+// encoding: explicit snake_case rather than Go's default PascalCase, matching
+// the rest of the schema and the HTTP/A2A projections.
 type Dissent struct {
-	AgentCode   MagiCode
-	Decision    VoteDecision
-	Reasoning   string
-	EvidenceIDs []string
-	ClaimIDs    []string
-	Conditions  []DecisionCondition
+	AgentCode   MagiCode            `json:"agent_code"`
+	Decision    VoteDecision        `json:"decision"`
+	Reasoning   string              `json:"reasoning,omitempty"`
+	EvidenceIDs []string            `json:"evidence_ids,omitempty"`
+	ClaimIDs    []string            `json:"claim_ids,omitempty"`
+	Conditions  []DecisionCondition `json:"conditions,omitempty"`
 }
 
 // ConsensusResult is the deterministic consensus outcome.

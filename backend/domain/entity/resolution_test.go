@@ -24,6 +24,7 @@ func TestValidateDissent(t *testing.T) {
 		{AgentCode: "nobody", Decision: entity.VoteDecisionReject},                 // unknown persona
 		{AgentCode: entity.MagiCodeCommander, Decision: entity.VoteDecisionReject}, // commander does not vote
 		{AgentCode: entity.MagiCodeCasper, Decision: "maybe"},                      // undefined decision
+		{AgentCode: entity.MagiCodeCasper, Decision: entity.VoteDecisionAbstain},   // abstention is not dissent
 	}
 	for i, d := range invalid {
 		if err := entity.ValidateDissent(d); err == nil {
