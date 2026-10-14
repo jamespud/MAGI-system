@@ -53,3 +53,30 @@ func TestResolutionRepo_DissentTriStateRoundTrip(t *testing.T) {
 		t.Fatalf("present dissent content lost: %+v", got.Dissent)
 	}
 }
+
+// A non-NULL dissent_json that is not a well-formed JSON array is corruption,
+// not "not recorded". It must fail closed instead of being downgraded to
+// UNKNOWN, otherwise a stored minority record would silently vanish from the
+// HTTP/A2A/export projections.
+func TestResolutionRepo_CorruptDissentRecordFailsClosed(t *testing.T) {
+	db := openConversationDB(t)
+	repo := magi.NewRepository(db)
+	ctx := context.Background()
+	res := &entity.Resolution{ID: "res-corrupt", CaseID: "c-corrupt", FinalDecision: entity.VoteDecisionApprove, FinalReport: "# r",
+		Dissent: []entity.Dissent{{AgentCode: entity.MagiCodeCasper, Decision: entity.VoteDecisionReject, Reasoning: "risk"}}}
+	if err := repo.ResolutionRepo().Create(ctx, res); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, bad := range []string{"{not json", "null", "", `{"agent_code":"casper"}`} {
+		if err := db.Exec("UPDATE resolution SET dissent_json = ? WHERE case_id = ?", bad, "c-corrupt").Error; err != nil {
+			t.Fatalf("corrupt row: %v", err)
+		}
+		got, err := repo.ResolutionRepo().Get(ctx, "c-corrupt")
+		if err == nil {
+			t.Fatalf("dissent_json=%q must fail closed, got %+v (state=%s)", bad, got, got.DissentState())
+		}
+		if got != nil {
+			t.Fatalf("dissent_json=%q must not return a resolution, got %+v", bad, got)
+		}
+	}
+}

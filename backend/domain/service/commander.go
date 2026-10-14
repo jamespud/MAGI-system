@@ -156,42 +156,58 @@ func (c *Commander) GenerateReport(ctx context.Context, case_ *entity.DecisionCa
 }
 
 // validateReportCitations enforces that every ID the report cites belongs to
-// the frozen authoritative set handed to the model, that duplicates are not
-// laundered into a longer citation list, and that a report cannot silently omit
-// citations when authoritative material exists. Empty/unknown/duplicate
-// references are rejected so the caller retries instead of persisting a report
-// that claims evidence MAGI cannot prove (invariants REPORT-01, EVID-02).
+// the frozen authoritative set handed to the model. Evidence and claim ids are
+// separate namespaces: a claim id cited as evidence (or vice versa) is
+// rejected, as are duplicates within one list or the same id appearing in both
+// lists. Empty/unknown/duplicate references are rejected so the caller retries
+// instead of persisting a report that claims evidence MAGI cannot prove
+// (invariants REPORT-01, EVID-02).
 func validateReportCitations(data *entity.FinalReportData, evidenceIDs, claimIDs []string) error {
 	if data == nil {
 		return fmt.Errorf("report data is nil")
 	}
-	allowed := make(map[string]struct{}, len(evidenceIDs)+len(claimIDs))
+	allowedEvidence := make(map[string]struct{}, len(evidenceIDs))
 	for _, id := range evidenceIDs {
-		allowed[id] = struct{}{}
+		allowedEvidence[id] = struct{}{}
 	}
+	allowedClaims := make(map[string]struct{}, len(claimIDs))
 	for _, id := range claimIDs {
-		allowed[id] = struct{}{}
+		allowedClaims[id] = struct{}{}
 	}
-	cited := append(append([]string{}, data.KeyEvidenceIDs...), data.KeyClaimIDs...)
-	for _, id := range cited {
+	if err := checkCitationList("evidence", data.KeyEvidenceIDs, allowedEvidence); err != nil {
+		return err
+	}
+	if err := checkCitationList("claim", data.KeyClaimIDs, allowedClaims); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(data.KeyEvidenceIDs)+len(data.KeyClaimIDs))
+	for _, id := range append(append([]string{}, data.KeyEvidenceIDs...), data.KeyClaimIDs...) {
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("report cites %q in more than one citation list", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if available := len(allowedEvidence) + len(allowedClaims); available > 0 && len(seen) == 0 {
+		return fmt.Errorf("report cites no authoritative artifact while %d are available", available)
+	}
+	return nil
+}
+
+// checkCitationList validates one citation namespace: no empty id, no id
+// outside the authorized set, and no duplicate inside the list.
+func checkCitationList(kind string, ids []string, allowed map[string]struct{}) error {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
 		if id == "" {
-			return fmt.Errorf("report cites an empty artifact id")
+			return fmt.Errorf("report cites an empty %s id", kind)
 		}
 		if _, ok := allowed[id]; !ok {
-			return fmt.Errorf("report cites %q which is not in the authoritative set %v", id, sortedKeys(allowed))
+			return fmt.Errorf("report cites %q which is not an authorized %s id %v", id, kind, sortedKeys(allowed))
 		}
-	}
-	for name, ids := range map[string][]string{"evidence": data.KeyEvidenceIDs, "claim": data.KeyClaimIDs} {
-		seen := make(map[string]struct{}, len(ids))
-		for _, id := range ids {
-			if _, dup := seen[id]; dup {
-				return fmt.Errorf("report cites duplicate %s id %q", name, id)
-			}
-			seen[id] = struct{}{}
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("report cites duplicate %s id %q", kind, id)
 		}
-	}
-	if len(allowed) > 0 && len(cited) == 0 {
-		return fmt.Errorf("report cites no authoritative artifact while %d are available", len(allowed))
+		seen[id] = struct{}{}
 	}
 	return nil
 }

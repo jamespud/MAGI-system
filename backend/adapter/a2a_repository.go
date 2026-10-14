@@ -270,7 +270,11 @@ func loadConversationResolutions(tx *gorm.DB, messages []*entity.ConversationMes
 	out := make(map[string]*entity.Resolution, len(models))
 	for i := range models {
 		model := &models[i]
-		out[model.CaseID] = resolutionFromModel(model)
+		resolution, err := resolutionFromModel(model)
+		if err != nil {
+			return nil, err
+		}
+		out[model.CaseID] = resolution
 	}
 	return out, nil
 }
@@ -681,7 +685,11 @@ func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel, includeArtifacts bo
 	if includeArtifacts {
 		var resolution ResolutionModel
 		if err := db.Where("case_id = ?", binding.TaskID).First(&resolution).Error; err == nil {
-			record.Resolution = resolutionFromModel(&resolution)
+			resolutionEntity, rerr := resolutionFromModel(&resolution)
+			if rerr != nil {
+				return nil, rerr
+			}
+			record.Resolution = resolutionEntity
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}

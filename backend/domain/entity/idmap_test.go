@@ -72,3 +72,43 @@ func TestCodeOfRun(t *testing.T) {
 		}
 	}
 }
+
+// The shield tokens used during rewriting must not collide with characters
+// that already appear in the report body: a model can legitimately return
+// control characters as JSON escapes, and rewriting them would corrupt text.
+func TestArtifactRemap_RemapTextDoesNotRewriteUnrelatedControlChars(t *testing.T) {
+	m := NewArtifactRemap()
+	m.AddEvidence("EV-001", "case-r1-EV-001")
+	in := "\x000\x00 case-r1-EV-001"
+	if got := m.RemapText(in); got != in {
+		t.Fatalf("control characters were rewritten:\n got %q\nwant %q", got, in)
+	}
+}
+
+// Overlapping bare IDs must be replaced longest-first and with token
+// boundaries: "EV-001" must never partially rewrite "EV-0012".
+func TestArtifactRemap_RemapTextHandlesOverlappingIDs(t *testing.T) {
+	m := NewArtifactRemap()
+	m.AddEvidence("EV-001", "p-EV-001")
+	m.AddEvidence("EV-0012", "p-EV-0012")
+	in := "see EV-0012 then EV-001 and EV-001"
+	want := "see p-EV-0012 then p-EV-001 and p-EV-001"
+	if got := m.RemapText(in); got != want {
+		t.Fatalf("overlapping rewrite:\n got %s\nwant %s", got, want)
+	}
+	if twice := m.RemapText(m.RemapText(in)); twice != want {
+		t.Fatalf("not idempotent:\n got %s\nwant %s", twice, want)
+	}
+}
+
+// A bare ID embedded in a longer identifier (e.g. an unknown namespaced id)
+// must be left alone rather than partially rewritten.
+func TestArtifactRemap_RemapTextRespectsTokenBoundaries(t *testing.T) {
+	m := NewArtifactRemap()
+	m.AddEvidence("EV-001", "p-EV-001")
+	in := "other-scope-EV-001 and EV-001"
+	want := "other-scope-EV-001 and p-EV-001"
+	if got := m.RemapText(in); got != want {
+		t.Fatalf("boundary rewrite:\n got %s\nwant %s", got, want)
+	}
+}

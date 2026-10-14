@@ -36,27 +36,44 @@ func fromJSON[T any](s string) T {
 // encodeDissent persists the tri-state minority record. A nil slice is stored
 // as SQL NULL ("not recorded"); a non-nil slice is stored as its JSON form
 // ("[]" or "[...]") so an explicit "no dissent" survives a round trip.
+//
+// The struct is marshal-only (strings/slices/bools), so encoding cannot fail in
+// practice. If it ever did, writing SQL NULL would silently turn a real
+// minority record into "not recorded"; the sentinel below instead makes the
+// read fail closed.
 func encodeDissent(d []entity.Dissent) *string {
 	if d == nil {
 		return nil
 	}
 	b, err := json.Marshal(d)
 	if err != nil {
-		return nil
+		bad := "!dissent-encode-error"
+		return &bad
 	}
 	s := string(b)
 	return &s
 }
 
-// decodeDissent restores the tri-state. NULL (legacy), an empty string and JSON
-// null all mean "not recorded"; "[]" is an explicit recorded-none; "[...]" is a
-// recorded minority. json.Unmarshal yields a non-nil empty slice for "[]", so
-// the nil-ness of the returned slice preserves the distinction.
-func decodeDissent(raw *string) []entity.Dissent {
-	if raw == nil || *raw == "" || *raw == "null" {
-		return nil
+// decodeDissent restores the tri-state. SQL NULL is the only legal "not
+// recorded" representation. Every other value must be a well-formed JSON array:
+// "[]" is an explicit recorded-none and "[...]" is a recorded minority.
+//
+// A malformed or non-array value is reported as an error instead of being
+// downgraded to "not recorded": silently returning nil would drop a stored
+// minority record from the HTTP/A2A/export projections and hide the corruption.
+func decodeDissent(raw *string) ([]entity.Dissent, error) {
+	if raw == nil {
+		return nil, nil
 	}
-	return fromJSON[[]entity.Dissent](*raw)
+	trimmed := strings.TrimSpace(*raw)
+	var out []entity.Dissent
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil, fmt.Errorf("resolution.dissent_json is corrupt: %w", err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf(`resolution.dissent_json must be a JSON array; use SQL NULL for "not recorded", got %q`, trimmed)
+	}
+	return out, nil
 }
 
 // --- aggregate ---
@@ -1056,20 +1073,24 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 	if err := r.db.WithContext(ctx).First(&m, "case_id = ?", caseID).Error; err != nil {
 		return nil, err
 	}
-	return resolutionFromModel(&m), nil
+	return resolutionFromModel(&m)
 }
 
 // resolutionFromModel maps a persisted resolution row to its domain entity.
-// Generic (non-authoritative) reads must never invent fields a legacy row did
-// not carry: Dissent stays nil when dissent_json is empty.
-func resolutionFromModel(m *ResolutionModel) *entity.Resolution {
+// A row whose dissent column is SQL NULL loads as UNKNOWN (never recorded); a
+// corrupt non-NULL value is an error, not a silent UNKNOWN.
+func resolutionFromModel(m *ResolutionModel) (*entity.Resolution, error) {
+	dissent, err := decodeDissent(m.DissentJSON)
+	if err != nil {
+		return nil, fmt.Errorf("resolution %s: %w", m.CaseID, err)
+	}
 	return &entity.Resolution{
 		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
 		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
 		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
-		Dissent: decodeDissent(m.DissentJSON),
+		Dissent: dissent,
 		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
-	}
+	}, nil
 }
 
 // --- EventRepository ---

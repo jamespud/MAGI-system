@@ -95,3 +95,34 @@ func TestGenerateReport_RejectsModelSuppliedDecision(t *testing.T) {
 		t.Fatal("a report that supplies its own decision must be rejected")
 	}
 }
+
+// Evidence and claim citations are different namespaces: a claim id must not
+// be accepted as an evidence citation (and vice versa).
+func TestGenerateReport_RejectsCrossTypeCitation(t *testing.T) {
+	m := &reportScriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["CL-001"]}`, nil),
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["CL-001"]}`, nil),
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["CL-001"]}`, nil),
+	}}
+	cmd := newReportCommander(t, m)
+	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"},
+		&entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, []string{"EV-001"}, []string{"CL-001"})
+	if err == nil {
+		t.Fatal("a claim id cited as evidence must be rejected")
+	}
+}
+
+// The same id must not be cited in both the evidence and the claim list.
+func TestGenerateReport_RejectsIdInBothCitationLists(t *testing.T) {
+	m := &reportScriptedModel{responses: []*schema.Message{
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"],"key_claim_ids":["EV-001"]}`, nil),
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"],"key_claim_ids":["EV-001"]}`, nil),
+		schema.AssistantMessage(`{"summary":"s","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"],"key_claim_ids":["EV-001"]}`, nil),
+	}}
+	cmd := newReportCommander(t, m)
+	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"},
+		&entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, []string{"EV-001"}, []string{"EV-001"})
+	if err == nil {
+		t.Fatal("an id cited in both lists must be rejected")
+	}
+}
