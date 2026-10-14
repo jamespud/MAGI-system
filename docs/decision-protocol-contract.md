@@ -37,8 +37,8 @@
 
 ### 0.2 扩展不变量编号的定位
 
-本契约使用的 `CHARTER-01..05`、`CAND-01..04`、`VOTE-04..11`、`DEC-01..06`、
-`LEGACY-01..03`、`TRIAL-01..02` 属于**Rev4 原始要求的细化编号**，用于把 §19 的粗粒度不变量（AGENDA-01、SELECT-01..03、VOTE-01..03、REPORT-01
+本契约使用的 `CHARTER-01..05`、`CAND-01..04`、`VOTE-04..12`、`DEC-01..06`、
+`LEGACY-01..04`、`TRIAL-01..02` 属于**Rev4 原始要求的细化编号**，用于把 §19 的粗粒度不变量（AGENDA-01、SELECT-01..03、VOTE-01..03、REPORT-01
 等）拆成可实现、可测试的条款。它们：
 
 - **不新增或替换** Rev4 的原始验收要求；
@@ -132,7 +132,8 @@ charter_digest        : string
 snapshot_id            : string
 charter_id             : string
 domain_profile_id      : string
-candidate_count        : int                 # 冻结时的候选数 k = len(candidates)，1 <= k <= K_max
+candidate_count        : int                 # 参与正式终票的 INCLUDED 候选数 k，1 <= k <= K_max
+candidate_entries      : int                 # len(candidates)：含 MERGED/WITHDRAWN/EXCLUDED 的条目总数
 candidates             : [Candidate]
 material_pending       : [PendingItem]        # 实质性未决替代方案
 agenda_log             : [AgendaEvent]        # 纳入/排除/合并/撤回/超限
@@ -171,7 +172,11 @@ risk_level             : enum{R0, R1, R2, R3}
 - **CAND-01**：`candidates` 至少包含一个 `is_no_action=true` 的候选，除非宪章显式说明其不适用并记录理由。
 - **CAND-02**：`candidate_id` 在快照内唯一，且与 `candidates` 的任意排序无关。
 - **CAND-03**：`state=EXCLUDED` 或 `MERGED` 的候选不得出现在后续 `BallotSet` 的计票中。
-- **CAND-04**：`candidate_count == len(INCLUDED 候选)`，且冻结时校验 `1 <= candidate_count <= charter.candidate_limit`。
+- **CAND-04**：两个计数含义唯一，不得混用：
+  `candidate_count == len(state=INCLUDED 的候选)`（正式投票的 `k`），
+  `candidate_entries == len(candidates)`（含 `MERGED`/`WITHDRAWN`/`EXCLUDED` 的历史条目）。
+  冻结时校验 `1 <= candidate_count <= charter.candidate_limit`。VOTE-01 的成对偏好数量
+  `k(k-1)/2` 一律取 `candidate_count`，绝不取 `candidate_entries`。
   候选征集期间新增/合并/撤回只改变快照，不修改已确认的宪章；超出 K_max 按 AGENDA-01/§3 的议程规则处理。
 
 ---
@@ -202,6 +207,7 @@ user_preference_snapshot_id : string         # 本人视图的用户偏好快照
 read_set_digest          : string            # 实际读取集合摘要
 context_revocation_epoch : int64
 execution_generation     : int64             # 必须 > 0：独立提交即受所有权/代次约束（VOTE-11）
+authority_proof_id       : string            # 本票签发时的冻结授权证明（VOTE-12）
 attitudes                : {candidate_id -> enum{APPROVE, REJECT, ABSTAIN}}
 preferences              : [PairPreference]  # 正式偏好的唯一权威来源
 reasoning_summary        : string
@@ -224,7 +230,8 @@ context_manifest_id    : string
 authority_proof_id     : string
 execution_generation   : int64               # 必须 > 0
 participant_slots      : {MagiCode -> ParticipantSlot}   # 三个参与者的槽位都必须进入终结结果
-ballot_set_digest      : string
+slots_digest           : string              # 仅 participant_slots 的规范化摘要
+ballot_set_digest      : string              # 完整工件摘要（见 VOTE-09）
 ```
 
 `ParticipantSlot`（每个参与者恰好一个终结结果，取代「必须有 n 份有效票据」的写法）：
@@ -239,8 +246,20 @@ absence    : Absence?                        # ABSENT 时必填（缺票不等�
 - **VOTE-09**：`BallotSet` 可形成的条件是**三个参与者的槽位都进入终结结果**（`SEALED` 或
   `ABSENT`），而**不是**必须拿到三份有效票据。缺席只产生一个不可变的**不完整** `BallotSet`，
   裁决器据此只能得到 `INCOMPLETE`、先验 `BLOCKED` 或协议明确允许的结果，绝不得凑成法定人数。
-  `ballot_set_id`/`ballot_set_digest` 由 `snapshot_id` + 全部槽位（`ballot_id` 或 `absence`）
-  规范化计算；部分到达不得覆盖或改写已有 `SealedBallot`，槽位也未全部终结时不得生成 `BallotSet`。
+  - `slots_digest` 只覆盖 `participant_slots`（每个槽位的 `persona_id` + `outcome` + `ballot_id`/`absence`）。
+  - `ballot_set_digest` **必须覆盖全部权威字段**：`case_id`、`round`、`charter_id`、`domain_profile_id`、
+    `snapshot_id`、`context_manifest_id`、`authority_proof_id`、`execution_generation` 与 `slots_digest`。
+    只算槽位或只算 `snapshot_id + slots` 都不够：那样两个引用不同授权证明或不同执行代次的集合会
+    得到相同摘要，违反 §0 的内容寻址与 ID-01/ID-03。
+  - **`ballot_set_id` 由 `ballot_set_digest` 派生**，因此绑定完整不可变内容；`slots_digest` 只是便于
+    比较槽位集合的次级摘要，不得单独用作工件标识。
+  - 部分到达不得覆盖或改写已有 `SealedBallot`，槽位也未全部终结时不得生成 `BallotSet`。
+- **VOTE-12**：`SealedBallot` 在**独立提交**即绑定 `authority_proof_id`（不是只由聚合层持有），
+  并必须在三个时点验证：① 提交时校验该证明属于当前宪章/上下文且未撤销、未过期；
+  ② 聚合时校验三份票据引用的证明与 `BallotSet.authority_proof_id` 一致；
+  ③ 裁决时再次校验依赖仍有效，失效则整轮作废（`CONTEXT_INVALIDATED`），而不是沿用旧票据。
+  授权证明无法在提交时确定时，必须冻结从不可变 `ContextManifest`/`Charter` 到 `authority_proof_id`
+  的唯一映射并按同一规则校验，不能留空或只在上层检查。
 - **VOTE-11**：`SealedBallot` 的**独立提交**即受 `execution_generation` 持久所有权约束：
   提交时必须校验写入者持有该 Case 的当前代次，旧代次/旧写入者的提交被拒绝（`ErrLeaseLost`）；
   不能只在最终 `BallotSet` 聚合时才做所有权检查，否则独立提交阶段缺少隔离。
@@ -261,7 +280,8 @@ rationale              : enum{EVIDENCE_GAP, VALUE_INCOMPARABLE, CHARTER_PENDING}
 
 计票与验证规则（最终设计 §10、VOTE-01..03）：
 
-- **VOTE-01**：对 k 个候选，`preferences` 必须恰好包含 `k(k-1)/2` 个无序对，每对一个关系；
+- **VOTE-01**：对 `k = candidate_count`（冻结快照的 INCLUDED 候选数，见 CAND-04）个候选，
+  `preferences` 必须恰好包含 `k(k-1)/2` 个无序对，每对一个关系；
   缺失或重复即整份票据 `INVALID`。`preferences` 是正式偏好的**唯一权威来源**；任何扁平展示顺序
   （如 UI 列表顺序）都只是由偏序**导出**的、非权威的表示，不得参与一致性校验、计数或裁决，
   也不得用它把 `TIED` / `INCOMPARABLE` 压成一条并不存在的严格偏好。
@@ -545,13 +565,14 @@ DecisionRecord:    PENDING（RESOLVING 内存态）→ ISSUED | SELECTION_DEFERR
 | VOTE-08 | §4 | 正式票据/Dissent 仅 APPROVE/REJECT/ABSTAIN，不含条件赞成枚举 |
 | VOTE-09 | §4 | BallotSet 在三个参与者槽位（SEALED/ABSENT）全部终结后聚合；缺席产出不可变的不完整集合 |
 | VOTE-11 | §4 | SealedBallot 独立提交即校验 execution_generation 所有权，旧代次写入被拒 |
+| VOTE-12 | §4 | SealedBallot 绑定 authority_proof_id，并在提交/聚合/裁决三点校验有效性 |
 | VOTE-10 | §4 | SealedBallot 绑定 user_preference_snapshot_id，且不可热更新 |
-| CAND-04 | §3 | candidate_count 来自冻结快照，1 <= k <= K_max，不写入宪章 |
+| CAND-04 | §3 | candidate_count(INCLUDED) 与 candidate_entries(len) 含义唯一，1 <= k <= K_max，不写入宪章 |
 | DEC-04 | §5 | APPROVED / SELECTED / HUMAN_SELECTED / AUTHORIZED 四态分离；不沿用条件赞成隐含批准 |
 | DEC-05 | §5 | DecisionRecord 唯一提交绑定快照、全部有效 BallotSet 与上下文版本 |
 | DEC-06 | §5 | 候选级异议必须带 candidate_id/ballot_id；选择级意见单独记录，报告按候选分组 |
 | ID-01..03 | §6.4 | 运行代次、协议轮次、票据签发身份互不替代；权威性由持久来源核验 |
-| LEGACY-01..03 | §6.3 | 旧 Resolution 只经 LegacyProjection 读取，不默认升级为 SELECTED |
+| LEGACY-01..04 | §6.3 | 旧 Resolution 只经 LegacyProjection 读取，不默认升级为 SELECTED；旧 Dissent 形状不外推 |
 | REPORT-01 | §5 | 不隐藏少数意见；dissent 在报告/HTTP/A2A/导出一致（#13 结构化部分已修复） |
 
 ---
@@ -561,15 +582,17 @@ DecisionRecord:    PENDING（RESOLVING 内存态）→ ISSUED | SELECTION_DEFERR
 每个切片都标注规范条款、代码基线、依赖、可运行正反例，禁止一次性大重写。
 
 1. **契约类型与验证器**：为四个工件落地 Go 类型 + JSON Schema + 语义验证器
-   （含 CHARTER-01..05、VOTE-01..08）。仅新增类型与验证，不改 FSM。
+   （含 CHARTER-01..05、CAND-01..04、VOTE-01..12、SELECT-01..03、DEC-01..06、TRIAL-01..02）。
+   仅新增类型与验证，不改 FSM。
 2. **CandidateSnapshot 议程**：候选纳入/排除/合并/超限/冻结与 AgendaEvent 持久化
    （AGENDA-01、CAND-01..03），并提供裁决器所需的**冻结快照读取接口**。
-3. **BallotSet 密封终票**：成对偏好、幂等/冲突提交、缺席与非法票型（VOTE-01..08）。
+3. **BallotSet 密封终票**：成对偏好、幂等/冲突提交、缺席与非法票型、独立提交的所有权与授权绑定、
+   槽位终结与完整摘要（VOTE-01..12）。
 4. **DecisionRecord 裁决**：候选裁决 + 全局选择 + 候选级/选择级异议绑定（SELECT-01..03、DEC-01..06）。
    裁决器同时消费切片 2 的冻结快照（候选状态、MATERIAL_PENDING）与切片 3 的密封票据，
    因此**依赖切片 2 和切片 3**。
 5. **维度拆分与迁移**：候选/选择/授权/动作/上下文/工作流分维存储；`LegacyProjection`
-   （LEGACY-01..03）读兼容与迁移策略。
+   （LEGACY-01..04）读兼容与迁移策略。
 
 依赖关系：
 
@@ -619,6 +642,12 @@ F32-13（`SealedBallot` 显式绑定 `user_preference_snapshot_id`，新增 VOTE
 F32-15（`BallotSet` 改为三个参与者槽位 `SEALED`/`ABSENT` 全部终结后聚合，允许不可变的不完整集合，
 取代“必须三份有效票据”），并补齐两项非阻塞项：`SealedBallot` 独立提交即校验
 `execution_generation` 所有权（新增 VOTE-11）、`TrialAuthorization.risk_level` 收紧为 `enum{R1}`。
+
+**审阅修订（PR #32 第四轮）**：F32-16（`ballot_set_digest` 覆盖全部权威字段并由其派生 `ballot_set_id`，
+另立 `slots_digest` 作为次级槽位摘要）、F32-17（`candidate_count` 唯一表示 INCLUDED 投票候选数，
+新增 `candidate_entries` 表示历史条目总数，VOTE-01 的 `k` 取前者）、F32-18（`SealedBallot` 显式绑定
+`authority_proof_id`，在提交/聚合/裁决三点校验有效性，新增 VOTE-12）；并修正 §0.2 与 §9 的不变量
+范围（LEGACY-01..04、VOTE-01..12）。
 
 修订不改变冻结意图，仍需独立审阅确认。
 
