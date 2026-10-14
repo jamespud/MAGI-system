@@ -139,10 +139,24 @@ Lossless strict parsing and encoding, independent of artifact semantics:
 - canonical form, domain separation and identity derivation (§3–§4).
 
 The in-memory entry point (`CanonicalizeStruct`) additionally rejects values whose
-JSON rendering would be lossy — floats, invalid UTF-8 strings, `[]byte` (implicit
-base64), custom `json.Marshaler`/`MarshalText` implementations and unsupported
-kinds — **before** marshalling, because `encoding/json` would otherwise render
-`float64(1.0)` as `1` and replace invalid UTF-8 with U+FFFD.
+JSON rendering would be lossy or self-authored — floats, invalid UTF-8 strings,
+`[]byte` (implicit base64), custom `json.Marshaler`/`MarshalText` implementations
+and unsupported kinds — **before** marshalling, because `encoding/json` would
+otherwise render `float64(1.0)` as `1` and replace invalid UTF-8 with U+FFFD.
+
+The custom-marshaler check must cover the **pointer type** as well as the value
+type (and nested struct fields, pointer fields and interface values):
+`encoding/json` calls a pointer-receiver `MarshalJSON` on addressable struct
+fields even when the field's value type does not implement the interface. A value
+that can author its own JSON can never be an authoritative artifact input.
+
+The struct path enforces the same ceilings as the JSON path (§5.4) **during**
+validation, before `json.Marshal` runs: members are counted recursively, map keys
+are length-checked, and a worst-case encoded-size budget is accumulated. Because
+the budget assumes every string byte may escape to `\u00XX`, it is deliberately
+conservative — a value whose actual encoding would fit may still be rejected.
+Callers that need the exact ceiling should pre-encode and use
+`CanonicalizeWithLimits`. Validation never relies on post-hoc memory measurements.
 
 ### 5.2 Artifact layer — owned by C1/C2/C3, reusing `domain/validation`
 

@@ -228,7 +228,8 @@ func CanonicalizeStruct(v any) (Canonical, error) {
 // CanonicalizeStructWithLimits is CanonicalizeStruct with explicit ceilings.
 func CanonicalizeStructWithLimits(v any, limits Limits) (Canonical, error) {
 	limits = limits.withDefaults()
-	if err := validateInMemory(reflect.ValueOf(v), "$", 1, limits); err != nil {
+	budget := &inMemoryBudget{lim: limits}
+	if err := validateInMemory(reflect.ValueOf(v), "$", 1, budget); err != nil {
 		return Canonical{}, err
 	}
 	raw, err := json.Marshal(v)
@@ -269,36 +270,88 @@ var (
 	textMarshalerType = reflect.TypeOf((*interface{ MarshalText() ([]byte, error) })(nil)).Elem()
 )
 
+// hasCustomMarshaler reports whether encoding/json could route this type through
+// a user-defined marshaler instead of the struct/map we validated. It checks the
+// pointer type as well: encoding/json calls a pointer-receiver MarshalJSON on
+// addressable struct fields even when the field's value type does not implement
+// the interface, so checking only v.Type() leaves a bypass.
+func hasCustomMarshaler(t reflect.Type) bool {
+	if t == nil || t.Kind() == reflect.Invalid {
+		return false
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() == reflect.Invalid {
+		return false
+	}
+	if t.Implements(jsonMarshalerType) || t.Implements(textMarshalerType) {
+		return true
+	}
+	ptr := reflect.PointerTo(t)
+	return ptr.Implements(jsonMarshalerType) || ptr.Implements(textMarshalerType)
+}
+
+// inMemoryBudget tracks the resource ceilings for the struct path BEFORE the
+// value is handed to json.Marshal. bytes is a worst-case upper bound of the
+// encoded size, so an over-budget object is rejected without serializing it.
+type inMemoryBudget struct {
+	lim     Limits
+	members int
+	bytes   int64
+}
+
+func (b *inMemoryBudget) member(path string) error {
+	b.members++
+	if b.members > b.lim.MaxMembers {
+		return errf(KindTooManyMembers, path, "member count exceeds %d", b.lim.MaxMembers)
+	}
+	return nil
+}
+
+func (b *inMemoryBudget) add(n int, path string) error {
+	b.bytes += int64(n)
+	if b.bytes > int64(b.lim.MaxBytes) {
+		return errf(KindPayloadTooLarge, path, "encoded size upper bound exceeds %d bytes", b.lim.MaxBytes)
+	}
+	return nil
+}
+
+// maxEncodedStringBytes is the worst-case JSON size of a string: every byte may
+// escape to \u00XX.
+func maxEncodedStringBytes(n int) int { return 6*n + 2 }
+
 // validateInMemory rejects values whose JSON rendering would silently differ
 // from the in-memory value (floats, invalid UTF-8, custom marshalers) and
-// unsupported types, mirroring the strict JSON rules.
-func validateInMemory(v reflect.Value, path string, depth int, lim Limits) error {
-	if depth > lim.MaxDepth {
-		return errf(KindTooDeep, path, "value nesting exceeds %d", lim.MaxDepth)
+// enforces the same resource ceilings as the JSON path before marshalling.
+func validateInMemory(v reflect.Value, path string, depth int, b *inMemoryBudget) error {
+	if depth > b.lim.MaxDepth {
+		return errf(KindTooDeep, path, "value nesting exceeds %d", b.lim.MaxDepth)
 	}
 	if !v.IsValid() {
-		return nil
+		return b.add(4, path)
 	}
-	if v.CanInterface() {
-		if v.Type().Implements(jsonMarshalerType) || v.Type().Implements(textMarshalerType) {
-			return errf(KindCustomMarshaler, path, "type %s implements a custom marshaller; encode it explicitly", v.Type())
-		}
+	if v.CanInterface() && hasCustomMarshaler(v.Type()) {
+		return errf(KindCustomMarshaler, path, "type %s can marshal itself; encode it explicitly", v.Type())
 	}
 	switch v.Kind() {
 	case reflect.Interface, reflect.Pointer:
 		if v.IsNil() {
-			return nil
+			return b.add(4, path)
 		}
-		return validateInMemory(v.Elem(), path, depth, lim)
+		return validateInMemory(v.Elem(), path, depth, b)
 	case reflect.Bool:
-		return nil
+		return b.add(5, path)
 	case reflect.String:
 		s := v.String()
 		if !utf8.ValidString(s) {
 			return errf(KindInvalidUTF8, path, "string is not valid UTF-8")
 		}
-		if len(s) > lim.MaxStringBytes {
-			return errf(KindStringTooLong, path, "string is %d bytes, limit is %d", len(s), lim.MaxStringBytes)
+		if len(s) > b.lim.MaxStringBytes {
+			return errf(KindStringTooLong, path, "string is %d bytes, limit is %d", len(s), b.lim.MaxStringBytes)
+		}
+		if err := b.add(maxEncodedStringBytes(len(s)), path); err != nil {
+			return err
 		}
 		return checkNFC(s, path)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -306,20 +359,26 @@ func validateInMemory(v reflect.Value, path string, depth int, lim Limits) error
 		if n > MaxSafeInteger || n < -MaxSafeInteger {
 			return errf(KindIntegerOutOfRange, path, "integer %d is outside ±%d", n, MaxSafeInteger)
 		}
-		return nil
+		return b.add(20, path)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		if v.Uint() > uint64(MaxSafeInteger) {
 			return errf(KindIntegerOutOfRange, path, "integer %d is outside ±%d", v.Uint(), MaxSafeInteger)
 		}
-		return nil
+		return b.add(20, path)
 	case reflect.Float32, reflect.Float64:
 		return errf(KindFloatNumber, path, "floating point values are not allowed in authoritative artifacts")
 	case reflect.Slice, reflect.Array:
 		if v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Uint8 {
 			return errf(KindUnsupportedValue, path, "[]byte is implicitly base64-encoded by encoding/json; use an explicit string or array")
 		}
+		if err := b.add(2, path); err != nil {
+			return err
+		}
 		for i := 0; i < v.Len(); i++ {
-			if err := validateInMemory(v.Index(i), fmt.Sprintf("%s[%d]", path, i), depth+1, lim); err != nil {
+			if err := b.member(path); err != nil {
+				return err
+			}
+			if err := validateInMemory(v.Index(i), fmt.Sprintf("%s[%d]", path, i), depth+1, b); err != nil {
 				return err
 			}
 		}
@@ -328,27 +387,50 @@ func validateInMemory(v reflect.Value, path string, depth int, lim Limits) error
 		if v.Type().Key().Kind() != reflect.String {
 			return errf(KindUnsupportedValue, path, "map keys must be strings, got %s", v.Type().Key())
 		}
+		if err := b.add(2, path); err != nil {
+			return err
+		}
 		iter := v.MapRange()
 		for iter.Next() {
+			if err := b.member(path); err != nil {
+				return err
+			}
 			key := iter.Key().String()
 			if !utf8.ValidString(key) {
 				return errf(KindInvalidUTF8, path, "map key is not valid UTF-8")
 			}
+			if len(key) > b.lim.MaxStringBytes {
+				return errf(KindStringTooLong, path, "map key is %d bytes, limit is %d", len(key), b.lim.MaxStringBytes)
+			}
+			if err := b.add(maxEncodedStringBytes(len(key))+1, path); err != nil {
+				return err
+			}
 			if err := checkNFC(key, path); err != nil {
 				return err
 			}
-			if err := validateInMemory(iter.Value(), path+"."+key, depth+1, lim); err != nil {
+			if err := validateInMemory(iter.Value(), path+"."+key, depth+1, b); err != nil {
 				return err
 			}
 		}
 		return nil
 	case reflect.Struct:
+		if err := b.add(2, path); err != nil {
+			return err
+		}
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
 			if !field.IsExported() {
 				continue
 			}
-			if err := validateInMemory(v.Field(i), path+"."+field.Name, depth+1, lim); err != nil {
+			// Exported fields become object members, so they consume the same
+			// member and key budgets as an explicit map entry.
+			if err := b.member(path); err != nil {
+				return err
+			}
+			if err := b.add(maxEncodedStringBytes(len(field.Name))+1, path); err != nil {
+				return err
+			}
+			if err := validateInMemory(v.Field(i), path+"."+field.Name, depth+1, b); err != nil {
 				return err
 			}
 		}

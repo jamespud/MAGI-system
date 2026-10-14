@@ -381,3 +381,134 @@ func TestGoldenVectorsReproduceInPython(t *testing.T) {
 		t.Fatalf("python reference verifier failed: %v\n%s", err, out)
 	}
 }
+
+// --- F33-05: pointer-receiver marshalers ------------------------------------
+
+type ptrMarshalChild struct {
+	N int `json:"n"`
+}
+
+// Pointer receiver only: encoding/json calls this on addressable struct fields
+// even though the value type does not implement json.Marshaler.
+func (*ptrMarshalChild) MarshalJSON() ([]byte, error) { return []byte(`{"n":999}`), nil }
+
+type ptrMarshalParent struct {
+	Child ptrMarshalChild `json:"child"`
+}
+
+type textMarshalChild struct{ S string }
+
+func (*textMarshalChild) MarshalText() ([]byte, error) { return []byte("rewritten"), nil }
+
+type plainChild struct {
+	N int `json:"n"`
+}
+
+type plainParent struct {
+	Child plainChild `json:"child"`
+}
+
+func TestCanonicalizeStructRejectsPointerReceiverMarshaler(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"addressable struct field", &ptrMarshalParent{Child: ptrMarshalChild{N: 1}}},
+		{"value struct field", ptrMarshalParent{Child: ptrMarshalChild{N: 1}}},
+		{"nested pointer field", &struct {
+			Child *ptrMarshalChild `json:"child"`
+		}{Child: &ptrMarshalChild{N: 1}}},
+		{"interface holding value", map[string]any{"c": ptrMarshalChild{N: 1}}},
+		{"interface holding pointer", map[string]any{"c": &ptrMarshalChild{N: 1}}},
+		{"slice element", []any{ptrMarshalChild{N: 1}}},
+		{"pointer receiver text marshaler", &struct {
+			C textMarshalChild `json:"c"`
+		}{C: textMarshalChild{S: "x"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := canonical.CanonicalizeStruct(tc.in)
+			if err == nil {
+				t.Fatalf("accepted a custom marshaler; canonicalized to %s", got.String())
+			}
+			if kind := kindOf(t, err); kind != canonical.KindCustomMarshaler {
+				t.Fatalf("kind %q, want %q (%v)", kind, canonical.KindCustomMarshaler, err)
+			}
+		})
+	}
+	// Legal counterpart: the same shapes without a custom marshaler still work.
+	got, err := canonical.CanonicalizeStruct(&plainParent{Child: plainChild{N: 1}})
+	if err != nil {
+		t.Fatalf("plain struct rejected: %v", err)
+	}
+	if got.String() != `{"child":{"n":1}}` {
+		t.Fatalf("unexpected canonical form: %s", got.String())
+	}
+}
+
+// --- F33-06: struct path resource ceilings ----------------------------------
+
+func TestCanonicalizeStructEnforcesLimits(t *testing.T) {
+	lim := canonical.DefaultLimits()
+	lim.MaxMembers = 2
+	if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"a": 1, "b": 2}, lim); err != nil {
+		t.Fatalf("at member limit rejected: %v", err)
+	}
+	if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"a": 1, "b": 2, "c": 3}, lim); kindOf(t, err) != canonical.KindTooManyMembers {
+		t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindTooManyMembers)
+	}
+	if _, err := canonical.CanonicalizeStructWithLimits([]any{1, 2, 3}, lim); kindOf(t, err) != canonical.KindTooManyMembers {
+		t.Fatalf("slice members: kind %q, want %q", kindOf(t, err), canonical.KindTooManyMembers)
+	}
+
+	t.Run("map key length", func(t *testing.T) {
+		l := canonical.DefaultLimits()
+		l.MaxStringBytes = 3
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"abc": 1}, l); err != nil {
+			t.Fatalf("at key limit rejected: %v", err)
+		}
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"abcd": 1}, l); kindOf(t, err) != canonical.KindStringTooLong {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindStringTooLong)
+		}
+	})
+
+	t.Run("byte budget before marshalling", func(t *testing.T) {
+		l := canonical.DefaultLimits()
+		l.MaxBytes = 32
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"a": 1}, l); err != nil {
+			t.Fatalf("small object rejected: %v", err)
+		}
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"s": strings.Repeat("x", 64)}, l); kindOf(t, err) != canonical.KindPayloadTooLarge {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindPayloadTooLarge)
+		}
+	})
+
+	t.Run("depth", func(t *testing.T) {
+		l := canonical.DefaultLimits()
+		l.MaxDepth = 3
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"a": map[string]any{"b": 1}}, l); err != nil {
+			t.Fatalf("within depth rejected: %v", err)
+		}
+		if _, err := canonical.CanonicalizeStructWithLimits(map[string]any{"a": map[string]any{"b": map[string]any{"c": 1}}}, l); kindOf(t, err) != canonical.KindTooDeep {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindTooDeep)
+		}
+	})
+
+	t.Run("struct fields consume member budget", func(t *testing.T) {
+		l := canonical.DefaultLimits()
+		l.MaxMembers = 1
+		type oneField struct {
+			A int `json:"a"`
+		}
+		if _, err := canonical.CanonicalizeStructWithLimits(oneField{A: 1}, l); err != nil {
+			t.Fatalf("single field rejected: %v", err)
+		}
+		type twoFields struct {
+			A int `json:"a"`
+			B int `json:"b"`
+		}
+		if _, err := canonical.CanonicalizeStructWithLimits(twoFields{A: 1, B: 2}, l); kindOf(t, err) != canonical.KindTooManyMembers {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindTooManyMembers)
+		}
+	})
+}
