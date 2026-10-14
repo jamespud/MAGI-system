@@ -15,6 +15,9 @@ interface ApiCaseResponse {
   parent_case_id?: string;
   status: string;
   consensus: ApiConsensus | null;
+  // Tri-state: UNKNOWN = legacy resolution with no persisted minority record,
+  // NONE = explicitly recorded that nobody dissented, PRESENT = dissent below.
+  dissent_state?: 'UNKNOWN' | 'NONE' | 'PRESENT';
   dissent?: ApiDissent[];
   final_decision: string;
   confidence: number;

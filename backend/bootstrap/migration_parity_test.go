@@ -272,3 +272,29 @@ func TestS21MigrationMatchesModelWidths(t *testing.T) {
 		}
 	}
 }
+
+const s30MigrationPath = "../../docker/atlas/migrations/magi_s30_resolution_dissent.sql"
+
+// Issue #13 (CAS-8): the authoritative minority record is persisted on the
+// resolution. The Atlas migration and the GORM model must agree, or an offline
+// upgrade would silently drop structured dissent.
+func TestS30ResolutionDissentMigrationMatchesModel(t *testing.T) {
+	raw, err := os.ReadFile(s30MigrationPath)
+	if err != nil {
+		t.Fatalf("read s30 migration: %v", err)
+	}
+	sql := string(raw)
+	if regexp.MustCompile(`(?i)ALTER\s+TABLE\s+resolution[^;]*ADD\s+COLUMN\s+dissent_json\s+TEXT\s+NULL`).FindString(sql) == "" {
+		t.Fatalf("S30 must add a nullable dissent_json TEXT column to resolution:\n%s", sql)
+	}
+	field, ok := reflect.TypeOf(magi.ResolutionModel{}).FieldByName("DissentJSON")
+	if !ok {
+		t.Fatal("ResolutionModel is missing DissentJSON")
+	}
+	if tag := field.Tag.Get("gorm"); !strings.Contains(tag, "type:text") {
+		t.Fatalf("ResolutionModel.DissentJSON tag = %q, want type:text", tag)
+	}
+	if field.Type.Kind() != reflect.Ptr || field.Type.Elem().Kind() != reflect.String {
+		t.Fatalf("ResolutionModel.DissentJSON must be *string so NULL stays distinct from '[]': %s", field.Type)
+	}
+}

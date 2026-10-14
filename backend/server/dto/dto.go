@@ -19,21 +19,26 @@ type CreateCaseRequest struct {
 }
 
 type CaseResponse struct {
-	ID            string          `json:"id"`
-	Question      string          `json:"question"`
-	Background    string          `json:"background"`
-	Constraints   []ConstraintDTO `json:"constraints"`
-	ParentCaseID  string          `json:"parent_case_id,omitempty"`
-	Status        string          `json:"status"`
-	Consensus     *ConsensusDTO   `json:"consensus,omitempty"`
-	Dissent       []DissentDTO    `json:"dissent,omitempty"`
-	FinalDecision string          `json:"final_decision,omitempty"`
-	Confidence    float64         `json:"confidence"`
-	Round         int             `json:"round"`
-	Pinned        bool            `json:"pinned"`
-	Archived      bool            `json:"archived"`
-	CreatedAt     string          `json:"created_at"`
-	UpdatedAt     string          `json:"updated_at"`
+	ID           string          `json:"id"`
+	Question     string          `json:"question"`
+	Background   string          `json:"background"`
+	Constraints  []ConstraintDTO `json:"constraints"`
+	ParentCaseID string          `json:"parent_case_id,omitempty"`
+	Status       string          `json:"status"`
+	Consensus    *ConsensusDTO   `json:"consensus,omitempty"`
+	// DissentState is UNKNOWN (legacy: never recorded), NONE (recorded that no
+	// one dissented) or PRESENT. Dissent is null for UNKNOWN, [] for NONE and
+	// the minority list for PRESENT, so consumers cannot mistake "not recorded"
+	// for "no dissent".
+	DissentState  string       `json:"dissent_state"`
+	Dissent       []DissentDTO `json:"dissent"`
+	FinalDecision string       `json:"final_decision,omitempty"`
+	Confidence    float64      `json:"confidence"`
+	Round         int          `json:"round"`
+	Pinned        bool         `json:"pinned"`
+	Archived      bool         `json:"archived"`
+	CreatedAt     string       `json:"created_at"`
+	UpdatedAt     string       `json:"updated_at"`
 }
 
 // UpdateCaseRequest carries optional flag updates for PATCH /cases/:id.
@@ -205,7 +210,9 @@ func fromCase(c *entity.DecisionCase, resolution *entity.Resolution, dissent []e
 		CreatedAt:    c.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    c.UpdatedAt.Format(time.RFC3339),
 	}
-	if len(dissent) > 0 {
+	resp.DissentState = string(entity.DissentStateOf(dissent))
+	if dissent != nil {
+		resp.Dissent = make([]DissentDTO, 0, len(dissent))
 		for _, d := range dissent {
 			resp.Dissent = append(resp.Dissent, FromDissent(d))
 		}
@@ -1100,7 +1107,11 @@ type ResolutionExport struct {
 	KeyClaimIDs    []string `json:"key_claim_ids"`
 	VoteIDs        []string `json:"vote_ids"`
 	Conditions     []string `json:"conditions,omitempty"`
-	CreatedAt      string   `json:"created_at"`
+	// DissentState/Dissent mirror CaseResponse: null = not recorded, [] =
+	// recorded none, [...] = recorded minority.
+	DissentState string       `json:"dissent_state"`
+	Dissent      []DissentDTO `json:"dissent"`
+	CreatedAt    string       `json:"created_at"`
 }
 
 // FromResolutionExport maps a resolution to its export DTO (nil-safe).
@@ -1112,13 +1123,20 @@ func FromResolutionExport(r *entity.Resolution) *ResolutionExport {
 	for _, cd := range r.Consensus.Conditions {
 		cond = append(cond, cd.Statement)
 	}
-	return &ResolutionExport{
+	out := &ResolutionExport{
 		ID: r.ID, CaseID: r.CaseID, Outcome: string(r.Consensus.Outcome),
 		Round: r.Consensus.Round, Detail: r.Consensus.Detail,
 		FinalDecision: string(r.FinalDecision), FinalReport: r.FinalReport,
 		KeyEvidenceIDs: r.KeyEvidenceIDs, KeyClaimIDs: r.KeyClaimIDs, VoteIDs: r.VoteIDs,
-		Conditions: cond, CreatedAt: r.CreatedAt.Format(time.RFC3339),
+		Conditions: cond, DissentState: string(r.DissentState()), CreatedAt: r.CreatedAt.Format(time.RFC3339),
 	}
+	if r.Dissent != nil {
+		out.Dissent = make([]DissentDTO, 0, len(r.Dissent))
+		for _, d := range r.Dissent {
+			out.Dissent = append(out.Dissent, FromDissent(d))
+		}
+	}
+	return out
 }
 
 // MemoryExport is the full memory projection list for a user.

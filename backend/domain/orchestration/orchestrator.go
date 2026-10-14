@@ -532,6 +532,20 @@ func (o *Orchestrator) collectBallots(results []*runtime.LoopResult) ([]*entity.
 	return votes, absences
 }
 
+// extractDissent binds the current round's minority ballots to their agents.
+// Votes and results stay index-aligned with the config slice, so an agent code
+// is read from the same position that produced the ballot. A nil vote slot is a
+// missing ballot, never a dissent.
+func (o *Orchestrator) extractDissent(st *State) []entity.Dissent {
+	codes := make([]entity.MagiCode, len(st.Votes))
+	for i := range st.Votes {
+		if st.Votes[i] != nil {
+			codes[i] = codeOf(o.configAt(i))
+		}
+	}
+	return service.ExtractDissent(st.Resolution.FinalDecision, st.Votes, codes)
+}
+
 // absencesMsg renders the non-votes for a case-failure message.
 func absencesMsg(absences []entity.AgentAbsence) string {
 	parts := make([]string, 0, len(absences))

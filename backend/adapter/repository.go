@@ -33,6 +33,32 @@ func fromJSON[T any](s string) T {
 	return v
 }
 
+// encodeDissent persists the tri-state minority record. A nil slice is stored
+// as SQL NULL ("not recorded"); a non-nil slice is stored as its JSON form
+// ("[]" or "[...]") so an explicit "no dissent" survives a round trip.
+func encodeDissent(d []entity.Dissent) *string {
+	if d == nil {
+		return nil
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return nil
+	}
+	s := string(b)
+	return &s
+}
+
+// decodeDissent restores the tri-state. NULL (legacy), an empty string and JSON
+// null all mean "not recorded"; "[]" is an explicit recorded-none; "[...]" is a
+// recorded minority. json.Unmarshal yields a non-nil empty slice for "[]", so
+// the nil-ness of the returned slice preserves the distinction.
+func decodeDissent(raw *string) []entity.Dissent {
+	if raw == nil || *raw == "" || *raw == "null" {
+		return nil
+	}
+	return fromJSON[[]entity.Dissent](*raw)
+}
+
 // --- aggregate ---
 
 type magiRepository struct {
@@ -1022,7 +1048,7 @@ func resolutionModel(res *entity.Resolution) ResolutionModel {
 	return ResolutionModel{
 		ID: res.ID, CaseID: res.CaseID, ExecutionGeneration: res.ExecutionGeneration, ConsensusJSON: toJSON(res.Consensus), FinalDecision: string(res.FinalDecision),
 		FinalReport: res.FinalReport, KeyEvidenceIDsJSON: toJSON(res.KeyEvidenceIDs), KeyClaimIDsJSON: toJSON(res.KeyClaimIDs),
-		VoteIDsJSON: toJSON(res.VoteIDs), EvaluationJSON: toJSON(res.Evaluation), CreatedAt: res.CreatedAt,
+		DissentJSON: encodeDissent(res.Dissent), VoteIDsJSON: toJSON(res.VoteIDs), EvaluationJSON: toJSON(res.Evaluation), CreatedAt: res.CreatedAt,
 	}
 }
 func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolution, error) {
@@ -1030,12 +1056,20 @@ func (r *resolutionRepo) Get(ctx context.Context, caseID string) (*entity.Resolu
 	if err := r.db.WithContext(ctx).First(&m, "case_id = ?", caseID).Error; err != nil {
 		return nil, err
 	}
+	return resolutionFromModel(&m), nil
+}
+
+// resolutionFromModel maps a persisted resolution row to its domain entity.
+// Generic (non-authoritative) reads must never invent fields a legacy row did
+// not carry: Dissent stays nil when dissent_json is empty.
+func resolutionFromModel(m *ResolutionModel) *entity.Resolution {
 	return &entity.Resolution{
 		ID: m.ID, CaseID: m.CaseID, ExecutionGeneration: m.ExecutionGeneration, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
 		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
 		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
+		Dissent: decodeDissent(m.DissentJSON),
 		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
-	}, nil
+	}
 }
 
 // --- EventRepository ---

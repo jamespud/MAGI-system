@@ -52,10 +52,10 @@ func newReportCommander(t *testing.T, m model.ToolCallingChatModel) *service.Com
 
 func TestGenerateReport_ValidJSONRenders(t *testing.T) {
 	m := &reportScriptedModel{responses: []*schema.Message{
-		schema.AssistantMessage(`{"decision":"approve","summary":"proceed","key_reasons":["r1"],"risks":[],"next_steps":["s1"]}`, nil),
+		schema.AssistantMessage(`{"summary":"proceed","key_reasons":["r1"],"risks":[],"next_steps":["s1"]}`, nil),
 	}}
 	cmd := newReportCommander(t, m)
-	out, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{}, nil, nil, nil)
+	out, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestGenerateReport_InvalidJSONRetriesAndFails(t *testing.T) {
 		schema.AssistantMessage("{invalid", nil),
 	}}
 	cmd := newReportCommander(t, m)
-	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{}, nil, nil, nil)
+	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error after 3 invalid attempts")
 	}
@@ -81,11 +81,11 @@ func TestGenerateReport_InvalidJSONRetriesAndFails(t *testing.T) {
 
 func TestGenerateReport_RequiresEvidenceCitation(t *testing.T) {
 	m := &reportScriptedModel{responses: []*schema.Message{
-		schema.AssistantMessage(`{"decision":"approve","summary":"no citation","key_reasons":["r1"],"risks":[],"next_steps":["s1"]}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"cited","key_reasons":["r1"],"risks":[],"next_steps":["s1"],"key_evidence_ids":["EV-001"]}`, nil),
+		schema.AssistantMessage(`{"summary":"no citation","key_reasons":["r1"],"risks":[],"next_steps":["s1"]}`, nil),
+		schema.AssistantMessage(`{"summary":"cited","key_reasons":["r1"],"risks":[],"next_steps":["s1"],"key_evidence_ids":["EV-001"]}`, nil),
 	}}
 	cmd := newReportCommander(t, m)
-	out, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{}, nil, []string{"EV-001"}, nil)
+	out, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, []string{"EV-001"}, nil)
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
@@ -99,12 +99,12 @@ func TestGenerateReport_RequiresEvidenceCitation(t *testing.T) {
 
 func TestGenerateReport_FailsWhenCitationNeverProvided(t *testing.T) {
 	m := &reportScriptedModel{responses: []*schema.Message{
-		schema.AssistantMessage(`{"decision":"approve","summary":"a","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"b","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"c","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
+		schema.AssistantMessage(`{"summary":"a","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
+		schema.AssistantMessage(`{"summary":"b","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
+		schema.AssistantMessage(`{"summary":"c","key_reasons":["r"],"risks":[],"next_steps":["s"]}`, nil),
 	}}
 	cmd := newReportCommander(t, m)
-	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{}, nil, []string{"EV-001"}, nil)
+	_, err := cmd.GenerateReport(context.Background(), &entity.DecisionCase{Question: "q"}, &entity.Resolution{FinalDecision: entity.VoteDecisionApprove}, nil, []string{"EV-001"}, nil)
 	if err == nil {
 		t.Fatal("expected error when report never cites available evidence")
 	}

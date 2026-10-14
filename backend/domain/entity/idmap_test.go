@@ -21,6 +21,27 @@ func TestArtifactRemap_RemapListAndText(t *testing.T) {
 	}
 }
 
+// A namespaced ID contains its bare form as a suffix, so RemapText must be
+// idempotent: re-running it (or seeing an already-remapped citation alongside a
+// bare one) must not produce a doubled prefix.
+func TestArtifactRemap_RemapTextIsIdempotent(t *testing.T) {
+	m := NewArtifactRemap()
+	m.AddEvidence("EV-001", "case-abc-melchior-r1-investigate-EV-001")
+	namespaced := "case-abc-melchior-r1-investigate-EV-001"
+	oncemapped := m.RemapText(namespaced)
+	if oncemapped != namespaced {
+		t.Fatalf("already-namespaced text was rewritten: %s", oncemapped)
+	}
+	mixed := m.RemapText("see " + namespaced + " and EV-001")
+	want := "see " + namespaced + " and " + namespaced
+	if mixed != want {
+		t.Fatalf("mixed RemapText:\n got %s\nwant %s", mixed, want)
+	}
+	if twice := m.RemapText(mixed); twice != mixed {
+		t.Fatalf("second RemapText changed text: %s", twice)
+	}
+}
+
 func TestArtifactRemap_Merge(t *testing.T) {
 	a := NewArtifactRemap()
 	a.AddEvidence("EV-001", "p1-EV-001")

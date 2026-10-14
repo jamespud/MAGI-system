@@ -1,9 +1,11 @@
 package entity
 
 // FinalReportData is the Commander's structured, schema-validated output for
-// the final decision report (design §9). RenderReport turns it into markdown.
+// the final decision report (design §9). It carries only natural-language
+// explanation plus citations: the authoritative Decision and the minority
+// positions are bound deterministically from the resolution, never authored by
+// the report model (invariant REPORT-01, issue #13).
 type FinalReportData struct {
-	Decision       string   `json:"decision"`
 	Summary        string   `json:"summary"`
 	KeyReasons     []string `json:"key_reasons"`
 	Risks          []string `json:"risks"`

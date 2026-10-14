@@ -32,6 +32,7 @@ function mapToCase(c: ApiCaseResponse): Case {
       needReflection: c.consensus.need_reflection,
     } : null,
     confidence: c.confidence,
+    dissentState: c.dissent_state,
     dissent: (c.dissent || []).map((d) => ({
       agentCode: d.agent_code,
       decision: d.decision,

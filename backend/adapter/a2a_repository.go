@@ -270,13 +270,7 @@ func loadConversationResolutions(tx *gorm.DB, messages []*entity.ConversationMes
 	out := make(map[string]*entity.Resolution, len(models))
 	for i := range models {
 		model := &models[i]
-		out[model.CaseID] = &entity.Resolution{
-			ID: model.ID, CaseID: model.CaseID, ExecutionGeneration: model.ExecutionGeneration,
-			Consensus:     fromJSON[entity.ConsensusResult](model.ConsensusJSON),
-			FinalDecision: entity.VoteDecision(model.FinalDecision), FinalReport: model.FinalReport,
-			KeyEvidenceIDs: fromJSON[[]string](model.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](model.KeyClaimIDsJSON),
-			VoteIDs: fromJSON[[]string](model.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](model.EvaluationJSON), CreatedAt: model.CreatedAt,
-		}
+		out[model.CaseID] = resolutionFromModel(model)
 	}
 	return out, nil
 }
@@ -722,15 +716,6 @@ func loadTaskRecord(db *gorm.DB, binding A2ASubmissionModel, includeArtifacts bo
 	}
 	record.MaxEventSeq = maxSeq
 	return record, nil
-}
-
-func resolutionFromModel(m *ResolutionModel) *entity.Resolution {
-	return &entity.Resolution{
-		ID: m.ID, CaseID: m.CaseID, Consensus: fromJSON[entity.ConsensusResult](m.ConsensusJSON),
-		FinalDecision: entity.VoteDecision(m.FinalDecision), FinalReport: m.FinalReport,
-		KeyEvidenceIDs: fromJSON[[]string](m.KeyEvidenceIDsJSON), KeyClaimIDs: fromJSON[[]string](m.KeyClaimIDsJSON),
-		VoteIDs: fromJSON[[]string](m.VoteIDsJSON), Evaluation: fromJSON[*entity.Evaluation](m.EvaluationJSON), CreatedAt: m.CreatedAt,
-	}
 }
 
 func voteFromModel(m *VoteModel) *entity.Vote {

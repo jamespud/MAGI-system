@@ -68,14 +68,17 @@ func RenderDissent(dissent []entity.Dissent) string {
 }
 
 // RenderReport renders a validated FinalReportData into a markdown report.
-// Empty list sections are omitted. A nil input returns "".
-func RenderReport(d *entity.FinalReportData) string {
+// The Decision heading is taken from the authoritative resolution, not from the
+// model output, so a report can never assert a decision other than the one the
+// deterministic consensus produced (invariant REPORT-01). Empty list sections
+// are omitted. A nil input returns "".
+func RenderReport(decision entity.VoteDecision, d *entity.FinalReportData) string {
 	if d == nil {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("# Decision Report\n\n")
-	fmt.Fprintf(&b, "## Decision\n%s\n\n", d.Decision)
+	fmt.Fprintf(&b, "## Decision\n%s\n\n", decision)
 	fmt.Fprintf(&b, "## Summary\n%s\n", d.Summary)
 	if len(d.KeyReasons) > 0 {
 		b.WriteString("\n## Key Reasons\n")

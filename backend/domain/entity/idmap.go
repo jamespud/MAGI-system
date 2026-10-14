@@ -1,6 +1,9 @@
 package entity
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // ArtifactRemap maps in-memory ledger IDs (EV-001/CL-001) to the namespaced
 // IDs persisted for one dispatch round ("<runID>-<oldID>"). It is the single
@@ -66,19 +69,43 @@ func (m *ArtifactRemap) RemapList(ids []string) []string {
 // RemapText replaces every known in-memory ID inside a text blob with its
 // persisted form. Used for the final report body, whose citations are
 // free-form text rather than structured fields.
+//
+// It is idempotent: a namespaced ID contains its bare in-memory form as a
+// suffix ("<case>-<code>-...-EV-001" contains "EV-001"), so a naive replace
+// would rewrite an already-remapped citation into a doubled prefix. Every
+// persisted value is shielded first, the bare forms are rewritten, and the
+// shields are restored.
 func (m *ArtifactRemap) RemapText(s string) string {
 	if m == nil || s == "" {
 		return s
 	}
-	for old, new := range m.evidence {
-		if old != "" {
-			s = strings.ReplaceAll(s, old, new)
+	type shield struct{ token, value string }
+	var shields []shield
+	guard := func(new string) {
+		if new == "" || !strings.Contains(s, new) {
+			return
+		}
+		token := "\x00" + strconv.Itoa(len(shields)) + "\x00"
+		s = strings.ReplaceAll(s, new, token)
+		shields = append(shields, shield{token: token, value: new})
+	}
+	for _, new := range m.evidence {
+		guard(new)
+	}
+	for _, new := range m.claims {
+		guard(new)
+	}
+	replace := func(pairs map[string]string) {
+		for old, new := range pairs {
+			if old != "" {
+				s = strings.ReplaceAll(s, old, new)
+			}
 		}
 	}
-	for old, new := range m.claims {
-		if old != "" {
-			s = strings.ReplaceAll(s, old, new)
-		}
+	replace(m.evidence)
+	replace(m.claims)
+	for _, sh := range shields {
+		s = strings.ReplaceAll(s, sh.token, sh.value)
 	}
 	return s
 }

@@ -10,7 +10,6 @@ import (
 
 func TestRenderReport_FullFields(t *testing.T) {
 	d := &entity.FinalReportData{
-		Decision:       "approve",
 		Summary:        "the team should proceed",
 		KeyReasons:     []string{"r1", "r2"},
 		Risks:          []string{"risk1"},
@@ -18,7 +17,7 @@ func TestRenderReport_FullFields(t *testing.T) {
 		KeyEvidenceIDs: []string{"EV-001", "EV-002"},
 		KeyClaimIDs:    []string{"CL-001"},
 	}
-	out := service.RenderReport(d)
+	out := service.RenderReport(entity.VoteDecisionApprove, d)
 	for _, want := range []string{"# Decision Report", "approve", "the team should proceed", "- r1", "- r2", "- risk1", "- step1", "## Key Reasons", "## Risks", "## Next Steps", "## Key Evidence", "EV-001", "EV-002", "## Key Claims", "CL-001"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q, got:\n%s", want, out)
@@ -28,10 +27,9 @@ func TestRenderReport_FullFields(t *testing.T) {
 
 func TestRenderReport_EmptySectionsOmitted(t *testing.T) {
 	d := &entity.FinalReportData{
-		Decision: "reject",
-		Summary:  "no",
+		Summary: "no",
 	}
-	out := service.RenderReport(d)
+	out := service.RenderReport(entity.VoteDecisionReject, d)
 	if !strings.Contains(out, "reject") || !strings.Contains(out, "no") {
 		t.Fatalf("missing decision/summary: %s", out)
 	}
@@ -43,7 +41,7 @@ func TestRenderReport_EmptySectionsOmitted(t *testing.T) {
 }
 
 func TestRenderReport_NilSafe(t *testing.T) {
-	if got := service.RenderReport(nil); got != "" {
+	if got := service.RenderReport(entity.VoteDecisionApprove, nil); got != "" {
 		t.Fatalf("nil should render empty string, got %q", got)
 	}
 }

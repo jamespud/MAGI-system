@@ -12,9 +12,58 @@ type Resolution struct {
 	FinalReport         string
 	KeyEvidenceIDs      []string
 	KeyClaimIDs         []string
-	VoteIDs             []string
-	Evaluation          *Evaluation
-	CreatedAt           time.Time
+	// Dissent is the authoritative structured minority record derived from the
+	// frozen round's ballots, persisted with the resolution so the report,
+	// HTTP/A2A and export projections cannot independently re-invent (or hide)
+	// minority positions (invariant REPORT-01, issue #13).
+	//
+	// Its nil-ness is the tri-state (see DissentState): nil means the record was
+	// never persisted (legacy), an empty non-nil slice means an explicit
+	// "no dissent", and a non-empty slice means minority positions exist.
+	Dissent    []Dissent
+	VoteIDs    []string
+	Evaluation *Evaluation
+	CreatedAt  time.Time
+}
+
+// DissentState classifies whether minority positions were recorded for a
+// resolution. "No record" is not the same fact as "recorded that nobody
+// dissented": a truthfulness contract must never present the former as the
+// latter (invariant REPORT-01, issue #13).
+type DissentState string
+
+const (
+	// DissentUnknown means the resolution predates structured dissent
+	// persistence (or its record was never committed). Whether anyone dissented
+	// cannot be proven from the stored data.
+	DissentUnknown DissentState = "UNKNOWN"
+	// DissentNone means the resolution explicitly recorded that no participant
+	// dissented.
+	DissentNone DissentState = "NONE"
+	// DissentPresent means one or more minority positions were recorded.
+	DissentPresent DissentState = "PRESENT"
+)
+
+// DissentStateOf classifies a dissent record by the nil-ness of its slice: nil
+// means "never persisted", an empty non-nil slice means "explicitly no
+// dissent", and a non-empty slice means "minority positions recorded".
+func DissentStateOf(d []Dissent) DissentState {
+	switch {
+	case d == nil:
+		return DissentUnknown
+	case len(d) == 0:
+		return DissentNone
+	default:
+		return DissentPresent
+	}
+}
+
+// DissentState reports the persisted minority state of the resolution.
+func (r *Resolution) DissentState() DissentState {
+	if r == nil {
+		return DissentUnknown
+	}
+	return DissentStateOf(r.Dissent)
 }
 
 // Dissent is a structured minority position recorded for auditability.

@@ -2,6 +2,7 @@ package magi_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,15 +36,56 @@ type t3ScriptedModel struct {
 	calls     int
 }
 
-func (m *t3ScriptedModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+func (m *t3ScriptedModel) Generate(_ context.Context, in []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var prompt strings.Builder
+	for _, msg := range in {
+		if msg != nil {
+			prompt.WriteString(msg.Content)
+			prompt.WriteString("\n")
+		}
+	}
+	// The report call cites the first authoritative ID in the prompt. The
+	// strict citation validator (issue #13) rejects the old canned "EV-001"
+	// because the frozen set holds namespaced IDs the script cannot know.
+	if strings.Contains(prompt.String(), "FinalReportData") {
+		return schema.AssistantMessage(t3CitingReportJSON(prompt.String()), nil), nil
+	}
 	if m.calls >= len(m.responses) {
 		return nil, fmt.Errorf("t3 scripted model exhausted after %d calls", m.calls)
 	}
 	msg := m.responses[m.calls]
 	m.calls++
 	return msg, nil
+}
+
+func t3CitingReportJSON(prompt string) string {
+	body := map[string]any{"summary": "decision report summary", "key_reasons": []string{"r1"}, "risks": []string{}, "next_steps": []string{}}
+	if id := t3FirstListedID(prompt, "Available evidence IDs: ["); id != "" {
+		body["key_evidence_ids"] = []string{id}
+	} else if id := t3FirstListedID(prompt, "Available claim IDs: ["); id != "" {
+		body["key_claim_ids"] = []string{id}
+	}
+	raw, _ := json.Marshal(body)
+	return string(raw)
+}
+
+func t3FirstListedID(prompt, marker string) string {
+	i := strings.Index(prompt, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := prompt[i+len(marker):]
+	j := strings.IndexByte(rest, ']')
+	if j < 0 {
+		return ""
+	}
+	fields := strings.Fields(rest[:j])
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 func (m *t3ScriptedModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
@@ -106,7 +148,6 @@ func t3Commander(t *testing.T) *service.Commander {
 	t.Helper()
 	script := &t3ScriptedModel{responses: []*schema.Message{
 		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"decision report summary","key_reasons":["r1"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"]}`, nil),
 	}}
 	cmd, err := service.NewCommander(
 		service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"},

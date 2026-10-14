@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudwego/eino/schema"
 	magiapp "github.com/jamespud/magi/backend/adapter"
 	"github.com/jamespud/magi/backend/domain/consensus"
 	"github.com/jamespud/magi/backend/domain/debate"
@@ -46,10 +45,7 @@ func TestIntegration_OrchestratorWithDB(t *testing.T) {
 
 	gen := validation.NewReflectSchemaGenerator()
 	val := validation.NewJSONSchemaValidator()
-	cmdModel := &scriptedChatModel{responses: []*schema.Message{
-		schema.AssistantMessage(`{"canonical_question":"compute"}`, nil),
-		schema.AssistantMessage(`{"decision":"approve","summary":"decision report from db test","key_reasons":["r"],"risks":[],"next_steps":[],"key_evidence_ids":["EV-001"]}`, nil),
-	}}
+	cmdModel := &citingCommanderModel{}
 	cmd, err := service.NewCommander(service.CommanderConfig{Model: entity.ModelRef{ModelID: 1}, Persona: "commander"}, &stubModelPort{m: cmdModel}, gen, val)
 	if err != nil {
 		t.Fatalf("commander: %v", err)

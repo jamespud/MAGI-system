@@ -13,7 +13,6 @@ import (
 	"github.com/jamespud/magi/backend/application/memory"
 	"github.com/jamespud/magi/backend/domain/entity"
 	"github.com/jamespud/magi/backend/domain/port"
-	domainservice "github.com/jamespud/magi/backend/domain/service"
 	"github.com/jamespud/magi/backend/server/dto"
 )
 
@@ -63,10 +62,8 @@ func (h *ExportHandler) Case(ctx context.Context, c *app.RequestContext) {
 	if h.mem != nil {
 		memory, _ = h.mem.Get(ctx, id)
 	}
+	// The persisted report already carries the deterministic dissent section.
 	report := h.dec.Report(ctx, id)
-	if ds := h.dissent(ctx, id, res); len(ds) > 0 {
-		report += "\n\n--- Dissent ---\n" + domainservice.RenderDissent(ds)
-	}
 	c.JSON(consts.StatusOK, dto.CaseExport{
 		Case:       dto.FromCaseWithDissent(case_, res, h.dissent(ctx, id, res)),
 		Resolution: dto.FromResolutionExport(res),
@@ -126,17 +123,11 @@ func (h *ExportHandler) Evaluation(ctx context.Context, c *app.RequestContext) {
 	})
 }
 
-// dissent is a package-level helper to avoid importing the domain dissent
-// renderer here twice; it reuses the same extraction the decision handler uses.
+// dissent returns the authoritative minority record persisted with the
+// resolution; it is never re-derived from the vote tables (issue #13).
 func (h *ExportHandler) dissent(ctx context.Context, id string, res *entity.Resolution) []entity.Dissent {
 	if res == nil {
 		return nil
 	}
-	votes, _ := h.dec.Votes(ctx, id)
-	runs, _ := h.dec.AgentRuns(ctx, id)
-	codes := make(map[string]entity.MagiCode, len(runs))
-	for _, r := range runs {
-		codes[r.ID] = r.MagiCode
-	}
-	return domainservice.ExtractDissent(res.FinalDecision, votes, codes)
+	return res.Dissent
 }
