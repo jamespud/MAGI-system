@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -337,6 +338,11 @@ func jsonFieldName(f reflect.StructField) (name string, skip bool, err error) {
 	name = parts[0]
 	if name == "" {
 		name = f.Name
+	} else if !isValidJSONTagName(name) {
+		// encoding/json silently falls back to the Go field name for tag names
+		// that fail its character rules. Rather than mirror that fallback (and
+		// risk budgeting the wrong key), treat the tag as unsupported.
+		return "", false, fmt.Errorf("json tag name %q is not a valid encoding/json field name", name)
 	}
 	for _, opt := range parts[1:] {
 		switch opt {
@@ -350,6 +356,25 @@ func jsonFieldName(f reflect.StructField) (name string, skip bool, err error) {
 		}
 	}
 	return name, false, nil
+}
+
+// isValidJSONTagName mirrors encoding/json's isValidTag: letters, digits and
+// the punctuation set it accepts. Anything else (e.g. an emoji) makes
+// encoding/json ignore the tag and use the Go field name instead.
+func isValidJSONTagName(s string) bool {
+	if s == "" {
+		return false
+	}
+	const punctuation = "!#$%&()*+-./:;<=>?@[]^_{|}~ "
+	for _, r := range s {
+		switch {
+		case strings.ContainsRune(punctuation, r):
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validateInMemory rejects values whose JSON rendering would silently differ

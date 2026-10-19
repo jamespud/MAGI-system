@@ -170,7 +170,10 @@ rather than approximated:
   them (and marshals the exported fields of unexported embedded types), which
   would otherwise escape both validation and budgeting;
 - **`,string` is rejected** — it re-encodes the value as a JSON string, so its
-  worst-case size can exceed the value's own budget.
+  worst-case size can exceed the value's own budget;
+- **invalid JSON tag names are rejected** — `encoding/json` silently falls back to
+  the Go field name for tag names that fail its character rules (e.g. an emoji),
+  so accepting such a tag would budget a key that is not the one emitted.
 
 A producer that needs either should use an explicit named field / string field.
 

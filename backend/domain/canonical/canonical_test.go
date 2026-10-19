@@ -538,6 +538,28 @@ func TestCanonicalizeStructEnforcesLimits(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid json tag names are rejected", func(t *testing.T) {
+		// encoding/json ignores tag names that fail its character rules and
+		// falls back to the Go field name, so budgeting the tag would be wrong.
+		type badTag struct {
+			ThisIsAnExtremelyLongFieldName bool `json:"🧿"`
+		}
+		if _, err := canonical.CanonicalizeStruct(badTag{}); kindOf(t, err) != canonical.KindUnsupportedValue {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindUnsupportedValue)
+		}
+		// Punctuation accepted by encoding/json stays valid.
+		type okTag struct {
+			N int `json:"n-ok_1"`
+		}
+		got, err := canonical.CanonicalizeStruct(okTag{N: 1})
+		if err != nil {
+			t.Fatalf("valid punctuation tag rejected: %v", err)
+		}
+		if got.String() != `{"n-ok_1":1}` {
+			t.Fatalf("unexpected canonical form: %s", got.String())
+		}
+	})
+
 	t.Run("embedded structs are rejected", func(t *testing.T) {
 		type Embedded struct {
 			N int `json:"n"`
