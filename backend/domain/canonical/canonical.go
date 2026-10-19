@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -306,7 +307,9 @@ func (b *inMemoryBudget) member(path string) error {
 	if b.members > b.lim.MaxMembers {
 		return errf(KindTooManyMembers, path, "member count exceeds %d", b.lim.MaxMembers)
 	}
-	return nil
+	// One byte per member covers the comma separator. Counting it for the first
+	// member too is deliberate: over-counting keeps this a strict upper bound.
+	return b.add(1, path)
 }
 
 func (b *inMemoryBudget) add(n int, path string) error {
@@ -320,6 +323,34 @@ func (b *inMemoryBudget) add(n int, path string) error {
 // maxEncodedStringBytes is the worst-case JSON size of a string: every byte may
 // escape to \u00XX.
 func maxEncodedStringBytes(n int) int { return 6*n + 2 }
+
+// jsonFieldName resolves the object key encoding/json will emit for a struct
+// field. It mirrors encoding/json's tag rules for the parts that affect the key
+// name and rejects `,string`, whose re-encoding can be larger than the value's
+// own worst-case budget.
+func jsonFieldName(f reflect.StructField) (name string, skip bool, err error) {
+	tag := f.Tag.Get("json")
+	if tag == "-" {
+		return "", true, nil
+	}
+	parts := strings.Split(tag, ",")
+	name = parts[0]
+	if name == "" {
+		name = f.Name
+	}
+	for _, opt := range parts[1:] {
+		switch opt {
+		case "string":
+			return "", false, fmt.Errorf(`json option "string" changes the encoding shape; use an explicit string field`)
+		case "", "omitempty":
+			// omitempty may omit the field, so counting it keeps the budget an
+			// upper bound.
+		default:
+			// Unknown options do not change the key name in encoding/json.
+		}
+	}
+	return name, false, nil
+}
 
 // validateInMemory rejects values whose JSON rendering would silently differ
 // from the in-memory value (floats, invalid UTF-8, custom marshalers) and
@@ -419,18 +450,35 @@ func validateInMemory(v reflect.Value, path string, depth int, b *inMemoryBudget
 		}
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
+			// Check anonymity BEFORE exportedness: encoding/json marshals the
+			// exported fields of an embedded struct even when the embedded type
+			// itself is unexported, so skipping it here would leave those values
+			// unvalidated and unbudgeted.
+			if field.Anonymous {
+				return errf(KindUnsupportedValue, path+"."+field.Name, "embedded/anonymous struct fields are not supported; use a named field")
+			}
 			if !field.IsExported() {
 				continue
+			}
+			name, skip, err := jsonFieldName(field)
+			if err != nil {
+				return errf(KindUnsupportedValue, path+"."+field.Name, "%v", err)
+			}
+			if skip {
+				continue
+			}
+			if len(name) > b.lim.MaxStringBytes {
+				return errf(KindStringTooLong, path+"."+name, "field name is %d bytes, limit is %d", len(name), b.lim.MaxStringBytes)
 			}
 			// Exported fields become object members, so they consume the same
 			// member and key budgets as an explicit map entry.
 			if err := b.member(path); err != nil {
 				return err
 			}
-			if err := b.add(maxEncodedStringBytes(len(field.Name))+1, path); err != nil {
+			if err := b.add(maxEncodedStringBytes(len(name))+1, path); err != nil {
 				return err
 			}
-			if err := validateInMemory(v.Field(i), path+"."+field.Name, depth+1, b); err != nil {
+			if err := validateInMemory(v.Field(i), path+"."+name, depth+1, b); err != nil {
 				return err
 			}
 		}

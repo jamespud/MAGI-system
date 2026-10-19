@@ -494,6 +494,63 @@ func TestCanonicalizeStructEnforcesLimits(t *testing.T) {
 		}
 	})
 
+	t.Run("array separators count toward the byte budget", func(t *testing.T) {
+		l := canonical.DefaultLimits()
+		l.MaxBytes = 10
+		if _, err := canonical.CanonicalizeStructWithLimits([]any{nil, nil}, l); kindOf(t, err) != canonical.KindPayloadTooLarge {
+			t.Fatalf("kind %q, want %q ([null,null] is 11 bytes)", kindOf(t, err), canonical.KindPayloadTooLarge)
+		}
+	})
+
+	t.Run("json tag names count toward the string budget", func(t *testing.T) {
+		type tagged struct {
+			A int `json:"averylongfieldname"`
+		}
+		l := canonical.DefaultLimits()
+		l.MaxStringBytes = 5
+		if _, err := canonical.CanonicalizeStructWithLimits(tagged{A: 1}, l); kindOf(t, err) != canonical.KindStringTooLong {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindStringTooLong)
+		}
+	})
+
+	t.Run("json dash fields are not counted", func(t *testing.T) {
+		type withIgnored struct {
+			A int `json:"a"`
+			B int `json:"-"`
+		}
+		l := canonical.DefaultLimits()
+		l.MaxMembers = 1
+		got, err := canonical.CanonicalizeStructWithLimits(withIgnored{A: 1, B: 2}, l)
+		if err != nil {
+			t.Fatalf("json:\"-\" field consumed budget: %v", err)
+		}
+		if got.String() != `{"a":1}` {
+			t.Fatalf("unexpected canonical form: %s", got.String())
+		}
+	})
+
+	t.Run("json string option is rejected", func(t *testing.T) {
+		type stringOpt struct {
+			N int `json:"n,string"`
+		}
+		if _, err := canonical.CanonicalizeStruct(stringOpt{N: 1}); kindOf(t, err) != canonical.KindUnsupportedValue {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindUnsupportedValue)
+		}
+	})
+
+	t.Run("embedded structs are rejected", func(t *testing.T) {
+		type Embedded struct {
+			N int `json:"n"`
+		}
+		type Outer struct {
+			Embedded
+			M int `json:"m"`
+		}
+		if _, err := canonical.CanonicalizeStruct(Outer{Embedded: Embedded{N: 1}, M: 2}); kindOf(t, err) != canonical.KindUnsupportedValue {
+			t.Fatalf("kind %q, want %q", kindOf(t, err), canonical.KindUnsupportedValue)
+		}
+	})
+
 	t.Run("struct fields consume member budget", func(t *testing.T) {
 		l := canonical.DefaultLimits()
 		l.MaxMembers = 1

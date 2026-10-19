@@ -152,11 +152,27 @@ that can author its own JSON can never be an authoritative artifact input.
 
 The struct path enforces the same ceilings as the JSON path (§5.4) **during**
 validation, before `json.Marshal` runs: members are counted recursively, map keys
-are length-checked, and a worst-case encoded-size budget is accumulated. Because
-the budget assumes every string byte may escape to `\u00XX`, it is deliberately
-conservative — a value whose actual encoding would fit may still be rejected.
-Callers that need the exact ceiling should pre-encode and use
+are length-checked, and a worst-case encoded-size budget is accumulated. The
+budget counts the comma separator for every array/object member, and it uses the
+**JSON tag name** (`json:"name"`) that `encoding/json` will actually emit — not
+`field.Name`. Fields tagged `json:"-"` are skipped; `omitempty` is counted anyway,
+which keeps the budget an upper bound.
+
+Because the budget assumes every string byte may escape to `\u00XX`, it is
+deliberately conservative — a value whose actual encoding would fit may still be
+rejected. Callers that need the exact ceiling should pre-encode and use
 `CanonicalizeWithLimits`. Validation never relies on post-hoc memory measurements.
+
+Two struct features whose encoding rules are hard to bound are **narrowed out**
+rather than approximated:
+
+- **embedded/anonymous struct fields are rejected** — `encoding/json` flattens
+  them (and marshals the exported fields of unexported embedded types), which
+  would otherwise escape both validation and budgeting;
+- **`,string` is rejected** — it re-encodes the value as a JSON string, so its
+  worst-case size can exceed the value's own budget.
+
+A producer that needs either should use an explicit named field / string field.
 
 ### 5.2 Artifact layer — owned by C1/C2/C3, reusing `domain/validation`
 
