@@ -1,0 +1,1004 @@
+[
+  {
+    "name": "domain-structural-only",
+    "body": {
+      "artifact_type": "domain_profile",
+      "schema_version": "1.0",
+      "version": "1.0",
+      "created_by": {
+        "subject_id": "fixture-publisher",
+        "identity_source_id": "fixture-idp",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "frozen_at": "2026-10-22T00:00:00.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "domain_key": "ROLLOUT-LAB",
+      "governance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "governance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "risk_policy": {
+        "rules_version": "1.0",
+        "required_attributes": [
+          "protected_effect",
+          "bounded",
+          "recovery_verified",
+          "within_quota"
+        ],
+        "rules": [
+          {
+            "rule_id": "lab-c2",
+            "level": "R1",
+            "all_of": [
+              {
+                "attribute_id": "protected_effect",
+                "operator": "EQ",
+                "expected": true
+              }
+            ],
+            "evidence_rule_ids": [
+              "fact"
+            ]
+          }
+        ],
+        "aggregation": "MAX_APPLICABLE",
+        "unknown_level": "R3",
+        "downgrade": "VERIFIED_NEW_EVIDENCE_NEW_ROUND",
+        "r3_execution": "DISABLED"
+      },
+      "evidence_rules": [
+        {
+          "rule_id": "fact",
+          "assertion_kind": "FACT",
+          "source_kinds": [
+            "fixture"
+          ],
+          "method_refs": [
+            {
+              "namespace": "fixture",
+              "object_id": "method",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "verifier",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "ttl_ms": 120000,
+          "invalidating_events": [
+            "REVOKED",
+            "ENVIRONMENT_CHANGED"
+          ],
+          "independent_verifier_required": true
+        },
+        {
+          "rule_id": "prediction",
+          "assertion_kind": "PREDICTION",
+          "source_kinds": [
+            "fixture"
+          ],
+          "method_refs": [
+            {
+              "namespace": "fixture",
+              "object_id": "method",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "verifier",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "ttl_ms": 3600000,
+          "invalidating_events": [
+            "REVOKED",
+            "ENVIRONMENT_CHANGED"
+          ],
+          "independent_verifier_required": true
+        },
+        {
+          "rule_id": "preference",
+          "assertion_kind": "USER_PREFERENCE",
+          "source_kinds": [
+            "fixture"
+          ],
+          "method_refs": [
+            {
+              "namespace": "fixture",
+              "object_id": "method",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "verifier",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "ttl_ms": 86400000,
+          "invalidating_events": [
+            "REVOKED",
+            "ENVIRONMENT_CHANGED"
+          ],
+          "independent_verifier_required": true
+        },
+        {
+          "rule_id": "authority",
+          "assertion_kind": "EXTERNAL_AUTHORITY",
+          "source_kinds": [
+            "fixture"
+          ],
+          "method_refs": [
+            {
+              "namespace": "fixture",
+              "object_id": "method",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ],
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "verifier",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "ttl_ms": 300000,
+          "invalidating_events": [
+            "REVOKED",
+            "ENVIRONMENT_CHANGED"
+          ],
+          "independent_verifier_required": true
+        }
+      ],
+      "tool_scope": [],
+      "selection": {
+        "candidate_limit": 4,
+        "default_early_selection_policy": "WAIT",
+        "allowed_early_selection_policies": [
+          "WAIT",
+          "REVERSIBLE_TRIAL",
+          "HUMAN_WAIVER"
+        ],
+        "material_pending_rule": "REV4_4_3",
+        "approval_votes": {
+          "R0": 2,
+          "R1": 2,
+          "R2": 3,
+          "R3": 3
+        },
+        "trial_risk_levels": [
+          "R1"
+        ]
+      },
+      "budget": {
+        "role_tool_calls": 6,
+        "task_tool_calls": 24,
+        "role_output_tokens": 6000,
+        "task_output_tokens": 24000,
+        "task_input_tokens": 200000,
+        "cost_limit": null
+      },
+      "windows": {
+        "submission_ms": 60000,
+        "objection_ms": 120000,
+        "revision_ms": 150000,
+        "freeze_ms": 180000,
+        "active_decision_ms": 300000,
+        "arbitration_accept_ms": 3600000,
+        "arbitration_final_ms": 86400000,
+        "task_validity_ms": 86400000,
+        "read_timeout_ms": 10000,
+        "read_retries": 1,
+        "format_repairs_per_role": 1,
+        "paused_states": [
+          "WAITING_INPUT",
+          "ARBITRATION"
+        ]
+      },
+      "sla_targets": [
+        {
+          "metric_id": "active-decision-p95",
+          "population_ref": {
+            "namespace": "fixture",
+            "object_id": "all-tasks",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "operator": "LE",
+          "bound": {
+            "value": 240000,
+            "unit": "millisecond",
+            "scale": 0
+          },
+          "measurement_method_ref": {
+            "namespace": "fixture",
+            "object_id": "p95",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        }
+      ],
+      "statistics": {
+        "plan_ref": {
+          "namespace": "fixture",
+          "object_id": "rev4-18-8-10",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "claim_count": 23,
+        "family_alpha": {
+          "numerator": 5,
+          "denominator": 100
+        },
+        "label_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "blind-label",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "denominator_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "frozen-denominators",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "independence_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "independent-reset",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "model_check_scope_ref": {
+          "namespace": "fixture",
+          "object_id": "rev4-18-7",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "experience_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "manual-publication",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "retention": {
+        "full_input_ms": 7776000000,
+        "integrity_metadata_ms": 31536000000,
+        "cache_ms": 86400000,
+        "backup_erasure_ms": 604800000
+      },
+      "adapter_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "fenced-idempotent-only",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "instance_parameters": [
+        {
+          "parameter_id": "canary-c2",
+          "value": {
+            "value": 5,
+            "unit": "ratio",
+            "scale": 2
+          }
+        },
+        {
+          "parameter_id": "error-increase",
+          "value": {
+            "value": 5,
+            "unit": "percentage_point",
+            "scale": 1
+          }
+        },
+        {
+          "parameter_id": "recovery-bound",
+          "value": {
+            "value": 60000,
+            "unit": "millisecond",
+            "scale": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "melchior-structural-only",
+    "body": {
+      "artifact_type": "persona_spec",
+      "schema_version": "1.0",
+      "version": "1.0",
+      "created_by": {
+        "subject_id": "fixture-publisher",
+        "identity_source_id": "fixture-idp",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "frozen_at": "2026-10-22T00:00:00.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "persona_id": "melchior",
+      "spec_version": "1.0",
+      "baseline_id": "MELCHIOR-1.0",
+      "maintenance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "maintainer",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "core_priority": [
+        "TARGET_EFFECT",
+        "RESOURCE_OPPORTUNITY_COST",
+        "IMPLEMENTATION_CONVENIENCE"
+      ],
+      "mandatory_reviews": [
+        "BASELINE",
+        "EFFECT_SIZE",
+        "SCOPE",
+        "RESOURCE_TIME_COST",
+        "KEY_ASSUMPTIONS",
+        "ALTERNATIVES",
+        "NO_ACTION"
+      ],
+      "minimum_investigation": [
+        {
+          "requirement_id": "EFFECT_BASELINE",
+          "description": "EFFECT_BASELINE",
+          "acceptable_evidence_rule_ids": [
+            "fact"
+          ],
+          "substitution": "APPLICABLE_INDEPENDENT_RECORD"
+        },
+        {
+          "requirement_id": "FEASIBILITY_COUNTEREVIDENCE",
+          "description": "FEASIBILITY_COUNTEREVIDENCE",
+          "acceptable_evidence_rule_ids": [
+            "fact"
+          ],
+          "substitution": "APPLICABLE_INDEPENDENT_RECORD"
+        }
+      ],
+      "evidence_priority": [
+        "REPRODUCIBLE_TASK_MEASUREMENT",
+        "VERIFIED_RESOURCE_RECORD",
+        "APPLICABLE_EXPERIENCE",
+        "MARKED_MODEL_SPECULATION"
+      ],
+      "required_output_fields": [
+        "facts",
+        "assumptions",
+        "predictions",
+        "value_tradeoffs",
+        "alternatives",
+        "objections",
+        "missing_information",
+        "vote",
+        "change_conditions"
+      ],
+      "investigation_output_fields": [
+        "target_question",
+        "sources",
+        "known",
+        "unknown",
+        "candidate_impact",
+        "stop_reason"
+      ],
+      "tool_call_limit": 6,
+      "output_token_limit": 6000,
+      "call_allocation": [
+        {
+          "bucket_id": "EFFECT_BASELINE",
+          "calls": 2
+        },
+        {
+          "bucket_id": "COUNTEREVIDENCE_FEASIBILITY",
+          "calls": 2
+        },
+        {
+          "bucket_id": "CANDIDATE_COMPARISON",
+          "calls": 1
+        },
+        {
+          "bucket_id": "CORRECTION_RESERVE",
+          "calls": 1
+        }
+      ],
+      "transfer_policy": "MINIMUM_COMPLETE_WITH_REASON",
+      "support_conditions": [
+        "EFFECT_SUPPORTED",
+        "FEASIBILITY_RESOLVED",
+        "CHARTER_SATISFIED"
+      ],
+      "reject_conditions": [
+        "EFFECT_REFUTED",
+        "CHARTER_COST_EXCEEDED",
+        "UNACCEPTABLE_DEFECT"
+      ],
+      "abstain_conditions": [
+        "EFFECT_UNVERIFIABLE",
+        "FEASIBILITY_UNVERIFIABLE",
+        "EVIDENCE_CONFLICT"
+      ],
+      "correction_triggers": [
+        "BASELINE_ERROR",
+        "MEASUREMENT_INVALID",
+        "KEY_COST_CHANGED",
+        "COUNTEREXAMPLE",
+        "CONFIRMED_GOAL_REVISED"
+      ],
+      "domain_extensions": [],
+      "compatibility": {
+        "core_change": "INCOMPATIBLE",
+        "continuity_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "continuity",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "behavior_acceptance_ref": {
+          "namespace": "fixture",
+          "object_id": "rev4-17-18",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  {
+    "name": "balthasar-structural-only",
+    "body": {
+      "artifact_type": "persona_spec",
+      "schema_version": "1.0",
+      "version": "1.0",
+      "created_by": {
+        "subject_id": "fixture-publisher",
+        "identity_source_id": "fixture-idp",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "frozen_at": "2026-10-22T00:00:00.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "persona_id": "balthasar",
+      "spec_version": "1.0",
+      "baseline_id": "BALTHASAR-1.0",
+      "maintenance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "maintainer",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "core_priority": [
+        "IRREVERSIBLE_SPILLOVER",
+        "RECOVERY_RESPONSIBILITY",
+        "LONG_TERM_RESILIENCE"
+      ],
+      "mandatory_reviews": [
+        "AFFECTED_SUBJECTS",
+        "FAILURE_MODES",
+        "MAX_LOSS",
+        "IMPACT_SCOPE",
+        "RECOVERY_EVIDENCE",
+        "RESPONSIBILITY",
+        "STOP_CONDITIONS",
+        "NO_ACTION_RISK"
+      ],
+      "minimum_investigation": [
+        {
+          "requirement_id": "FAILURE_IMPACT",
+          "description": "FAILURE_IMPACT",
+          "acceptable_evidence_rule_ids": [
+            "fact"
+          ],
+          "substitution": "NONE"
+        },
+        {
+          "requirement_id": "RECOVERY_VERIFICATION",
+          "description": "RECOVERY_VERIFICATION",
+          "acceptable_evidence_rule_ids": [
+            "fact"
+          ],
+          "substitution": "NONE"
+        }
+      ],
+      "evidence_priority": [
+        "SAME_ENVIRONMENT_RECOVERY_MEASUREMENT",
+        "RESOURCE_AUTHORITY_BOUNDARY",
+        "COMPARABLE_FAILURE_HISTORY",
+        "UNVERIFIED_RECOVERY_PROMISE"
+      ],
+      "required_output_fields": [
+        "facts",
+        "assumptions",
+        "predictions",
+        "value_tradeoffs",
+        "alternatives",
+        "objections",
+        "missing_information",
+        "vote",
+        "change_conditions"
+      ],
+      "investigation_output_fields": [
+        "target_question",
+        "sources",
+        "known",
+        "unknown",
+        "candidate_impact",
+        "stop_reason"
+      ],
+      "tool_call_limit": 6,
+      "output_token_limit": 6000,
+      "call_allocation": [
+        {
+          "bucket_id": "FAILURE_IMPACT",
+          "calls": 2
+        },
+        {
+          "bucket_id": "RECOVERY_VERIFICATION",
+          "calls": 2
+        },
+        {
+          "bucket_id": "NO_ACTION_RESPONSIBILITY",
+          "calls": 1
+        },
+        {
+          "bucket_id": "CORRECTION_RESERVE",
+          "calls": 1
+        }
+      ],
+      "transfer_policy": "MINIMUM_COMPLETE_WITH_REASON",
+      "support_conditions": [
+        "RISK_ACCEPTED_WITHIN_BOUNDARY",
+        "DECISIVE_RECOVERY_SATISFIED",
+        "RESPONSIBILITY_CLEAR"
+      ],
+      "reject_conditions": [
+        "UNACCEPTABLE_HARM",
+        "RECOVERY_UNAVAILABLE",
+        "CHARTER_RISK_EXCEEDED"
+      ],
+      "abstain_conditions": [
+        "CONSEQUENCE_UNKNOWN",
+        "RECOVERY_UNKNOWN",
+        "BOUNDARY_UNCLEAR",
+        "DECISIVE_CONFLICT"
+      ],
+      "correction_triggers": [
+        "RECOVERY_VERDICT_CHANGED",
+        "IMPACT_CHANGED",
+        "RESPONSIBILITY_CONFIRMED",
+        "NEW_COUNTEREVIDENCE",
+        "NO_ACTION_RISK_CHANGED"
+      ],
+      "domain_extensions": [],
+      "compatibility": {
+        "core_change": "INCOMPATIBLE",
+        "continuity_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "continuity",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "behavior_acceptance_ref": {
+          "namespace": "fixture",
+          "object_id": "rev4-17-18",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  {
+    "name": "casper-structural-only",
+    "body": {
+      "artifact_type": "persona_spec",
+      "schema_version": "1.0",
+      "version": "1.0",
+      "created_by": {
+        "subject_id": "fixture-publisher",
+        "identity_source_id": "fixture-idp",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "frozen_at": "2026-10-22T00:00:00.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "persona_id": "casper",
+      "spec_version": "1.0",
+      "baseline_id": "CASPER-1.0",
+      "maintenance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "maintainer",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "core_priority": [
+        "EXPLICIT_GOAL_CONSENT",
+        "CONTROL_EXIT",
+        "BURDEN_ADOPTION"
+      ],
+      "mandatory_reviews": [
+        "EXPLICIT_GOAL",
+        "MARKED_INFERENCE",
+        "REQUIRED_CONSENT",
+        "CONTROL_CHANGE",
+        "EXIT",
+        "BURDEN_TRANSFER",
+        "REAL_GOAL_ADOPTION"
+      ],
+      "minimum_investigation": [
+        {
+          "requirement_id": "AUTHENTICATED_GOAL_PREFERENCE",
+          "description": "AUTHENTICATED_GOAL_PREFERENCE",
+          "acceptable_evidence_rule_ids": [
+            "preference"
+          ],
+          "substitution": "NONE"
+        },
+        {
+          "requirement_id": "CONTROL_CONSENT_BURDEN",
+          "description": "CONTROL_CONSENT_BURDEN",
+          "acceptable_evidence_rule_ids": [
+            "preference"
+          ],
+          "substitution": "NONE"
+        }
+      ],
+      "evidence_priority": [
+        "AUTHENTICATED_SUBJECT_RECORD",
+        "APPLICABLE_CONSENT_AUTHORITY_CHAIN",
+        "VERIFIABLE_OPERATIONAL_BURDEN",
+        "INFERRED_PREFERENCE_NO_AUTHORITY"
+      ],
+      "required_output_fields": [
+        "facts",
+        "assumptions",
+        "predictions",
+        "value_tradeoffs",
+        "alternatives",
+        "objections",
+        "missing_information",
+        "vote",
+        "change_conditions"
+      ],
+      "investigation_output_fields": [
+        "target_question",
+        "sources",
+        "known",
+        "unknown",
+        "candidate_impact",
+        "stop_reason"
+      ],
+      "tool_call_limit": 6,
+      "output_token_limit": 6000,
+      "call_allocation": [
+        {
+          "bucket_id": "GOAL_PREFERENCE",
+          "calls": 2
+        },
+        {
+          "bucket_id": "CONTROL_CONSENT",
+          "calls": 2
+        },
+        {
+          "bucket_id": "BURDEN_ALTERNATIVE",
+          "calls": 1
+        },
+        {
+          "bucket_id": "CORRECTION_RESERVE",
+          "calls": 1
+        }
+      ],
+      "transfer_policy": "MINIMUM_COMPLETE_WITH_REASON",
+      "support_conditions": [
+        "CONFIRMED_GOAL_CONTROL_BURDEN",
+        "REQUIRED_CONSENT_COMPLETE"
+      ],
+      "reject_conditions": [
+        "EXPLICIT_GOAL_CONFLICT",
+        "UNAUTHORIZED_CONTROL_LOSS",
+        "REJECTED_BURDEN"
+      ],
+      "abstain_conditions": [
+        "KEY_PREFERENCE_UNKNOWN",
+        "CONSENT_UNKNOWN",
+        "EXIT_UNKNOWN",
+        "PREFERENCE_CONFLICT"
+      ],
+      "correction_triggers": [
+        "PREFERENCE_CONFIRMED_WITHDRAWN",
+        "AUTHORITY_CHANGED",
+        "BURDEN_EVIDENCE_CHANGED",
+        "INFERENCE_MISLABELED"
+      ],
+      "domain_extensions": [],
+      "compatibility": {
+        "core_change": "INCOMPATIBLE",
+        "continuity_policy_ref": {
+          "namespace": "fixture",
+          "object_id": "continuity",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "behavior_acceptance_ref": {
+          "namespace": "fixture",
+          "object_id": "rev4-17-18",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  },
+  {
+    "name": "context-structural-only",
+    "body": {
+      "artifact_type": "context_manifest",
+      "schema_version": "1.0",
+      "version": "1.0",
+      "created_by": {
+        "subject_id": "fixture-publisher",
+        "identity_source_id": "fixture-idp",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "frozen_at": "2026-10-22T00:00:00.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "case_id": "fixture-case",
+      "round": 1,
+      "charter_id": "chtr_0000000000000000000000000000000000000000000000000000000000000000",
+      "domain_profile_id": "dprf_0000000000000000000000000000000000000000000000000000000000000000",
+      "shared_fact_snapshot_id": "facts-1",
+      "user_preference_snapshot_id": "preferences-1",
+      "roles": {
+        "melchior": {
+          "persona_spec_id": "pspc_0000000000000000000000000000000000000000000000000000000000000000",
+          "experience_snapshot_id": "melchior-experience-1",
+          "allowed_context_ids": []
+        },
+        "balthasar": {
+          "persona_spec_id": "pspc_0000000000000000000000000000000000000000000000000000000000000000",
+          "experience_snapshot_id": "balthasar-experience-1",
+          "allowed_context_ids": []
+        },
+        "casper": {
+          "persona_spec_id": "pspc_0000000000000000000000000000000000000000000000000000000000000000",
+          "experience_snapshot_id": "casper-experience-1",
+          "allowed_context_ids": []
+        }
+      },
+      "snapshot_refs": [
+        {
+          "snapshot_id": "facts-1",
+          "kind": "SHARED_FACT",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        {
+          "snapshot_id": "preferences-1",
+          "kind": "USER_PREFERENCE",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "preferences-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        {
+          "snapshot_id": "melchior-experience-1",
+          "kind": "EXPERIENCE",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "melchior-experience-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        {
+          "snapshot_id": "balthasar-experience-1",
+          "kind": "EXPERIENCE",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "balthasar-experience-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        {
+          "snapshot_id": "casper-experience-1",
+          "kind": "EXPERIENCE",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "casper-experience-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        {
+          "snapshot_id": "index-1",
+          "kind": "DEPENDENCY_INDEX",
+          "version": "1",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_ref": {
+            "namespace": "fixture",
+            "object_id": "index-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "qualification_policy_ref": {
+            "namespace": "fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        }
+      ],
+      "source_dependency_index_version": "index-1",
+      "context_revocation_epoch": 0,
+      "admission_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "read-admission",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "context_revocation_scope_id": "fixture-context-scope"
+    }
+  }
+]
