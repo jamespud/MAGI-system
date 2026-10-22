@@ -220,7 +220,8 @@
         "role_tool_calls": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 6
+          "maximum": 9007199254740991,
+          "$comment": "Generic domain policy: this maximum is only the C0 safe-integer bound. Apply the selected PersonaSpec and domain-instance limits separately; see input-artifact-contract sections 2.6 and 3.3."
         },
         "task_tool_calls": {
           "type": "integer",
@@ -230,7 +231,8 @@
         "role_output_tokens": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 6000
+          "maximum": 9007199254740991,
+          "$comment": "Generic domain policy: this maximum is only the C0 safe-integer bound. Apply the selected PersonaSpec and domain-instance limits separately; see input-artifact-contract sections 2.6 and 3.3."
         },
         "task_output_tokens": {
           "type": "integer",
@@ -314,12 +316,14 @@
         "read_retries": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 9007199254740991,
+          "$comment": "Generic domain policy: this maximum is only the C0 safe-integer bound. Apply the selected PersonaSpec and domain-instance limits separately; see input-artifact-contract sections 2.6 and 3.3."
         },
         "format_repairs_per_role": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 9007199254740991,
+          "$comment": "Generic domain policy: this maximum is only the C0 safe-integer bound. Apply the selected PersonaSpec and domain-instance limits separately; see input-artifact-contract sections 2.6 and 3.3."
         },
         "paused_states": {
           "const": [

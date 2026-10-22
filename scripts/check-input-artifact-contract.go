@@ -24,6 +24,11 @@ type mutation struct {
 	edit func(map[string]any)
 }
 
+type policyCase struct {
+	mutation
+	valid bool
+}
+
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
@@ -70,6 +75,7 @@ func main() {
 	}
 	validator := validation.NewJSONSchemaValidator()
 	positive, negative, identity := 0, 0, 0
+	policyChecks := 0
 	for _, ex := range examples {
 		limits := canonical.Limits{MaxBytes: 262144, MaxDepth: 24, MaxMembers: 4096, MaxStringBytes: 16384}
 		if ex.Body["artifact_type"] == "persona_spec" {
@@ -112,6 +118,50 @@ func main() {
 			fail("%s: authoritative version mutation did not change digest: %v", ex.Name, err)
 		}
 		identity++
+		// D-04: a generic DomainProfile describes budgets independently of
+		// Persona v1.0 and ROLLOUT-LAB instance validation. This is structural
+		// coverage only; accepting a value does not authorize its use.
+		var policyCases []policyCase
+		switch typ {
+		case canonical.TypeDomainProfile:
+			for _, tc := range []struct {
+				group, field string
+				value        int
+				valid        bool
+			}{
+				{"budget", "role_tool_calls", 12, true},
+				{"budget", "role_output_tokens", 12000, true},
+				{"windows", "read_retries", 2, true},
+				{"windows", "format_repairs_per_role", 2, true},
+				{"budget", "role_tool_calls", 0, false},
+				{"budget", "role_output_tokens", 0, false},
+				{"windows", "read_retries", -1, false},
+				{"windows", "format_repairs_per_role", -1, false},
+			} {
+				policyCases = append(policyCases, policyCase{mutation{fmt.Sprintf("%s=%d", tc.field, tc.value), func(b map[string]any) {
+					b[tc.group].(map[string]any)[tc.field] = tc.value
+				}}, tc.valid})
+			}
+		case canonical.TypePersonaSpec:
+			policyCases = append(policyCases, policyCase{mutation{"persona-tool-budget-raised", func(b map[string]any) {
+				b["tool_call_limit"] = 7
+			}}, false}, policyCase{mutation{"persona-output-budget-raised", func(b map[string]any) {
+				b["output_token_limit"] = 6001
+			}}, false})
+		}
+		for _, tc := range policyCases {
+			body := clone(ex.Body)
+			tc.edit(body)
+			parsed, err := canonical.CanonicalizeWithLimits(encode(body), limits)
+			if err != nil {
+				fail("%s/D-04/%s: C0: %v", ex.Name, tc.name, err)
+			}
+			result := validator.Validate(schema, parsed.Bytes())
+			if result == nil || result.Valid != tc.valid {
+				fail("%s/D-04/%s: expected structural validity %t, got %+v", ex.Name, tc.name, tc.valid, result)
+			}
+			policyChecks++
+		}
 		mutations := []mutation{
 			{"unknown-field", func(b map[string]any) { b["unexpected"] = true }},
 			{"missing-version", func(b map[string]any) { delete(b, "version") }},
@@ -171,11 +221,12 @@ func main() {
 		seen[digest] = true
 	}
 	if _, err := c.Digest(canonical.ArtifactType("read_set_snapshot")); err == nil {
-		fail("D-01 unresolved type unexpectedly registered; review the contract status")
+		fail("D-01 planned type unexpectedly registered; review the migration boundary")
 	}
 	if _, err := canonical.Adopt([]byte("{ \"schema_version\": \"1.0\" }")); err == nil {
 		fail("storage adoption accepted non-canonical bytes")
 	}
 	fmt.Printf("C1-A structure: %d positive, %d negative; %d identity/adoption mutation checks; type separation and D-01 boundary OK\n", positive, negative, identity)
+	fmt.Printf("D-04 policy separation: %d structural checks OK (generic budgets/windows and Persona v1.0 limits)\n", policyChecks)
 	fmt.Println("Publication, semantic validators, behavior, revocation, concurrency and C1 Golden Vectors: NOT RUN")
 }

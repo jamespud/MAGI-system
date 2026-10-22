@@ -25,9 +25,9 @@
 ### 0.1 当前状态核对（2026-10-22，Asia/Shanghai）
 
 - `git fetch origin` 与 `git ls-remote`：远端 main 与上述基线一致；PR #33 已于 2026-10-19 合并。
-- GitHub API：开始工作时开放 PR 为 0；#3/#4/#5/#8 为 OPEN；#10/#11 为 CLOSED，不重开。
+- GitHub API：C1-A 初次启动时开放 PR 为 0；#3/#4/#5/#8 为 OPEN；#10/#11 为 CLOSED，不重开。本轮设计收敛复核 PR #34：Draft / OPEN / MERGEABLE，Base 为上述基线，修订前 Head 为 `861458fe4ef2a54d4f9b0ac8c07b9b9e2eeeb794`，正式 Reviews 为 0，该 Head 的 6/6 CI 已成功。这些 CI 不验收本轮新增的协议义务。
 - #2 是组织入口；其 #10/#11 复选框未同步关闭事实，不以复选框推翻 Issue 状态。#13 仍 OPEN，不能从“没有开放 PR”推断没有其他在制工作；WIP 状态仍须核对。
-- Linear：本轮未取得认证读取。CAS-9 `In Progress` / CAS-10 `Backlog` **仅为任务提供的状态，尚未独立重核**。浏览器访问 CAS-9 跳回 Linear 官网；没有可用的 Linear 连接器或 CLI。本草案不更新 Linear 或 Issues。
+- Linear：用户在本轮独立审阅中通过连接器确认 CAS-9 为 `In Progress`、CAS-10 为 `Backlog`。作者未取得认证读取，不将用户的复核写成作者独立验证；本草案不更新 Linear 或 Issues。
 
 ## 1. 源码调查与兼容边界
 
@@ -142,6 +142,34 @@ D-03 尚未选定治理根实现、签名封装或跨服务确认存储。**三�
 聚合字节/成员上限可能先于单字段上限触发，取最严格者。超限显式 `RESOURCE_LIMIT`，不能截断决定性材料/依赖后称完整。外部 blob 只保存引用，但抓取/验真也受任务输入预算及流式字节上限约束，不能借引用逃避预算。上限调整需 Schema/版本审阅；D-04 未批准前不能宣称这些数值来自 Rev4。
 
 Schema 的 K_max 至多 64 是拟定的配置资源边界，不是支持 k>4 的实现/验证声明；Rev4 参考模型检查仍固定 k=1..4，其他领域/规模必须完成对应配置和验收。
+
+### 2.6 通用资源政策与组合预算（D-04 收敛）
+
+| 政策层 | 来源及约束 | 通用 Schema 的责任 |
+| --- | --- | --- |
+| 跨领域协议边界 | C0 安全整数、精确量纲、权限及撤销失败关闭；通用 R0–R3 门槛 | 固定数值形状及协议门槛，不用参考域数值代替通用规则 |
+| 正式 PersonaSpec v1.0 | Rev4 §17.1–4：每角色最多 6 次主动调用、6000 输出 token；调查分配四桶 `[2,2,1,1]` | PersonaSpec 的 `tool_call_limit=6`、`output_token_limit=6000` 及正式调查分配保持不变，不能由领域配置扩大 |
+| ROLLOUT-LAB-1.0 | Rev4 §18.5：全任务最多 24 次调用、24000 输出、200000 输入 token；幂等读取重试和每角色格式修复各最多 1 次 | 由选定参考域的语义验证器核对；通用 `Budget` / `Windows` 不硬编码这些实例值 |
+| 暂定工程边界 | §2.5 正文大小、深度、成员、字符串、事件及依赖数；固定实现支持的容量 | 明确超限失败，不截断或隐式增加预算；数值不是 Rev4 的安全结论 |
+
+因此通用 `Budget.role_tool_calls`、`role_output_tokens` 为正安全整数，`Windows.read_retries`、`format_repairs_per_role` 为非负安全整数，结构上允许 12/12000/2/2。选择 Persona v1.0 后每角色仍最多 6/6000；选择 ROLLOUT-LAB 后重试/修复仍最多 1。结构接受仅说明可以描述另一个配置，不构成该配置的运行许可、人格版本变更或验收通过。
+
+组合执行预算取 DomainProfile、已确认 Charter、所选 PersonaSpec 与工程容量中**所有适用上限的最严格者**，角色限额与全任务限额同时满足；若无法满足最低调查则弃权/暂缓，不能扩大限额。重试、格式修复、共享验证、协调及报告按实际资源归属计入对应总预算，不能换入口避开计数。C1-B 须实现组合语义与实例检查；当前检查器只验证结构层分离。
+
+### 2.7 信任根与顺序接口责任（D-03 收敛，非 AuthorityProof Schema）
+
+治理根必须由独立部署/治理流程预先初始化和明确确认，具有不可变根版本、适用作用域与可核验主体。根初始化、轮换、应急撤销、凭据来源及失陷恢复归 C2/#5 冻结；不能从待批准 Profile、PersonaSpec、模型文本或它们自填的发布政策启动自身权限。缺少可信根只允许离线结构/语义验证，禁止权威发布。
+
+| 责任方 | 输入与必须给出的结果 | 不能由其替代的责任 |
+| --- | --- | --- |
+| C1 离线验证器 | 正文、预期类型/版本/ID、固定引用及完整依赖；输出结构/领域约束结果与待验证资格依赖 | 不认证治理根、主体或签名；不以 Schema 合法签发发布批准或人格行为通过 |
+| C2 信任/授权服务 | 已确认根版本、认证主体、精确目标/动作/资源范围、逐跳委托/同意、可信时间、当前 epoch；输出可核验批准/拒绝与权威序列位置 | 不从正文 `created_by` 推断资格；不把治理发布资格等同于任务执行权 |
+| C1-C 注入及证据关闭协调器 | 固定 Manifest、角色会话、持久 Journal/反向边、可信交付回执；提交唯一候选/关闭记录并提供完整性核对 | 不自行生成批准者资格或承诺跨服务线性化；必须使用 C2/C3 冻结的顺序接口 |
+| C3/#6 出口与权威状态实现 | 精确待执行意图、依赖闭包、预期 context/authority/credential epoch 与 execution generation；在共同权威顺序中校验并提交受保护发送 | 不允许“先读有效、稍后独立发送”；最终检查与 SEND_COMMITTED 不能跨越未排序的撤销 |
+
+提议的接口责任为 `VerifyAuthority(request) → verified_record / denial` 与 `CommitIfCurrent(expected_state, operation) → committed_record / conflict / unavailable`。请求须绑定根/政策版本、主体、精确目标及范围；验证记录须绑定输入摘要、资格链、有效期、各类 epoch 和权威序号。提交记录还须绑定操作幂等键、前置版本、结果及提交序号/UTC 毫秒时间。记录以 ExternalRef 固定原件，不能仅相信调用者提交的 `verified=true`。这些是后续接口的必备信息，不是新增可自行签发的权威类型；具体字段、认证封装和分布式存储协议留给 C2/C3 审阅。
+
+候选关闭、撤销、seal、票据接收、裁决发布和 SEND_COMMITTED 必须获得可比较的权威顺序；是否使用一个日志或有证明的跨服务排序由 C2/C3 决议。context epoch、authority epoch、credential epoch、execution generation 分别核对，不合并为一个整数。权威来源不可用、顺序不可判定、资格/依赖不完整均失败关闭。普通发布不提升安全撤销 epoch；本版同 context scope 任一 epoch 不匹配即新轮，不暗含“未受影响”豁免。
 
 ## 3. DomainProfile
 
@@ -284,15 +312,15 @@ Schema 约束数值形状和通用门槛；下表是 Rev4 §18 的**参考实例
 
 `allowed_context_ids` 表示固定的上下文视图/数据访问边界，不是允许加载任意“最新内容”的别名。D-02 的新观察必须证明其源和访问范围落在初始视图及固定 admission policy 共同允许的范围内；政策不能扩大数据访问权或切换经验/偏好快照。不得以新增材料描述符绕过原来的角色隔离。
 
-### 5.2 初始视图、动态观察与终审冻结（D-02，待批准）
+### 5.2 初始视图、动态观察与终审冻结（D-02，收敛为方案 A，待复核）
 
-Rev4 §6.1 的不可变初审清单与 §18.3 的终审新鲜遥测需要同时成立。候选模型：Manifest 固定**初始事实/偏好/经验版本与读取准入政策**；初审后通过政策准入的检索/工具结果逐条冻结为材料描述符并追加 Journal。它们是有来源的新观察，不是替换初始 shared_fact_snapshot_id。人格/经验/偏好版本不通过该渠道热替换。
+Rev4 §6.1 的不可变初审清单与 §18.3 的终审新鲜遥测需要同时成立。本轮选定的设计草案方案 A：Manifest 固定**初始事实/偏好/经验版本与读取准入政策**；初审后通过政策准入的检索/工具结果逐条冻结为材料描述符并追加 Journal。它们是有来源的新观察，不是替换初始 shared_fact_snapshot_id。人格/经验/偏好版本不通过该渠道热替换。
 
 终审前创建共同的 `final_shared_inputs` 外部不可变包：三者收到同一 ID/版本/摘要的新鲜事实及其验证结论，分别登记实际注入；独立检查与初审差异，不以新材料抹掉旧判断的历史。包在 CandidateSnapshot 冻结前产生并符合参考域 30 秒新鲜性；在途授权、偏好、关键经验被撤销仍立即走失效，不能以“普通新观察”掩盖安全事件。
 
-CandidateSnapshot 冻结与权威 `EVIDENCE_CLOSED` 事件同一顺序边界：此后只允许重读已准入版本的材料；任何新增的判断相关材料或决定性事实变化都开新轮。后续在线授权/停止阈值检查只用于原动作保护，不为旧票添加新理由。终票 ReadSetSnapshot 含相同的 `final_shared_inputs` 及 cutoff sequence，验证三个角色的共享输入相同，但各自实际经验读取可以不同。
+CandidateSnapshot 冻结与权威 `EVIDENCE_CLOSED` 事件同一顺序边界；三份可信交付回执、实际读取记录、无未结算注入及三角色候选确认必须先齐备，提交协议见 §6.5。仅将 final_shared_inputs ID 写入候选或 ReadSetSnapshot 不满足前置条件。此边界之后只允许重读已准入版本的材料；任何新增的判断相关材料或决定性事实变化都开新轮。后续在线授权/停止阈值检查只用于原动作保护，不为旧票添加新理由。终票 ReadSetSnapshot 含相同的 `final_shared_inputs` 及 cutoff sequence，验证三个角色的共享输入相同，但各自实际经验读取可以不同。
 
-**这是待验证的细化方案，不是对 Rev4 已存在机制的描述。** 如果审阅认定 §6.1 要求所有未来材料 ID 在初审时已穷尽枚举，则不能采用政策准入；须选择预收集全部版本或新增轮次/阶段工件设计，并评估 §18.3 新鲜遥测与调查预算影响。不得用原地修改 Manifest 消解冲突。D-02 未接受前，`admission_policy_ref` 与 §6 的实现均为阻塞候选。
+**这是待验证的细化方案，不是对 Rev4 已存在机制的描述。** 如果审阅认定 §6.1 要求所有未来材料 ID 在初审时已穷尽枚举，则不能采用政策准入；须选择预收集全部版本或新增轮次/阶段工件设计，并评估 §18.3 新鲜遥测与调查预算影响。不得用原地修改 Manifest 消解冲突。本轮设计采用方案 A 作为复核基线，但不把原则支持当作事务协议已获批准；§6.5 的唯一绑定/交付/提交规则及未来契约修订仍是实现准入条件。
 
 ## 6. 实际读取：候选 Journal → Snapshot 模型
 
@@ -300,16 +328,16 @@ CandidateSnapshot 冻结与权威 `EVIDENCE_CLOSED` 事件同一顺序边界：�
 
 | 方案 | 可变性、终票绑定 | 对 Rev4 的影响 |
 | --- | --- | --- |
-| A：不可变 Manifest + 追加 Journal + 终票前不可变 ReadSetSnapshot（推荐候选） | Manifest ID 固定；动态事实为受控准入；密封票绑定全量读取闭包 | 便于完整追溯及撤销；需要 D-01 身份、D-02 准入/终审、D-03 权威日志顺序决议 |
+| A：不可变 Manifest + 追加 Journal + 终票前不可变 ReadSetSnapshot（本轮草案选定） | Manifest ID 固定；动态事实为受控准入；密封票绑定全量读取闭包 | 便于完整追溯及撤销；需要 D-01 身份、D-02 准入/终审、D-03 权威日志顺序决议 |
 | B：每次读取重发 ContextManifest | 每次生成新 ctxm，票据只绑定最终者 | 初审 Manifest 与后续轮次唯一绑定发生分裂；除非新增明确前驱/轮次语义，否则不满足现有契约。不等于允许原地修改 |
 | C：初审前穷尽全部输入，再整体冻结 | 无动态源，实际读取仍另作记录 | 最易保持 ID 边界，但无法一般性覆盖工具调查、交叉质询及临近冻结的新鲜遥测；可能需要多轮重建 |
 | D：终票只声明若干已用 ID 或模型自报摘要 | 动态列表无完整记录，无法证明系统注入 | 拒绝：不满足实际 read-set、派生依赖及保守失效要求 |
 
-推荐 A 不等于批准 A。当前 C0 不认识 `read_set_snapshot`；不能调用 `Digest("context_manifest")` 哈希 ReadSet 或裸 SHA-256 并称 C0 合规。D-01 候选是显式注册新类型及前缀；备选是将 ReadSet 正文嵌入 SealedBallot 并单独冻结次级摘要规范（同样需要审阅）。本 PR 不改 C0 白名单或决策协议。
+方案 A 已作为本轮设计收敛方向，D-01 相应选定独立 `read_set_snapshot` / `rset_` 身份；不再将嵌入 SealedBallot 作为并列待选方案。当前 C0 仍不认识该类型，不能调用 `Digest("context_manifest")` 哈希 ReadSet 或裸 SHA-256 并称 C0 合规。注册迁移按 §6.4 后续独立交付；本轮不改 C0 白名单或 PR #32 的决策契约。设计选定不等于注册/集成已完成。
 
 ### 6.2 候选正式记录（语义 Schema；未注册顶层权威类型）
 
-以下 `record{}` 是封闭记录；全部字段必填、不 nullable、无默认；数组类型/排序/上限按 §2.3/2.5。不能在 D-01 决议前用它签发生产 read_set_digest。
+以下 `record{}` 是封闭记录；全部字段必填、不 nullable、无默认；数组类型/排序/上限按 §2.3/2.5。D-01 的设计选择已明确，但在 §6.4 的注册、Schema/语义实现及独立 Golden 完成前不能用它签发生产 read_set_digest。
 
 ```text
 ReadSetJournalKey = record{case_id:Token, round:PositiveSafeInt,
@@ -340,12 +368,16 @@ ReadSetSnapshotBody = record{
     source_dependency_index_version:Token,
     events:[ReadEvent], dependency_nodes:[SourceNode],
     journal_high_watermark:SafeUInt, evidence_cutoff_sequence:PositiveSafeInt,
-    final_shared_inputs:SnapshotRef, completeness_record_ref:ExternalRef}
+    final_shared_inputs:SnapshotRef,
+    final_shared_delivery_receipt_ref:ExternalRef,
+    evidence_closure_record_ref:ExternalRef, completeness_record_ref:ExternalRef}
 ```
 
 `CandidateID` 必须匹配 C0 `csnp_[0-9a-f]{64}`；ReadSetSnapshot 只向已冻结候选快照引用，候选不引用未来 ReadSetSnapshot，避免摘要循环。`ReadEvent.source` 同时必须在 dependency_nodes 中存在同一精确内容。RAW/EMPTY_RESULT 的 parent_node_ids 为空，derivation_method_ref 指向原始采集/空结果方法；DERIVED 必须非空且登记转换/摘要模型、模板和参数版本。没有“null method 表示不重要”。
 
 `ReadEvent.parent_node_ids` 必须与其 SourceNode 的父集合完全相同；dependency_nodes 按 node_id 排序、ID 唯一、父引用闭合且 DAG 无环。`target_persona == journal_key.persona_id`；事件 Key、角色、Manifest 和 Snapshot Key 必须相同；Snapshot 撤销 scope/epoch 与 Manifest 一致。`final_shared_inputs.kind=SHARED_FACT`，其 ID/版本/摘要与三个角色实际注入记录完全一致。`frozen_at` 是封存时点，`created_by` 是合格记录器，不增加一个可与之冲突的 sealed_at/sealed_by 别名。
+
+Snapshot 的 `final_shared_delivery_receipt_ref` 必须等于候选中本人槽位及共同 closure 的对应引用；回执的 JournalKey、persona/spec、经验/偏好、共享包及 epoch 与本 Snapshot/Manifest 精确相同。`evidence_closure_record_ref` 必须解析为已提交记录，其候选 ID、Manifest、case/round、cutoff 与 Snapshot 逐项相同。三份终票须解析到同一 closure 和共享包，不能仅凭三份各自非空的引用通过。
 
 Journal 是按 Key 的追加序列，不是可签发的可变权威工件，不能把它的当前指针当终票身份；每个事件必须由可信注入边界产生。`sequence` 连续且事件不可覆盖；`authority_sequence` 是与候选冻结/撤销共同可比较的权威序号，不是工作者时间戳。delivery_id 唯一重试幂等；相同 delivery_id 不同内容拒绝。读取次数可以重复，不能按 source ID 去重后丢失注入顺序或接收者。
 
@@ -354,15 +386,84 @@ Journal 是按 Key 的追加序列，不是可签发的可变权威工件，不�
 1. 查询/工具/共享材料/历史/摘要/交叉质询经过**唯一受控注入边界**：校验 Manifest 准入、源版本/权限/闭包、预算和 epoch；持久登记事件及反向边，再向会话交付。登记失败不得交付。任务问题/目标/系统注入也必须有冻结来源和读记录；训练知识不得包装为 VERIFIED 任务事实。
 2. 实际 read-set 取**可能已暴露给该角色会话的全部材料**，不只取模型最终引用。登记成功但交付不确定时保守计入并标记交付核对状态于完整性记录；不得删除事件。空检索结果也记录查询/索引快照和 EMPTY_RESULT，证明缺失不能凭模型自报。
 3. 缓存复用要求相同源快照、权限、查询/转换方法版本和时效；每次命中另记 CACHE_REPLAY，父依赖保留全部原始来源。缓存键不能仅为文本或 query。摘要、裁剪、压缩、拼接及 Debate 都产生派生节点；删掉文字不等于删掉其影响，旧闭包保留。
-4. Journal 的生命周期为 `OPEN → INPUT_CLOSED → SEALED`。候选冻结后 INPUT_CLOSED 禁止新增源；允许原版本重读并登记。封票时暂停该角色全部输入生产者，等待所有交付/登记结算，核对持久会话/工具记录与完整性见证，再封存完整连续前缀。`journal_high_watermark == len(events)`；空前缀不能被接受为已完成初审。
+4. Journal 的生命周期为 `OPEN → QUIESCING → INPUT_CLOSED → SEALED`；QUIESCING 为 §6.5 的共享终审交付栅栏，不是现有 Case FSM 新增状态。候选冻结后 INPUT_CLOSED 禁止新增源；允许原版本重读并登记。封票时暂停该角色全部输入生产者，等待所有交付/登记结算，核对持久会话/工具记录与完整性见证，再封存完整连续前缀。`journal_high_watermark == len(events)`；空前缀不能被接受为已完成初审。
 5. Snapshot 固定本人视图、完整事件前缀、闭包、共享终审包、cutoff 和 epoch。完整性记录由注入边界/受信任记录器签发，绑定整个事件前缀及 high watermark，不能由任务模型签发。日志截断/未登记注入/未完成交付核对均为 `INCOMPLETE_READ_SET`；不能用“日志自身无缺号”证明没有未登记交付。
-6. **D-01 的推荐身份**：在获批注册 `read_set_snapshot` / `rset_` 后，对上述全部正文以 C0 canonicalize → Schema/语义 → `Digest(TypeReadSetSnapshot)` 派生 digest 与 ID；SealedBallot.read_set_digest 精确等于该 digest。票据不需要引用未来 BallotSet。当前 API 会拒绝该未注册类型，这是已知集成阻塞，不在本 PR 绕过。
+6. **D-01 的选定设计身份**：在获批注册 `read_set_snapshot` / `rset_` 后，对上述全部正文以 C0 canonicalize → Schema/语义 → `Digest(TypeReadSetSnapshot)` 派生 digest 与 ID；SealedBallot.read_set_digest 精确等于该 digest。票据不需要引用未来 BallotSet。当前 API 会拒绝该未注册类型；具体读写部署及兼容门槛见 §6.4，不在本 PR 绕过。
 7. seal、票据接收与撤销以权威序列校验；完成 seal 不获得永久有效性。SEALED 后收到新材料拒绝/新轮，不更新 Snapshot 或重签原票。同轮冲突票据仍按 PR #32 拒绝。新执行 generation 只能在持久所有权协议允许且依赖/会话完整时恢复，不能自动搬运旧代次票据成为新票。
 8. checkpoint 恢复先验证实际代次、固定 Manifest/三视图、Journal 可信 high watermark、完整依赖及当前撤销状态，才加载消息/摘要/缓存到模型。历史文本缺少来源证明时不能恢复为权威上下文，必须清空并用有效源新建轮次。禁止“先恢复文本再异步检查”。
 
 完整性记录与 journal 可靠保存、跨进程注入拦截、seal/写票事务及截断检测属于 C1-C / 后续运行时集成，Schema 不能证明它们已经存在。没有受控注入/提供方隔离保证的模型会话不得声称 read-set 完整。
 
 `completeness_record_ref` 指向先存在的外部持久注入核对记录，记录绑定 JournalKey、完整事件版本序列、high watermark 和交付结算结果，**不引用未来 ReadSetSnapshot 的 ID/digest**；由 Snapshot 后向绑定记录。原件按 ExternalRef 原始字节验真，不能通过在 Snapshot 中嵌入一份“证明该 Snapshot 自己完整”的签名形成 ID 循环。具体核对记录协议随 D-03 定版。
+
+### 6.4 ReadSetSnapshot 的 C0 注册与读写迁移计划（D-01）
+
+选定身份为 `artifact_type=read_set_snapshot`，前缀 `rset_` 加完整小写 64 位 digest。后续独立注册 PR 增加 `TypeReadSetSnapshot` 和 C0 类型/前缀白名单映射；继续使用 `magi:canonical:v1:read_set_snapshot\n` 的类型域及现有 SHA-256 算法，不改 `magi-cj/1` 字节规范。本文正文不能冒用 `context_manifest`、`sealed_ballot` 或裸 hash 暂时代替新类型。
+
+| 后续交付 | 必须验证的兼容/拒绝条件 | 实施边界 |
+| --- | --- | --- |
+| 注册及类型契约 | 新类型唯一映射到 `rset_`；显式预期类型与正文 artifact_type、schema_version 一致；不同类型同 bytes 的摘要域分离 | 后续 C0 注册 PR；本轮不改类型表或 encoder |
+| 独立 Golden Vector | 固定完整正文、canonical bytes、digest、rset ID 的独立期望值；包含本人 spec/经验/偏好、Manifest、候选、事件前缀/依赖闭包、共享包/回执/关闭引用、scope/epoch | C1-C；只重复调用生产 encoder 生成期望值不算独立 Golden |
+| 敏感字段及 Adopt | 改角色/视图版本、源或派生依赖、事件顺序、高水位、cutoff、epoch 或候选引用，均改变身份；`Adopt` 回读后逐项校验预期类型/ID/引用；错前缀、错类型、未知版本、非 canonical 字节拒绝 | C0 注册 + C1-C 正反例；重排语义集合须先语义校验，不将无效排列视为合法新工件 |
+| 反向引用与失效 | 源→派生→Journal→rset→票据→裁决→动作可追溯；缺边失败关闭；撤销源可定位三角色不同 ReadSet，错误角色 digest/Manifest/round 不能接票 | C1-C + 票据集成；不是编码算法本身的能力 |
+| 旧 API/身份回归 | 原 API 签名、所有已注册类型的 canonical bytes/digest/ID、原 C0 Golden 与 LegacyProjection 算法/列值保持原样 | 注册 PR 必跑旧向量及旧调用测试；不重编码历史 |
+
+部署顺序为：先批准类型/版本与引用契约 → 部署能够校验新类型和完整语义的消费者/存储回读路径 → 显式能力协商成功后启用生产者 → 才开启新票据协议。旧 C0 消费者拒绝未知类型是预期行为，**不能声称旧程序自动兼容 rset**；禁止降级为 legacy 或换类型重试。回滚关闭新签发/消费资格，保留既有 rset 和票据的原始身份及历史，不能把它们改写成旧工件继续执行。
+
+当前检查器继续断言 `Digest("read_set_snapshot")` 被拒绝，以防文档收敛被误认为注册完成。只有后续注册 PR 同步更新这项边界断言和独立向量后，才允许新类型成功；本轮不输出可用于生产的 read_set_digest。
+
+防循环约束：Manifest 不引用未来 Candidate/ReadSet；Candidate 可引用先存在的交付回执，但不引用未来 ReadSet 或反向绑定自己的关闭记录；ReadSet 后向引用已存在的候选、关闭/完整性记录；这些记录不能再包含该 ReadSet 的未来 ID。票据和反向依赖索引后建，不回写任何祖先正文。
+
+### 6.5 唯一绑定、共享终审交付与提交点（D-02）
+
+**唯一性不是“取最新”。** 初审前以条件创建登记 `(case_id, round) → context_manifest_id`，并核对 Manifest 内精确 Charter、Domain 与三视图；同键同 ID 重试幂等，同键异 ID 拒绝且须新轮。后续 `(case_id, round)` 只允许一个已提交 CandidateSnapshot；`(case_id, round, context_manifest_id, persona_id)` 只允许一个 seal 结果/终票身份。执行 generation 变化不重置这些唯一键或允许换票；恢复须验证合法持久所有权和完整旧前缀。工件显式引用与登记不一致即失败，登记不能覆盖正文。
+
+**选择后续版本化契约修订。** 对 PR #32 的独立修订提议为：
+
+| 工件新版本 | 显式内容绑定 | 不进入正文的后置状态 |
+| --- | --- | --- |
+| DecisionCharter | 新增 `domain_profile_id`，既有主体/目标确认必须覆盖该 ID | 发布/资格确认记录 |
+| CandidateSnapshot | 保留已有 charter_id/domain_profile_id；新增 `case_id`、`round`、`context_manifest_id`、`final_shared_inputs` 及按三角色固定槽位的 `final_shared_delivery_receipt_refs` | 引用其精确 ID 的三角色候选确认与 evidence closure 记录 |
+| ReadSetSnapshot | §6.2 的 Manifest/候选/本人视图，自己的交付回执、共同 evidence closure 引用、共享包与 cutoff | 发布批准、消费者及后继票据 ID |
+
+这些字段改变内容身份，须显式新 schema_version、能力路由及 C0 向量；不能给旧 v1 缺字段数据补默认后称完成绑定。本 PR 不修改 `decision-protocol-contract.md`。候选原有 `freeze_signatures` 槽位仍按旧契约处理；后续修订须把“签候选自身 digest 的确认”置于正文外，与正文内三角色 persona/spec 声明区分，避免 `Candidate → 签名 → Candidate` 摘要循环。可先封存待提交的候选正文、计算 ID，再收集对该 ID 的外置确认；正文封存时刻与权威提交时刻分开，未提交者不得被消费。
+
+**交付回执责任。** 每份回执必须由可信注入/会话边界核验，绑定 JournalKey、persona/spec、经验/偏好版本、目标会话/提供方请求标识、共享包 ID/版本/摘要、已登记事件 sequence、execution generation、撤销 scope/epoch、交付状态和 UTC 毫秒时间。依赖/权限亦须可追溯。它证明指定包已应用到指定角色的受控终审上下文且完成持久核对；不证明模型理解或行为忠实度。仅保存包 ID、发出网络请求、模型自报“已阅读”或不确定的发送结果均不足以签发成功回执。提供方接口无法支持该核对时，阻断关闭，不用推测成功。回执先于候选封存，不能含未来 candidate_snapshot_id。
+
+提交顺序如下，所有步骤仍是后续实现义务：
+
+1. `OPEN`：三角色调查经受控入口登记、交付；初始 Manifest 始终不可变。
+2. `QUIESCING`：持久栅栏阻断其他新材料生产者，结算在途登记/交付；仅允许该栅栏标识下的共享终审包及随后候选确认上下文交付，均须登记。先前交付不确定、遗漏或无法核对均阻断；不能删除日志后继续。
+3. 固定新鲜共享包。对每角色先提交事件及反向边，再将**同一 ID/版本/摘要**的包应用到终审上下文，持久核对并取得各自可信回执。三角色包相同，Journal 序号可不同；不得伪造第三份回执补齐。
+4. 将共享包及三份回执引用写入待提交候选正文，封存并派生候选 ID；取得三角色对该精确 ID/候选集合的外置确认。候选正文/确认请求的会话交付同样先登记事件和依赖，外置确认绑定对应交付记录，不回填候选正文。确认仅表示对既定候选的结构/集合确认；一旦引入新判断材料，阻断本次关闭并按新轮规则处理，不能藏在确认消息中。
+5. 在提交边界重验三份匹配回执、三角色确认、无未结算注入、权限/完整依赖、epoch/generation、窗口及包的新鲜性。ROLLOUT-LAB 的 30000 ms 从受信任源观测时刻计到**提交时刻**，不能用复制/重发时间刷新。任何不满足均禁止冻结；普通更新可在截止前重新准备新鲜包/候选并重获确认，撤销/决定性变化按规则新轮。
+6. **唯一线性化点**：同一权威条件提交中登记候选精确 ID、发出 `EVIDENCE_CLOSED`、使三 Journal 转为 `INPUT_CLOSED`、固定共同 authority cutoff 及各角色关闭高水位，并保存 evidence closure 记录。条件含唯一轮次绑定、有效 generation/epoch 与结算状态。只有该提交记录确认后候选才可供 seal/终票消费；不能先可见 Candidate 再异步补关闭。C2/C3 须提供原子或等价不可半提交协议。
+7. 此后只可重读关闭前已准入的精确源版本/派生版本，且仍登记；新源/新派生或决定性事实变化须新轮。各角色停止全部输入并结算后 seal 自己的 ReadSetSnapshot，引用共同 closure、自己的回执与完整性记录；终票绑定对应 read_set_digest。三个 ReadSet 可有不同重读前缀和经验，但共享包/候选/Manifest/cutoff 必须相同。
+
+`evidence_closure_record_ref` 的原件至少绑定 case/round、Manifest/候选 ID、三角色视图/确认/回执引用、共享包精确版本、cutoff、各 Journal 关闭高水位、generation、各撤销 scope/epoch、提交序号/时间及状态。该记录在候选 ID 派生后产生，仅被 ReadSet 后向引用，不填回 Candidate。`evidence_cutoff_sequence` 为共同权威序号；各角色关闭高水位是本地 sequence，不能混用。Snapshot 的 journal_high_watermark 不小于本人的关闭高水位；cutoff 后事件只可指向关闭时已准入的精确节点并证明原先准入记录。
+
+```mermaid
+sequenceDiagram
+  participant Gate as 注入与证据关闭协调器
+  participant Log as 持久 Journal 和反向依赖
+  participant Roles as 三角色受控终审会话
+  participant Authority as 共同权威顺序
+  Gate->>Log: QUIESCING 栅栏并结算在途输入
+  loop 每个角色，同一新鲜共享包
+    Gate->>Log: 先登记事件和依赖
+    Gate->>Roles: 应用到指定终审上下文
+    Roles-->>Gate: 可信边界核对并持久交付回执
+  end
+  Gate->>Roles: 待提交候选精确 ID
+  Roles-->>Gate: 三角色外置确认
+  Gate->>Authority: 条件提交：绑定、回执、结算、时效、epoch 和 generation
+  Note over Authority: 唯一线性化点：候选提交 + EVIDENCE_CLOSED + cutoff
+  Authority-->>Gate: 已提交关闭记录或拒绝
+  Gate->>Log: 从关闭前缀核对、受控重读、各自 seal
+  Note over Log,Roles: 仅已提交候选可消费；终票绑定各自 ReadSet digest
+```
+
+图中最后一步不代表关闭后再异步安装输入栅栏；三 Journal 的关闭资格已经是第 6 步提交的组成部分，每个注入/重读操作须核对权威状态。崩溃/回执丢失只按同幂等键查询原提交；结果未知禁止消费或另发第二候选。持久前缀/结算完整才可恢复；无法证明则保留历史并安全失效、新轮重建。撤销与关闭并发按同序列比较；即使关闭先成功，后续 seal/接票仍重验当前状态，不延续永久有效性。
 
 ## 7. 依赖 DAG、撤销及历史效果
 
@@ -377,10 +478,16 @@ graph TD
   P --> M
   C --> M
   S[初始事实/偏好/三角色经验/依赖索引快照] --> M
-  M --> J[实际注入 Journal]
+  M --> J[候选准备前的实际注入事件前缀]
   O[政策允许的新观察及最终共享事实] --> J
+  J --> Q[三角色可信共享交付回执]
   M --> K[CandidateSnapshot]
+  Q --> K
+  K --> JC[候选确认交付事件与关闭后受控重读]
+  JC --> R
+  K --> EC[外置候选确认与证据关闭记录]
   K --> R[ReadSetSnapshot 候选]
+  EC --> R
   J --> R
   R --> B[SealedBallot]
   K --> B
@@ -391,6 +498,8 @@ graph TD
 ```
 
 箭头表示下游依赖上游，不表示父正文包含子 ID。Domain 扩展的人格可引用已发布 Domain，而 Domain 不反向引用该 PersonaSpec；AcceptanceManifest 最后绑定两者，不把未来验收报告 ID 填回人格正文。Manifest 不引用未来 Candidate、ReadSet、票据或裁决；CandidateSnapshot 不引用未来终票。运行依赖/反向索引是外部登记，可增加边，不改变被冻结正文；索引版本固定的是初始数据视图，**不是停止在线撤销检查**。
+
+图中把 Journal 的先存事件前缀与候选交付/后续重读分开；回执只引用先存共享交付事件，不引用可变 Journal 全体或未来尾部。关闭记录核对候选确认事件，关闭后重读另登记并在 seal 时由完整性记录核对；这些后续事件均不能回填候选或先存回执。
 
 动态边按“原始条目版本 → 派生节点版本 → 注入事件/角色视图 → ReadSet/票据 → 裁决 → 待执行动作”建立，发布依赖工件/交付材料前必须原子提交边或提供等价的不可漏登记协议。索引缺边、丢失、无法追到可信高水位均为完整性未知，不能解释成“未受影响”。反向索引优化查找，最终有效性检查仍核验前向闭包和权威撤销序列。
 
@@ -423,7 +532,7 @@ graph TD
 
 | 消费点 | 必须核对的不可变关系 | 身份/授权时点 |
 | --- | --- | --- |
-| DecisionCharter | 采用的 DomainProfile 精确 ID、规则/预算/选择范围；授权目标/偏好来自人，不来自 Persona | 主体确认时；现有 Charter Schema 未显式列 domain_profile_id，见 D-02 的唯一登记映射边界 |
+| DecisionCharter | 采用的 DomainProfile 精确 ID、规则/预算/选择范围；授权目标/偏好来自人，不来自 Persona | 主体确认时；现有 Charter Schema 未显式列 domain_profile_id；按 §6.5 后续版本化修订，禁止可变查找补成权威绑定 |
 | CandidateSnapshot | charter_id/domain_profile_id 与本轮 Manifest 一致；classification evidence/规则版本与风险相符；final_shared_inputs 三者确认 | 冻结及 EVIDENCE_CLOSED；记录固定候选版，实际 k 与 Charter K_max 分开 |
 | SealedBallot | manifest ID、本人 pspc/experience、共同 preference、read_set_digest、context epoch、candidate snapshot、AuthorityProof、execution_generation 全部匹配 | seal / 独立提交；校验当前持久所有权及资格，不等聚合才检查 |
 | BallotSet | 三个固定槽位；每份 SEALED 票与同轮/同 snapshot/同 Manifest/同 AuthorityProof 一致；经各自 read_set_digest 定位各人精确读取快照 | 聚合时重新验证；ABSENT 不补造 ReadSet/投票，不转 ABSTAIN |
@@ -431,7 +540,7 @@ graph TD
 | AuthorityProof | 证明当前 Charter / 任务 / 资源 / 动作权限；Profile/Persona 发布用的治理资格与任务执行权限不同 | C2 固定真实主体、逐跳委托、同意和撤销；Manifest 不把自己认可为权限来源 |
 | ActionIntent | 从 DecisionRecord 沿完整链绑定全部输入、各角色视图和实际读取；动作自身精确参数/范围/期限另行绑定 | 动作授权及 FINAL CHECK 再检查；选择/人格批准不等于写权限 |
 
-PR #32 票据已有 read_set_digest、context epoch、本人 spec/experience 与 preference 字段，推荐 A 可消费这些槽位，不改既有计票和终态事务。其 CandidateSnapshot 没有显式 Manifest 字段，Charter 也未显式列 DomainProfile；本草案要求通过权威登记唯一固定 `(charter_id → domain_profile_id)`、`(case_id,round → manifest_id,snapshot_id)`，或经审阅为后续新 Schema 增加显式字段；**不能在调用时随意选择“当前映射”**。D-02 必须确定映射存储/确认和共享终审绑定，不把缺字段当成已经解决。
+PR #32 票据已有 read_set_digest、context epoch、本人 spec/experience 与 preference 字段，方案 A 消费这些槽位。其 CandidateSnapshot 没有显式 Manifest 字段，Charter 也未显式列 DomainProfile；本轮明确选择后续版本化契约修订：Charter 显式 domain_profile_id，CandidateSnapshot 显式 case_id/round/context_manifest_id 及共享终审包/交付引用，详见 §6.5。外部登记仅负责唯一性及提交状态，不再作为长期解析输入 ID 的替代。**本轮没有修改 PR #32 文档或将缺字段 v1 自动补全为新权威版本**；该契约修订及实现/并发验收仍阻塞集成。
 
 同一个 Charter 可用于多轮，但每轮唯一 Manifest；重建必须新轮/new ctxm，不能同轮换原件。旧执行 generation 不能把恢复的旧票重新提交为新代次；原历史只读保留。AuthorityProof 不反向引用未来 ballot/record ID；Profile/Persona 发布证明也不得依赖待发布对象授予的权限。
 
@@ -458,6 +567,7 @@ PR #32 票据已有 read_set_digest、context epoch、本人 spec/experience 与
 | CONTEXT-01 | 初审前唯一不可变 Manifest 固定三视图；普通更新不热切换 | MEM-01..02 |
 | READ-01 | 所有材料暴露持久登记，闭包和权限完整，seal 后不增加读取 | MEM-01、EVID-01..02 |
 | READ-02 | 本人 snapshot 与终票摘要逐项一致，cutoff/完整性可追溯，无尾截断 | MEM-01、VOTE-03 |
+| READ-03 | 每轮 Manifest/候选唯一；三份可信同包交付、登记及候选确认先于同一候选/关闭提交点；只消费已提交者 | MEM-01、EVID-01..02、AGENDA-01 |
 | REVOKE-01 | 失效沿派生/会话/票/裁决/动作传播，缺依赖保守失效 | MEM-02..03、AUTH-01..02 |
 | HISTORY-01 | 已有效果及历史记录真实保留，敏感原件清理不提供新决策读取路径 | MEM-03、REPORT-01、SEND-01 |
 
@@ -467,21 +577,23 @@ PR #32 票据已有 read_set_digest、context epoch、本人 spec/experience 与
 
 Golden Vector 归 C1-B/C1-C：须有完整受控治理/证据环境、语义排序、期望 canonical bytes / digest / ID、独立生成的固定期望值及跨工件拒绝结果。当前结构例子的摘要稳定性 smoke check 不能冒充该证据。
 
-### 9.3 本轮实际验证（2026-10-22）
+### 9.3 实际验证与历史回归边界（2026-10-22）
 
-| 检查 | 实际结果与能证明的范围 |
+| 验证时点 / 检查 | 实际结果与能证明的范围 |
 | --- | --- |
-| `GOCACHE=/tmp/magi-c1-go-build go run ../scripts/check-input-artifact-contract.go`（backend 内） | 5 个结构正例、46 个结构/C0 反例、5 个身份/Adopt/版本变更检查通过；另核对三类型摘要域分离、未注册 ReadSet 类型拒绝、非 canonical 存储拒绝 |
-| `GOCACHE=/tmp/magi-c1-go-build go test ./domain/canonical ./domain/validation ./domain/execution ./domain/memory ./application/memory`（backend 内） | 五个现有包通过；是相关设施回归，不证明新语义实现 |
-| C0 Python 跨语言 Golden 检查 | `OK (0 failures)`；是 C0 原有向量，不是 C1 领域 Golden |
-| Schema 引用及封闭对象审计 | 35 个定义、116 个本地引用全部可解析；全部对象关闭未知字段 |
-| 格式/变更检查 | 新 Go 检查脚本 gofmt；本 PR diff whitespace 检查；顶层三份权威文档未修改 |
+| 本轮：`GOCACHE=/tmp/magi-c1-go-build go run ../scripts/check-input-artifact-contract.go`（backend 内） | 原有 5 个结构正例、46 个结构/C0 反例、5 个身份/Adopt/版本变更检查通过；三类型域分离、未注册 ReadSet 拒绝及非 canonical 存储拒绝仍成立；新增 **14 项 D-04 结构检查**通过（通用预算/窗口可描述更大值，Persona v1.0 不可提高上限，零/负数边界拒绝） |
+| 本轮：旧 Schema 定向复现 | 临时目录使用修订前 Schema、相同样本及当前检查器，按预期在通用 `role_tool_calls=12` 失败；当前 Schema 对应检查通过。仅此结构限制的 RED→GREEN，不代表组合预算/授权实现 |
+| 本轮：`GOCACHE=/tmp/magi-c1-go-build go vet ../scripts/check-input-artifact-contract.go` | 通过；检查器复用现有 C0 与 domain/validation，未增加运行时验证器 |
+| 本轮：Schema / 文档 / 变更审计 | 35 个定义、116 个本地引用可解析、28 个对象关闭未知字段；新增四节/本地链接/fence、30 个未来用例条目、gofmt 与 diff whitespace 检查通过；三份权威文档与 C0 生产代码未改 |
+| 修订前 Head `861458f`：五个相关 Go 包测试 | `domain/canonical`、`domain/validation`、`domain/execution`、`domain/memory`、`application/memory` 已通过；本轮未重跑，属于先前设施回归 |
+| 修订前 Head `861458f`：C0 Python 跨语言 Golden | `OK (0 failures)`；本轮未重跑，这是 C0 原有向量，不是 C1 领域 Golden |
+| 修订前 Head `861458f`：远端 CI | GitHub API 核实 6/6 成功；修订提交的 CI 须按新 Head 单独查看，不能继承该结果 |
 
-首次 Go 启动因默认缓存目录只读而失败，改用上述临时缓存后成功重跑；这不是业务 RED→GREEN。新增检查接入现有 backend CI，本轮远端 CI 结果以 Draft PR checks 为准，不预先声明通过。未运行完整 backend/MySQL/生产服务或新协议故障测试；本 PR 无生产代码/数据库迁移。
+初次交付 Go 启动因默认缓存目录只读失败，改用临时缓存成功；不是业务 RED→GREEN。本轮没有重新逐项审阅已覆盖的 46 个反例，仅做结构回归并增加 D-04 检查。未运行完整 backend/MySQL/生产服务或新协议故障测试；本 PR 无生产代码/数据库迁移。
 
 ### 9.4 未来 RED→GREEN 矩阵（全部为 NOT RUN）
 
-每行先在缺失守卫/故障注入下观察 RED，再加守卫 GREEN；正例同条件下只改变列出的合法前提。下面**不是 PASS 记录**。
+下列 30 项均为未来计划，其中最后 9 项为本轮设计收敛新增；无一标记通过。每行先在缺失守卫/故障注入下观察 RED，再加守卫 GREEN；正例同条件下只改变列出的合法前提。下面**不是 PASS 记录**。
 
 | 未来测试名称 | 负例输入 / 故障 | 期望拒绝；配对正例 | 实施归属 |
 | --- | --- | --- | --- |
@@ -506,17 +618,26 @@ Golden Vector 归 C1-B/C1-C：须有完整受控治理/证据环境、语义排�
 | `TestRevocationDecisionAndSendOrdering` | 撤销与裁决发布/授权/FINAL CHECK 交错、源不可用 | 以同权威序列拒绝后序消费；撤销前已提交效果保留核对 | C1-C + C2/C3/切片4 |
 | `TestReadSetLimitsNeverTruncate` | 超过512事件/闭包或正文上限，删旧源后继续 | RESOURCE_LIMIT；界限内全量记录允许 | C1-C |
 | `TestPersonaBehaviorNotInferredFromSchema` | 合法 PersonaSpec，最低调查实际未做但投对结果 | PER-01 失败，不签发行为通过；独立行为实验满足才声明 | #4/#8 行为验收 |
+| `TestReadSetRegistrationPreservesC0Compatibility` | 新类型错前缀/错域、改变旧类型 ID/API、旧消费者尝试降级 | 拒绝错引用及降级；新 rset 独立 Golden/Adopt、所有旧向量与 API 不变 | 后续 C0 注册 + C1-C |
+| `TestSharedDeliveryMustPrecedeEvidenceClose` | 只有共享包 ID、两份回执、迟到交付或模型自报第三份 | INCOMPLETE_READ_SET；三份可信已应用回执及事件齐备才可提交 | C1-C / 候选切片2 |
+| `TestSharedFreshnessMeasuredAtCommit` | 包交付时新鲜，等待第三角色后到提交已超过 30000ms；重发试图刷新年龄 | EVIDENCE_EXPIRED；以源观测时刻计龄，提交时仍新鲜才通过 | C1-C / ROLLOUT-LAB 集成 |
+| `TestEvidenceCloseSingleCommitAndRecovery` | 候选可见与关闭间崩溃，或提交成功回执丢失后重发新 ID | 禁止消费半提交/未知状态；同幂等键查询原提交且仅一候选/closure | C1-C + C2/C3 事务集成 |
+| `TestQuiescingSettlesInflightInjection` | 未结算工具交付与终审/关闭竞争，工作者绕过持久栅栏 | INCOMPLETE_READ_SET 或冲突；栅栏覆盖全部入口且结算完成才允许 | C1-C / 注入集成 |
+| `TestEvidenceCloseChecksEpochAndGeneration` | 三份回执后撤销/所有权切代，再用旧前置状态关闭 | STATE_CONFLICT / CONTEXT_INVALIDATED；同权威序列当前状态才提交，关闭后撤销仍阻断 seal/接票 | C1-C + C2/C3 |
+| `TestRoundManifestAndCandidateBindingIsUnique` | 同轮不同 Manifest/候选或换 generation 后再 seal 另一 rset | BINDING_CONFLICT；同键同 ID 幂等，合法新轮可用新 Manifest | C1-C / 候选及票据切片 |
+| `TestCandidateConfirmationCannotSmuggleInput` | 候选确认消息夹带未登记新理由，或候选正文反引自身确认/closure | INCOMPLETE_READ_SET / CYCLIC_REFERENCE；无新材料、外置确认且完整登记可提交 | C1-C / 版本化候选契约 |
+| `TestBudgetCompositionHonorsPersonaAndDomain` | 通用结构允许 12/12000/2/2，执行时试图扩大 Persona v1 或参考域预算 | BUDGET_EXCEEDED / INSTANCE_POLICY_MISMATCH；有效限额取适用最严格者，降低预算合法 | C1-B / 领域语义集成 |
 
 ## 10. 未决设计决议与严格自审
 
-### 10.1 必需决议（均为 PROPOSED，无用户批准推定）
+### 10.1 设计收敛状态（本轮草案选定，不等于正式发布批准）
 
 | 决议 | 候选与影响 | 放行边界 |
 | --- | --- | --- |
-| D-01 ReadSet 身份 | 推荐给 C0 显式注册 `read_set_snapshot` / `rset_`，冻结全正文摘要和 Golden；备选嵌入票据并批准次级摘要契约。前者新增类型、后者改 SealedBallot Schema；两者都不能偷偷实施 | **阻塞 C1-C 正式 digest/发布/终票集成**；不改 C0 编码算法，不降 Rev4 |
-| D-02 动态准入及共享终审 | 推荐 §5.2 的固定准入政策+Journal+final_shared_inputs+cutoff；备选预收集/新阶段 Manifest。须决议 Charter→Domain 及 round→Manifest/Snapshot 的唯一映射或显式新字段 | **阻塞 C1-C 与候选/票据集成**；不能修改原 Manifest 或 Rev4 |
-| D-03 共享信任/撤销 | C1 定义所需发布记录、根外置、context epoch 保守规则；C2 定义认证主体/逐跳权限/同意/序列具体协议。须确认治理根、谁能撤销各类对象、context scope、跨服务原子边界及完整性见证实现 | **阻塞权威发布/撤销/执行集成**；离线 Schema 不授予权限 |
-| D-04 工程资源上限 | 采用 §2.5 限额或审阅后调整，均不作为领域安全阈值；调整需匹配 Schema 与任务预算，不能靠截断材料满足 | 阻塞相关 validator 上限定版；C1-B 前需确认 |
+| D-01 ReadSet 身份 | 本轮选定独立 `read_set_snapshot` / `rset_`；§6.4 给出注册、独立 Golden、兼容和读写迁移计划 | 设计待复核；注册/验证/部署未实现，**仍阻塞 C1-C**；不改 C0 算法 |
+| D-02 动态准入及共享终审 | 本轮采用 A；§6.5 固定唯一绑定、三角色交付先行、候选冻结/证据关闭提交点；选择后续显式字段契约修订 | 事务及新契约待复核/实现/故障验证，**仍阻塞 C1-C 与票据集成** |
+| D-03 共享信任/撤销 | 保留先存治理根、外部批准及保守 epoch；§2.7 明确 C1/C2/C3 接口与根初始化的责任，具体系统权威协议留给 C2/#5、C3/#6 | **仍阻塞权威发布/撤销/执行集成**；本轮不批准完整实现 |
+| D-04 工程资源上限 | §2.5 数值作为暂定工程上限；§2.6 区分系统/Persona v1/参考域/工程规则，并修订通用 Budget/Windows Schema | P2 混用已在本轮修正；上限定版/组合语义验证仍待后续审阅 |
 
 D-01..04 是必要的设计决议候选；若选择改变 Rev4 的不可变性、风险、资格或撤销门槛，须独立 Design Change，经正式接受后再改规范。本 PR 不自动创建/关闭 Design Change 或修改 Rev4。
 
@@ -525,19 +646,19 @@ D-01..04 是必要的设计决议候选；若选择改变 Rev4 的不可变性�
 | Finding | 级别 | 处置 / 状态 |
 | --- | --- | --- |
 | F-C1-01 工件正文含自己 ID/批准 proof 容易形成摘要循环 | P1 | 本草案已改为正文→身份→外置批准；独立治理根先存在，§2.2/2.4 |
-| F-C1-02 C0 没有 ReadSet 类型，裸摘要会绕过白名单 | P1 | 记录 D-01，禁止擅用其他类型/自制 encoder；**实现准入仍阻塞** |
-| F-C1-03 初审冻结与临近终审新鲜事实冲突 | P1 | 补初始视图/新观察/共同终审包/cutoff 方案及备选；**D-02 待决** |
+| F-C1-02 C0 没有 ReadSet 类型，裸摘要会绕过白名单 | P1 | §6.4 明确独立类型及迁移；禁止擅用其他类型/自制 encoder；**注册及实现仍阻塞** |
+| F-C1-03 初审冻结与临近终审新鲜事实冲突 | P1 | 选定 A 并补 §6.5 交付栅栏/提交点；**契约修订及故障验证待完成** |
 | F-C1-04 签发者自填政策及人格 Schema 合法被当作资格/忠实度 | P1 | 明确先存根、独立资格/行为证据及不可自证；**D-03 具体协议待决** |
-| F-C1-05 日志无缺号不能证明没漏注入，seal 可与交付竞争 | P1 | 要求持久登记先于交付、会话暴露核对、暂停输入/结算、可信 high watermark；实现/故障证据 NOT RUN |
-| F-C1-06 决策协议 Charter/Candidate 未显式携带全部输入 ID | P1 | §8 要求唯一不可变映射或正式加字段；**D-02 待决**，不默改已冻结 Schema |
+| F-C1-05 日志无缺号不能证明没漏注入，seal 可与交付竞争 | P1 | §6.5 补三份可信交付回执和冻结前置条件；会话暴露核对/并发故障证据 NOT RUN |
+| F-C1-06 决策协议 Charter/Candidate 未显式携带全部输入 ID | P1 | 选定 §6.5 的后续显式字段修订；不默改 PR #32，修订尚未交付 |
 | F-C1-07 固定旧依赖索引易被误作无需在线查撤销 | P1 | 区分初始版本与动态反向边/在线序列；缺边保守失效，§7 |
-| F-C1-08 工程限额及集合排序可能被归因于 Rev4 | P2 | 明确标为草案实现选择 D-04；结构例子不冒充语义 Golden，§2/§9 |
+| F-C1-08 工程限额及集合排序可能被归因于 Rev4；通用预算混入参考参数 | P2 | §2.6 分四层；Schema 移除四处人格/实例最大值混用，保留 Persona v1.0 常量；14 项结构检查通过，组合语义及工程上限定版仍待完成 |
 
-结论：可提交 Draft 供独立设计审阅；**不能宣称 P0/P1 已全部解决或 C1 已验收通过**。P1 中的文档矛盾已给出处理边界，但 D-01..03 的选择和真实集成证据尚未完成；未获决议不得启动相应实现。
+结论：可提交 Draft 供独立设计审阅；**不能宣称 P0/P1 已全部解决或 C1 已验收通过**。D-01/D-02 方向已选定并补充迁移/提交义务，D-03 责任明确但系统权威协议未完成；独立复核、后续契约修订和真实集成证据仍未完成，不将计划或静态时序图标成运行通过。
 
 ### 10.3 CAS-9 仍未满足的验收项及后续依赖
 
-- C1-A：独立设计审阅、上述决议接受、认证 Linear 状态重核未完成；文档/Schema 存在不等于这些门槛通过。
+- C1-A：已收到用户的独立静态审阅及 Linear 状态确认；D-01..04 收敛版本仍需针对性复核，未收到对应正式 GitHub Review/冻结批准，文档/Schema 存在不等于这些门槛通过。
 - C1-B：Go 工件类型、Domain/Persona 语义验证、独立正反例和 Golden 未实现；需本契约批准部分及 D-03/04 接口/上限定版，运行发布仍依赖 C2。
 - C1-C：Manifest/ReadSet 语义验证、真实注入记录、反向依赖、恢复/撤销/并发测试未实现；先决 D-01/02/03/04 及 C1-B 身份/资格接口。
 - C2：AuthorityProof、主体/委托/同意/撤销具体协议未冻结/实现；本草案只提出共享接口要求。
