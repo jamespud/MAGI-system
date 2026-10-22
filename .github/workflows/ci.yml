@@ -55,6 +55,9 @@ jobs:
       - name: Canonical encoding cross-language vectors
         run: python3 domain/canonical/testdata/verify_golden.py domain/canonical/testdata/golden_vectors.json
 
+      - name: Input artifact contract structure
+        run: go run ../scripts/check-input-artifact-contract.go
+
   scripts:
     name: Operational scripts gate
     runs-on: ubuntu-latest
