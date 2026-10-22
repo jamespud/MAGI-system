@@ -20,6 +20,13 @@ import unicodedata
 
 MAX_SAFE = 2**53 - 1
 PROFILE = "magi-cj/1"
+TYPE_PREFIXES = {
+    "decision_charter": "chtr", "domain_profile": "dprf", "persona_spec": "pspc",
+    "context_manifest": "ctxm", "candidate_snapshot": "csnp", "sealed_ballot": "sbll",
+    "ballot_set": "bset", "decision_record": "drec", "authority_proof": "aprf",
+    "action_intent": "aint", "audit_receipt": "arcp", "send_record": "srec",
+    "acceptance_manifest": "aman", "read_set_snapshot": "rset",
+}
 
 
 class CanonicalError(Exception):
@@ -182,6 +189,10 @@ def verify(path):
             got = digest(v["artifact_type"], canon)
             if got != v["digest"]:
                 failures.append(f"{name}: digest {got} != {v['digest']}")
+        if "artifact_id" in v:
+            got_id = TYPE_PREFIXES[v["artifact_type"]] + "_" + digest(v["artifact_type"], canon)
+            if got_id != v["artifact_id"]:
+                failures.append(f"{name}: artifact ID {got_id} != {v['artifact_id']}")
     for v in vectors["negative"]:
         name = v["name"]
         # Rejection may happen at parse time (duplicates, bad JSON, numbers) or at

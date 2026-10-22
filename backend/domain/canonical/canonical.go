@@ -147,6 +147,7 @@ const (
 	TypeAuditReceipt       ArtifactType = "audit_receipt"
 	TypeSendRecord         ArtifactType = "send_record"
 	TypeAcceptanceManifest ArtifactType = "acceptance_manifest"
+	TypeReadSetSnapshot    ArtifactType = "read_set_snapshot"
 )
 
 var typePrefixes = map[ArtifactType]string{
@@ -163,6 +164,7 @@ var typePrefixes = map[ArtifactType]string{
 	TypeAuditReceipt:       "arcp",
 	TypeSendRecord:         "srec",
 	TypeAcceptanceManifest: "aman",
+	TypeReadSetSnapshot:    "rset",
 }
 
 // ValidType reports whether t is in the closed artifact-type whitelist.

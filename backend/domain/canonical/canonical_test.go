@@ -21,6 +21,7 @@ type vectorFile struct {
 		InputJSON         string `json:"input_json"`
 		CanonicalBytesHex string `json:"canonical_bytes_hex"`
 		Digest            string `json:"digest"`
+		ArtifactID        string `json:"artifact_id"`
 	} `json:"positive"`
 	Negative []struct {
 		Name              string `json:"name"`
@@ -70,6 +71,12 @@ func TestCanonicalGoldenVectors(t *testing.T) {
 			}
 			if digest != tc.Digest {
 				t.Fatalf("digest\n got %s\nwant %s", digest, tc.Digest)
+			}
+			if tc.ArtifactID != "" {
+				id, err := got.ArtifactID(canonical.ArtifactType(tc.ArtifactType))
+				if err != nil || id != tc.ArtifactID {
+					t.Fatalf("artifact ID got %q (%v), want %q", id, err, tc.ArtifactID)
+				}
 			}
 		})
 	}

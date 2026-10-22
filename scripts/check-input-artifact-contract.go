@@ -220,13 +220,41 @@ func main() {
 		}
 		seen[digest] = true
 	}
-	if _, err := c.Digest(canonical.ArtifactType("read_set_snapshot")); err == nil {
-		fail("D-01 planned type unexpectedly registered; review the migration boundary")
+	// D-01 / C0-R registers content identity only. This deliberately incomplete
+	// body must hash at C0 but remain unsupported by the C1 structural entry point.
+	rset, err := canonical.Canonicalize([]byte(`{"artifact_type":"read_set_snapshot","context_revocation_epoch":0,"schema_version":"1.0"}`))
+	if err != nil {
+		fail("D-01 identity probe: %v", err)
+	}
+	rsetType := canonical.TypeReadSetSnapshot
+	if !canonical.ValidType(rsetType) {
+		fail("D-01 C0 identity type is not registered")
+	}
+	rsetDigest, err := rset.Digest(rsetType)
+	if err != nil || rsetDigest != "5fad4b2ab6f44260174c65a2f5478b6e8402059e18ef33ce709ed866b2fb5824" {
+		fail("D-01 C0 identity digest mismatch: %q (%v)", rsetDigest, err)
+	}
+	if id, err := rset.ArtifactID(rsetType); err != nil || id != "rset_"+rsetDigest {
+		fail("D-01 C0 identity ID mismatch: %q (%v)", id, err)
+	}
+	if result := validator.Validate(schema, rset.Bytes()); result == nil || result.Valid {
+		fail("D-01 identity-only ReadSet probe accepted as a C1 input artifact")
+	}
+	// Also reject otherwise valid supported bodies relabelled as ReadSet; the
+	// whitelist extension must not make them usable through the C1 schema.
+	for _, ex := range examples {
+		body := clone(ex.Body)
+		body["artifact_type"] = string(rsetType)
+		if result := validator.Validate(schema, encode(body)); result == nil || result.Valid {
+			fail("D-01 %s relabelled as ReadSet accepted as a C1 input artifact", ex.Name)
+		}
 	}
 	if _, err := canonical.Adopt([]byte("{ \"schema_version\": \"1.0\" }")); err == nil {
 		fail("storage adoption accepted non-canonical bytes")
 	}
 	fmt.Printf("C1-A structure: %d positive, %d negative; %d identity/adoption mutation checks; type separation and D-01 boundary OK\n", positive, negative, identity)
 	fmt.Printf("D-04 policy separation: %d structural checks OK (generic budgets/windows and Persona v1.0 limits)\n", policyChecks)
+	fmt.Println("D-01: C0 read_set_snapshot / rset_ identity OK; 6 unsupported C1 ReadSet bodies rejected")
+	fmt.Println("Type registration does not authorize ReadSet issuance, publication or voting; producers must remain disabled until full consumer validation and capability negotiation pass")
 	fmt.Println("Publication, semantic validators, behavior, revocation, concurrency and C1 Golden Vectors: NOT RUN")
 }
