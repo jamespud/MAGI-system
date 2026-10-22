@@ -333,11 +333,11 @@ CandidateSnapshot 冻结与权威 `EVIDENCE_CLOSED` 事件同一顺序边界；�
 | C：初审前穷尽全部输入，再整体冻结 | 无动态源，实际读取仍另作记录 | 最易保持 ID 边界，但无法一般性覆盖工具调查、交叉质询及临近冻结的新鲜遥测；可能需要多轮重建 |
 | D：终票只声明若干已用 ID 或模型自报摘要 | 动态列表无完整记录，无法证明系统注入 | 拒绝：不满足实际 read-set、派生依赖及保守失效要求 |
 
-方案 A 已作为本轮设计收敛方向，D-01 相应选定独立 `read_set_snapshot` / `rset_` 身份；不再将嵌入 SealedBallot 作为并列待选方案。当前 C0 仍不认识该类型，不能调用 `Digest("context_manifest")` 哈希 ReadSet 或裸 SHA-256 并称 C0 合规。注册迁移按 §6.4 后续独立交付；本轮不改 C0 白名单或 PR #32 的决策契约。设计选定不等于注册/集成已完成。
+方案 A 已作为本轮设计收敛方向，D-01 相应选定独立 `read_set_snapshot` / `rset_` 身份；不再将嵌入 SealedBallot 作为并列待选方案。C0-R 已独立注册该类型的内容身份；不能调用 `Digest("context_manifest")` 哈希 ReadSet 或裸 SHA-256 并称 C0 合规。注册与完整验证/读写迁移分开，按 §6.4 执行；PR #32 的决策契约不变。类型注册不等于正式发布或集成完成。
 
-### 6.2 候选正式记录（语义 Schema；未注册顶层权威类型）
+### 6.2 候选正式记录（语义 Schema；仅注册 C0 类型身份）
 
-以下 `record{}` 是封闭记录；全部字段必填、不 nullable、无默认；数组类型/排序/上限按 §2.3/2.5。D-01 的设计选择已明确，但在 §6.4 的注册、Schema/语义实现及独立 Golden 完成前不能用它签发生产 read_set_digest。
+以下 `record{}` 是封闭记录；全部字段必填、不 nullable、无默认；数组类型/排序/上限按 §2.3/2.5。D-01 的 C0 类型身份已在 C0-R 注册；在 §6.4 的完整 Schema/语义实现、正文独立 Golden、消费者验证及能力协商完成前，仍不能签发生产 read_set_digest。
 
 ```text
 ReadSetJournalKey = record{case_id:Token, round:PositiveSafeInt,
@@ -388,7 +388,7 @@ Journal 是按 Key 的追加序列，不是可签发的可变权威工件，不�
 3. 缓存复用要求相同源快照、权限、查询/转换方法版本和时效；每次命中另记 CACHE_REPLAY，父依赖保留全部原始来源。缓存键不能仅为文本或 query。摘要、裁剪、压缩、拼接及 Debate 都产生派生节点；删掉文字不等于删掉其影响，旧闭包保留。
 4. Journal 的生命周期为 `OPEN → QUIESCING → INPUT_CLOSED → SEALED`；QUIESCING 为 §6.5 的共享终审交付栅栏，不是现有 Case FSM 新增状态。候选冻结后 INPUT_CLOSED 禁止新增源；允许原版本重读并登记。封票时暂停该角色全部输入生产者，等待所有交付/登记结算，核对持久会话/工具记录与完整性见证，再封存完整连续前缀。`journal_high_watermark == len(events)`；空前缀不能被接受为已完成初审。
 5. Snapshot 固定本人视图、完整事件前缀、闭包、共享终审包、cutoff 和 epoch。完整性记录由注入边界/受信任记录器签发，绑定整个事件前缀及 high watermark，不能由任务模型签发。日志截断/未登记注入/未完成交付核对均为 `INCOMPLETE_READ_SET`；不能用“日志自身无缺号”证明没有未登记交付。
-6. **D-01 的选定设计身份**：在获批注册 `read_set_snapshot` / `rset_` 后，对上述全部正文以 C0 canonicalize → Schema/语义 → `Digest(TypeReadSetSnapshot)` 派生 digest 与 ID；SealedBallot.read_set_digest 精确等于该 digest。票据不需要引用未来 BallotSet。当前 API 会拒绝该未注册类型；具体读写部署及兼容门槛见 §6.4，不在本 PR 绕过。
+6. **D-01 的选定设计身份**：在获批注册 `read_set_snapshot` / `rset_` 后，对上述全部正文以 C0 canonicalize → Schema/语义 → `Digest(TypeReadSetSnapshot)` 派生 digest 与 ID；SealedBallot.read_set_digest 精确等于该 digest。票据不需要引用未来 BallotSet。C0-R 的 API 现在允许该类型计算身份，但不检查上述完整正文或签发资格；具体读写部署及兼容门槛见 §6.4，生产者保持关闭。
 7. seal、票据接收与撤销以权威序列校验；完成 seal 不获得永久有效性。SEALED 后收到新材料拒绝/新轮，不更新 Snapshot 或重签原票。同轮冲突票据仍按 PR #32 拒绝。新执行 generation 只能在持久所有权协议允许且依赖/会话完整时恢复，不能自动搬运旧代次票据成为新票。
 8. checkpoint 恢复先验证实际代次、固定 Manifest/三视图、Journal 可信 high watermark、完整依赖及当前撤销状态，才加载消息/摘要/缓存到模型。历史文本缺少来源证明时不能恢复为权威上下文，必须清空并用有效源新建轮次。禁止“先恢复文本再异步检查”。
 
@@ -398,11 +398,12 @@ Journal 是按 Key 的追加序列，不是可签发的可变权威工件，不�
 
 ### 6.4 ReadSetSnapshot 的 C0 注册与读写迁移计划（D-01）
 
-选定身份为 `artifact_type=read_set_snapshot`，前缀 `rset_` 加完整小写 64 位 digest。后续独立注册 PR 增加 `TypeReadSetSnapshot` 和 C0 类型/前缀白名单映射；继续使用 `magi:canonical:v1:read_set_snapshot\n` 的类型域及现有 SHA-256 算法，不改 `magi-cj/1` 字节规范。本文正文不能冒用 `context_manifest`、`sealed_ballot` 或裸 hash 暂时代替新类型。
+选定身份为 `artifact_type=read_set_snapshot`，前缀 `rset_` 加完整小写 64 位 digest。C0-R 独立交付已增加 `TypeReadSetSnapshot` 和 C0 类型/前缀白名单映射；继续使用 `magi:canonical:v1:read_set_snapshot\n` 的类型域及现有 SHA-256 算法，不改 `magi-cj/1` 字节规范。本文正文不能冒用 `context_manifest`、`sealed_ballot` 或裸 hash 暂时代替新类型。
 
 | 后续交付 | 必须验证的兼容/拒绝条件 | 实施边界 |
 | --- | --- | --- |
-| 注册及类型契约 | 新类型唯一映射到 `rset_`；显式预期类型与正文 artifact_type、schema_version 一致；不同类型同 bytes 的摘要域分离 | 后续 C0 注册 PR；本轮不改类型表或 encoder |
+| C0 类型注册及身份向量 | 新类型唯一映射到 `rset_`；不同类型同 bytes 的摘要域分离；最小输入的固定 canonical bytes / digest / ID 由独立 Python 与 Go 复算一致 | C0-R 已实现；仅类型身份，不校验完整正文 |
+| 完整消费者类型契约 | 显式预期类型与正文 artifact_type、schema_version 一致；完整 Schema、依赖闭包与业务语义校验 | C1-C；C0 不是工件语义验证器 |
 | 独立 Golden Vector | 固定完整正文、canonical bytes、digest、rset ID 的独立期望值；包含本人 spec/经验/偏好、Manifest、候选、事件前缀/依赖闭包、共享包/回执/关闭引用、scope/epoch | C1-C；只重复调用生产 encoder 生成期望值不算独立 Golden |
 | 敏感字段及 Adopt | 改角色/视图版本、源或派生依赖、事件顺序、高水位、cutoff、epoch 或候选引用，均改变身份；`Adopt` 回读后逐项校验预期类型/ID/引用；错前缀、错类型、未知版本、非 canonical 字节拒绝 | C0 注册 + C1-C 正反例；重排语义集合须先语义校验，不将无效排列视为合法新工件 |
 | 反向引用与失效 | 源→派生→Journal→rset→票据→裁决→动作可追溯；缺边失败关闭；撤销源可定位三角色不同 ReadSet，错误角色 digest/Manifest/round 不能接票 | C1-C + 票据集成；不是编码算法本身的能力 |
@@ -410,7 +411,7 @@ Journal 是按 Key 的追加序列，不是可签发的可变权威工件，不�
 
 部署顺序为：先批准类型/版本与引用契约 → 部署能够校验新类型和完整语义的消费者/存储回读路径 → 显式能力协商成功后启用生产者 → 才开启新票据协议。旧 C0 消费者拒绝未知类型是预期行为，**不能声称旧程序自动兼容 rset**；禁止降级为 legacy 或换类型重试。回滚关闭新签发/消费资格，保留既有 rset 和票据的原始身份及历史，不能把它们改写成旧工件继续执行。
 
-当前检查器继续断言 `Digest("read_set_snapshot")` 被拒绝，以防文档收敛被误认为注册完成。只有后续注册 PR 同步更新这项边界断言和独立向量后，才允许新类型成功；本轮不输出可用于生产的 read_set_digest。
+C0-R 检查器分别验证：① `ValidType(TypeReadSetSnapshot)`、固定 digest 和 `rset_` ID 成功；② 最小身份探针及五份改标为 ReadSet 的结构例子仍被现有 C1 Schema 拒绝。输出明确指出类型注册不授予正式签发、发布或投票能力，生产者须保持关闭直至完整消费者验证与能力协商通过。这是结构入口的拒绝检查，不是完整 ReadSet 语义验证、运行时资格控制或真实生产开关的验收。C0 最小身份 Golden 与 C1-C 完整正文 Golden 分别验收。
 
 防循环约束：Manifest 不引用未来 Candidate/ReadSet；Candidate 可引用先存在的交付回执，但不引用未来 ReadSet 或反向绑定自己的关闭记录；ReadSet 后向引用已存在的候选、关闭/完整性记录；这些记录不能再包含该 ReadSet 的未来 ID。票据和反向依赖索引后建，不回写任何祖先正文。
 
@@ -573,9 +574,14 @@ PR #32 票据已有 read_set_digest、context epoch、本人 spec/experience 与
 
 ### 9.2 已可执行的结构检查
 
-`schema.json` 和 `examples.json` 只验证**形状**。示例使用合成主体、零摘要及不可解引用政策，明确**不满足发布资格/风险规则完备性**；它们不是 ROLLOUT-LAB Golden 或可用的生产配置。`scripts/check-input-artifact-contract.go` 复用现有 `domain/validation` 和 `domain/canonical`，检查五份结构正例、结构/C0 反例、Adopt 和三种已注册类型身份；不实现新语义验证器。
+`schema.json` 和 `examples.json` 只验证**形状**。示例使用合成主体、零摘要及不可解引用政策，明确**不满足发布资格/风险规则完备性**；它们不是 ROLLOUT-LAB Golden 或可用的生产配置。`scripts/check-input-artifact-contract.go` 复用现有 `domain/validation` 和 `domain/canonical`，检查五份结构正例、结构/C0 反例、Adopt、原三种输入类型身份及新增 ReadSet C0 身份/不准入边界；不实现新语义验证器。
 
-Golden Vector 归 C1-B/C1-C：须有完整受控治理/证据环境、语义排序、期望 canonical bytes / digest / ID、独立生成的固定期望值及跨工件拒绝结果。当前结构例子的摘要稳定性 smoke check 不能冒充该证据。
+完整业务 Golden Vector 归 C1-B/C1-C（C0-R 仅新增类型身份 Golden）：须有完整受控治理/证据环境、语义排序、期望 canonical bytes / digest / ID、独立生成的固定期望值及跨工件拒绝结果。当前结构例子的摘要稳定性 smoke check 不能冒充该证据。
+
+C0-R（2026-10-23）新增 `TestReadSetSnapshotIdentity`、
+`TestRegisteredArtifactIDsAreByteFrozen` 和最小类型身份 Golden；注册前因
+`unknown_type` / 未注册断言失败，追加类型/前缀后通过。原 C0 Golden
+期望值未修改。以下 §9.3 保留 C1-A 历史证据，不代表 C0-R 的验证结果。
 
 ### 9.3 实际验证与历史回归边界（2026-10-22）
 
@@ -634,7 +640,7 @@ Golden Vector 归 C1-B/C1-C：须有完整受控治理/证据环境、语义排�
 
 | 决议 | 候选与影响 | 放行边界 |
 | --- | --- | --- |
-| D-01 ReadSet 身份 | 本轮选定独立 `read_set_snapshot` / `rset_`；§6.4 给出注册、独立 Golden、兼容和读写迁移计划 | 设计待复核；注册/验证/部署未实现，**仍阻塞 C1-C**；不改 C0 算法 |
+| D-01 ReadSet 身份 | C0-R 已注册独立 `read_set_snapshot` / `rset_`，最小类型身份 Golden 与全部已注册类型 ID 回归通过；§6.4 分开身份与完整正文验收 | 仅 C0 身份已实现；完整 Schema/语义、正文 Golden、消费者验证/能力协商及读写部署未完成，仍阻塞 C1-C 权威集成；不改 C0 算法 |
 | D-02 动态准入及共享终审 | 本轮采用 A；§6.5 固定唯一绑定、三角色交付先行、候选冻结/证据关闭提交点；选择后续显式字段契约修订 | 事务及新契约待复核/实现/故障验证，**仍阻塞 C1-C 与票据集成** |
 | D-03 共享信任/撤销 | 保留先存治理根、外部批准及保守 epoch；§2.7 明确 C1/C2/C3 接口与根初始化的责任，具体系统权威协议留给 C2/#5、C3/#6 | **仍阻塞权威发布/撤销/执行集成**；本轮不批准完整实现 |
 | D-04 工程资源上限 | §2.5 数值作为暂定工程上限；§2.6 区分系统/Persona v1/参考域/工程规则，并修订通用 Budget/Windows Schema | P2 混用已在本轮修正；上限定版/组合语义验证仍待后续审阅 |
@@ -646,7 +652,7 @@ D-01..04 是必要的设计决议候选；若选择改变 Rev4 的不可变性�
 | Finding | 级别 | 处置 / 状态 |
 | --- | --- | --- |
 | F-C1-01 工件正文含自己 ID/批准 proof 容易形成摘要循环 | P1 | 本草案已改为正文→身份→外置批准；独立治理根先存在，§2.2/2.4 |
-| F-C1-02 C0 没有 ReadSet 类型，裸摘要会绕过白名单 | P1 | §6.4 明确独立类型及迁移；禁止擅用其他类型/自制 encoder；**注册及实现仍阻塞** |
+| F-C1-02 原 C0 没有 ReadSet 类型，裸摘要会绕过白名单 | P1 | C0-R 已补类型注册、独立身份 Golden 及旧 ID 回归；禁止擅用其他类型/自制 encoder；完整语义验证与发布/集成仍未实现 |
 | F-C1-03 初审冻结与临近终审新鲜事实冲突 | P1 | 选定 A 并补 §6.5 交付栅栏/提交点；**契约修订及故障验证待完成** |
 | F-C1-04 签发者自填政策及人格 Schema 合法被当作资格/忠实度 | P1 | 明确先存根、独立资格/行为证据及不可自证；**D-03 具体协议待决** |
 | F-C1-05 日志无缺号不能证明没漏注入，seal 可与交付竞争 | P1 | §6.5 补三份可信交付回执和冻结前置条件；会话暴露核对/并发故障证据 NOT RUN |

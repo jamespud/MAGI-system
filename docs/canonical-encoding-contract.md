@@ -37,7 +37,7 @@ Rules:
 - **L2-02** A legacy digest is only compared with the same algorithm id. Re-encoding an
   existing row into a new algorithm is forbidden; so is treating a mismatch as success.
 - **L2-03** New authoritative protocol artifacts (Charter, DomainProfile, PersonaSpec,
-  ContextManifest, CandidateSnapshot, SealedBallot, BallotSet, DecisionRecord,
+  ContextManifest, ReadSetSnapshot, CandidateSnapshot, SealedBallot, BallotSet, DecisionRecord,
   AuthorityProof, ActionIntent, AuditReceipt, SendRecord, AcceptanceManifest) MUST use the
   new profile. The legacy algorithms are never used for new artifacts.
 - **L2-04** Profile is part of the artifact's declared metadata (`canonical_profile`,
@@ -110,7 +110,7 @@ artifact_id      = <type_prefix> + "_" + digest            # derived, never supp
 - **`artifact_type` is a closed whitelist** (`decision_charter`, `domain_profile`,
   `persona_spec`, `context_manifest`, `candidate_snapshot`, `sealed_ballot`,
   `ballot_set`, `decision_record`, `authority_proof`, `action_intent`,
-  `audit_receipt`, `send_record`, `acceptance_manifest`). Unknown types are an
+  `audit_receipt`, `send_record`, `acceptance_manifest`, `read_set_snapshot`). Unknown types are an
   error; type strings are `[a-z][a-z0-9_]*`, never containing `\n`.
 - The digest is determined by **profile version + artifact type + canonical bytes**.
 - **Every authoritative field participates**, including `schema_version`. Only the
@@ -118,6 +118,27 @@ artifact_id      = <type_prefix> + "_" + digest            # derived, never supp
   `canonical_profile`, `digest_alg`) are excluded.
 - A digest proves **content equality only**. Signature validity, authorization
   validity, freshness/revocation and execution success are separate checks.
+
+### 4.1 C0-R: ReadSetSnapshot identity registration
+
+`TypeReadSetSnapshot = "read_set_snapshot"` maps only to prefix `rset`. Its digest
+is `SHA256(UTF8("magi:canonical:v1:read_set_snapshot\n") || canonical_bytes)`;
+its ID is `rset_<64 lowercase hex>`. The `\n` denotes one LF byte. All existing
+types, prefixes, encoder rules and legacy algorithms remain byte-frozen.
+
+Registration permits C0 identity calculation only. It does not validate the body
+or enable issuance, publication, ballot acceptance or any authoritative producer.
+Producers must remain disabled until complete consumer validation and explicit
+capability negotiation pass (input-artifact contract §6.4). Older consumers still
+reject the new type; registration does not make them compatible.
+
+The `read_set_snapshot_minimal_identity` Golden Vector is an intentionally
+incomplete C0 probe, not a valid ReadSetSnapshot. It fixes input JSON, canonical
+bytes, digest and ID, independently calculated with Python SHA-256 and checked
+by both Go and the Python reference gate. `identity_*` vectors freeze the IDs of
+all 14 registered types on identical `{"a":1}` bytes, including all 13 pre-C0-R
+types. No previous vector expectation changes. Full ReadSetSnapshot body Golden
+Vectors, Schema, closure and business semantics remain C1-C work.
 
 ## 5. Two validation layers (responsibility split)
 
