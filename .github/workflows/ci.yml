@@ -55,6 +55,9 @@ jobs:
       - name: Canonical encoding cross-language vectors
         run: python3 domain/canonical/testdata/verify_golden.py domain/canonical/testdata/golden_vectors.json
 
+      - name: DomainProfile offline identity cross-language vector
+        run: python3 domain/inputartifact/testdata/verify_domain_golden.py
+
       - name: Input artifact contract structure
         run: go run ../scripts/check-input-artifact-contract.go
 
