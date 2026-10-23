@@ -1,0 +1,50 @@
+{
+  "digest": "59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+  "artifact_id": "dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+  "local_semantics": "PASS",
+  "qualification": "UNVERIFIABLE_REFERENCE",
+  "publication": "NOT_IMPLEMENTED",
+  "mutations": [
+    {
+      "path": "created_by.subject_id",
+      "value": "other",
+      "expected": "IDENTITY_CHANGED",
+      "artifact_id": "dprf_28ec15297bf6d808bcfa1397c59e4eeab274bf890054ec96caac6747b79044f1"
+    },
+    {
+      "path": "governance_policy_ref.content_digest",
+      "value": "1111111111111111111111111111111111111111111111111111111111111111",
+      "expected": "IDENTITY_CHANGED",
+      "artifact_id": "dprf_e97de08fe319d4a67c88c65d69970036640ebcb93c554ee9dfde3fcc8d0eef79"
+    },
+    {
+      "path": "version",
+      "value": "1.0.1",
+      "expected": "IDENTITY_CHANGED",
+      "artifact_id": "dprf_b3cba49949995124bf457bcfc6ccd87bf8f5057b1b14320bd8d90191246133d9"
+    },
+    {
+      "path": "validity.valid_until",
+      "value": "2027-01-01T00:00:00.000Z",
+      "expected": "IDENTITY_CHANGED",
+      "artifact_id": "dprf_39bc12406783dcd82e0e5cb33e5893b430348d9467648d93f7963834a0af5c62"
+    },
+    {
+      "path": "schema_version",
+      "value": "2.0",
+      "expected": "SCHEMA_REJECTED",
+      "artifact_id": "dprf_071a6b1c7e74a62c56741d9d761919e744f77a4cefbc501d6491f499be9987b1"
+    },
+    {
+      "path": "selection.approval_votes",
+      "value": {
+        "R0": 2,
+        "R1": 2,
+        "R2": 2,
+        "R3": 2
+      },
+      "expected": "SCHEMA_REJECTED",
+      "artifact_id": "dprf_bd56d5d1eac1279b2e4041990e411601fde3efce4f48630986af689c8a78e5ab"
+    }
+  ]
+}

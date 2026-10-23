@@ -1,0 +1,448 @@
+{
+  "artifact_type": "domain_profile",
+  "schema_version": "1.0",
+  "version": "1.0",
+  "created_by": {
+    "subject_id": "fixture-publisher",
+    "identity_source_id": "fixture-idp",
+    "identity_source_version": "1"
+  },
+  "issuance_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "issuance",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "b468cbd80fe2e39b19c794b5d5623fcbf170f8821204ed44d73977c56a152014"
+  },
+  "frozen_at": "2026-10-22T00:00:00.000Z",
+  "validity": {
+    "not_before": "2026-10-22T00:00:00.000Z",
+    "valid_until": null
+  },
+  "domain_key": "OFFLINE-LAB",
+  "governance_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "governance",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "72e030279f0df2ded78147b7ade02db934e39fa32c4b666eacebb70866b6cfff"
+  },
+  "risk_policy": {
+    "rules_version": "1.0",
+    "required_attributes": [
+      "bounded",
+      "in_domain",
+      "protected_effect",
+      "recovery_verified",
+      "reversible",
+      "within_quota"
+    ],
+    "rules": [
+      {
+        "rule_id": "read",
+        "level": "R0",
+        "all_of": [
+          {
+            "attribute_id": "protected_effect",
+            "operator": "EQ",
+            "expected": false
+          }
+        ],
+        "evidence_rule_ids": [
+          "fact"
+        ]
+      },
+      {
+        "rule_id": "trial",
+        "level": "R1",
+        "all_of": [
+          {
+            "attribute_id": "bounded",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "in_domain",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "protected_effect",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "recovery_verified",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "reversible",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "within_quota",
+            "operator": "EQ",
+            "expected": true
+          }
+        ],
+        "evidence_rule_ids": [
+          "fact"
+        ]
+      },
+      {
+        "rule_id": "unknown",
+        "level": "R3",
+        "all_of": [
+          {
+            "attribute_id": "bounded",
+            "operator": "UNKNOWN"
+          }
+        ],
+        "evidence_rule_ids": [
+          "fact"
+        ]
+      },
+      {
+        "rule_id": "wide",
+        "level": "R2",
+        "all_of": [
+          {
+            "attribute_id": "bounded",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "in_domain",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "protected_effect",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "recovery_verified",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "reversible",
+            "operator": "EQ",
+            "expected": true
+          },
+          {
+            "attribute_id": "within_quota",
+            "operator": "EQ",
+            "expected": false
+          }
+        ],
+        "evidence_rule_ids": [
+          "fact"
+        ]
+      }
+    ],
+    "aggregation": "MAX_APPLICABLE",
+    "unknown_level": "R3",
+    "downgrade": "VERIFIED_NEW_EVIDENCE_NEW_ROUND",
+    "r3_execution": "DISABLED"
+  },
+  "evidence_rules": [
+    {
+      "rule_id": "authority",
+      "assertion_kind": "EXTERNAL_AUTHORITY",
+      "source_kinds": [
+        "fixture"
+      ],
+      "method_refs": [
+        {
+          "namespace": "fixture",
+          "object_id": "method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "54381852698d2fe54fa39e568ac5693088cfc5c7c1e13cdb62c26e818350cba6"
+        }
+      ],
+      "qualification_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "verifier",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "9039b71f411cd13e56abf2e42b6802b0dd9d6f402c59e9d10334aebec0a644d5"
+      },
+      "ttl_ms": 300000,
+      "invalidating_events": [
+        "ENVIRONMENT_CHANGED",
+        "REVOKED"
+      ],
+      "independent_verifier_required": true
+    },
+    {
+      "rule_id": "fact",
+      "assertion_kind": "FACT",
+      "source_kinds": [
+        "fixture"
+      ],
+      "method_refs": [
+        {
+          "namespace": "fixture",
+          "object_id": "method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "54381852698d2fe54fa39e568ac5693088cfc5c7c1e13cdb62c26e818350cba6"
+        }
+      ],
+      "qualification_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "verifier",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "9039b71f411cd13e56abf2e42b6802b0dd9d6f402c59e9d10334aebec0a644d5"
+      },
+      "ttl_ms": 120000,
+      "invalidating_events": [
+        "ENVIRONMENT_CHANGED",
+        "REVOKED"
+      ],
+      "independent_verifier_required": true
+    },
+    {
+      "rule_id": "prediction",
+      "assertion_kind": "PREDICTION",
+      "source_kinds": [
+        "fixture"
+      ],
+      "method_refs": [
+        {
+          "namespace": "fixture",
+          "object_id": "method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "54381852698d2fe54fa39e568ac5693088cfc5c7c1e13cdb62c26e818350cba6"
+        }
+      ],
+      "qualification_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "verifier",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "9039b71f411cd13e56abf2e42b6802b0dd9d6f402c59e9d10334aebec0a644d5"
+      },
+      "ttl_ms": 3600000,
+      "invalidating_events": [
+        "ENVIRONMENT_CHANGED",
+        "REVOKED"
+      ],
+      "independent_verifier_required": true
+    },
+    {
+      "rule_id": "preference",
+      "assertion_kind": "USER_PREFERENCE",
+      "source_kinds": [
+        "fixture"
+      ],
+      "method_refs": [
+        {
+          "namespace": "fixture",
+          "object_id": "method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "54381852698d2fe54fa39e568ac5693088cfc5c7c1e13cdb62c26e818350cba6"
+        }
+      ],
+      "qualification_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "verifier",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "9039b71f411cd13e56abf2e42b6802b0dd9d6f402c59e9d10334aebec0a644d5"
+      },
+      "ttl_ms": 86400000,
+      "invalidating_events": [
+        "ENVIRONMENT_CHANGED",
+        "REVOKED"
+      ],
+      "independent_verifier_required": true
+    }
+  ],
+  "tool_scope": [
+    {
+      "tool_id": "observe",
+      "version": "1",
+      "definition_ref": {
+        "namespace": "fixture",
+        "object_id": "observe",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "dbb65cbda6fbd2be51ae9be0e66f65794564f2f5d96a0a148c3bbeee19e73265"
+      },
+      "mode": "READ",
+      "resource_ids": [
+        "lab"
+      ],
+      "risk_levels": [
+        "R0"
+      ],
+      "adapter_mode": "READ_ONLY"
+    }
+  ],
+  "selection": {
+    "candidate_limit": 4,
+    "default_early_selection_policy": "WAIT",
+    "allowed_early_selection_policies": [
+      "HUMAN_WAIVER",
+      "REVERSIBLE_TRIAL",
+      "WAIT"
+    ],
+    "material_pending_rule": "REV4_4_3",
+    "approval_votes": {
+      "R0": 2,
+      "R1": 2,
+      "R2": 3,
+      "R3": 3
+    },
+    "trial_risk_levels": [
+      "R1"
+    ]
+  },
+  "budget": {
+    "role_tool_calls": 6,
+    "task_tool_calls": 24,
+    "role_output_tokens": 6000,
+    "task_output_tokens": 24000,
+    "task_input_tokens": 200000,
+    "cost_limit": null
+  },
+  "windows": {
+    "submission_ms": 60000,
+    "objection_ms": 120000,
+    "revision_ms": 150000,
+    "freeze_ms": 180000,
+    "active_decision_ms": 300000,
+    "arbitration_accept_ms": 3600000,
+    "arbitration_final_ms": 86400000,
+    "task_validity_ms": 86400000,
+    "read_timeout_ms": 10000,
+    "read_retries": 1,
+    "format_repairs_per_role": 1,
+    "paused_states": [
+      "WAITING_INPUT",
+      "ARBITRATION"
+    ]
+  },
+  "sla_targets": [
+    {
+      "metric_id": "active-decision-p95",
+      "population_ref": {
+        "namespace": "fixture",
+        "object_id": "all-tasks",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "fe32ec38f785e7ca9560570c57275c05a25d43731b6322e35dbfa954707d96de"
+      },
+      "operator": "LE",
+      "bound": {
+        "value": 240000,
+        "unit": "millisecond",
+        "scale": 0
+      },
+      "measurement_method_ref": {
+        "namespace": "fixture",
+        "object_id": "p95",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0c4861522e93bdc2fb435937fdbd7a0581eac844e8512b242e89ef9e21354613"
+      }
+    }
+  ],
+  "statistics": {
+    "plan_ref": {
+      "namespace": "fixture",
+      "object_id": "rev4-18-8-10",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "4a8a1e858fdf3b8e1179c230f348f5b787eafe0622800f44f78ab9788c60849d"
+    },
+    "claim_count": 23,
+    "family_alpha": {
+      "numerator": 1,
+      "denominator": 20
+    },
+    "label_policy_ref": {
+      "namespace": "fixture",
+      "object_id": "blind-label",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "938278b9e21c28f49c99fe03d5fef04fe1548311124a00c4c5afa6fbdd3eb5df"
+    },
+    "denominator_policy_ref": {
+      "namespace": "fixture",
+      "object_id": "frozen-denominators",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "63da92ea90764c8c9df4c2ff25c600525301140ffc121ca28416048878ac72e7"
+    },
+    "independence_policy_ref": {
+      "namespace": "fixture",
+      "object_id": "independent-reset",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "ab1be4f0cd2df94e3cb022649acd26956793859529d7c350ce9f018e9426703d"
+    },
+    "model_check_scope_ref": {
+      "namespace": "fixture",
+      "object_id": "rev4-18-7",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "ca43cff7859827924f33c8f7819bd247ea9170ee728be4547c2190f75c27469b"
+    }
+  },
+  "experience_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "manual-publication",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "e6eea343602406bcb8de768d8f1bd3ce3388f0bf9a7e6243155d4f3fe7771343"
+  },
+  "retention": {
+    "full_input_ms": 7776000000,
+    "integrity_metadata_ms": 31536000000,
+    "cache_ms": 86400000,
+    "backup_erasure_ms": 604800000
+  },
+  "adapter_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "fenced-idempotent-only",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "1d786b3f85c66b5b8530652ed3444901faf998ce94b52c4f8a18be2f4aceff68"
+  },
+  "instance_parameters": [
+    {
+      "parameter_id": "canary-c2",
+      "value": {
+        "value": 5,
+        "unit": "ratio",
+        "scale": 2
+      }
+    },
+    {
+      "parameter_id": "error-increase",
+      "value": {
+        "value": 5,
+        "unit": "percentage_point",
+        "scale": 1
+      }
+    },
+    {
+      "parameter_id": "recovery-bound",
+      "value": {
+        "value": 60000,
+        "unit": "millisecond",
+        "scale": 0
+      }
+    }
+  ]
+}
