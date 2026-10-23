@@ -164,24 +164,9 @@ type Envelope struct {
 // ReadDomainProfileEnvelope checks both transport metadata and the original
 // nested body bytes, including canonicality. The wrapper itself is not hashed.
 func ReadDomainProfileEnvelope(raw []byte, expectedID string, opts ValidationOptions) (ValidatedDomainProfile, error) {
-	if _, e := canonical.CanonicalizeWithLimits(raw, domainEnvelopeLimits(opts)); e != nil {
-		return ValidatedDomainProfile{}, canonicalError(e)
-	}
-	var fields map[string]json.RawMessage
-	if e := json.Unmarshal(raw, &fields); e != nil || len(fields) != 5 {
-		return ValidatedDomainProfile{}, invalid("ENVELOPE", "$", "exact five wrapper fields required")
-	}
-	for _, k := range []string{"artifact_id", "digest", "canonical_profile", "digest_alg", "body"} {
-		if _, ok := fields[k]; !ok || bytes.Equal(fields[k], []byte("null")) {
-			return ValidatedDomainProfile{}, invalid("ENVELOPE", "$."+k, "required nonnull wrapper field")
-		}
-	}
-	var env Envelope
-	if e := json.Unmarshal(raw, &env); e != nil {
-		return ValidatedDomainProfile{}, invalid("ENVELOPE", "$", e.Error())
-	}
-	if env.CanonicalProfile != canonical.Profile || env.DigestAlg != canonical.DigestAlg || env.ArtifactID != expectedID {
-		return ValidatedDomainProfile{}, invalid("ENVELOPE", "$", "wrapper identity/profile/algorithm mismatch")
+	env, e := readArtifactEnvelope(raw, expectedID, opts)
+	if e != nil {
+		return ValidatedDomainProfile{}, e
 	}
 	v, e := ReadDomainProfile(env.Body, expectedID, opts)
 	if e != nil {
@@ -191,6 +176,31 @@ func ReadDomainProfileEnvelope(raw []byte, expectedID string, opts ValidationOpt
 		return ValidatedDomainProfile{}, invalid("IDENTITY", "$.digest", "wrapper digest mismatch")
 	}
 	return v, nil
+}
+
+// readArtifactEnvelope is shared by offline input artifact consumers. It keeps
+// the original nested body bytes for the consumer's Adopt and semantic checks.
+func readArtifactEnvelope(raw []byte, expectedID string, opts ValidationOptions) (Envelope, error) {
+	if _, e := canonical.CanonicalizeWithLimits(raw, domainEnvelopeLimits(opts)); e != nil {
+		return Envelope{}, canonicalError(e)
+	}
+	var fields map[string]json.RawMessage
+	if e := json.Unmarshal(raw, &fields); e != nil || len(fields) != 5 {
+		return Envelope{}, invalid("ENVELOPE", "$", "exact five wrapper fields required")
+	}
+	for _, k := range []string{"artifact_id", "digest", "canonical_profile", "digest_alg", "body"} {
+		if _, ok := fields[k]; !ok || bytes.Equal(fields[k], []byte("null")) {
+			return Envelope{}, invalid("ENVELOPE", "$."+k, "required nonnull wrapper field")
+		}
+	}
+	var env Envelope
+	if e := json.Unmarshal(raw, &env); e != nil {
+		return Envelope{}, invalid("ENVELOPE", "$", e.Error())
+	}
+	if env.CanonicalProfile != canonical.Profile || env.DigestAlg != canonical.DigestAlg || env.ArtifactID != expectedID {
+		return Envelope{}, invalid("ENVELOPE", "$", "wrapper identity/profile/algorithm mismatch")
+	}
+	return env, nil
 }
 
 // domainEnvelopeLimits keeps transport parsing bounded without charging the

@@ -1,0 +1,121 @@
+{
+  "canonical_profile": "magi-cj/1",
+  "digest_alg": "sha256",
+  "digest": "92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+  "artifact_id": "pspc_92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+  "selected_domain_profile_id": "dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+  "status": {
+    "baseline": "VALID_OFFLINE",
+    "domain_relations": "PARTIAL_OFFLINE",
+    "qualification": "UNVERIFIABLE_REFERENCE",
+    "behavior": "NOT_RUN"
+  },
+  "pending_references": [
+    {
+      "path": "$.compatibility.behavior_acceptance_ref",
+      "reference": {
+        "namespace": "fixture",
+        "object_id": "persona-behavior-unverified",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "bbc3946dba448a2fa1d6995fe8c81aa315795ba9cac575c803e3623027bf29a3"
+      }
+    },
+    {
+      "path": "$.compatibility.continuity_policy_ref",
+      "reference": {
+        "namespace": "fixture",
+        "object_id": "persona-continuity",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "67d5cdb65e37d4a6808539b4329daeec78b345da7827b6aaca70996a3e2eb209"
+      }
+    },
+    {
+      "path": "$.domain_extensions[0].approval_policy_ref",
+      "reference": {
+        "namespace": "fixture",
+        "object_id": "persona-extension",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "b69fd22b40983f1f4b18a448486453b8f9e752e3fcefde18c91751e6e4b20fd8"
+      }
+    },
+    {
+      "path": "$.issuance_policy_ref",
+      "reference": {
+        "namespace": "fixture",
+        "object_id": "persona-issuance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "aad8ef480bb30622382d32a72f011095100e6227f4d7819446b0087afaa23756"
+      }
+    },
+    {
+      "path": "$.maintenance_policy_ref",
+      "reference": {
+        "namespace": "fixture",
+        "object_id": "persona-maintenance",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "86ab3d99afbbbcae4df5665d507f7c1c6989d5d5ad8a49ca16dfa1692c5c5c24"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "field": "core_priority",
+      "digest": "03377abb439e22546f6a63f4c9769d28ca54374847d184eb1bc874e675f86703",
+      "artifact_id": "pspc_03377abb439e22546f6a63f4c9769d28ca54374847d184eb1bc874e675f86703",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "mandatory_reviews",
+      "digest": "bbd932a656d9586a075cca903290710e6c82a26e3f9afb9b192c0f84bcc49a89",
+      "artifact_id": "pspc_bbd932a656d9586a075cca903290710e6c82a26e3f9afb9b192c0f84bcc49a89",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "minimum_investigation",
+      "digest": "01e6dc5602846430182a0b249384cd84839c43d06edc12b56b9af047f01506f4",
+      "artifact_id": "pspc_01e6dc5602846430182a0b249384cd84839c43d06edc12b56b9af047f01506f4",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "evidence_priority",
+      "digest": "b9f1db7bd1f2e4679e5ffab40da429c3cf0056c01215b4a07cee5729560f335d",
+      "artifact_id": "pspc_b9f1db7bd1f2e4679e5ffab40da429c3cf0056c01215b4a07cee5729560f335d",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "call_allocation",
+      "digest": "c7330d5059feaeed0dd849859024b02a472f4298e8201130d80103ea97541ba1",
+      "artifact_id": "pspc_c7330d5059feaeed0dd849859024b02a472f4298e8201130d80103ea97541ba1",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "support_conditions",
+      "digest": "28d686efe8a708639f36bd37781c05106f9e387ac3d7d325f6fcf7338eabeefd",
+      "artifact_id": "pspc_28d686efe8a708639f36bd37781c05106f9e387ac3d7d325f6fcf7338eabeefd",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "reject_conditions",
+      "digest": "d2721829ac20ab21d96a7872d1ad5ad1a42662f4720b54570db6f5aa39b9d175",
+      "artifact_id": "pspc_d2721829ac20ab21d96a7872d1ad5ad1a42662f4720b54570db6f5aa39b9d175",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "abstain_conditions",
+      "digest": "5edd261f8a96442b5e913001c3f44f7971f24af262b9d008ed6e1024c7744784",
+      "artifact_id": "pspc_5edd261f8a96442b5e913001c3f44f7971f24af262b9d008ed6e1024c7744784",
+      "validation": "REJECTED"
+    },
+    {
+      "field": "correction_triggers",
+      "digest": "e69366b2f6b6ea3975aabb70c78342cb4c60113f092e03628b63557238923804",
+      "artifact_id": "pspc_e69366b2f6b6ea3975aabb70c78342cb4c60113f092e03628b63557238923804",
+      "validation": "REJECTED"
+    }
+  ]
+}

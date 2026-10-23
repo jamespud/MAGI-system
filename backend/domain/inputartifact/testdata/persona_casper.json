@@ -1,0 +1,175 @@
+{
+  "artifact_type": "persona_spec",
+  "schema_version": "1.0",
+  "version": "1.0",
+  "created_by": {
+    "subject_id": "fixture-publisher",
+    "identity_source_id": "fixture-idp",
+    "identity_source_version": "1"
+  },
+  "issuance_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "persona-issuance",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "aad8ef480bb30622382d32a72f011095100e6227f4d7819446b0087afaa23756"
+  },
+  "frozen_at": "2026-10-22T00:00:00.000Z",
+  "validity": {
+    "not_before": "2026-10-22T00:00:00.000Z",
+    "valid_until": null
+  },
+  "persona_id": "casper",
+  "spec_version": "1.0",
+  "baseline_id": "CASPER-1.0",
+  "maintenance_policy_ref": {
+    "namespace": "fixture",
+    "object_id": "persona-maintenance",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "86ab3d99afbbbcae4df5665d507f7c1c6989d5d5ad8a49ca16dfa1692c5c5c24"
+  },
+  "core_priority": [
+    "EXPLICIT_GOAL_CONSENT",
+    "CONTROL_EXIT",
+    "BURDEN_ADOPTION"
+  ],
+  "mandatory_reviews": [
+    "BURDEN_TRANSFER",
+    "CONTROL_CHANGE",
+    "EXIT",
+    "EXPLICIT_GOAL",
+    "MARKED_INFERENCE",
+    "REAL_GOAL_ADOPTION",
+    "REQUIRED_CONSENT"
+  ],
+  "minimum_investigation": [
+    {
+      "requirement_id": "AUTHENTICATED_GOAL_PREFERENCE",
+      "description": "AUTHENTICATED_GOAL_PREFERENCE",
+      "acceptable_evidence_rule_ids": [
+        "preference"
+      ],
+      "substitution": "NONE"
+    },
+    {
+      "requirement_id": "CONTROL_CONSENT_BURDEN",
+      "description": "CONTROL_CONSENT_BURDEN",
+      "acceptable_evidence_rule_ids": [
+        "authority",
+        "fact"
+      ],
+      "substitution": "NONE"
+    }
+  ],
+  "evidence_priority": [
+    "AUTHENTICATED_SUBJECT_RECORD",
+    "APPLICABLE_CONSENT_AUTHORITY_CHAIN",
+    "VERIFIABLE_OPERATIONAL_BURDEN",
+    "INFERRED_PREFERENCE_NO_AUTHORITY"
+  ],
+  "required_output_fields": [
+    "facts",
+    "assumptions",
+    "predictions",
+    "value_tradeoffs",
+    "alternatives",
+    "objections",
+    "missing_information",
+    "vote",
+    "change_conditions"
+  ],
+  "investigation_output_fields": [
+    "target_question",
+    "sources",
+    "known",
+    "unknown",
+    "candidate_impact",
+    "stop_reason"
+  ],
+  "tool_call_limit": 6,
+  "output_token_limit": 6000,
+  "call_allocation": [
+    {
+      "bucket_id": "GOAL_PREFERENCE",
+      "calls": 2
+    },
+    {
+      "bucket_id": "CONTROL_CONSENT",
+      "calls": 2
+    },
+    {
+      "bucket_id": "BURDEN_ALTERNATIVE",
+      "calls": 1
+    },
+    {
+      "bucket_id": "CORRECTION_RESERVE",
+      "calls": 1
+    }
+  ],
+  "transfer_policy": "MINIMUM_COMPLETE_WITH_REASON",
+  "support_conditions": [
+    "CONFIRMED_GOAL_CONTROL_BURDEN",
+    "REQUIRED_CONSENT_COMPLETE"
+  ],
+  "reject_conditions": [
+    "EXPLICIT_GOAL_CONFLICT",
+    "REJECTED_BURDEN",
+    "UNAUTHORIZED_CONTROL_LOSS"
+  ],
+  "abstain_conditions": [
+    "CONSENT_UNKNOWN",
+    "EXIT_UNKNOWN",
+    "KEY_PREFERENCE_UNKNOWN",
+    "PREFERENCE_CONFLICT"
+  ],
+  "correction_triggers": [
+    "AUTHORITY_CHANGED",
+    "BURDEN_EVIDENCE_CHANGED",
+    "INFERENCE_MISLABELED",
+    "PREFERENCE_CONFIRMED_WITHDRAWN"
+  ],
+  "domain_extensions": [
+    {
+      "extension_id": "availability",
+      "domain_profile_id": "dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+      "review_item_ids": [
+        "DOMAIN_AVAILABILITY"
+      ],
+      "minimum_investigation": [
+        {
+          "requirement_id": "DOMAIN_AVAILABILITY",
+          "description": "Additional availability review; applicability remains unverified.",
+          "acceptable_evidence_rule_ids": [
+            "fact"
+          ],
+          "substitution": "NONE"
+        }
+      ],
+      "approval_policy_ref": {
+        "namespace": "fixture",
+        "object_id": "persona-extension",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "b69fd22b40983f1f4b18a448486453b8f9e752e3fcefde18c91751e6e4b20fd8"
+      }
+    }
+  ],
+  "compatibility": {
+    "core_change": "INCOMPATIBLE",
+    "continuity_policy_ref": {
+      "namespace": "fixture",
+      "object_id": "persona-continuity",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "67d5cdb65e37d4a6808539b4329daeec78b345da7827b6aaca70996a3e2eb209"
+    },
+    "behavior_acceptance_ref": {
+      "namespace": "fixture",
+      "object_id": "persona-behavior-unverified",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "bbc3946dba448a2fa1d6995fe8c81aa315795ba9cac575c803e3623027bf29a3"
+    }
+  }
+}
