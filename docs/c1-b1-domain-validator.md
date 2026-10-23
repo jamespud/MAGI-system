@@ -20,7 +20,7 @@ validated, err := inputartifact.ValidateDomainProfile(raw, expectedID,
 
 The entrypoint applies C0 strict parsing with resource limits, the existing JSON Schema engine, local semantics, and finally domain-separated `dprf_` identity. It does not strip Markdown fences, repair JSON, sort sets, normalize times or fill missing fields. `*inputartifact.Error` exposes `Kind`, `Path`, `Detail` and an unwrapped C0 cause when applicable. Rejections return an empty validated result. Copies returned by `Body`, `CanonicalBytes` and `PendingDependencies` cannot mutate the validated identity.
 
-`ReadDomainProfile` requires an expected ID, prechecks explicit limits, calls C0 `Adopt` on original bytes, and rechecks type/Schema/semantics/identity. `ReadDomainProfileEnvelope` additionally checks the exact five wrapper fields, profile, algorithm, digest and request ID; it examines the original nested body bytes, not a repaired re-encoding. The wrapper is not a new hashed artifact.
+`ReadDomainProfile` requires an expected ID, prechecks explicit limits, calls C0 `Adopt` on original bytes, and rechecks type/Schema/semantics/identity. `ReadDomainProfileEnvelope` additionally checks the exact five wrapper fields, profile, algorithm, digest and request ID; it examines the original nested body bytes, not a repaired re-encoding. The wrapper is not a new hashed artifact. `ValidationOptions.Limits` always bounds the body. `EnvelopeLimits` independently bounds outer transport parsing; each nonpositive field derives from the effective body ceiling with a wrapper allowance: 1024 extra bytes, one extra nesting level, five extra members, and a string ceiling of at least 69 bytes for the artifact ID. Positive outer fields override only their respective transport ceilings. Additions saturate at max int. The byte allowance includes metadata and transport whitespace; it is an implementation default, not a new artifact or protocol budget. The body still passes its original limits and canonical adoption checks.
 
 `RequireCompleteQualification=true` **fails closed** with `UNVERIFIABLE_REFERENCE`. It is a stricter request, never an authorization flag. There is deliberately no success-capable qualification resolver, approval boolean, signature verifier or publication API in B1. Each ExternalRef path remains an unresolved dependency even with a nonempty digest. Subject identity, rule/method registration and billing mappings have additional explicit pending records. Contradictory content digests for the same external namespace/object/version are rejected; identical references at different paths remain individually reported.
 
@@ -45,11 +45,17 @@ Frozen base SHA-256: `59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9
 
 Frozen ArtifactID: `dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea`.
 
+### F36-01: envelope resource boundary regression
+
+Independent review identified the reuse of body limits for the enclosing transport. Before the fix, `TestDomainEnvelopeAcceptsBodyAtByteLimit` failed: the valid 7867-byte canonical body fit its exact ceiling, while its 8092-byte envelope returned `payload_too_large` against that same 7867-byte ceiling. The RED log is `/tmp/magi-f36-01-red.log` (session evidence, not a runtime dependency).
+
+The fix separates transport and body limits as described above. Four new top-level tests cover exact body acceptance with stable identity; explicit and default outer byte ceilings (including rejection at one byte over); rejection of an oversized inner body despite sufficient outer capacity; exact body depth/member boundaries and independent outer structural limits; and overflow-safe derivation. Run `go test ./domain/inputartifact -run '^TestDomainEnvelope' -count=1 -v` from backend. The same original regression is now GREEN. After F36-01, full `go test ./...`, `go test -race ./...`, `go vet ./...`, formatting, both independent Python vector verifiers and the C1-A checker all passed locally on 2026-10-23. The focused Envelope suite has four passing top-level tests and eight passing subtests. New-head GitHub results are recorded on the Draft PR. C0, Schema, Golden vectors and publication/qualification behavior are unchanged.
+
 ## D. Validation
 
 Local baseline `go test ./...` passed using a writable `/tmp` Go cache; the first default-cache attempt was blocked by the filesystem and is not a test failure. Local final results and CI are recorded below before PR handoff. Existing MySQL-gated tests without a DSN do not count as MySQL integration evidence; the unchanged MySQL GitHub jobs supply that evidence separately.
 
-- Focused tests: 33 top-level PASS, 3 explicitly SKIP (authority, classifier, distributed revocation).
+- Original delivery focused tests: 33 top-level PASS, 3 explicitly SKIP (authority, classifier, distributed revocation).
 - `go test ./...`: PASS (54 packages with tests; baseline had 53).
 - `go test -race ./...`: PASS, including a final rerun after the last semantic changes.
 - `go vet ./...`: PASS.

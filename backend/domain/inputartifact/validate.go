@@ -22,8 +22,20 @@ var schemaValidator = validation.NewJSONSchemaValidator()
 // Zero entries use C0 defaults; C1-A section 2.5 remains provisional.
 type ResourceLimits = canonical.Limits
 
+// DefaultEnvelopeByteAllowance bounds wrapper metadata and transport whitespace
+// in addition to the body ceiling. It is an implementation allowance, not an
+// artifact budget or a change to the C0/C1 contracts.
+const DefaultEnvelopeByteAllowance = 1024
+
 type ValidationOptions struct {
+	// Limits applies to the DomainProfile body, including envelope readback.
 	Limits ResourceLimits
+	// EnvelopeLimits applies only to envelope transport. Nonpositive entries
+	// derive from effective body limits: bytes + 1024, depth + 1, members + 5,
+	// and string bytes at least 69 (the dprf_ identity). Additions saturate at
+	// max int. Positive entries override only the corresponding outer ceiling;
+	// they never relax body validation. Ignored by body-only entrypoints.
+	EnvelopeLimits ResourceLimits
 	// RequireCompleteQualification can only make validation stricter. No resolver,
 	// identity source or governance root is implemented in C1-B1.
 	RequireCompleteQualification bool
@@ -152,7 +164,7 @@ type Envelope struct {
 // ReadDomainProfileEnvelope checks both transport metadata and the original
 // nested body bytes, including canonicality. The wrapper itself is not hashed.
 func ReadDomainProfileEnvelope(raw []byte, expectedID string, opts ValidationOptions) (ValidatedDomainProfile, error) {
-	if _, e := canonical.CanonicalizeWithLimits(raw, opts.Limits); e != nil {
+	if _, e := canonical.CanonicalizeWithLimits(raw, domainEnvelopeLimits(opts)); e != nil {
 		return ValidatedDomainProfile{}, canonicalError(e)
 	}
 	var fields map[string]json.RawMessage
@@ -179,4 +191,31 @@ func ReadDomainProfileEnvelope(raw []byte, expectedID string, opts ValidationOpt
 		return ValidatedDomainProfile{}, invalid("IDENTITY", "$.digest", "wrapper digest mismatch")
 	}
 	return v, nil
+}
+
+// domainEnvelopeLimits keeps transport parsing bounded without charging the
+// wrapper against the body's own resources. C0 itself remains unchanged.
+func domainEnvelopeLimits(opts ValidationOptions) ResourceLimits {
+	defaults := canonical.DefaultLimits()
+	effective := func(value, fallback int) int {
+		if value > 0 {
+			return value
+		}
+		return fallback
+	}
+	add := func(value, extra int) int {
+		maxInt := int(^uint(0) >> 1)
+		if value > maxInt-extra {
+			return maxInt
+		}
+		return value + extra
+	}
+	body := opts.Limits
+	outer := opts.EnvelopeLimits
+	return ResourceLimits{
+		MaxBytes:       effective(outer.MaxBytes, add(effective(body.MaxBytes, defaults.MaxBytes), DefaultEnvelopeByteAllowance)),
+		MaxDepth:       effective(outer.MaxDepth, add(effective(body.MaxDepth, defaults.MaxDepth), 1)),
+		MaxMembers:     effective(outer.MaxMembers, add(effective(body.MaxMembers, defaults.MaxMembers), 5)),
+		MaxStringBytes: effective(outer.MaxStringBytes, max(effective(body.MaxStringBytes, defaults.MaxStringBytes), 69)),
+	}
 }
