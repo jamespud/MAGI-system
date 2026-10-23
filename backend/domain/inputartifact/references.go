@@ -23,10 +23,10 @@ func fixedVersion(version, path string) error {
 	}
 	return nil
 }
-func pendingReferences(d DomainProfile) ([]Dependency, error) {
+func pendingArtifactReferences(body any, createdBy SubjectRef) ([]Dependency, error) {
 	// Walk only a Schema-checked typed body. The traversal is deterministic and
 	// preserves a separate path for every declaration, including repeated refs.
-	b, e := json.Marshal(d)
+	b, e := json.Marshal(body)
 	if e != nil {
 		return nil, e
 	}
@@ -84,10 +84,18 @@ func pendingReferences(d DomainProfile) ([]Dependency, error) {
 	if e = walk(value, "$"); e != nil {
 		return nil, e
 	}
-	if e = fixedVersion(d.CreatedBy.IdentitySourceVersion, "$.created_by.identity_source_version"); e != nil {
+	if e = fixedVersion(createdBy.IdentitySourceVersion, "$.created_by.identity_source_version"); e != nil {
 		return nil, e
 	}
 	pending = append(pending, Dependency{Kind: "UNVERIFIABLE_IDENTITY", Path: "$.created_by", Detail: "publisher and identity-source assertions are unauthenticated; C2 governance root required"})
+	return pending, nil
+}
+
+func pendingReferences(d DomainProfile) ([]Dependency, error) {
+	pending, e := pendingArtifactReferences(d, d.CreatedBy)
+	if e != nil {
+		return nil, e
+	}
 	pending = append(pending, Dependency{Kind: "UNVERIFIABLE_POLICY_BINDING", Path: "$.risk_policy", Detail: "local code types checked; external rules/method/parameter registration and governance compatibility unresolved"})
 	if d.Budget.CostLimit != nil {
 		pending = append(pending, Dependency{Kind: "UNVERIFIABLE_BILLING_MAPPING", Path: "$.budget.cost_limit", Detail: "currency/exponent shape only; no trusted billing or currency minor-unit mapping"})
