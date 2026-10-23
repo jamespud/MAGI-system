@@ -417,6 +417,10 @@ C0-R 检查器分别验证：① `ValidType(TypeReadSetSnapshot)`、固定 diges
 
 ### 6.5 唯一绑定、共享终审交付与提交点（D-02）
 
+后续独立交付：[#38 的 Decision Artifact v2 契约草案](decision-artifact-v2-contract.md)
+及其[静态证据/独立审阅记录](decision-artifact-v2-review.md)。该草案明确下列字段与关闭边界，
+不将本节的设计义务或静态门禁改报为真实会话/事务实现。
+
 **唯一性不是“取最新”。** 初审前以条件创建登记 `(case_id, round) → context_manifest_id`，并核对 Manifest 内精确 Charter、Domain 与三视图；同键同 ID 重试幂等，同键异 ID 拒绝且须新轮。后续 `(case_id, round)` 只允许一个已提交 CandidateSnapshot；`(case_id, round, context_manifest_id, persona_id)` 只允许一个 seal 结果/终票身份。执行 generation 变化不重置这些唯一键或允许换票；恢复须验证合法持久所有权和完整旧前缀。工件显式引用与登记不一致即失败，登记不能覆盖正文。
 
 **选择后续版本化契约修订。** 对 PR #32 的独立修订提议为：

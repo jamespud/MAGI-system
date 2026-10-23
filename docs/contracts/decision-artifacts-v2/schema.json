@@ -1,0 +1,2195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Decision Artifact v2 offline contract structure; no production issuance",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Charter"
+    },
+    {
+      "$ref": "#/$defs/CandidateSnapshot"
+    },
+    {
+      "$ref": "#/$defs/ReadSetSnapshot"
+    },
+    {
+      "$ref": "#/$defs/SealedBallot"
+    },
+    {
+      "$ref": "#/$defs/ContextManifest"
+    },
+    {
+      "$ref": "#/$defs/TrustedDeliveryReceipt"
+    },
+    {
+      "$ref": "#/$defs/CandidateConfirmation"
+    },
+    {
+      "$ref": "#/$defs/EvidenceClosureRecord"
+    },
+    {
+      "$ref": "#/$defs/CompletenessRecord"
+    },
+    {
+      "$ref": "#/$defs/CharterApproval"
+    },
+    {
+      "$ref": "#/$defs/RiskClassificationRecord"
+    }
+  ],
+  "$defs": {
+    "Token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Time": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "format": "date-time"
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[0-9]+(?:\\.[0-9]+)?$",
+      "maxLength": 32
+    },
+    "DomainID": {
+      "type": "string",
+      "pattern": "^dprf_[0-9a-f]{64}$"
+    },
+    "PersonaID": {
+      "type": "string",
+      "pattern": "^pspc_[0-9a-f]{64}$"
+    },
+    "ContextID": {
+      "type": "string",
+      "pattern": "^ctxm_[0-9a-f]{64}$"
+    },
+    "CharterID": {
+      "type": "string",
+      "pattern": "^chtr_[0-9a-f]{64}$"
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "melchior",
+        "balthasar",
+        "casper"
+      ]
+    },
+    "ExternalRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/Token"
+        },
+        "object_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "version": {
+          "$ref": "#/$defs/Token"
+        },
+        "digest_alg": {
+          "const": "sha256"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "namespace",
+        "object_id",
+        "version",
+        "digest_alg",
+        "content_digest"
+      ]
+    },
+    "SubjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "identity_source_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "identity_source_version": {
+          "$ref": "#/$defs/Token"
+        }
+      },
+      "required": [
+        "subject_id",
+        "identity_source_id",
+        "identity_source_version"
+      ]
+    },
+    "Validity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "not_before": {
+          "$ref": "#/$defs/Time"
+        },
+        "valid_until": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "not_before",
+        "valid_until"
+      ]
+    },
+    "Quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "ratio",
+            "percentage_point",
+            "millisecond",
+            "token",
+            "tool_call",
+            "byte",
+            "count"
+          ]
+        },
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "scale"
+      ]
+    },
+    "SnapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "SHARED_FACT",
+            "USER_PREFERENCE",
+            "EXPERIENCE",
+            "CONTEXT",
+            "DEPENDENCY_INDEX"
+          ]
+        },
+        "version": {
+          "$ref": "#/$defs/Token"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "qualification_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "kind",
+        "version",
+        "content_digest",
+        "source_ref",
+        "qualification_policy_ref",
+        "validity"
+      ]
+    },
+    "RoleView": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "persona_spec_id": {
+          "$ref": "#/$defs/PersonaID"
+        },
+        "experience_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "allowed_context_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "persona_spec_id",
+        "experience_snapshot_id",
+        "allowed_context_ids"
+      ]
+    },
+    "ContextManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "const": "context_manifest"
+        },
+        "schema_version": {
+          "const": "1.0"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "issuance_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "frozen_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "case_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "charter_id": {
+          "$ref": "#/$defs/CharterID"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "shared_fact_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "user_preference_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "casper": {
+              "$ref": "#/$defs/RoleView"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "snapshot_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotRef"
+          },
+          "minItems": 3,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "source_dependency_index_version": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "admission_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "schema_version",
+        "version",
+        "created_by",
+        "issuance_policy_ref",
+        "frozen_at",
+        "validity",
+        "case_id",
+        "round",
+        "charter_id",
+        "domain_profile_id",
+        "shared_fact_snapshot_id",
+        "user_preference_snapshot_id",
+        "roles",
+        "snapshot_refs",
+        "source_dependency_index_version",
+        "context_revocation_epoch",
+        "admission_policy_ref",
+        "context_revocation_scope_id"
+      ]
+    },
+    "Risk": {
+      "type": "string",
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3"
+      ]
+    },
+    "CandidateID": {
+      "type": "string",
+      "pattern": "^csnp_[0-9a-f]{64}$"
+    },
+    "ReadSetID": {
+      "type": "string",
+      "pattern": "^rset_[0-9a-f]{64}$"
+    },
+    "BallotID": {
+      "type": "string",
+      "pattern": "^sbll_[0-9a-f]{64}$"
+    },
+    "AuthorityID": {
+      "type": "string",
+      "pattern": "^aprf_[0-9a-f]{64}$"
+    },
+    "JournalKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_manifest_id": {
+          "$ref": "#/$defs/ContextID"
+        },
+        "persona_id": {
+          "$ref": "#/$defs/Role"
+        }
+      },
+      "required": [
+        "case_id",
+        "round",
+        "context_manifest_id",
+        "persona_id"
+      ]
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "proposal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "is_no_action": {
+          "type": "boolean"
+        },
+        "originated_by": {
+          "type": "string",
+          "enum": [
+            "PERSONA",
+            "REQUESTER",
+            "CHARTER"
+          ]
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "must_hold": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "statement",
+              "must_hold"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "parent_candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PROPOSED",
+            "MERGED",
+            "WITHDRAWN",
+            "EXCLUDED",
+            "INCLUDED"
+          ]
+        },
+        "risk_level": {
+          "$ref": "#/$defs/Risk"
+        },
+        "risk_classification_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "proposal",
+        "is_no_action",
+        "originated_by",
+        "conditions",
+        "parent_candidate_ids",
+        "state",
+        "risk_level",
+        "risk_classification_ref"
+      ]
+    },
+    "AgendaEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "INCLUDE",
+            "EXCLUDE",
+            "MERGE",
+            "WITHDRAW",
+            "OVER_LIMIT"
+          ]
+        },
+        "candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "rule_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "notified": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SubjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "event_id",
+        "kind",
+        "candidate_ids",
+        "rule_id",
+        "evidence_ids",
+        "reason",
+        "notified",
+        "recorded_at"
+      ]
+    },
+    "Charter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "const": "decision_charter"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "issuance_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "frozen_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "non_goals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "success_criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/Token"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "code",
+              "description"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "hard_constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/Token"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "source": {
+                "$ref": "#/$defs/ExternalRef"
+              }
+            },
+            "required": [
+              "code",
+              "statement",
+              "source"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "soft_preferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/Token"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              },
+              "weight": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Quantity"
+                },
+                "minItems": 0,
+                "maxItems": 1
+              }
+            },
+            "required": [
+              "code",
+              "statement",
+              "weight"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "allowed_costs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "$ref": "#/$defs/Token"
+              },
+              "bound": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unit": {
+                "$ref": "#/$defs/Token"
+              }
+            },
+            "required": [
+              "resource",
+              "bound",
+              "unit"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "decision_owner": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "resource_owners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "resource": {
+                "$ref": "#/$defs/Token"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "OWNER_ALL",
+                  "OWNER_THRESHOLD",
+                  "SINGLE_DELEGATE"
+                ]
+              },
+              "owners": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/SubjectRef"
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "owner_rule_ref": {
+                "$ref": "#/$defs/ExternalRef"
+              }
+            },
+            "required": [
+              "resource",
+              "mode",
+              "owners",
+              "owner_rule_ref"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "authorizers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SubjectRef"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "arbiter": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SubjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 1
+        },
+        "tool_scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "risk_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "default_level": {
+              "$ref": "#/$defs/Risk"
+            },
+            "escalation_level": {
+              "$ref": "#/$defs/Risk"
+            }
+          },
+          "required": [
+            "default_level",
+            "escalation_level"
+          ]
+        },
+        "candidate_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "submission_deadline": {
+          "$ref": "#/$defs/Time"
+        },
+        "objection_deadline": {
+          "$ref": "#/$defs/Time"
+        },
+        "revision_deadline": {
+          "$ref": "#/$defs/Time"
+        },
+        "freeze_deadline": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity_horizon": {
+          "$ref": "#/$defs/Time"
+        },
+        "early_selection_policy": {
+          "type": "string",
+          "enum": [
+            "WAIT",
+            "REVERSIBLE_TRIAL",
+            "HUMAN_WAIVER"
+          ]
+        },
+        "no_action_exception_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "artifact_type",
+        "schema_version",
+        "version",
+        "created_by",
+        "issuance_policy_ref",
+        "frozen_at",
+        "validity",
+        "domain_profile_id",
+        "objective",
+        "non_goals",
+        "success_criteria",
+        "hard_constraints",
+        "soft_preferences",
+        "allowed_costs",
+        "decision_owner",
+        "resource_owners",
+        "authorizers",
+        "arbiter",
+        "tool_scope",
+        "risk_policy",
+        "candidate_limit",
+        "submission_deadline",
+        "objection_deadline",
+        "revision_deadline",
+        "freeze_deadline",
+        "validity_horizon",
+        "early_selection_policy",
+        "no_action_exception_reasons"
+      ]
+    },
+    "CandidateSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "const": "candidate_snapshot"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "issuance_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "frozen_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "case_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "charter_id": {
+          "$ref": "#/$defs/CharterID"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "context_manifest_id": {
+          "$ref": "#/$defs/ContextID"
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "candidate_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "material_pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/$defs/Token"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16384
+              }
+            },
+            "required": [
+              "code",
+              "description"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "agenda_log": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgendaEvent"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        "final_shared_inputs": {
+          "$ref": "#/$defs/SnapshotRef"
+        },
+        "final_shared_delivery_receipt_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "casper": {
+              "$ref": "#/$defs/ExternalRef"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "persona_views": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "casper": {
+              "$ref": "#/$defs/RoleView"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        }
+      },
+      "required": [
+        "artifact_type",
+        "schema_version",
+        "version",
+        "created_by",
+        "issuance_policy_ref",
+        "frozen_at",
+        "validity",
+        "case_id",
+        "round",
+        "charter_id",
+        "domain_profile_id",
+        "context_manifest_id",
+        "candidate_count",
+        "candidate_entries",
+        "candidates",
+        "material_pending",
+        "agenda_log",
+        "final_shared_inputs",
+        "final_shared_delivery_receipt_refs",
+        "persona_views"
+      ]
+    },
+    "SourceNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "source_entry_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "source_version": {
+          "$ref": "#/$defs/Token"
+        },
+        "raw_content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "RAW",
+            "DERIVED",
+            "EMPTY_RESULT"
+          ]
+        },
+        "source_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "derivation_method_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "parent_node_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "node_id",
+        "source_entry_id",
+        "source_version",
+        "raw_content_digest",
+        "kind",
+        "source_ref",
+        "validity",
+        "derivation_method_ref",
+        "parent_node_ids"
+      ]
+    },
+    "ReadEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "journal_key": {
+          "$ref": "#/$defs/JournalKey"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "authority_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "RETRIEVAL",
+            "TOOL_INJECTION",
+            "HISTORY_SUMMARY",
+            "PREFERENCE",
+            "EXPERIENCE",
+            "SHARED_FACT",
+            "CACHE_REPLAY",
+            "RESTORE",
+            "DEBATE"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "INITIAL_REVIEW",
+            "CROSS_EXAMINATION",
+            "FINAL_REVIEW"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/SourceNode"
+        },
+        "parent_node_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Token"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "permission_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "producer": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "verification_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "injected_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "target_persona": {
+          "$ref": "#/$defs/Role"
+        }
+      },
+      "required": [
+        "journal_key",
+        "sequence",
+        "authority_sequence",
+        "execution_generation",
+        "delivery_id",
+        "kind",
+        "phase",
+        "source",
+        "parent_node_ids",
+        "permission_ref",
+        "producer",
+        "verification_record_ref",
+        "injected_at",
+        "target_persona"
+      ]
+    },
+    "ReadSetSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "const": "read_set_snapshot"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "issuance_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "frozen_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "journal_key": {
+          "$ref": "#/$defs/JournalKey"
+        },
+        "candidate_snapshot_id": {
+          "$ref": "#/$defs/CandidateID"
+        },
+        "persona_spec_id": {
+          "$ref": "#/$defs/PersonaID"
+        },
+        "experience_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "user_preference_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credential_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_dependency_index_version": {
+          "$ref": "#/$defs/Token"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReadEvent"
+          },
+          "minItems": 1,
+          "maxItems": 512
+        },
+        "dependency_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceNode"
+          },
+          "minItems": 1,
+          "maxItems": 2048
+        },
+        "journal_high_watermark": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "evidence_cutoff_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "final_shared_inputs": {
+          "$ref": "#/$defs/SnapshotRef"
+        },
+        "final_shared_delivery_receipt_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "evidence_closure_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "completeness_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "schema_version",
+        "version",
+        "created_by",
+        "issuance_policy_ref",
+        "frozen_at",
+        "validity",
+        "journal_key",
+        "candidate_snapshot_id",
+        "persona_spec_id",
+        "experience_snapshot_id",
+        "user_preference_snapshot_id",
+        "execution_generation",
+        "context_revocation_scope_id",
+        "context_revocation_epoch",
+        "authority_scope_id",
+        "authority_epoch",
+        "credential_scope_id",
+        "credential_epoch",
+        "source_dependency_index_version",
+        "events",
+        "dependency_nodes",
+        "journal_high_watermark",
+        "evidence_cutoff_sequence",
+        "final_shared_inputs",
+        "final_shared_delivery_receipt_ref",
+        "evidence_closure_record_ref",
+        "completeness_record_ref"
+      ]
+    },
+    "SealedBallot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_type": {
+          "const": "sealed_ballot"
+        },
+        "schema_version": {
+          "const": "2.0"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "created_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "issuance_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "frozen_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "validity": {
+          "$ref": "#/$defs/Validity"
+        },
+        "case_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_manifest_id": {
+          "$ref": "#/$defs/ContextID"
+        },
+        "persona_id": {
+          "$ref": "#/$defs/Role"
+        },
+        "persona_spec_id": {
+          "$ref": "#/$defs/PersonaID"
+        },
+        "charter_id": {
+          "$ref": "#/$defs/CharterID"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/CandidateID"
+        },
+        "experience_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "user_preference_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "read_set_snapshot_id": {
+          "$ref": "#/$defs/ReadSetID"
+        },
+        "read_set_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credential_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_proof_id": {
+          "$ref": "#/$defs/AuthorityID"
+        },
+        "evidence_closure_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "attitudes": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "propertyNames": {
+            "$ref": "#/$defs/Token"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "REJECT",
+              "ABSTAIN"
+            ]
+          }
+        },
+        "preferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "candidate_a": {
+                "$ref": "#/$defs/Token"
+              },
+              "candidate_b": {
+                "$ref": "#/$defs/Token"
+              },
+              "relation": {
+                "type": "string",
+                "enum": [
+                  "LEFT_PREFERRED",
+                  "RIGHT_PREFERRED",
+                  "TIED",
+                  "INCOMPARABLE"
+                ]
+              },
+              "rationale": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "EVIDENCE_GAP",
+                    "VALUE_INCOMPARABLE",
+                    "CHARTER_PENDING"
+                  ]
+                },
+                "minItems": 0,
+                "maxItems": 1
+              }
+            },
+            "required": [
+              "candidate_a",
+              "candidate_b",
+              "relation",
+              "rationale"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "relation": {
+                      "const": "INCOMPARABLE"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "rationale": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "rationale": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 2016
+        },
+        "reasoning_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "submitted_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "schema_version",
+        "version",
+        "created_by",
+        "issuance_policy_ref",
+        "frozen_at",
+        "validity",
+        "case_id",
+        "round",
+        "context_manifest_id",
+        "persona_id",
+        "persona_spec_id",
+        "charter_id",
+        "domain_profile_id",
+        "snapshot_id",
+        "experience_snapshot_id",
+        "user_preference_snapshot_id",
+        "read_set_snapshot_id",
+        "read_set_digest",
+        "execution_generation",
+        "context_revocation_scope_id",
+        "context_revocation_epoch",
+        "authority_scope_id",
+        "authority_epoch",
+        "credential_scope_id",
+        "credential_epoch",
+        "authority_proof_id",
+        "evidence_closure_record_ref",
+        "attitudes",
+        "preferences",
+        "reasoning_summary",
+        "submitted_at"
+      ]
+    },
+    "TrustedDeliveryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "TrustedDeliveryReceipt"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "journal_key": {
+          "$ref": "#/$defs/JournalKey"
+        },
+        "persona_spec_id": {
+          "$ref": "#/$defs/PersonaID"
+        },
+        "experience_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "user_preference_snapshot_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "controlled_session_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "provider_request_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "final_shared_inputs": {
+          "$ref": "#/$defs/SnapshotRef"
+        },
+        "registered_injection_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credential_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "quiescence_fence_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "delivery_status": {
+          "const": "APPLIED_VERIFIED"
+        },
+        "verification_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "verified_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "verified_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "journal_key",
+        "persona_spec_id",
+        "experience_snapshot_id",
+        "user_preference_snapshot_id",
+        "controlled_session_id",
+        "provider_request_id",
+        "final_shared_inputs",
+        "registered_injection_sequence",
+        "execution_generation",
+        "context_revocation_scope_id",
+        "context_revocation_epoch",
+        "authority_scope_id",
+        "authority_epoch",
+        "credential_scope_id",
+        "credential_epoch",
+        "quiescence_fence_id",
+        "delivery_status",
+        "verification_record_ref",
+        "verified_by",
+        "verified_at"
+      ]
+    },
+    "CandidateConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "CandidateConfirmation"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "journal_key": {
+          "$ref": "#/$defs/JournalKey"
+        },
+        "candidate_snapshot_id": {
+          "$ref": "#/$defs/CandidateID"
+        },
+        "persona_spec_id": {
+          "$ref": "#/$defs/PersonaID"
+        },
+        "final_shared_inputs": {
+          "$ref": "#/$defs/SnapshotRef"
+        },
+        "receipt_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credential_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "confirmed_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "confirmed_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "confirmation_injection_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "controlled_session_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "provider_request_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "verification_record_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "journal_key",
+        "candidate_snapshot_id",
+        "persona_spec_id",
+        "final_shared_inputs",
+        "receipt_ref",
+        "execution_generation",
+        "context_revocation_scope_id",
+        "context_revocation_epoch",
+        "authority_scope_id",
+        "authority_epoch",
+        "credential_scope_id",
+        "credential_epoch",
+        "confirmed_by",
+        "confirmed_at",
+        "confirmation_injection_sequence",
+        "controlled_session_id",
+        "provider_request_id",
+        "verification_record_ref"
+      ]
+    },
+    "EvidenceClosureRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "EvidenceClosureRecord"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "case_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_manifest_id": {
+          "$ref": "#/$defs/ContextID"
+        },
+        "candidate_snapshot_id": {
+          "$ref": "#/$defs/CandidateID"
+        },
+        "persona_views": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/RoleView"
+            },
+            "casper": {
+              "$ref": "#/$defs/RoleView"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "final_shared_inputs": {
+          "$ref": "#/$defs/SnapshotRef"
+        },
+        "receipt_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "casper": {
+              "$ref": "#/$defs/ExternalRef"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "confirmation_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "balthasar": {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            "casper": {
+              "$ref": "#/$defs/ExternalRef"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "execution_generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "context_revocation_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "context_revocation_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "credential_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "credential_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "quiescence_fence_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "evidence_cutoff_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "close_high_watermarks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "balthasar": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "casper": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "pending_injections": {
+          "const": 0
+        },
+        "journal_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "melchior": {
+              "const": "INPUT_CLOSED"
+            },
+            "balthasar": {
+              "const": "INPUT_CLOSED"
+            },
+            "casper": {
+              "const": "INPUT_CLOSED"
+            }
+          },
+          "required": [
+            "melchior",
+            "balthasar",
+            "casper"
+          ]
+        },
+        "event": {
+          "const": "EVIDENCE_CLOSED"
+        },
+        "status": {
+          "const": "COMMITTED"
+        },
+        "commit_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "committed_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "case_id",
+        "round",
+        "context_manifest_id",
+        "candidate_snapshot_id",
+        "persona_views",
+        "final_shared_inputs",
+        "receipt_refs",
+        "confirmation_refs",
+        "execution_generation",
+        "context_revocation_scope_id",
+        "context_revocation_epoch",
+        "authority_scope_id",
+        "authority_epoch",
+        "credential_scope_id",
+        "credential_epoch",
+        "quiescence_fence_id",
+        "evidence_cutoff_sequence",
+        "close_high_watermarks",
+        "pending_injections",
+        "journal_states",
+        "event",
+        "status",
+        "commit_id",
+        "committed_at"
+      ]
+    },
+    "CompletenessRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "CompletenessRecord"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "journal_key": {
+          "$ref": "#/$defs/JournalKey"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReadEvent"
+          },
+          "minItems": 1,
+          "maxItems": 512
+        },
+        "journal_high_watermark": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "delivery_settled": {
+          "const": true
+        },
+        "recorded_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "journal_key",
+        "events",
+        "journal_high_watermark",
+        "delivery_settled",
+        "recorded_by",
+        "recorded_at"
+      ]
+    },
+    "CharterApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "CharterApproval"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "charter_id": {
+          "$ref": "#/$defs/CharterID"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "issuer": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "approval_policy_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "authority_proof_id": {
+          "$ref": "#/$defs/AuthorityID"
+        },
+        "authority_scope_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "approved_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "charter_id",
+        "domain_profile_id",
+        "issuer",
+        "approval_policy_ref",
+        "authority_proof_id",
+        "authority_scope_id",
+        "authority_epoch",
+        "approved_at"
+      ]
+    },
+    "RiskClassificationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "const": "RiskClassificationRecord"
+        },
+        "record_version": {
+          "const": "2.0"
+        },
+        "candidate_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "domain_profile_id": {
+          "$ref": "#/$defs/DomainID"
+        },
+        "risk_level": {
+          "$ref": "#/$defs/Risk"
+        },
+        "rule_ref": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "classified_by": {
+          "$ref": "#/$defs/SubjectRef"
+        },
+        "classified_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "rules_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "input_attribute_values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "attribute_id": {
+                "$ref": "#/$defs/Token"
+              },
+              "knowledge": {
+                "type": "string",
+                "enum": [
+                  "KNOWN",
+                  "UNKNOWN"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 1,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "$ref": "#/$defs/Token"
+                    },
+                    {
+                      "$ref": "#/$defs/Quantity"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "attribute_id",
+              "knowledge",
+              "value"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "knowledge": {
+                      "const": "KNOWN"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "value": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "value": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "input_evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/ExternalRef"
+          }
+        },
+        "matched_rule_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Token"
+          }
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_version",
+        "candidate_id",
+        "domain_profile_id",
+        "risk_level",
+        "rule_ref",
+        "classified_by",
+        "classified_at",
+        "rules_version",
+        "input_attribute_values",
+        "input_evidence_refs",
+        "matched_rule_ids",
+        "valid_until"
+      ]
+    }
+  }
+}

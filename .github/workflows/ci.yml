@@ -64,6 +64,9 @@ jobs:
       - name: Input artifact contract structure
         run: go run ../scripts/check-input-artifact-contract.go
 
+      - name: Decision Artifact v2 offline contract and negative fixtures
+        run: python3 ../scripts/check-decision-artifact-v2.py
+
   scripts:
     name: Operational scripts gate
     runs-on: ubuntu-latest

@@ -6,6 +6,9 @@
 > 本文件冻结**契约形状、状态枚举与不变量**，作为拆分实施 PR 的基线；它不批准修改最终设计，
 > 也不承诺任何生产环境的写操作或发送授权。
 
+> 后续版本化修订：[Decision Artifact v2 独立契约草案](decision-artifact-v2-contract.md)（#38）。
+> 本 v1 冻结正文与历史身份保留；v2 不由缺字段 v1 自动升级。
+
 ## 0. 状态与边界
 
 - **本文档是契约冻结，不是实现。** 现有代码（`domain/entity/vote.go`、`domain/consensus`、

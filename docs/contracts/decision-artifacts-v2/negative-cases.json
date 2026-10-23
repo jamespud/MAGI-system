@@ -1,0 +1,1363 @@
+[
+  {
+    "name": "charter-domain-mismatch",
+    "expected": "DOMAIN",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "charter",
+          "body",
+          "domain_profile_id"
+        ],
+        "value": "dprf_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "charter-domain-missing",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "artifacts",
+          "charter",
+          "body",
+          "domain_profile_id"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "candidate-manifest-mismatch",
+    "expected": "BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "context_manifest_id"
+        ],
+        "value": "ctxm_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "candidate-case-mismatch",
+    "expected": "BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "case_id"
+        ],
+        "value": "other-case"
+      }
+    ]
+  },
+  {
+    "name": "candidate-round-mismatch",
+    "expected": "BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "round"
+        ],
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "candidate-domain-mismatch",
+    "expected": "BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "domain_profile_id"
+        ],
+        "value": "dprf_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "mutable-latest-lookup",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "domain_profile_id"
+        ],
+        "value": "latest"
+      }
+    ]
+  },
+  {
+    "name": "unknown-schema-version",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "schema_version"
+        ],
+        "value": "3.0"
+      }
+    ]
+  },
+  {
+    "name": "same-round-multiple-manifests",
+    "expected": "ROUND_BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "append",
+        "path": [
+          "round_bindings"
+        ],
+        "value": {
+          "case_id": "case-v2",
+          "round": 1,
+          "context_manifest_id": "ctxm_0000000000000000000000000000000000000000000000000000000000000000",
+          "candidate_snapshot_id": "csnp_0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    ]
+  },
+  {
+    "name": "same-round-multiple-candidates",
+    "expected": "ROUND_BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "append",
+        "path": [
+          "round_bindings"
+        ],
+        "value": {
+          "case_id": "case-v2",
+          "round": 1,
+          "context_manifest_id": "__manifest__",
+          "candidate_snapshot_id": "csnp_0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    ]
+  },
+  {
+    "name": "missing-third-delivery",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "final_shared_delivery_receipt_refs",
+          "casper"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "wrong-third-role-receipt",
+    "expected": "VIEW",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "journal_key",
+          "persona_id"
+        ],
+        "value": "melchior"
+      }
+    ]
+  },
+  {
+    "name": "forged-model-acknowledgement",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "delivery_status"
+        ],
+        "value": "MODEL_ACK"
+      }
+    ]
+  },
+  {
+    "name": "unknown-delivery",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "delivery_status"
+        ],
+        "value": "UNKNOWN"
+      }
+    ]
+  },
+  {
+    "name": "different-third-shared-package",
+    "expected": "SHARED",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "2"
+      }
+    ]
+  },
+  {
+    "name": "receipt-wrong-spec",
+    "expected": "VIEW",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "persona_spec_id"
+        ],
+        "value": "pspc_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "receipt-wrong-experience",
+    "expected": "VIEW",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "experience_snapshot_id"
+        ],
+        "value": "other-experience"
+      }
+    ]
+  },
+  {
+    "name": "receipt-wrong-preference",
+    "expected": "VIEW",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "user_preference_snapshot_id"
+        ],
+        "value": "other-preference"
+      }
+    ]
+  },
+  {
+    "name": "receipt-wrong-generation",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "execution_generation"
+        ],
+        "value": 6
+      }
+    ]
+  },
+  {
+    "name": "receipt-unregistered-sequence",
+    "expected": "DELIVERY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "registered_injection_sequence"
+        ],
+        "value": 99
+      }
+    ]
+  },
+  {
+    "name": "receipt-after-candidate",
+    "expected": "ORDER",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "verified_at"
+        ],
+        "value": "2026-10-23T00:00:08.000Z"
+      }
+    ]
+  },
+  {
+    "name": "candidate-self-referencing-signature-cycle",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "freeze_signatures"
+        ],
+        "value": [
+          {
+            "candidate_snapshot_id": "__candidate__"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "receipt-future-candidate-cycle",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "candidate_snapshot_id"
+        ],
+        "value": "__candidate__"
+      }
+    ]
+  },
+  {
+    "name": "candidate-future-closure-cycle",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "evidence_closure_record_ref"
+        ],
+        "value": {}
+      }
+    ]
+  },
+  {
+    "name": "confirmations-different-candidate-ids",
+    "expected": "CONFIRMATION",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "candidate_snapshot_id"
+        ],
+        "value": "csnp_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "confirmation-before-body-seal",
+    "expected": "ORDER",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "confirmed_at"
+        ],
+        "value": "2026-10-23T00:00:06.000Z"
+      }
+    ]
+  },
+  {
+    "name": "half-commit-wrong-event",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "event"
+        ],
+        "value": "CANDIDATE_ONLY"
+      }
+    ]
+  },
+  {
+    "name": "half-commit-open-third-journal",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "journal_states",
+          "casper"
+        ],
+        "value": "OPEN"
+      }
+    ]
+  },
+  {
+    "name": "in-flight-injection-at-cutoff",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "pending_injections"
+        ],
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "missing-shared-cutoff",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "evidence_cutoff_sequence"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "current-generation-changed-at-commit",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "execution_generation"
+        ],
+        "value": 8
+      }
+    ]
+  },
+  {
+    "name": "current-context-epoch-changed",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "context_revocation_epoch"
+        ],
+        "value": 3
+      }
+    ]
+  },
+  {
+    "name": "current-authority-epoch-changed",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "authority_epoch"
+        ],
+        "value": 4
+      }
+    ]
+  },
+  {
+    "name": "current-credential-epoch-changed",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "credential_epoch"
+        ],
+        "value": 5
+      }
+    ]
+  },
+  {
+    "name": "scope-substitution",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "context_revocation_scope_id"
+        ],
+        "value": "other-scope"
+      }
+    ]
+  },
+  {
+    "name": "stale-owner",
+    "expected": "AUTHORITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "owner_subject_id"
+        ],
+        "value": "new-owner"
+      }
+    ]
+  },
+  {
+    "name": "missing-submit-authority-check",
+    "expected": "AUTHORITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "authority_checks",
+          "1"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "wrong-authority-proof",
+    "expected": "AUTHORITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "authority_proof_id"
+        ],
+        "value": "aprf_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "commit-reply-loss-conflicting-retry",
+    "expected": "ROUND_BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "append",
+        "path": [
+          "round_bindings"
+        ],
+        "value": {
+          "case_id": "case-v2",
+          "round": 1,
+          "context_manifest_id": "__manifest__",
+          "candidate_snapshot_id": "csnp_0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    ]
+  },
+  {
+    "name": "legacy-v1-is-not-v2",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "schema_version"
+        ],
+        "value": "1.0"
+      }
+    ]
+  },
+  {
+    "name": "legacy-generation-zero",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "execution_generation"
+        ],
+        "value": 0
+      }
+    ]
+  },
+  {
+    "name": "tampered-immutable-object-unrehashed",
+    "expected": "IDENTITY",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "charter",
+          "body",
+          "objective"
+        ],
+        "value": "Changed after hashing"
+      }
+    ]
+  },
+  {
+    "name": "wrong-id-prefix",
+    "expected": "IDENTITY",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "artifact_id"
+        ],
+        "value": "ctxm_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "wrong-envelope-digest",
+    "expected": "IDENTITY",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "digest"
+        ],
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "noncanonical-stored-body",
+    "expected": "ADOPT",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "canonical_bytes_hex"
+        ],
+        "value": "7b7d"
+      }
+    ]
+  },
+  {
+    "name": "arbitrary-readset-digest",
+    "expected": "READSET",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "read_set_digest"
+        ],
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "wrong-role-readset",
+    "expected": "READSET",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "read_set_snapshot_id"
+        ],
+        "value": "__readset.melchior__"
+      }
+    ]
+  },
+  {
+    "name": "cross-round-ballot",
+    "expected": "BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "round"
+        ],
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "old-generation-ballot",
+    "expected": "STALE",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "ballot.casper",
+          "body",
+          "execution_generation"
+        ],
+        "value": 6
+      }
+    ]
+  },
+  {
+    "name": "wrong-readset-role-view",
+    "expected": "VIEW",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "persona_spec_id"
+        ],
+        "value": "pspc_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "readset-wrong-cutoff",
+    "expected": "READSET",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "evidence_cutoff_sequence"
+        ],
+        "value": 99
+      }
+    ]
+  },
+  {
+    "name": "readset-truncated-events",
+    "expected": "READSET",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "events",
+          "1"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "readset-new-source-after-cutoff",
+    "expected": "CUTOFF",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "events",
+          "1",
+          "authority_sequence"
+        ],
+        "value": 101
+      }
+    ]
+  },
+  {
+    "name": "readset-mutated-node",
+    "expected": "DAG",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "dependency_nodes",
+          "0",
+          "source_version"
+        ],
+        "value": "3.0"
+      }
+    ]
+  },
+  {
+    "name": "readset-cycle",
+    "expected": "DAG",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "dependency_nodes",
+          "0",
+          "parent_node_ids"
+        ],
+        "value": [
+          "node-shared"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "same-seal-key-different-readset",
+    "expected": "SEAL_BINDING",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "append",
+        "path": [
+          "seal_bindings"
+        ],
+        "value": {
+          "case_id": "case-v2",
+          "round": 1,
+          "context_manifest_id": "__manifest__",
+          "persona_id": "casper",
+          "read_set_snapshot_id": "rset_0000000000000000000000000000000000000000000000000000000000000000",
+          "ballot_id": "sbll_0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    ]
+  },
+  {
+    "name": "no-v2-capability",
+    "expected": "CAPABILITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "capabilities",
+          "0"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "stale-shared-observation-at-commit",
+    "expected": "FRESHNESS",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_state",
+          "source_observed_at"
+        ],
+        "value": "2026-10-22T23:59:39.999Z"
+      }
+    ]
+  },
+  {
+    "name": "missing-third-confirmation-record",
+    "expected": "REFERENCE",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "records",
+          "confirmation.casper"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "charter-self-id-in-hashed-body",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "charter",
+          "body",
+          "charter_id"
+        ],
+        "value": "__charter__"
+      }
+    ]
+  },
+  {
+    "name": "unknown-nested-authority-field",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "charter",
+          "body",
+          "created_by",
+          "admin"
+        ],
+        "value": true
+      }
+    ]
+  },
+  {
+    "name": "missing-no-action",
+    "expected": "AGENDA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "candidates",
+          "0",
+          "is_no_action"
+        ],
+        "value": false
+      }
+    ]
+  },
+  {
+    "name": "candidate-count-lies",
+    "expected": "AGENDA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "candidate_count"
+        ],
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "missed-close-high-watermark",
+    "expected": "READSET",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "close_high_watermarks",
+          "casper"
+        ],
+        "value": 3
+      }
+    ]
+  },
+  {
+    "name": "missing-closure-record",
+    "expected": "REFERENCE",
+    "reseal": false,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "records",
+          "closure"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "time-precision-lost",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "frozen_at"
+        ],
+        "value": "2026-10-23T00:00:07Z"
+      }
+    ]
+  },
+  {
+    "name": "unregistered-confirmation-delivery",
+    "expected": "CONFIRMATION",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "confirmation_injection_sequence"
+        ],
+        "value": 99
+      }
+    ]
+  },
+  {
+    "name": "wrong-confirmation-session",
+    "expected": "CONFIRMATION",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "controlled_session_id"
+        ],
+        "value": "other-session"
+      }
+    ]
+  },
+  {
+    "name": "reused-role-session",
+    "expected": "DELIVERY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "controlled_session_id"
+        ],
+        "value": "session-melchior"
+      }
+    ]
+  },
+  {
+    "name": "authority-check-for-another-round",
+    "expected": "AUTHORITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "authority_checks",
+          "0",
+          "round"
+        ],
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "expired-manifest-experience",
+    "expected": "FRESHNESS",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "manifest",
+          "body",
+          "snapshot_refs",
+          "0",
+          "validity",
+          "valid_until"
+        ],
+        "value": "2026-10-23T00:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "expired-readset-dependency",
+    "expected": "FRESHNESS",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "dependency_nodes",
+          "0",
+          "validity",
+          "valid_until"
+        ],
+        "value": "2026-10-23T00:00:00.000Z"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "events",
+          "1",
+          "source",
+          "validity",
+          "valid_until"
+        ],
+        "value": "2026-10-23T00:00:00.000Z"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "completeness.casper",
+          "body",
+          "events",
+          "1",
+          "source",
+          "validity",
+          "valid_until"
+        ],
+        "value": "2026-10-23T00:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "name": "wrong-confirmation-context-version",
+    "expected": "CONFIRMATION",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "events",
+          "1",
+          "source",
+          "source_version"
+        ],
+        "value": "3.0"
+      }
+    ]
+  },
+  {
+    "name": "wrong-risk-domain",
+    "expected": "RISK",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "domain_profile_id"
+        ],
+        "value": "dprf_0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "risk-level-does-not-match-provenance",
+    "expected": "RISK",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "candidates",
+          "0",
+          "risk_level"
+        ],
+        "value": "R0"
+      }
+    ]
+  },
+  {
+    "name": "revoked-charter-governance-approval",
+    "expected": "AUTHORITY",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "approval_authority",
+          "authority_epoch"
+        ],
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "expired-risk-classification",
+    "expected": "FRESHNESS",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "valid_until"
+        ],
+        "value": "2026-10-23T00:00:10.000Z"
+      }
+    ]
+  },
+  {
+    "name": "missing-risk-input-provenance",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "delete",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "input_attribute_values"
+        ]
+      }
+    ]
+  }
+]
