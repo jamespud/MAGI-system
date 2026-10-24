@@ -46,7 +46,7 @@ func PrepareRegistration(cfg Config, req RegisterRequest) (PreparedRegistration,
 	cfg = cfg.effective()
 	if cfg.MaxEventBytes > 32768 || cfg.MaxEventMembers > 512 || cfg.MaxStringBytes > 8192 ||
 		cfg.MaxGraphDepth > 16 || cfg.MaxNodes > 2048 || cfg.MaxParents > 64 ||
-		cfg.MaxEventsPerJournal > 512 || cfg.MaxJournalBytes > 16*1024*1024 || cfg.MaxClosureBytes > 16*1024*1024 {
+		cfg.MaxEventsPerJournal > 512 || cfg.MaxJournalBytes > 16*1024*1024 || cfg.MaxClosureBytes > 1024*1024 {
 		return PreparedRegistration{}, limitErr("configuration exceeds frozen ReadSet journal ceilings")
 	}
 	if err := validateJournalKey(req.Event.JournalKey); err != nil {

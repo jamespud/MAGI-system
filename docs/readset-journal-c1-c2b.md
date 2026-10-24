@@ -106,7 +106,7 @@ post-policy settlement write，不包含“登记先于可能暴露”的 typed 
 | 无独立 provider 证据 | `UNVERIFIABLE`；APPLIED/authority sequence 不可达 | reconciliation 完整性 |
 | 派生材料先于 parent 或 orphan | 完整 ancestor closure、edge 精确匹配、cycle/extra-node 拒绝 | parent 原件真实性/撤销 |
 | post-revocation cache replay | 当前 scope/epoch 与登记精确不等即 `ErrRevoked` | 当前 scope 的可信来源；生产 resolver BLOCKED |
-| 超大/截断 | event 32768B、members 512、string 8192B、depth 16、nodes 2048、parents 64、events 512、closure/journal 16MiB | 未经版本审阅调整阈值 |
+| 超大/截断 | event 32768B、members 512、string 8192B、depth 16、nodes 2048、parents 64、events 512、closure 1MiB、journal 16MiB | 未经版本审阅调整阈值 |
 | future/expired source | 锁后 DB time 对全部 required nodes 做 `[not_before, valid_until)` 检查 | 真实 C2 freshness/revocation source |
 | 存储损坏 | canonical bytes + raw SHA-256、columns 与 payload 交叉核对、graph 重建 | MySQL 管理员恶意破坏持久性 |
 
@@ -127,7 +127,10 @@ post-policy settlement write，不包含“登记先于可能暴露”的 typed 
   RequiresReconciliation=false`；
 - exact duplicate 一律返回 `Created=false, ExposurePermitted=false,
   RequiresReconciliation=true`，即使 delivery 仍为 PENDING；
-- 不调用 provider；失败/回滚/duplicate 都不返回可暴露 permit。
+- 新登记在 owner lock 后、任何 journal/event/delivery 写入前，用 DB time 对 prepared
+  exact closure 做 half-open freshness 检查；stale/future 返回 `ErrStaleMaterial`，
+  不写任何行、不返回 permit；
+- 不调用 provider；失败/回滚/duplicate/stale 都不返回可暴露 permit。
 
 `Register` 的 exact duplicate 判定包含 canonical payload、closure node digests 和
 provider request binding；只相同 payload digest 不足以重放不同 closure。新 generation
@@ -156,7 +159,8 @@ generation 检查之前返回，且永不授权重发。
 - same-generation response-loss retry 可按 delivery ID 恢复原 sequence，但结果仍是
   reconciliation-only，`ExposurePermitted=false`。
 - `ReadJournal` 在 owner/journal 锁后读取 MySQL `CURRENT_TIMESTAMP(6)`；任一 required
-  node 未生效或在 `valid_until` 半开边界之外即拒绝恢复。
+  node 未生效或在 `valid_until` 半开边界之外即拒绝恢复；最终 freshness sample 后
+  再按同一 DB time 重验 active owner/lease，长验证期间 lease 到期则拒绝释放。
 - 没有自动 resend、自动 retry provider 或“unknown 视为未执行”的路径。
 
 ## 5. 持久不变量
@@ -182,6 +186,10 @@ generation 检查之前返回，且永不授权重发。
 | RJ-17 | RequestDigest 从 event bytes + exact ancestor closure 重算，预算由 node/closure 上限而非 event 上限决定。 |
 | RJ-18 | node FirstSequence/AdmissionGeneration/AdmissionScopeID、edge CreatedSequence 与 parent-admission order 必须与 journal anchor 一致。 |
 | RJ-19 | 拒绝 `rset_` source、DEBATE/INITIAL_REVIEW 和 phase regression。 |
+| RJ-20 | 新建 registration 在首次 durable write 前做 DB-time half-open freshness；stale/future 不产生 permit/row。 |
+| RJ-21 | event/delivery generation 必须等于 journal anchor；event/delivery owner ID、lease evidence 与 event/delivery identity 必须完整。 |
+| RJ-22 | 最终 freshness DB-time sample 后、返回材料前再次验证 active owner/lease。 |
+| RJ-23 | closure 仍冻结为 1 MiB；RequestDigest 单独支持 2048 个 digest 元素。 |
 
 ## 6. MySQL 存储与事务
 
@@ -241,13 +249,23 @@ generation 检查之前返回，且永不授权重发。
 | P1 exact replay 不得成为 exposure permit | `TestReadSetJournal_ReplayNeverPermitsExposureMySQL` build failed：`ExposurePermitted`/`RequiresReconciliation` 未定义 | 新登记唯一 permit；所有 duplicate reconciliation-only。测试覆盖 PENDING/UNKNOWN/UNVERIFIABLE，PASS |
 | P1 restore source freshness | MySQL stale test 实际返回 journal 并失败；domain helper 测试 build failed | 锁后 DB time + 全部节点 half-open validity；expired/not-yet-valid/future-ancestor PASS |
 | P1 禁止跨 generation append | `TestReadSetJournal_GenerationCannotAppendSecondEventMySQL` 中 event 2 被接受，返回 `nil`；HWM 增至 2 | journal generation 锚定；新 generation exact replay/read 可用、append 返回 `ErrOwnerFence`、HWM 保持 1，PASS |
-| P2 2048-node RequestDigest | 2048-node near-limit test 先因 closure 1MiB cap 被拒绝 | `RequestDigestFor` 使用 node/closure budget；closure cap 16MiB；2048-node closure PASS |
+| P2 2048-node RequestDigest | 2048-node full fixture 先因 closure 1MiB cap 被拒绝 | 保留 1MiB closure cap；改为 prepared-node direct digest test，2048 个 digest PASS；closure re-review 的 over-limit 边界继续拒绝 |
 | P2 readback closure/evidence 重算 | corruption 子测试均被接受 | 重算 exact ancestor RequestDigest；校验 FirstSequence/Generation/Scope/CreatedSequence/parent ordering；六个 corruption 子测试 PASS |
 | P2 frozen #42 declaration rejection | `rset_`、DEBATE/INITIAL、phase regression append/readback 被接受 | append/readback 双重拒绝；domain/readback/MySQL 测试 PASS |
 
 本轮修复没有修改 frozen #42 Schema/Golden/身份，也没有扩大 provider/C2/C3 能力。
 
-## 9. A–F 证据
+## 9. Closure re-review fixes
+
+| 审查项 | 实际 RED | 修正与 GREEN |
+| --- | --- | --- |
+| P1 stale first registration 仍可 permit | stale MySQL test 实际返回 `Created=true, ExposurePermitted=true` | duplicate-first、锁后 DB time、写入前 exact-closure freshness；stale 返回 `ErrStaleMaterial` 且四张表零写入。ReadJournal 仍保留最终 freshness gate |
+| P2 closure cap 被放宽到 16 MiB | `TestClosureByteCeilingRemainsFrozenAtOneMiB` 观察 `MaxClosureBytes=16777216` | 恢复 1048576；2048 RequestDigest 用 prepared-node direct test；over-1MiB closure 边界返回 `ErrLimit` |
+| P2 未校验 generation/owner metadata 与最终 lease | corruption probes 接受 mismatch/empty owner；slow-read 在 lease 到期后仍返回 | event/delivery anchor、owner/lease/identity 校验；最终 DB-time 后重验 active owner/lease。12 个 corruption cases + slow-read PASS |
+
+本轮修复未修改 migration、frozen #42 Schema/Golden/身份，也未增加 provider/C2/C3 能力。
+
+## 10. A–F 证据
 
 ### A. 问题与边界
 
@@ -281,8 +299,9 @@ generation 检查之前返回，且永不授权重发。
 | domain RED shape | 同上 | nil parent array / 非 UTC 时间被接受，frozen-array/time-shape 测试真实失败 |
 | domain GREEN | 同上 | PASS |
 | adapter RED | `go test ./adapter -run ReadSetJournal -count=1` | build failed：`ReadSetJournalRepository`/result 未定义 |
-| review P1/P2 REDs | 见第 8 节；日志保存在 `/tmp/magi-wave2-44-fix{1..6}-*.log` | 六项均先观察实际失败，再实现 |
-| adapter MySQL GREEN | 下述 DSN 命令 | 14 个顶层验收测试全部 PASS（含 review regression 子测试） |
+| first review P1/P2 REDs | 见第 8 节；日志保存在 `/tmp/magi-wave2-44-fix{1..6}-*.log` | 六项均先观察实际失败，再实现 |
+| closure re-review REDs | 见第 9 节；日志 `/tmp/magi-wave2-44-review2-*.log` | 三项均先观察实际失败，再实现 |
+| adapter MySQL GREEN | 下述 DSN 命令 | 17 个顶层验收测试全部 PASS（含两轮 review regression 子测试） |
 | domain regression | `go test ./domain/readsetjournal ./domain/inputartifact ./domain/canonical -count=1` | PASS；未修改 #42 frozen tests |
 | domain race | `go test -race ./domain/readsetjournal -count=1` | PASS |
 | MySQL race | 下述 DSN 命令加 `-race` | PASS |
@@ -313,10 +332,13 @@ go test ./adapter -run ReadSetJournal -count=1 -v
 - `TestReadSetJournal_DefaultDisabledDoesNotWriteMySQL`
 - `TestReadSetJournal_MigrationShapeMySQL`
 - `TestReadSetJournal_ReplayNeverPermitsExposureMySQL`
-- `TestReadSetJournal_ReadRejectsStaleSourceMySQL`
+- `TestReadSetJournal_RegisterRejectsStaleSourceMySQL`
+- `TestReadSetJournal_ReadRechecksFreshnessMySQL`
 - `TestReadSetJournal_GenerationCannotAppendSecondEventMySQL`
 - `TestReadSetJournal_ReadbackRecomputesClosureEvidenceMySQL`
 - `TestReadSetJournal_FrozenDeclarationRejectionsMySQL`
+- `TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL`
+- `TestReadSetJournal_ReadRevalidatesLeaseAfterLongValidationMySQL`
 
 覆盖：24 并发 append 的连续 `1..24` 前缀；same-ID/same-bytes replay 与
 same-ID/different-bytes conflict；scope conflict；same-worker owner ABA、generation
@@ -327,7 +349,9 @@ deliveries 为空；insert failure 整体回滚；post-commit reply loss 后 dur
 disabled 零写入；真实 migration 列和 reverse index shape；duplicate 永不 permit；
 expired/future source restore 拒绝；跨 generation append 保持 HWM；2048-node closure
 RequestDigest；RequestDigest/node/edge/parent-order corruption 拒绝；future `rset_`
-source、DEBATE/INITIAL 和 phase regression 拒绝。
+source、DEBATE/INITIAL 和 phase regression 拒绝；stale 首登记零写入；1 MiB
+closure boundary；event/delivery generation/owner/lease corruption 拒绝；slow read
+在最终 lease 到期后拒绝返回。
 
 ### E. 自审与残余风险
 
@@ -338,7 +362,7 @@ source、DEBATE/INITIAL 和 phase regression 拒绝。
 | 无真实 provider apply/authority sequence | P0（C1-C2B 完整性） | BLOCKED / NOT RUN |
 | 无自动 resend 是设计约束，不是恢复已完成 | P1 | 已实现“不重发”与 duplicate 永不 permit；真实 provider 恢复 NOT RUN |
 | DB-time freshness 不替代 C2 当前撤销源 | P1 | 仅 half-open declared validity；真实 revocation BLOCKED |
-| 16MiB closure budget 的内存/CPU 上限未压测 | P2 | 2048-node identity 已测；大 body load test 未运行 |
+| 1MiB closure 与 2048-node digest ceiling 的极端组合未做负载压测 | P2 | 两个边界分别测试；大 body/并发 load test 未运行 |
 | same-case 写者通过 DecisionJob 串行，吞吐而非细粒度并发 | P2 | 有界 slice 可接受；需压测 |
 | APPLIED 读路径只能做 shape/fail-closed 映射 | P1 | provider/C2/C3 BLOCKED |
 | Journal QUIESCING/INPUT_CLOSED 无生产转换 | P1 | 后续关闭切片 |

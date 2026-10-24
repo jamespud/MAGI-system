@@ -410,8 +410,8 @@ func TestReadSetJournal_UnknownRestartReadbackAndPostRevocationMySQL(t *testing.
 		readSetJournalIDForCase(t, db, owner2.CaseID), req.Event.DeliveryID).Scan(&binding).Error; err != nil {
 		t.Fatal(err)
 	}
-	if binding.Generation != owner2.ExecutionGeneration || binding.Worker != owner2.WorkerID {
-		t.Fatalf("provider transition owner binding=%+v, want generation=%d worker=%s", binding, owner2.ExecutionGeneration, owner2.WorkerID)
+	if binding.Generation != registered.Event.ExecutionGeneration || binding.Worker != owner2.WorkerID {
+		t.Fatalf("provider transition owner binding=%+v, want anchored generation=%d worker=%s", binding, registered.Event.ExecutionGeneration, owner2.WorkerID)
 	}
 	// Recovery is reconciliation-only. Reusing the old canonical request under a
 	// different ExecutionGeneration would be a different byte payload and must
@@ -648,7 +648,7 @@ func TestReadSetJournal_ReplayNeverPermitsExposureMySQL(t *testing.T) {
 	}
 }
 
-func TestReadSetJournal_ReadRejectsStaleSourceMySQL(t *testing.T) {
+func TestReadSetJournal_RegisterRejectsStaleSourceMySQL(t *testing.T) {
 	expiredUntil := "2021-01-01T00:00:00.000Z"
 	cases := []struct {
 		name       string
@@ -669,13 +669,72 @@ func TestReadSetJournal_ReadRejectsStaleSourceMySQL(t *testing.T) {
 			req := journalRegistration(owner, "delivery-freshness-"+tc.name)
 			req.Event.Source.Validity = inputartifact.Validity{NotBefore: tc.notBefore, ValidUntil: tc.validUntil}
 			req.Closure[0] = req.Event.Source
-			if _, err := repo.Register(ctx, owner, req); err != nil {
-				t.Fatalf("register stale fixture: %v", err)
+			result, err := repo.Register(ctx, owner, req)
+			if !errors.Is(err, readsetjournal.ErrStaleMaterial) {
+				t.Fatalf("stale registration result=%+v error=%v, want ErrStaleMaterial", result, err)
 			}
-			if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
-				t.Fatalf("stale source was released for restore: %+v", view)
+			if result.Created || result.ExposurePermitted || result.RequiresReconciliation {
+				t.Fatalf("stale registration returned partial result: %+v", result)
+			}
+			for _, table := range []string{"readset_journal", "readset_journal_event", "readset_journal_delivery", "readset_journal_node"} {
+				var count int64
+				if err := db.Table(table).Count(&count).Error; err != nil || count != 0 {
+					t.Fatalf("stale registration wrote %s: count=%d err=%v", table, count, err)
+				}
 			}
 		})
+	}
+}
+
+func TestReadSetJournal_ReadRechecksFreshnessMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	_, owner := claimArtifactOwner(t, jobs, job, "journal-read-freshness")
+	repo := newReadSetJournalRepo(db, true)
+	req := journalRegistration(owner, "delivery-read-freshness")
+	if _, err := repo.Register(ctx, owner, req); err != nil {
+		t.Fatal(err)
+	}
+
+	expiredUntil := "2021-01-01T00:00:00.000Z"
+	staleReq := req
+	staleReq.Event.Source.Validity = inputartifact.Validity{
+		NotBefore: "2020-01-01T00:00:00.000Z", ValidUntil: &expiredUntil,
+	}
+	staleReq.Closure[0] = staleReq.Event.Source
+	cfg := readsetjournal.DefaultConfig()
+	cfg.Enabled = true
+	prepared, err := readsetjournal.PrepareRegistration(cfg, staleReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+	if err := db.Exec(`UPDATE readset_journal_node SET node_json = ?, node_digest = ?
+		WHERE journal_id = ? AND node_id = ?`,
+		prepared.Nodes[0].Bytes, prepared.Nodes[0].Digest, journalID, staleReq.Event.Source.NodeID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`UPDATE readset_journal_event
+		SET payload_json = ?, payload_digest = ?, request_digest = ?, payload_bytes = ?
+		WHERE journal_id = ? AND delivery_id = ?`,
+		prepared.EventBytes, prepared.EventDigest, prepared.RequestDigest, len(prepared.EventBytes),
+		journalID, staleReq.Event.DeliveryID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`UPDATE readset_journal_delivery SET payload_digest = ?
+		WHERE journal_id = ? AND delivery_id = ?`,
+		prepared.EventDigest, journalID, staleReq.Event.DeliveryID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`UPDATE readset_journal
+		SET event_bytes = (SELECT COALESCE(SUM(payload_bytes), 0) FROM readset_journal_event WHERE journal_id = ?)
+		WHERE id = ?`, journalID, journalID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ReadJournal(ctx, owner, staleReq.Event.JournalKey, reqScope(staleReq)); !errors.Is(err, readsetjournal.ErrStaleMaterial) {
+		t.Fatalf("read-time freshness error=%v, want ErrStaleMaterial", err)
 	}
 }
 
@@ -917,4 +976,126 @@ func TestReadSetJournal_FrozenDeclarationRejectionsMySQL(t *testing.T) {
 			t.Fatalf("phase-regressed journal accepted for restore: %+v", view)
 		}
 	})
+}
+
+func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
+	type corruption struct {
+		name        string
+		expectDBErr bool
+		apply       func(t *testing.T, db *gorm.DB, journalID string)
+	}
+	cases := []corruption{
+		{name: "event_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET execution_generation = execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "delivery_first_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET first_execution_generation = first_execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "delivery_last_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET last_execution_generation = last_execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_generation_zero", expectDBErr: true, apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET execution_generation = 0 WHERE journal_id = ?", journalID).Error; err == nil {
+				t.Fatal("database accepted event generation 0")
+			}
+		}},
+		{name: "delivery_first_generation_zero", expectDBErr: true, apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET first_execution_generation = 0 WHERE journal_id = ?", journalID).Error; err == nil {
+				t.Fatal("database accepted delivery generation 0")
+			}
+		}},
+		{name: "event_owner_job", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET owner_job_id = '' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_owner_worker", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET owner_worker_id = '' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_lease_evidence", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET owner_lease_until = '1970-01-01 00:00:00' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "delivery_owner_job", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET last_owner_job_id = '' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "delivery_owner_worker", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET last_owner_worker_id = '' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "delivery_lease_evidence", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET last_owner_lease_until = '1970-01-01 00:00:00' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_delivery_provider_request_identity", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery SET provider_request_id = 'foreign-provider-request' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-evidence-owner-"+tc.name)
+			req := journalRegistration(owner, "delivery-evidence-owner-"+tc.name)
+			repo := newReadSetJournalRepo(db, true)
+			if _, err := repo.Register(ctx, owner, req); err != nil {
+				t.Fatal(err)
+			}
+			journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+			tc.apply(t, db, journalID)
+			if tc.expectDBErr {
+				return
+			}
+			if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
+				t.Fatalf("corrupt generation/owner evidence accepted: %+v", view)
+			}
+		})
+	}
+}
+
+func TestReadSetJournal_ReadRevalidatesLeaseAfterLongValidationMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	_, owner := claimArtifactOwner(t, jobs, job, "journal-read-lease")
+	repo := newReadSetJournalRepo(db, true)
+	req := journalRegistration(owner, "delivery-read-lease")
+	if _, err := repo.Register(ctx, owner, req); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("UPDATE decision_job SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?", owner.JobID).Error; err != nil {
+		t.Fatal(err)
+	}
+	name := "readset-journal:slow-read"
+	if err := db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Table == "readset_journal_node" && tx.Statement.Context.Value(t4ContextKey{}) == "slow-read" {
+			time.Sleep(1500 * time.Millisecond)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Query().Remove(name)
+	waitCtx, cancel := context.WithTimeout(context.WithValue(ctx, t4ContextKey{}, "slow-read"), 5*time.Second)
+	defer cancel()
+	if view, err := repo.ReadJournal(waitCtx, owner, req.Event.JournalKey, reqScope(req)); !errors.Is(err, port.ErrLeaseLost) {
+		t.Fatalf("slow read view=%+v error=%v, want ErrLeaseLost", view, err)
+	}
 }

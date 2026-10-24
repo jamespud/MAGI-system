@@ -358,7 +358,7 @@ func TestSourceFreshnessUsesHalfOpenValidityAcrossAllNodes(t *testing.T) {
 	}
 }
 
-func TestRequestDigestSupportsFullDeclaredNodeClosure(t *testing.T) {
+func fullDeclaredNodeClosure() []inputartifact.SourceNode {
 	const nodeCount = 2048
 	base := validRegisterRequest().Event.Source
 	nodes := make([]inputartifact.SourceNode, nodeCount)
@@ -379,16 +379,42 @@ func TestRequestDigestSupportsFullDeclaredNodeClosure(t *testing.T) {
 		}
 		nodes[i] = node
 	}
+	return nodes
+}
+
+func TestRequestDigestSupportsDeclaredNodeDigestCeiling(t *testing.T) {
+	prepared, err := PrepareRegistration(enabledConfig(), validRegisterRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const nodeCount = 2048
+	nodes := make([]PreparedNode, nodeCount)
+	for i := range nodes {
+		nodes[i] = PreparedNode{
+			Node:   inputartifact.SourceNode{NodeID: fmt.Sprintf("n%04d", i)},
+			Digest: fmt.Sprintf("%064x", i),
+		}
+	}
+	digest, err := RequestDigestFor(prepared.EventBytes, nodes, enabledConfig())
+	if err != nil || digest == "" {
+		t.Fatalf("2048-node RequestDigest digest=%q err=%v", digest, err)
+	}
+	if _, err := RequestDigestFor(prepared.EventBytes, append(nodes, nodes[0]), enabledConfig()); !errors.Is(err, ErrLimit) {
+		t.Fatalf("2049-node error=%v, want ErrLimit", err)
+	}
+}
+
+func TestClosureByteCeilingRemainsFrozenAtOneMiB(t *testing.T) {
+	if got := DefaultConfig().MaxClosureBytes; got != 1024*1024 {
+		t.Fatalf("MaxClosureBytes=%d, want frozen 1048576", got)
+	}
+	nodes := fullDeclaredNodeClosure()
 	req := validRegisterRequest()
 	req.Event.Source = nodes[0]
 	req.Event.ParentNodeIDs = append([]string(nil), nodes[0].ParentNodeIDs...)
 	req.Closure = nodes
-	prepared, err := PrepareRegistration(enabledConfig(), req)
-	if err != nil {
-		t.Fatalf("full declared closure rejected: %v", err)
-	}
-	if prepared.RequestDigest == "" || len(prepared.Nodes) != nodeCount {
-		t.Fatalf("prepared closure=%d digest=%q", len(prepared.Nodes), prepared.RequestDigest)
+	if _, err := PrepareRegistration(enabledConfig(), req); !errors.Is(err, ErrLimit) {
+		t.Fatalf("over-1MiB closure error=%v, want ErrLimit", err)
 	}
 }
 

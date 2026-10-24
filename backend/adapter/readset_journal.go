@@ -78,65 +78,88 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 		}
 		leaseUntil := *job.LeaseUntil
 
-		journal, err := lockOrCreateJournal(tx, prepared, owner, leaseUntil)
-		if err != nil {
+		journal, err := lockJournal(tx, prepared)
+		journalExisted := err == nil
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		if journal.State != string(readsetjournal.JournalOpen) {
-			return fmt.Errorf("%w: journal is %s", readsetjournal.ErrJournalScope, journal.State)
-		}
-		storedScope := scopeFromJournalModel(journal)
-		if storedScope != prepared.Scope {
-			return fmt.Errorf("%w: admission scope differs from durable journal", readsetjournal.ErrJournalScope)
-		}
-
-		var existing ReadSetJournalEventModel
-		eventErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("journal_id = ? AND delivery_id = ?", journal.ID, prepared.Event.DeliveryID).
-			First(&existing).Error
-		switch {
-		case eventErr == nil:
-			if existing.PayloadDigest != prepared.EventDigest || existing.RequestDigest != prepared.RequestDigest ||
-				!bytes.Equal(existing.PayloadJSON, prepared.EventBytes) {
-				return readsetjournal.ErrDeliveryConflict
+		if journalExisted {
+			if journal.State != string(readsetjournal.JournalOpen) {
+				return fmt.Errorf("%w: journal is %s", readsetjournal.ErrJournalScope, journal.State)
 			}
-			state, err := deliveryState(tx, journal.ID, prepared.Event.DeliveryID)
-			if err != nil {
-				return err
+			if scopeFromJournalModel(journal) != prepared.Scope {
+				return fmt.Errorf("%w: admission scope differs from durable journal", readsetjournal.ErrJournalScope)
 			}
-			fact, err := eventFactFromModels(&existing, state)
-			if err != nil {
-				return err
+			var existing ReadSetJournalEventModel
+			eventErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("journal_id = ? AND delivery_id = ?", journal.ID, prepared.Event.DeliveryID).
+				First(&existing).Error
+			switch {
+			case eventErr == nil:
+				if existing.PayloadDigest != prepared.EventDigest || existing.RequestDigest != prepared.RequestDigest ||
+					!bytes.Equal(existing.PayloadJSON, prepared.EventBytes) {
+					return readsetjournal.ErrDeliveryConflict
+				}
+				state, err := deliveryState(tx, journal.ID, prepared.Event.DeliveryID)
+				if err != nil {
+					return err
+				}
+				fact, err := eventFactFromModels(&existing, state)
+				if err != nil {
+					return err
+				}
+				result = ReadSetJournalRegistration{
+					JournalID: journal.ID, Sequence: existing.LocalSequence, Created: false,
+					ExposurePermitted: false, RequiresReconciliation: true, Event: fact,
+				}
+				return nil
+			case !errors.Is(eventErr, gorm.ErrRecordNotFound):
+				return eventErr
 			}
-			result = ReadSetJournalRegistration{
-				JournalID: journal.ID, Sequence: existing.LocalSequence, Created: false,
-				ExposurePermitted: false, RequiresReconciliation: true, Event: fact,
-			}
-			return nil
-		case !errors.Is(eventErr, gorm.ErrRecordNotFound):
-			return eventErr
 		}
 
 		if err := readsetjournal.ValidateAppendGeneration(req.Owner, prepared.Event); err != nil {
 			return err
 		}
-		if journal.ExecutionGeneration != owner.ExecutionGeneration {
+		if journalExisted && journal.ExecutionGeneration != owner.ExecutionGeneration {
 			return fmt.Errorf("%w: journal generation is anchored at %d", readsetjournal.ErrOwnerFence, journal.ExecutionGeneration)
 		}
-		var prior ReadSetJournalEventModel
-		priorErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("journal_id = ?", journal.ID).Order("local_sequence desc").First(&prior).Error
-		switch {
-		case priorErr == nil:
-			priorPlan, err := readsetjournal.DecodeRegistrationEvent(prior.PayloadJSON)
+		// Freshness is sampled after the owner/journal locks but before creating a
+		// journal or any event/delivery row. A stale first registration therefore
+		// cannot receive ExposurePermitted or leave a durable partial registration.
+		freshAt, err := databaseNow(tx)
+		if err != nil {
+			return err
+		}
+		freshNodes := make([]inputartifact.SourceNode, len(prepared.Nodes))
+		for i := range prepared.Nodes {
+			freshNodes[i] = prepared.Nodes[i].Node
+		}
+		if err := readsetjournal.ValidateNodesFreshAt(freshNodes, freshAt); err != nil {
+			return err
+		}
+		if !journalExisted {
+			journal, err = createJournal(tx, prepared, owner, leaseUntil)
 			if err != nil {
 				return err
 			}
-			if err := readsetjournal.ValidatePhaseOrder([]readsetjournal.RegistrationPlan{priorPlan, prepared.Event}); err != nil {
-				return err
+		}
+		if journalExisted {
+			var prior ReadSetJournalEventModel
+			priorErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("journal_id = ?", journal.ID).Order("local_sequence desc").First(&prior).Error
+			switch {
+			case priorErr == nil:
+				priorPlan, err := readsetjournal.DecodeRegistrationEvent(prior.PayloadJSON)
+				if err != nil {
+					return err
+				}
+				if err := readsetjournal.ValidatePhaseOrder([]readsetjournal.RegistrationPlan{priorPlan, prepared.Event}); err != nil {
+					return err
+				}
+			case !errors.Is(priorErr, gorm.ErrRecordNotFound):
+				return priorErr
 			}
-		case !errors.Is(priorErr, gorm.ErrRecordNotFound):
-			return priorErr
 		}
 		var providerReuse int64
 		if err := tx.Model(&ReadSetJournalEventModel{}).
@@ -259,11 +282,12 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 	}
 	var view readsetjournal.JournalView
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if _, _, err := lockActiveExecution(tx, owner); err != nil {
+		job, caseModel, err := lockActiveExecution(tx, owner)
+		if err != nil {
 			return err
 		}
 		var journal ReadSetJournalModel
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("case_id = ? AND round_no = ? AND context_manifest_id = ? AND persona_id = ?",
 				key.CaseID, key.Round, key.ContextManifestID, key.PersonaID).First(&journal).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -274,6 +298,9 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 		}
 		if journal.ID != journalID {
 			return fmt.Errorf("%w: journal ID differs from frozen key", readsetjournal.ErrInvalidJournal)
+		}
+		if journal.ExecutionGeneration <= 0 {
+			return fmt.Errorf("%w: journal generation anchor is not positive", readsetjournal.ErrInvalidJournal)
 		}
 		switch readsetjournal.JournalState(journal.State) {
 		case readsetjournal.JournalOpen, readsetjournal.JournalQuiescing, readsetjournal.JournalInputClosed:
@@ -302,6 +329,14 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 		for i := range deliveries {
 			delivery := &deliveries[i]
 			deliveryBySequence[delivery.EventSequence] = delivery
+			if delivery.FirstExecutionGeneration != journal.ExecutionGeneration ||
+				delivery.LastExecutionGeneration != journal.ExecutionGeneration ||
+				delivery.FirstExecutionGeneration <= 0 {
+				return fmt.Errorf("%w: delivery generation differs from journal anchor", readsetjournal.ErrInvalidJournal)
+			}
+			if delivery.LastOwnerJobID == "" || delivery.LastOwnerWorkerID == "" || delivery.LastOwnerLeaseUntil.IsZero() {
+				return fmt.Errorf("%w: delivery owner/lease evidence is incomplete", readsetjournal.ErrInvalidJournal)
+			}
 			switch readsetjournal.ProviderState(delivery.State) {
 			case readsetjournal.ProviderPending, readsetjournal.ProviderUnknown, readsetjournal.ProviderUnverifiable:
 				pending++
@@ -351,11 +386,22 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 				plan.AdmissionScope != storedScope {
 				return fmt.Errorf("%w: stored event columns differ from canonical payload", readsetjournal.ErrInvalidJournal)
 			}
+			if event.ExecutionGeneration != journal.ExecutionGeneration || event.ExecutionGeneration <= 0 {
+				return fmt.Errorf("%w: event generation differs from journal anchor", readsetjournal.ErrInvalidJournal)
+			}
+			if event.OwnerJobID == "" || event.OwnerWorkerID == "" || event.OwnerLeaseUntil.IsZero() ||
+				event.RegisteredAt.IsZero() || !event.OwnerLeaseUntil.After(event.RegisteredAt) {
+				return fmt.Errorf("%w: event owner/lease evidence is incomplete", readsetjournal.ErrInvalidJournal)
+			}
 			plans[i] = plan
 			eventBytes += int64(len(event.PayloadJSON))
 			delivery := deliveryBySequence[event.LocalSequence]
-			if delivery == nil || delivery.DeliveryID != event.DeliveryID || delivery.PayloadDigest != event.PayloadDigest {
+			if delivery == nil || delivery.DeliveryID != event.DeliveryID || delivery.PayloadDigest != event.PayloadDigest ||
+				delivery.ProviderRequestID != event.ProviderRequestID || delivery.EventSequence != event.LocalSequence {
 				return fmt.Errorf("%w: event/delivery binding mismatch", readsetjournal.ErrInvalidJournal)
+			}
+			if !delivery.LastOwnerLeaseUntil.After(event.RegisteredAt) {
+				return fmt.Errorf("%w: delivery lease evidence predates event registration", readsetjournal.ErrInvalidJournal)
 			}
 			fact, err := eventFactFromModels(event, delivery)
 			if err != nil {
@@ -461,6 +507,9 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			return err
 		}
 		if err := readsetjournal.ValidateNodesFreshAt(nodes, readAt); err != nil {
+			return err
+		}
+		if err := validateActiveExecutionAt(job, caseModel, owner, readAt); err != nil {
 			return err
 		}
 		reverse := make(map[string][]string)
@@ -574,7 +623,7 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 			Where("journal_id = ? AND delivery_id = ? AND state = ? AND state_version = ?", journal.ID, deliveryID, delivery.State, delivery.StateVersion).
 			Updates(map[string]any{
 				"state": target, "state_version": delivery.StateVersion + 1,
-				"last_execution_generation": owner.ExecutionGeneration,
+				"last_execution_generation": journal.ExecutionGeneration,
 				"last_owner_job_id":         owner.JobID,
 				"last_owner_worker_id":      owner.WorkerID,
 				"last_owner_lease_until":    leaseUntil,
@@ -588,7 +637,7 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 		}
 		delivery.State = string(target)
 		delivery.StateVersion++
-		delivery.LastExecutionGeneration = owner.ExecutionGeneration
+		delivery.LastExecutionGeneration = journal.ExecutionGeneration
 		delivery.LastOwnerJobID = owner.JobID
 		delivery.LastOwnerWorkerID = owner.WorkerID
 		delivery.LastOwnerLeaseUntil = leaseUntil
@@ -614,19 +663,20 @@ func (r *ReadSetJournalRepository) ReconcileDelivery(ctx context.Context, owner 
 	return readsetjournal.EventFact{}, readsetjournal.ErrNotFound
 }
 
-func lockOrCreateJournal(tx *gorm.DB, prepared readsetjournal.PreparedRegistration, owner *entity.ExecutionContext, leaseUntil time.Time) (*ReadSetJournalModel, error) {
+func lockJournal(tx *gorm.DB, prepared readsetjournal.PreparedRegistration) (*ReadSetJournalModel, error) {
 	var journal ReadSetJournalModel
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("case_id = ? AND round_no = ? AND context_manifest_id = ? AND persona_id = ?",
 			prepared.JournalKey.CaseID, prepared.JournalKey.Round, prepared.JournalKey.ContextManifestID, prepared.JournalKey.PersonaID).
 		First(&journal).Error
-	if err == nil {
-		return &journal, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
 		return nil, err
 	}
-	journal = ReadSetJournalModel{
+	return &journal, nil
+}
+
+func createJournal(tx *gorm.DB, prepared readsetjournal.PreparedRegistration, owner *entity.ExecutionContext, leaseUntil time.Time) (*ReadSetJournalModel, error) {
+	journal := ReadSetJournalModel{
 		ID: prepared.JournalID, CaseID: prepared.JournalKey.CaseID, RoundNo: prepared.JournalKey.Round,
 		ContextManifestID: prepared.JournalKey.ContextManifestID, PersonaID: prepared.JournalKey.PersonaID,
 		State: string(readsetjournal.JournalOpen), HighWatermark: 0, PendingCount: 0, EventBytes: 0,

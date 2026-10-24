@@ -141,7 +141,7 @@ func DefaultConfig() Config {
 		MaxParents:          64,
 		MaxEventsPerJournal: 512,
 		MaxJournalBytes:     16 * 1024 * 1024,
-		MaxClosureBytes:     16 * 1024 * 1024,
+		MaxClosureBytes:     1024 * 1024,
 	}
 }
 
