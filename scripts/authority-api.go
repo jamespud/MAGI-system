@@ -55,6 +55,14 @@ type ExactDependency struct {
 	Version SafeUInt  `json:"version"`
 	Parents []ExactID `json:"parents"`
 }
+type IntentBinding struct {
+	ActionID                ExactID `json:"action_id"`
+	IntentID                ExactID `json:"intent_id"`
+	IntentDigest            Digest  `json:"intent_digest"`
+	EncodedRequestDigest    Digest  `json:"encoded_request_digest"`
+	LogicalOperationID      ExactID `json:"logical_operation_id"`
+	BusinessParameterDigest Digest  `json:"business_parameter_digest"`
+}
 type VerifyRequest struct {
 	Operation           Operation         `json:"operation"`
 	Principal           Subject           `json:"principal"`
@@ -66,10 +74,11 @@ type VerifyRequest struct {
 	ExactTargetID       ExactID           `json:"exact_target_id"`
 	UniqueKey           ExactID           `json:"unique_key"`
 	TrustedNow          UTCMillis         `json:"trusted_now"`
+	SendIntent          *IntentBinding    `json:"send_intent"`
 }
 
-// Opaque server-side handle; the stored transcript also binds the entire write
-// set and expected state. These fields describe stored diagnostic declarations,
+// Opaque server-side handle; the stored transcript binds the complete caller
+// plan, derivation profile and expected state. These fields describe stored diagnostic declarations,
 // never a caller-created bearer capability. No secret or target credential here.
 type VerifiedToken struct {
 	TokenID             ExactID       `json:"token_id"`
@@ -80,7 +89,7 @@ type VerifiedToken struct {
 	UniqueKey           ExactID       `json:"unique_key"`
 	RequestDigest       Digest        `json:"request_digest"`
 	ExpectedStateDigest Digest        `json:"expected_state_digest"`
-	WriteSetDigest      Digest        `json:"write_set_digest"`
+	PlanDigest          Digest        `json:"plan_digest"`
 	IssuedAt            UTCMillis     `json:"issued_at"`
 	ExpiresAt           UTCMillis     `json:"expires_at"`
 	AuthorityVersion    SafeUInt      `json:"authority_version"`
@@ -97,49 +106,132 @@ type ExpectedState struct {
 	GatewayGeneration   SafeUInt      `json:"gateway_generation"`
 }
 
-// ImmutableRow is a validated exact reference to prepared canonical bytes;
-// consumers must load/revalidate those bytes, not trust a digest declaration.
-type ImmutableRow struct {
-	ID        ExactID
-	Digest    Digest
-	ObjectRef ExactID
+// PreparedObject contains only already fixed input bytes. No generated commit,
+// token, sequence, time, closure/event/lineage output can be referenced here.
+type PreparedObject struct {
+	ID        ExactID `json:"id"`
+	Digest    Digest  `json:"digest"`
+	ObjectRef ExactID `json:"object_ref"`
 }
-type JournalAdmissionWrites struct {
-	Admission, JournalEvent ImmutableRow
-	DependencyEdges         []ImmutableRow
+type HighWatermarkPlan struct {
+	JournalID ExactID  `json:"journal_id"`
+	Expected  SafeUInt `json:"expected"`
+	Next      SafeUInt `json:"next"`
 }
-type QuiescenceWrites struct {
-	Fence, RoundState ImmutableRow
-	Journals          [3]ImmutableRow // fixed balthasar, casper, melchior slots
+type ProviderSettlementPlan struct {
+	RequestID       ExactID        `json:"request_id"`
+	ExpectedStatus  string         `json:"expected_status"`
+	NextStatus      string         `json:"next_status"`
+	VerificationRef PreparedObject `json:"verification_ref"`
 }
-type CandidateClosureWrites struct {
-	Candidate, Closure, EvidenceClosed ImmutableRow
-	Journals                           [3]ImmutableRow
+type PendingTransitionPlan struct {
+	JournalID ExactID  `json:"journal_id"`
+	Expected  SafeUInt `json:"expected"`
+	Next      SafeUInt `json:"next"`
 }
-type SendWrites struct {
-	SendRecord, QuotaConsumption ImmutableRow
+type JournalAdmissionPlan struct {
+	AdmissionInput       PreparedObject         `json:"admission_input"`
+	JournalEventInput    PreparedObject         `json:"journal_event_input"`
+	DependencyEdgeInputs []PreparedObject       `json:"dependency_edge_inputs"`
+	HighWatermark        HighWatermarkPlan      `json:"high_watermark"`
+	ProviderSettlement   ProviderSettlementPlan `json:"provider_settlement"`
+	PendingTransition    PendingTransitionPlan  `json:"pending_transition"`
+}
+type StateTransitionPlan struct {
+	ObjectID      ExactID `json:"object_id"`
+	ExpectedState string  `json:"expected_state"`
+	NextState     string  `json:"next_state"`
+}
+type QuiescencePlan struct {
+	FenceID  ExactID                `json:"fence_id"`
+	Round    StateTransitionPlan    `json:"round"`
+	Journals [3]StateTransitionPlan `json:"journals"`
+}
+type JournalClosurePlan struct {
+	Role                  string   `json:"role"`
+	JournalID             ExactID  `json:"journal_id"`
+	ExpectedHighWatermark SafeUInt `json:"expected_high_watermark"`
+	CloseHighWatermark    SafeUInt `json:"close_high_watermark"`
+	ExpectedPending       SafeUInt `json:"expected_pending"`
+}
+type CandidateClosurePlan struct {
+	Candidate     PreparedObject        `json:"candidate"`
+	FenceID       ExactID               `json:"fence_id"`
+	Receipts      [3]PreparedObject     `json:"receipts"`
+	Confirmations [3]PreparedObject     `json:"confirmations"`
+	Journals      [3]JournalClosurePlan `json:"journals"`
+	Round         StateTransitionPlan   `json:"round"`
+}
+type ActionTransitionPlan struct {
+	ExpectedVersion   SafeUInt `json:"expected_version"`
+	NextVersion       SafeUInt `json:"next_version"`
+	ActionID          ExactID  `json:"action_id"`
+	ExpectedState     string   `json:"expected_state"`
+	NextState         string   `json:"next_state"`
+	GatewayID         ExactID  `json:"gateway_id"`
+	GatewayGeneration SafeUInt `json:"gateway_generation"`
+}
+type QuotaTransitionPlan struct {
+	ExpectedVersion   SafeUInt `json:"expected_version"`
+	NextVersion       SafeUInt `json:"next_version"`
+	QuotaID           ExactID  `json:"quota_id"`
+	ExpectedRemaining SafeUInt `json:"expected_remaining"`
+	Amount            SafeUInt `json:"amount"`
+	NextRemaining     SafeUInt `json:"next_remaining"`
+}
+type LogicalOperationPlan struct {
+	LogicalOperationID      ExactID `json:"logical_operation_id"`
+	BusinessParameterDigest Digest  `json:"business_parameter_digest"`
+	Mode                    string  `json:"mode"` // SEND only VERIFY_EXISTING; PREPARE owns CREATE_IF_ABSENT.
+}
+type SendPlan struct {
+	Intent           PreparedObject       `json:"intent"`
+	ActionTransition ActionTransitionPlan `json:"action_transition"`
+	QuotaTransition  QuotaTransitionPlan  `json:"quota_transition"`
+	LogicalBinding   LogicalOperationPlan `json:"logical_binding"`
 }
 
-// Exactly one variant is present and agrees with Operation. All four variants
-// additionally commit immutable lineage, token consumption, unique binding and
-// outbox together. Unsupported operations cannot use a generic table-mutation API.
-type CompleteWriteSet struct {
-	Operation     Operation
-	Admission     *JournalAdmissionWrites
-	Quiescence    *QuiescenceWrites
-	Closure       *CandidateClosureWrites
-	Send          *SendWrites
-	Lineage       ImmutableRow
-	UniqueBinding ImmutableRow
-	ConsumedToken ImmutableRow
-	Outbox        []ImmutableRow
+// CompleteWritePlan is an acyclic pre-token proposal. Exactly one variant is
+// non-nil. MutationSet and DerivationProfile bind WHICH transaction-derived rows
+// and algorithms must run; they never contain finalized output bytes/digests.
+type CompleteWritePlan struct {
+	PlanVersion       string                `json:"plan_version"`
+	DerivationProfile string                `json:"derivation_profile"`
+	Operation         Operation             `json:"operation"`
+	MutationSet       []string              `json:"mutation_set"`
+	Admission         *JournalAdmissionPlan `json:"admission"`
+	Quiescence        *QuiescencePlan       `json:"quiescence"`
+	Closure           *CandidateClosurePlan `json:"closure"`
+	Send              *SendPlan             `json:"send"`
+	OutboxKinds       []string              `json:"outbox_kinds"`
 }
 type CommitRequest struct {
 	UniqueKey        ExactID
 	ExactTargetID    ExactID
 	CommitToken      ExactID
 	ExpectedState    ExpectedState
-	CompleteWriteSet CompleteWriteSet
+	CompleteWriteSet CompleteWritePlan // caller plan, not finalized/generated rows
+}
+
+// Allocation is produced after verification/locking. All finalized rows bind
+// plan/request/expected digests + this allocation; result rows do not hash lineage.
+type TransactionAllocation struct {
+	TokenID, CommitID ExactID
+	AuthoritySequence SafeUInt
+	CommittedAt       UTCMillis
+}
+type FinalizedResultRef struct {
+	Kind   string
+	ID     ExactID
+	Digest Digest
+}
+type AuditReadRequest struct {
+	Requester                                   Subject
+	CaseRound                                   CaseRound
+	UniqueKey, ExactTargetID, HistoricalTokenID ExactID
+}
+type AuditReadContract interface {
+	ReadOriginal(context.Context, AuditReadRequest) CommitResult
 }
 type Failure struct {
 	Outcome   Outcome // Any non-VALID code; UNKNOWN never implies no commit.
@@ -152,11 +244,12 @@ type VerifyResult struct {
 	Failure *Failure       // Present iff non-VALID.
 }
 type CommitLineage struct {
-	CommitID, UniqueKey, ExactTargetID, TokenID        ExactID
-	RequestDigest, WriteSetDigest, ExpectedStateDigest Digest
-	AuthoritySequence                                  SafeUInt
-	CommittedAt                                        UTCMillis
-	ResultRefs                                         []ImmutableRow
+	DerivationProfile                              string
+	CommitID, UniqueKey, ExactTargetID, TokenID    ExactID
+	RequestDigest, PlanDigest, ExpectedStateDigest Digest
+	AuthoritySequence                              SafeUInt
+	CommittedAt                                    UTCMillis
+	ResultRefs                                     []FinalizedResultRef
 }
 type CommitResult struct {
 	Outcome     Outcome
@@ -165,11 +258,11 @@ type CommitResult struct {
 	Failure     *Failure
 }
 
-// VerifyAuthority receives write-set and expected-state proposals so the token
+// VerifyAuthority receives an acyclic write plan and expected-state proposal so the token
 // cannot be moved to different writes after verification. Authentication and
 // TrustedNow are service-injected, never accepted from model/caller JSON.
 type AuthorityContract interface {
-	VerifyAuthority(context.Context, VerifyRequest, ExpectedState, CompleteWriteSet) VerifyResult
+	VerifyAuthority(context.Context, VerifyRequest, ExpectedState, CompleteWritePlan) VerifyResult
 	CommitIfCurrent(context.Context, CommitRequest) CommitResult
 }
 

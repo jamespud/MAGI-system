@@ -26,13 +26,13 @@
 
 ## 2. 类型化 API 与结果
 
-可编译声明：[authority-api.go](../scripts/authority-api.go)。该文件与离线 Schema oracle 一起 `go run` 编译，只有 interface/类型，无任何 AuthorityContract 实现，也不被生产启动器导入。请求的 VerifyRequest、Subject、CaseRound、Dependency、ScopedEpoch、ExpectedState、VerifiedToken 字段名与 [schema.json](contracts/authority-v1/schema.json) 必填字段做反射对齐。
+可编译声明：[authority-api.go](../scripts/authority-api.go)。该文件与离线 Schema oracle 一起 `go run` 编译，只有 interface/类型，无任何 AuthorityContract 实现，也不被生产启动器导入。请求、token、expected state 以及所有新增 Intent/Plan/Transition 类型字段名与 [schema.json](contracts/authority-v1/schema.json) 必填字段做反射对齐。
 
 ```go
 VerifyAuthority(ctx, VerifyRequest{
   ExactDependencies, Operation, Principal, CaseRound, ExecutionGeneration,
-  ScopedEpochs, ProofID, ExactTargetID, UniqueKey, TrustedNow,
-}, ExpectedState, CompleteWriteSet) VerifyResult
+  ScopedEpochs, ProofID, ExactTargetID, UniqueKey, TrustedNow, SendIntent,
+}, ExpectedState, CompleteWritePlan) VerifyResult
 CommitIfCurrent(ctx, CommitRequest{
   UniqueKey, ExactTargetID, CommitToken, ExpectedState, CompleteWriteSet,
 }) CommitResult
@@ -40,7 +40,7 @@ CommitIfCurrent(ctx, CommitRequest{
 
 这是服务间的类型契约，不是暴露给模型的 JSON 工具。principal 从认证连接的主体和固定 identity source 取得，再与请求绑定；TrustedNow 由 Authority 的可信时间适配器注入。调用者填写的时间、principal_id、valid=true 或本地 Schema 通过都不能被相信。C2 读取不可变依赖原件、证明、资格登记和反向索引；C0 回读/Schema/语义检查来自对应冻结契约。请求字节/规模继承 C1-A；闭包至多 2048 节点、每节点父至多 64；超限拒绝而非截断。
 
-完整写集是封闭的 typed union：Admission / Quiescence / CandidateClosure / Send 四个变体恰好一个，必须与 operation 相同；都附带 lineage、唯一绑定、token 消耗和 outbox。每个 ImmutableRow 指向准备好的原始字节，提交器回读、核对精确内容再写。不能用任意表名/SQL/字符串标签申请权限。离线 trace 的 complete_write_set 只是这些必需行的标签投影，不是实际写入负载或生产 Schema。
+本轮独立审阅修订将新 authority Draft 的 `write_set_digest` 改为 `plan_digest`、trace 的标签列表改为 typed `write_plan`；不修改冻结上游契约。`CompleteWriteSet` 参数现在携带的是 `CompleteWritePlan` 类型：封闭的 Admission / Quiescence / CandidateClosure / Send 提案，恰好一个非 null，其余显式 null，必须与 operation 相同。这些 null 仅属于新增 trace/计划契约，不更改冻结工件 nullable 规则。PreparedObject 只引用**已经存在的输入原件**，不能引用未来 closure/event/token/commit/lineage 原件。计划包含全部调用者可控参数、预期行状态、拟执行变更、outbox 事件种类和固定派生 profile；提交器回读输入，再按固定规则构造结果。不能用任意表名/SQL/标签授权写入，mutation_set 只是 typed plan 的必需变更投影，不能替代具体 transition 字段。
 
 | Outcome | VerifyAuthority | CommitIfCurrent |
 | --- | --- | --- |
@@ -54,7 +54,54 @@ CommitIfCurrent(ctx, CommitRequest{
 
 VerifyResult：VALID iff token 非空且 failure 为空；其他六码反之。CommitResult：VALID iff lineage 非空、failure 为空、disposition∈{NEW,ORIGINAL}；其他六码不携带新提交记录。UNKNOWN 可以返回查询定位信息，但不能返回发送能力。实现必须拒绝未知枚举/字段/版本。失败 reason 是固定机器原因，不让自由文本决定放行。STATIC_VALID 是离线检查输出，**不是**上述 VALID，也不能出现在生产 API。
 
-CommitLineage 永久记录 commit_id、unique_key、target、token、request/expected-state/write-set digests、完整 result refs、权威 sequence 和 UTC-ms。一个 submission 内所有子行引用同一 commit_id。查询原 lineage 允许使用历史 token ID 定位，但仍需当前认证的审计读取权限；不能把它转换为新的 VALID token、计票或发送。
+CommitLineage 永久记录 commit_id、unique_key、target、token、request/expected-state/plan digests、完整 result refs、权威 sequence 和 UTC-ms。一个 submission 内所有子行引用同一 commit_id。查询原 lineage 允许使用历史 token ID 定位，但仍需当前认证的审计读取权限；不能把它转换为新的 VALID token、计票或发送。
+
+
+### 2.1 无环提案与事务派生结果（B-01）
+
+提交前必须按以下顺序构造，禁止实现者自行排除字段或求解自引用摘要：
+
+```text
+已固定输入原件 + typed transitions + mutation_set + outbox_kinds + derive/1
+  -> CompleteWritePlan canonical bytes -> plan_digest
+已固定 VerifyRequest（包括 send_intent）-> request_digest
+已固定 ExpectedState -> expected_state_digest
+三个 digest + 认证主体/当前状态 -> Verify 存储 opaque token_id（此时才分配 token）
+锁内重验同三个 digest -> 分配 commit_id + sequence + UTC-ms
+  -> derive/1 构造所有非-lineage 结果行（都绑定 allocation + 三个 digest）
+  -> 各结果行 canonical bytes / result digest
+  -> 最后构造 lineage（引用结果摘要和三个 digest，不引用自身）
+  -> lineage digest 置于外包装，不放回 lineage 正文或 plan
+```
+
+`plan_digest = SHA256("magi:authority-plan:v1\n" || C0(plan))`；request/expected 分别复用本契约专属的 `magi:authority-request:v1\n`、`magi:authority-expected-state:v1\n` 域。不是给 C0 注册新 artifact type。`magi-authority-derive/1` 固定各变更由哪个 plan 字段派生，以及公共 allocation `{token_id,commit_id,authority_sequence,committed_at}` 的注入规则。固定候选/意图等工件**正文不被重写**，其存储提交元数据独立派生。
+
+结果行含 `{kind,allocation,request_digest,expected_state_digest,plan_digest,derivation_profile,payload}`；其摘要使用 `magi:authority-result:v1\n` 域。payload 的映射为下节表和 `derive_example` 的封闭映射：admission/event/edges/三个 transition 使用对应输入/计划，quiescence 使用 fence/round/journals，closure 使用 candidate/fence/receipts/confirmations/journal 高水位，send 使用意图/请求绑定、action/quota/logical transition。唯一绑定由请求 key/target 派生；token 消耗由 allocation.token_id 派生；outbox 由已绑定 event kinds 与公共 allocation 派生。
+
+lineage 含公共 allocation、三个 digest、derivation_profile、key/target 和所有非-lineage result_refs `{kind,id,digest}`，摘要使用 `magi:authority-lineage:v1\n` 域。所有子行只引用 commit_id/plan_digest，**不引用 lineage_digest**；lineage 的 result_refs 不包含自身。未来 token/sequence/time/lineage 摘要从未进入 plan preimage，因而不存在 `write_digest→lineage_digest→write_digest` 环。未知 profile 拒绝，不允许动态模板或调用者提供派生代码。
+
+`test_B01_first_proposal_constructs_and_roundtrips_without_future_values` 对四种变体先删除全部 token/事务值计算计划摘要，再构造合成 token 声明、验证完整输入形状、注入事务 allocation、逐行回算结果和 lineage 摘要；改变未来 sequence 不改变三个提案摘要。此纯函数是**离线可构造性见证**，不实现 VerifyAuthority、不签发任何许可、不写数据库。
+
+### 2.2 完整 transition 与结果派生清单（B-02）
+
+| 变体 | 必需的已绑定计划 | 事务生成/变更的全部业务行（另加共同四项） |
+| --- | --- | --- |
+| JournalAdmissionPlan | admission/event 输入、全部依赖边、`HighWatermarkPlan(expected,next)`、`ProviderSettlementPlan(request_id,PENDING→APPLIED_VERIFIED,verification_ref)`、`PendingTransitionPlan(expected,next)` | admission、dependency_edges、journal_event、journal_high_watermark、provider_settlement、pending_transition |
+| QuiescencePlan | 已分配 fence ID、round OPEN→QUIESCING、三个确定 Journal 的同向状态转移 | fence、round_state、journal_states |
+| CandidateClosurePlan | 固定 candidate、三回执/确认、fence、三个 journal HWM/pending=0、round QUIESCING→EVIDENCE_CLOSED | candidate 的 COMMITTED 登记、closure、evidence_closed、三 journal 关闭行 |
+| SendPlan | 已固定 Intent、ActionTransitionPlan(AUDIT_READY→SEND_COMMITTED，精确 gateway/generation/expected_version→next_version)、QuotaTransitionPlan(remaining 与 version CAS)、LogicalOperationPlan(VERIFY_EXISTING) | action_transition、quota、send_record、logical_operation_binding 的核验结果 |
+
+共同四项是 **派生** lineage、token_consumed、unique_binding、outbox；只把种类与固定派生规则纳入计划，绝不要求预先存在这些输出原件。Journal HWM 与 pending 同一行可合为一次 SQL CAS，但两项都在 typed plan 中，不得遗漏任何一个。provider settlement 只在可信 provider 原件确认已应用后进入 APPLIED_VERIFIED；未知交付不减 pending、不生成可声称实际读取的 event。先于暴露的来源准入/权限及 provider pending 登记是 C1-C 前置持久事实，当前计划是对此确切请求的已验证交付进行 Journal 登记和结算；该前置协议未实现就不能运行本契约。
+
+PREPARE 负责在 authority sequence 锁下创建永久 `(trust_domain,logical_operation_id)→business_parameter_digest` 映射：不存在时 INSERT，相同 digest 重用，不同 digest CONFLICT；与 ActionIntent+outbox 同事务。SEND 只 `VERIFY_EXISTING`，不得在发送时补建映射或改 business digest。PREPARE 的生产 typed write-set 仍属后续独立切片，本 Draft 不启用它。静态 negative 分别删掉 HWM、provider settlement、pending、action transition、logical binding 的 mutation 标签，必须拒绝；删掉具体必填 transition 本体则由 Schema 拒绝。
+
+### 2.3 SEND 精确绑定与历史审计读取（B-03 / B-04）
+
+SEND 的 VerifyRequest 必须有 `SendIntent`，其他三个操作显式为 null。该输入绑定 action_id、固定 intent ID/digest、最终编码的 HTTP 请求 digest、logical_operation_id 和业务参数 digest；相同 intent ID/digest 还必须存在于 exact dependency DAG。Commit 的 action、typed SendPlan、独立 witness 原件和准备好的实际请求必须全部匹配这同一 token-bound binding；action+witness 同时换成另一个 ID 或摘要仍拒绝，不能仅检查两份互相一致的未绑定声明。
+
+`ReadOriginal(AuditReadRequest)` 是独立只读契约；trace 的 ORIGINAL/UNKNOWN lookup 分支代表它，不是使用旧 mutation token 重新调用发送。服务注入当前 audit 认证主体/固定身份源、当前审计政策决定与时间；`requester` 必须等于认证 principal，政策精确覆盖 case/round/key/target。audit 身份源/政策不可用为 UNKNOWN，拒绝/未认证/错身份源/越权为 DENIED，到期为 EXPIRED。确认 immutable lineage 完整性和其历史 issuer 映射后才能返回 ORIGINAL；历史 issuer 的当前 mutation credential 已被撤销不影响历史验真，不把恶意改写的 issuer 当作原记录。
+
+audit gate 与旧 mutation 的主体、根、proof、lease、generation/epochs、token 期限分开。当前获准 auditor 可以读取已过期/撤销的旧 worker 的 lineage；旧 token 仅定位原件，不能证明当前读取权限。审计授权通过后仍只读原记录且禁止 resend。缺少 audit 认证不能因为历史内容一致而返回 STATIC_VALID；真实审计认证/政策引擎仍未实现，合成 audit_access 只检查这些声明约束。
 
 ## 3. 操作、责任与依赖 DAG
 
@@ -102,7 +149,7 @@ flowchart LR
 | 决议 | 固定选择/理由 |
 | --- | --- |
 | D45-01 token 生命周期 | 最长 5000 ms，是新增工程上限，非 Rev4 原文。expires_at=min(issued_at+5000ms, identity/proof/全部依赖/lease/任务/操作窗口/见证的最早上界)。半开区间；等于到期即拒绝。过期只可查询原提交，重验证发新 token 仍不能替换永久唯一键。参考域写权限证明仍最长 5 分钟，短 token 不延长它 |
-| D45-02 token 内容与重放 | opaque server-side 256-bit 随机 ID，存储精确认证主体/身份源、operation、case/round、target、unique key、proof/root/policy/全部依赖、generation、scope/epochs、expected-state/write-set digests、期限和版本。连接身份与存储 token 交叉核验；不能转移为 bearer。Verify 接收写集/期望状态提案，Commit 必须逐字节同绑定。token 消耗与完整写集同事务；同 token 跨键/目标/操作拒绝 |
+| D45-02 token 内容与重放 | opaque server-side 256-bit 随机 ID，存储精确认证主体/身份源、operation、case/round、target、unique key、proof/root/policy/全部依赖、generation、scope/epochs、expected-state/plan digests 与 derivation profile、期限和版本。连接身份与存储 token 交叉核验；不能转移为 bearer。Verify 接收无未来输出的写入计划/期望状态提案，Commit 必须同 plan_digest / expected_state_digest；不能要求调用者提交含未来 sequence/token 的最终行字节。token 消耗与完整写集同事务；同 token 跨键/目标/操作拒绝 |
 | D45-03 时间与顺序 | UTC 毫秒来自同一经监测的 Authority DB UTC 时钟，权威时间不可用/回跳超出已批准误差策略则 UNKNOWN。UTC 用于期限；sequence 用于撤销/提交先后，禁止通过时间戳打平局。锁后独立语句读取时间，不能用锁等待前的 NOW。时间适配器/误差配置未验收前不启用 |
 | D45-04 scopes 集合 | `(kind,scope_id)` 去重，按 NFC UTF-16 code unit 排序；kind 固定 AUTHORITY/CONTEXT/CREDENTIAL。每类至少一个，受影响全部 scope 必须闭包完整，不是仅单资源。按同 kind+scope 比较 epoch；零 epoch 是显式值，缺项不补零。所有键/依赖集合稳定排序，事件按 sequence，不通过排序改变事件顺序 |
 | D45-05 撤销与 ABA | epoch、owner generation、各权威 row_version 单调不回退/复用；超安全整数上限拒绝而非回绕。删除再建不得重用旧 scope 身份/版本。根/凭据轮换提升对应 credential/authority epoch，旧 token 立即 STALE/REVOKED；任何安全撤销不可恢复旧 ID，纠正需新原件/新轮 |
@@ -129,12 +176,14 @@ bootstrap：独立部署治理者用带外双人核验安装根指纹、身份�
 | a45_owner `(trust_domain,case_id)` | owner_id、execution_generation、lease_until、active、row_version；映射持久 runtime claim |
 | a45_round `(trust_domain,case_id,round)` | manifest_id、state、fence_id、candidate_id、cutoff、version；唯一轮次不随 generation 解开 |
 | a45_journal `(trust_domain,case_id,round,role)` | manifest_id、state、fence、high_watermark、close_high_watermark、pending_count |
+| a45_provider_delivery `(trust_domain,provider_request_id)` | status、verification_ref、JournalKey；先于暴露持久 PENDING，未知不转为已验证 |
 | a45_dependency `(trust_domain,node_id)` | digest、version、valid_until、revoked、source/proof/policy refs；外部反向边唯一 `(parent,child,edge_kind)` |
-| a45_token `(trust_domain,token_id)` | request/expected/write-set digests、subject、state、expires_at、commit_id；ID 不复用 |
+| a45_token `(trust_domain,token_id)` | request/expected/plan digests、subject、state、expires_at、commit_id；ID 不复用 |
 | a45_unique `(trust_domain,operation,unique_key)` | target_id、token_id、三个 digests、commit_id；原内容永不覆盖 |
 | a45_witness `(trust_domain,action_id,intent_digest)` | 独立签名回执原件、witness_domain/key/checkpoint/sequence、valid_until |
 | a45_gateway `(trust_domain,gateway_id)` | generation、lease_until、active、identity source/credential refs |
 | a45_action / a45_quota / a45_logical_operation | action 状态/row_version/intent；quota remaining/version；logical_operation_id 永久绑定业务参数 digest；原生行也必须锁定 |
+| a45_logical_binding_check `(commit_id,logical_operation_id)` | SEND 对已有永久映射的派生核验结果，绑定本次 plan_digest；不替换永久映射 |
 | a45_lineage / a45_outbox | commit_id 全部引用/sequence/time；outbox 唯一 `(commit_id,event_kind,ordinal)` |
 
 admission 唯一键 `(case,round,role,controlled_session_id,provider_request_id,injection_id)`，同 delivery 重试不新增 event；Journal event 主键含 role+local_sequence。Candidate 唯一 `(case,round)`；seal/ballot 继承 Decision v2 `(case,round,manifest,persona)`。send 唯一 action_id；另永久 logical_operation_id→业务参数 digest 的去重登记，换 action_id 不能绕过业务操作去重。key 在服务内由 typed tuple 编码，不能相信调用者拼接的字符串是否唯一。
@@ -162,14 +211,17 @@ SELECT state,fence,high_watermark,close_high_watermark,pending_count FROM a45_jo
 SELECT digest,version,valid_until,revoked FROM a45_dependency
  WHERE trust_domain=:domain AND node_id=:node FOR UPDATE;
 -- Repeat entire dependency/proof/root/policy closure, never partial set.
+-- JOURNAL_ADMIT native provider request is locked in this dependency phase:
+SELECT status,verification_ref FROM a45_provider_delivery
+ WHERE trust_domain=:domain AND provider_request_id=:provider_request FOR UPDATE;
 -- SEND native action/quota rows are locked during this dependency phase, in exact ID order:
 SELECT state,intent_digest,row_version FROM a45_action
  WHERE trust_domain=:domain AND action_id=:action FOR UPDATE;
 SELECT remaining,row_version FROM a45_quota
  WHERE trust_domain=:domain AND quota_id=:quota FOR UPDATE;
-SELECT state,expires_at,commit_id,request_digest,expected_digest,write_set_digest
+SELECT state,expires_at,commit_id,request_digest,expected_digest,plan_digest
  FROM a45_token WHERE trust_domain=:domain AND token_id=:token FOR UPDATE;
-SELECT target_id,token_id,request_digest,expected_digest,write_set_digest,commit_id
+SELECT target_id,token_id,request_digest,expected_digest,plan_digest,commit_id
  FROM a45_unique WHERE trust_domain=:domain AND operation=:op AND unique_key=:key FOR UPDATE;
 -- Unique-key phase also locks the permanent logical-operation binding on SEND:
 SELECT business_parameter_digest FROM a45_logical_operation
@@ -182,9 +234,9 @@ SELECT generation,lease_until,active FROM a45_gateway
 SELECT UTC_TIMESTAMP(3) AS locked_now;
 ```
 
-所有实际 SELECT 的完整列包含验权需要的字段，上面仅显示关键列；实现不得按草图列缺省其他字段。已提交同键的 exact target/token/三个 digest 全同：在当前审计读权限下返回原完整 lineage，ORIGINAL 路径不检查旧 token 是否过期来重授许可；不同即 CONFLICT。数据库故障或找不到完整 lineage => UNKNOWN。否则确认 token 为 UNUSED、issuer/认证主体一致、服务器存储的整个 transcript 相同，重算原件/写集，比较 owner/generation/version/所有 epochs/lease。锁后重新核对 identity/proof/dependency/预算/窗口/风险/同意/回执；变更或未知则回滚。
+所有实际 SELECT 的完整列包含验权需要的字段，上面仅显示关键列；实现不得按草图列缺省其他字段。在独立当前 audit gate 通过后，已提交同键的 exact target/token/request/expected/plan 三个 digest 全同：在当前审计读权限下返回原完整 lineage，ORIGINAL 路径不检查旧 token 是否过期来重授许可；不同即 CONFLICT。数据库故障或找不到完整 lineage => UNKNOWN。新 mutation 路径另行确认 token 为 UNUSED、issuer/认证主体一致、服务器存储的整个 transcript 相同，重算输入原件/完整计划/派生 profile，比较 owner/generation/version/所有 epochs/lease。锁后重新核对 identity/proof/dependency/预算/窗口/风险/同意/回执；变更或未知则回滚。
 
-**线性化语句**：准备且核验完整写集后，持有全部锁，在下列条件 UPDATE 中再次取语句起点时间。`:deadline` 是所有适用上界的最早值（包括 token/lease/证明/数据/任务/操作/见证），`:not_before` 是全部下界最大值。新鲜性另用可包含上界 `:inclusive_freshness_limit`（观测时间+已批准 max_age_ms），不能塞入半开 `:deadline` 而错误拒绝等于上限；非适用操作显式无该条件。UTC 不可判定则不执行。`ROW_COUNT()` 必须为 1，0 则回滚并分类期限/STALE。此 UPDATE 的 sequence 是条件提交的线性化点，只有后续 COMMIT 成功才生效；外界直到完整事务提交才能读取 NEW。time 比较与序号分配在同一语句，不能用早先 locked_now 延长期限。
+**线性化语句**：准备且核验完整计划后，持有全部锁，在下列条件 UPDATE 中再次取语句起点时间。`:deadline` 是所有适用上界的最早值（包括 token/lease/证明/数据/任务/操作/见证），`:not_before` 是全部下界最大值。新鲜性另用可包含上界 `:inclusive_freshness_limit`（观测时间+已批准 max_age_ms），不能塞入半开 `:deadline` 而错误拒绝等于上限；非适用操作显式无该条件。UTC 不可判定则不执行。`ROW_COUNT()` 必须为 1，0 则回滚并分类期限/STALE。此 UPDATE 的 sequence 是条件提交的线性化点，只有后续 COMMIT 成功才生效；外界直到完整事务提交才能读取 NEW。time 比较与序号分配在同一语句，不能用早先 locked_now 延长期限。
 
 ```sql
 UPDATE a45_sequence
@@ -202,7 +254,7 @@ authority row_version 是相关权限/状态版本，**不是** last_sequence；
 
 ### 5.1 Journal 准入、交付与三方 quiescence
 
-JOURNAL_ADMIT 必须先有持久 provider/session request 及 pending 注入登记；准入/完整反向依赖与受控交付相协调：未准入不得暴露上下文；交付失败/未知保留 pending，不删记录伪造完整性。持久 adapter 实现该顺序/恢复，真实交付证明 BLOCKED C1-C。
+JOURNAL_ADMIT 的输入必须先有暴露前来源准入/访问资格、完整依赖和持久 provider/session PENDING 登记；这里提交的是已应用交付的 Journal 事件与 pending 结算，不能把此后置结算当作首次暴露许可。可信 provider 原件无法确认 APPLIED_VERIFIED 时保留 PENDING，不追加假读取或删记录。前置准入与持久 adapter 顺序/恢复仍 BLOCKED C1-C；未实现前不能调用本协议产生实际读取声明。
 
 ```sql
 -- Common locks and checks; validate exact JournalKey/Manifest/role/generation.
@@ -212,15 +264,19 @@ JOURNAL_ADMIT 必须先有持久 provider/session request 及 pending 注入登�
 INSERT INTO a45_admission (...) VALUES (...,:exact_node,:node_digest,:sequence,:commit_id);
 INSERT INTO a45_dependency_edge (...) VALUES (...); -- entire parent + reverse edge set
 INSERT INTO a45_journal_event (...) VALUES (...,:locked_hwm+1,:provider_request,:commit_id);
-UPDATE a45_journal SET high_watermark=high_watermark+1
+UPDATE a45_provider_delivery SET status='APPLIED_VERIFIED',verification_ref=:exact_verification_ref
+ WHERE trust_domain=:domain AND provider_request_id=:provider_request AND status='PENDING';
+-- exactly one row; trustworthy applied-delivery proof is a fixed plan input.
+UPDATE a45_journal SET high_watermark=high_watermark+1,pending_count=pending_count-1
  WHERE trust_domain=:domain AND case_id=:case AND round=:round AND role=:role
-   AND high_watermark=:locked_hwm AND state=:expected_state AND fence=:expected_fence;
--- affected row exactly 1; provider delivery/pending settlement records same write set.
+   AND high_watermark=:locked_hwm AND state=:expected_state AND fence=:expected_fence
+   AND pending_count=:expected_pending AND pending_count>0;
+-- exactly one row; HWM and pending transitions both bound by the plan, same CAS/tx.
 ```
 
 事件本地序号是连续前缀；authority_sequence 仅供全域排序，两者不混用。INPUT_CLOSED 的合法重读新增 ReadEvent，但 node 的原 admission_sequence 必须 `<=cutoff`，不得把后序 node 换名为缓存重读。
 
-QUIESCE 取三 Journal 锁，检查全是 OPEN、Manifest 唯一绑定/owner 当前；生成一次不可复用 fence_id，round 和三 Journal 同事务更新为 QUIESCING，记录 fence sequence/outbox/lineage。允许既有 in-flight 结算；普通新材料从此拒绝。关闭前重新取锁检查所有 pending 为 0，包括提供方交付、确认上下文交付和依赖边；unknown/失败阻断关闭。不能在 quiesce 时清零 pending。
+QUIESCE 取三 Journal 锁，检查全是 OPEN、Manifest 唯一绑定/owner 当前；使用 Verify 前计划已绑定的不可复用 fence_id（此前不得消费），round 和三 Journal 同事务更新为 QUIESCING，记录 fence sequence/outbox/lineage。允许既有 in-flight 结算；普通新材料从此拒绝。关闭前重新取锁检查所有 pending 为 0，包括提供方交付、确认上下文交付和依赖边；unknown/失败阻断关闭。不能在 quiesce 时清零 pending。
 
 ### 5.2 Candidate + closure：唯一关闭提交
 
@@ -259,16 +315,21 @@ PREPARE 原子持久化不可变 ActionIntent + witness-request outbox，状态 
 -- assert authenticated egress identity == pinned gateway; generation/lease current;
 -- assert action AUDIT_READY, current permissions/risk/budget, exact request encoded;
 -- assert valid durable independent receipt, policy/witness-key epoch/checkpoint current;
--- assert logical_operation_id remains bound to same business-parameter digest.
+-- assert PREPARE-created logical binding exists with same business-parameter digest;
+-- bind VERIFY_EXISTING result to this commit_id; SEND never creates/rebinds permanent mapping.
+-- locked current quota_id/vendor/version/remaining exactly equals the token-bound quota row.
 -- Common conditional sequence UPDATE is the SEND_COMMITTED linearization point.
 UPDATE a45_action SET state='SEND_COMMITTED',send_sequence=:sequence,
- gateway_id=:gateway,gateway_generation=:gateway_generation,commit_id=:commit_id
+ gateway_id=:gateway,gateway_generation=:gateway_generation,commit_id=:commit_id,row_version=:next_action_version
  WHERE trust_domain=:domain AND action_id=:action AND intent_digest=:intent_digest
    AND state='AUDIT_READY' AND row_version=:expected_action_version;
-UPDATE a45_quota SET remaining=remaining-:amount,row_version=row_version+1
- WHERE trust_domain=:domain AND quota_id=:quota AND row_version=:quota_version AND remaining>=:amount;
+UPDATE a45_quota SET remaining=remaining-:amount,row_version=:next_quota_version
+ WHERE trust_domain=:domain AND quota_id=:quota_id AND row_version=:quota_version
+   AND remaining=:quota_remaining AND remaining>=:amount;
 -- quota/action rows are part of prelocked dependencies; affected rows exactly 1 each.
 INSERT INTO a45_send_record (...) VALUES (...,:exact_request_digest,:gateway,:gateway_generation,:sequence,:commit_id);
+INSERT INTO a45_logical_binding_check (...)
+ VALUES (:commit_id,:logical_operation,:business_parameter_digest,:plan_digest,'VERIFIED_EXISTING');
 -- unique binding + token consumption + immutable lineage + outbox, all same tx.
 COMMIT;
 -- Only exact authenticated gateway from NEW lineage may perform exact encoded SEND.
@@ -334,7 +395,7 @@ Action: PREPARED -> WITNESS_PENDING -> AUDIT_READY -> SEND_COMMITTED
 
 ## 8. 静态验收与证据边界
 
-GOCACHE 仅用于当前环境默认缓存只读的绕行，CI 无须设置。运行 `GOCACHE=/tmp/magi-authority-cache python3 scripts/test-authority-contract.py` 和 `... python3 scripts/check-authority-contract.py`。使用现有 Go C0 与 JSON Schema 引擎；没有新增 JSON Schema 实现。typed API 文件与 oracle 联合编译，关键类型 required 字段漂移直接报基础设施错误。
+GOCACHE 仅用于当前环境默认缓存只读的绕行，CI 无须设置。运行 `GOCACHE=/tmp/magi-authority-cache python3 scripts/test-authority-contract.py` 、`... python3 scripts/test-authority-review.py` 和 `... python3 scripts/check-authority-contract.py`。使用现有 Go C0 与 JSON Schema 引擎；没有新增 JSON Schema 实现。typed API 文件与 oracle 联合编译，原有七种输入类型及新增 intent/完整计划/各 transition 的 required 字段漂移直接报基础设施错误。
 
 [traces.json](contracts/authority-v1/traces.json) 用独立 bases + 明确 mutation paths 表示配对场景。非 Schema 负例都必须先通过 C0/Schema 才进入语义断言，期望固定错误码。float/超安全整数由 C0 拒绝；未知字段/枚举/时间精度是 Schema；合法形状但错误 scope/DAG/token/state/write-set/order/witness/重放/逐跳权限/同意门槛/身份源绑定是静态语义。无效 Schema、编译错误、缺文件、异常都让命令失败，不能算拒绝负例通过。坏日历时间另报 TIME；新鲜性 30000ms 等于允许，超出 1ms 拒绝，未来观测不补成有效。事务步骤显式包含 revalidate 后的 linearize。
 

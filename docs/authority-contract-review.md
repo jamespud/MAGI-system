@@ -126,8 +126,88 @@ require Design Change before implementation.
 
 ## F. Review, CI and delivery status
 
-Independent read-only review: PENDING controller dispatch. Exact-head remote CI:
+Initial independent read-only review of `17917a98f5e968edc2531822fd1412a3e0b07631`: CHANGES REQUIRED (B-01..B-04). Corrections below await scoped rereview. Exact-head remote CI:
 PENDING controller push/Draft PR. This worker performed no remote action. Keep
 Draft. No Ready/merge, issue/Epic/CAS-9 closure, terminal authorization, production
 permissions or protected send. Controller stage ledger records later review/CI
 URLs and exact final hash; this report claims no future result.
+
+
+## Review correction wave — B-01 through B-04
+
+Fix base: `17917a98f5e968edc2531822fd1412a3e0b07631`.
+All four findings were verified against that head before changes. They concern
+the new unmerged authority Draft only; frozen artifacts and backend remain intact.
+
+| Finding | Correction and executable coverage |
+| --- | --- |
+| B-01 P1 | CompleteWritePlan binds fixed inputs, explicit transitions, mutation kinds and `magi-authority-derive/1`; plan_digest excludes generated outputs. Allocation/child result digests/lineage are constructed afterwards with no lineage self-reference. `test_B01_first_proposal_constructs_and_roundtrips_without_future_values` starts without a token for each of four variants, fixes the transcript, introduces a synthetic token/allocation, validates the first declaration, and roundtrips every result/lineage digest. Changed future sequence leaves the plan digest unchanged. No production Verify implementation is added. |
+| B-02 P2 | Type/bind Journal HWM, provider settlement and pending transition, SEND action/gateway/version transition, exact current quota identity/version/remaining CAS and logical-operation VERIFY_EXISTING. Align SQL/provider locking with those fields. Permanent logical map is created only at PREPARE; SEND cannot create/rebind it. Separate negatives omit each required mutation label (semantic WRITE_SET), delete each concrete transition field (Schema), and replace only quota identity while retaining the same version/remaining (semantic STALE). |
+| B-03 P2 | VerifyRequest.SendIntent binds exact action/intent/dependency digest, encoded request and business/logical operation. Compare action, typed SendPlan, dependency, witness and actual encoded request declaration to this request commitment. Paired detached-action, jointly swapped intent, and swapped actual request digest negatives retain the original token and reject. |
+| B-04 P2 | Independent ReadOriginal/AuditReadRequest and current audit_access gate, with exact authenticated principal/source and case/round/key/target scope. DENIED/UNAVAILABLE/expired/identity mismatch negatives; approved current auditor can still read an expired/revoked old worker's immutable lineage, without old mutation roots being current or any resend. |
+
+A scoped independent rereview found one residual B-02 binding gap. A schema-valid
+mutation replacing only `quota_transition.quota_id` from `quota-1` to `quota-2`,
+while retaining the same version and remaining balance and recomputing the plan
+digest, was accepted as `STATIC_VALID`. `CurrentDeclaration` now includes a
+required exact `quota_id`; the send checker requires it to equal the plan's
+quota transition, the SQL compares the locked row into the conditional update,
+and `test_B02_review_quota_identity_is_bound` requires `STALE` for that mutation.
+This is the B-02-R1 correction.
+
+### RED
+
+From repository root on the fix base, the original reviewer reproducer confirmed
+all three schema-valid false acceptances:
+
+```text
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 /tmp/magi-joint-stage-43/review-b-repro.py
+exit 0 (diagnostic reproducer), all three semantics STATIC_VALID
+log: /tmp/magi-joint-stage-43/b/review-repro-before.log
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-review.py
+exit 1; Ran 4 tests; FAILED (failures=9)
+log: /tmp/magi-joint-stage-43/b/red-review.log
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-review.py
+exit 1; B-02-R1 observed STATIC_VALID where STALE was required
+log: /tmp/magi-joint-stage-43/b/red-review-quota.log
+```
+
+The assertions failed because the old proposal contained prepared transaction
+outputs, five omissions were accepted, send substitutions were accepted, and audit
+denied/unavailable still passed. These were assertion failures, not import,
+compiler, schema compilation or missing-function errors.
+
+### GREEN and coverage boundary
+
+From repository root after the coherent correction wave:
+
+```text
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-review.py
+exit 0; Ran 8 tests; OK
+log: /tmp/magi-joint-stage-43/b/green-review.log
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-contract.py
+exit 0; Ran 4 tests; OK
+log: /tmp/magi-joint-stage-43/b/review-existing-contract.log
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/check-authority-contract.py
+exit 0; PASS 108 schema/static trace declarations
+log: /tmp/magi-joint-stage-43/b/check-authority-review.log
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 /tmp/magi-joint-stage-43/review-b-repro.py
+exit 0; schema='' for all three; TOKEN_BINDING, TOKEN_BINDING, DENIED
+log: /tmp/magi-joint-stage-43/b/review-repro-after.log
+```
+
+From backend:
+
+```text
+GOCACHE=/tmp/magi-joint-stage-43/b/go-cache go vet ../scripts/check-authority-contract.go ../scripts/authority-api.go
+exit 0; log: /tmp/magi-joint-stage-43/b/review-script-vet.log
+```
+
+New review regression is wired into the same backend CI static gate. Existing
+baseline/full backend race/vet and eight frozen gates from §A/D are prior results;
+this script/schema/doc-only correction did not repeat unchanged backend suites.
+Exact-head CI remains controller-owned/pending. `git diff --check` passes.
+All construction rows/tokens/audit decisions are synthetic declarations; new
+MySQL/issuer/provider/independent witness/egress remains NOT RUN/BLOCKED as in §E.
+No push/PR, Ready/merge, closure or activation by this worker. Scoped independent
+rereview of the complete fix-base→fix-head delta is required before delivery.

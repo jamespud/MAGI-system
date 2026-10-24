@@ -50,7 +50,8 @@
         "proof_id": "proof-1",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": null
       },
       "token": {
         "token_id": "token-1",
@@ -59,8 +60,7 @@
         "operation": "CANDIDATE_CLOSE",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "12f63ef1a76fa24ee71aa9e88b67d70adaf3c462236478b1c66bc88bdd49307a",
-        "write_set_digest": "35b4b1e66156e9ae6bc531bdef04b4085e45431623fbe88cc747cb5a729770c8",
+        "request_digest": "85543b02cd7bdcaa8dc3a2b412a2c6cc468f02f88d12548a1b5314ca1eecd751",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -82,7 +82,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b"
+        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b",
+        "plan_digest": "a188fd14f925f8d0d75290040783ce01f7405e17f9ab133b26ebdb68ab9beecb"
       },
       "current": {
         "principal_id": "coordinator",
@@ -140,7 +141,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "candidate:case-1:1",
@@ -171,18 +180,100 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "candidate",
-          "closure",
-          "evidence_closed",
-          "journal:balthasar",
-          "journal:casper",
-          "journal:melchior",
-          "lineage",
-          "outbox",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "CANDIDATE_CLOSE",
+          "mutation_set": [
+            "candidate",
+            "closure",
+            "evidence_closed",
+            "journal:balthasar",
+            "journal:casper",
+            "journal:melchior",
+            "lineage",
+            "outbox",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": null,
+          "quiescence": null,
+          "closure": {
+            "candidate": {
+              "id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "object_ref": "objects/csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            },
+            "fence_id": "fence-1",
+            "receipts": [
+              {
+                "id": "receipt-balthasar",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/receipt-balthasar"
+              },
+              {
+                "id": "receipt-casper",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/receipt-casper"
+              },
+              {
+                "id": "receipt-melchior",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/receipt-melchior"
+              }
+            ],
+            "confirmations": [
+              {
+                "id": "confirmation-balthasar",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/confirmation-balthasar"
+              },
+              {
+                "id": "confirmation-casper",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/confirmation-casper"
+              },
+              {
+                "id": "confirmation-melchior",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/confirmation-melchior"
+              }
+            ],
+            "journals": [
+              {
+                "role": "balthasar",
+                "journal_id": "journal-balthasar",
+                "expected_high_watermark": 3,
+                "close_high_watermark": 3,
+                "expected_pending": 0
+              },
+              {
+                "role": "casper",
+                "journal_id": "journal-casper",
+                "expected_high_watermark": 3,
+                "close_high_watermark": 3,
+                "expected_pending": 0
+              },
+              {
+                "role": "melchior",
+                "journal_id": "journal-melchior",
+                "expected_high_watermark": 3,
+                "close_high_watermark": 3,
+                "expected_pending": 0
+              }
+            ],
+            "round": {
+              "object_id": "case-1:1",
+              "expected_state": "QUIESCING",
+              "next_state": "EVIDENCE_CLOSED"
+            }
+          },
+          "send": null,
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "CANDIDATE_CLOSE"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -215,9 +306,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -226,7 +317,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -237,7 +330,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -303,6 +400,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "candidate:case-1:1",
+        "permitted_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     },
     "send": {
@@ -350,12 +472,28 @@
             "parents": [
               "dep-a"
             ]
+          },
+          {
+            "id": "intent-1",
+            "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "version": 1,
+            "parents": [
+              "dep-b"
+            ]
           }
         ],
         "proof_id": "proof-1",
         "exact_target_id": "action-1",
         "unique_key": "send:action-1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": {
+          "action_id": "action-1",
+          "intent_id": "intent-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
       },
       "token": {
         "token_id": "token-1",
@@ -364,8 +502,7 @@
         "operation": "SEND_COMMIT",
         "exact_target_id": "action-1",
         "unique_key": "send:action-1",
-        "request_digest": "a3027398ec616985981b950ab791c9c3f4a9ceb289083ad96672fce4d0c804ad",
-        "write_set_digest": "aaf96f411e375ad3b1a507cda132b36146916f99f522cf00fbe41a319b62f7f3",
+        "request_digest": "a1a1ae68bb99de7bad4f506db45d3873fa6ff7a3d8747dc09f78cb7661b91f75",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -387,7 +524,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "e86564b3ca75189b46273db2a26a1aaaa7d6c3dd3afad10e07277f72819471a0"
+        "expected_state_digest": "e86564b3ca75189b46273db2a26a1aaaa7d6c3dd3afad10e07277f72819471a0",
+        "plan_digest": "26629444c579a9bb7c2887812cd260c39f5b45d7e1162e4dec6503ad3e4fe135"
       },
       "current": {
         "principal_id": "coordinator",
@@ -445,7 +583,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "send:action-1",
@@ -476,14 +622,57 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "lineage",
-          "outbox",
-          "quota",
-          "send_record",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "SEND_COMMIT",
+          "mutation_set": [
+            "action_transition",
+            "lineage",
+            "logical_operation_binding",
+            "outbox",
+            "quota",
+            "send_record",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": null,
+          "quiescence": null,
+          "closure": null,
+          "send": {
+            "intent": {
+              "id": "intent-1",
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "object_ref": "objects/intent-1"
+            },
+            "action_transition": {
+              "action_id": "action-1",
+              "expected_state": "AUDIT_READY",
+              "next_state": "SEND_COMMITTED",
+              "gateway_id": "gateway-1",
+              "gateway_generation": 9,
+              "expected_version": 1,
+              "next_version": 2
+            },
+            "quota_transition": {
+              "quota_id": "quota-1",
+              "expected_remaining": 7,
+              "amount": 1,
+              "next_remaining": 6,
+              "expected_version": 1,
+              "next_version": 2
+            },
+            "logical_binding": {
+              "logical_operation_id": "logical-1",
+              "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "mode": "VERIFY_EXISTING"
+            }
+          },
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "SEND_COMMIT"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -516,9 +705,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -527,7 +716,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -538,7 +729,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -604,6 +799,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "send:action-1",
+        "permitted_target_id": "action-1",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     },
     "journal_admit": {
@@ -656,7 +876,8 @@
         "proof_id": "proof-1",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": null
       },
       "token": {
         "token_id": "token-1",
@@ -665,8 +886,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
-        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -688,7 +908,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557"
+        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557",
+        "plan_digest": "d487710c53155ff987c70bcebc542811465d4dcf7774bbd9a01e2f4f2f5d9bb8"
       },
       "current": {
         "principal_id": "coordinator",
@@ -746,7 +967,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "candidate:case-1:1",
@@ -777,15 +1006,69 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "admission",
-          "dependency_edges",
-          "journal_event",
-          "lineage",
-          "outbox",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "JOURNAL_ADMIT",
+          "mutation_set": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "journal_high_watermark",
+            "lineage",
+            "outbox",
+            "pending_transition",
+            "provider_settlement",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": {
+            "admission_input": {
+              "id": "admission-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/admission-input-1"
+            },
+            "journal_event_input": {
+              "id": "event-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/event-input-1"
+            },
+            "dependency_edge_inputs": [
+              {
+                "id": "edge-input-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/edge-input-1"
+              }
+            ],
+            "high_watermark": {
+              "journal_id": "journal-melchior",
+              "expected": 3,
+              "next": 4
+            },
+            "provider_settlement": {
+              "request_id": "provider-request-1",
+              "expected_status": "PENDING",
+              "next_status": "APPLIED_VERIFIED",
+              "verification_ref": {
+                "id": "provider-verification-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/provider-verification-1"
+              }
+            },
+            "pending_transition": {
+              "journal_id": "journal-melchior",
+              "expected": 1,
+              "next": 0
+            }
+          },
+          "quiescence": null,
+          "closure": null,
+          "send": null,
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "JOURNAL_ADMIT"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -818,9 +1101,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -829,7 +1112,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -840,7 +1125,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -906,6 +1195,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "candidate:case-1:1",
+        "permitted_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     },
     "quiesce": {
@@ -958,7 +1272,8 @@
         "proof_id": "proof-1",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": null
       },
       "token": {
         "token_id": "token-1",
@@ -967,8 +1282,7 @@
         "operation": "QUIESCE",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "1c1ea2f2037e4f9ae35e008da6a460d95e181f064a1120d783f01e3bb86ad02e",
-        "write_set_digest": "fcb4d591ffabb7c87fd3ce1feba5806b2d70342393bee768d406bced11ed1e2b",
+        "request_digest": "710677bc840bcaf1d9550297a8e9b8a00313fdf23db4a558abbd9942fe2d0720",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -990,7 +1304,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557"
+        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557",
+        "plan_digest": "b7030249120d3019f223f480fb40cb8157d0faa174243bc335f5c90fa39e83e2"
       },
       "current": {
         "principal_id": "coordinator",
@@ -1048,7 +1363,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "candidate:case-1:1",
@@ -1079,15 +1402,52 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "fence",
-          "journal_states",
-          "lineage",
-          "outbox",
-          "round_state",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "QUIESCE",
+          "mutation_set": [
+            "fence",
+            "journal_states",
+            "lineage",
+            "outbox",
+            "round_state",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": null,
+          "quiescence": {
+            "fence_id": "fence-1",
+            "round": {
+              "object_id": "case-1:1",
+              "expected_state": "OPEN",
+              "next_state": "QUIESCING"
+            },
+            "journals": [
+              {
+                "object_id": "journal-balthasar",
+                "expected_state": "OPEN",
+                "next_state": "QUIESCING"
+              },
+              {
+                "object_id": "journal-casper",
+                "expected_state": "OPEN",
+                "next_state": "QUIESCING"
+              },
+              {
+                "object_id": "journal-melchior",
+                "expected_state": "OPEN",
+                "next_state": "QUIESCING"
+              }
+            ]
+          },
+          "closure": null,
+          "send": null,
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "QUIESCE"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -1120,9 +1480,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -1131,7 +1491,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -1142,7 +1504,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -1208,6 +1574,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "candidate:case-1:1",
+        "permitted_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     },
     "quiescing_admit": {
@@ -1260,7 +1651,8 @@
         "proof_id": "proof-1",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": null
       },
       "token": {
         "token_id": "token-1",
@@ -1269,8 +1661,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
-        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -1292,7 +1683,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b"
+        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b",
+        "plan_digest": "d487710c53155ff987c70bcebc542811465d4dcf7774bbd9a01e2f4f2f5d9bb8"
       },
       "current": {
         "principal_id": "coordinator",
@@ -1350,7 +1742,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "candidate:case-1:1",
@@ -1381,15 +1781,69 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "admission",
-          "dependency_edges",
-          "journal_event",
-          "lineage",
-          "outbox",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "JOURNAL_ADMIT",
+          "mutation_set": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "journal_high_watermark",
+            "lineage",
+            "outbox",
+            "pending_transition",
+            "provider_settlement",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": {
+            "admission_input": {
+              "id": "admission-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/admission-input-1"
+            },
+            "journal_event_input": {
+              "id": "event-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/event-input-1"
+            },
+            "dependency_edge_inputs": [
+              {
+                "id": "edge-input-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/edge-input-1"
+              }
+            ],
+            "high_watermark": {
+              "journal_id": "journal-melchior",
+              "expected": 3,
+              "next": 4
+            },
+            "provider_settlement": {
+              "request_id": "provider-request-1",
+              "expected_status": "PENDING",
+              "next_status": "APPLIED_VERIFIED",
+              "verification_ref": {
+                "id": "provider-verification-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/provider-verification-1"
+              }
+            },
+            "pending_transition": {
+              "journal_id": "journal-melchior",
+              "expected": 1,
+              "next": 0
+            }
+          },
+          "quiescence": null,
+          "closure": null,
+          "send": null,
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "JOURNAL_ADMIT"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -1422,9 +1876,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -1433,7 +1887,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -1444,7 +1900,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -1510,6 +1970,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "candidate:case-1:1",
+        "permitted_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     },
     "closed_admit": {
@@ -1562,7 +2047,8 @@
         "proof_id": "proof-1",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "trusted_now": "2026-10-24T01:00:00.000Z"
+        "trusted_now": "2026-10-24T01:00:00.000Z",
+        "send_intent": null
       },
       "token": {
         "token_id": "token-1",
@@ -1571,8 +2057,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
-        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -1594,7 +2079,8 @@
             "epoch": 4
           }
         ],
-        "expected_state_digest": "0ee43b753c8aa69735b73c702f1614a6a27f830169e698793e7b7a2346d71822"
+        "expected_state_digest": "0ee43b753c8aa69735b73c702f1614a6a27f830169e698793e7b7a2346d71822",
+        "plan_digest": "d487710c53155ff987c70bcebc542811465d4dcf7774bbd9a01e2f4f2f5d9bb8"
       },
       "current": {
         "principal_id": "coordinator",
@@ -1652,7 +2138,15 @@
         },
         "egress_domain": "egress-domain",
         "gateway_id": "gateway-1",
-        "gateway_generation": 9
+        "gateway_generation": 9,
+        "logical_binding": {
+          "exists": true,
+          "logical_operation_id": "logical-1",
+          "business_parameter_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "quota_version": 1,
+        "quota_remaining": 7,
+        "quota_id": "quota-1"
       },
       "commit": {
         "unique_key": "candidate:case-1:1",
@@ -1683,15 +2177,69 @@
           "gateway_id": "gateway-1",
           "gateway_generation": 9
         },
-        "complete_write_set": [
-          "admission",
-          "dependency_edges",
-          "journal_event",
-          "lineage",
-          "outbox",
-          "token_consumed",
-          "unique_binding"
-        ]
+        "write_plan": {
+          "plan_version": "1.0",
+          "derivation_profile": "magi-authority-derive/1",
+          "operation": "JOURNAL_ADMIT",
+          "mutation_set": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "journal_high_watermark",
+            "lineage",
+            "outbox",
+            "pending_transition",
+            "provider_settlement",
+            "token_consumed",
+            "unique_binding"
+          ],
+          "admission": {
+            "admission_input": {
+              "id": "admission-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/admission-input-1"
+            },
+            "journal_event_input": {
+              "id": "event-input-1",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "object_ref": "objects/event-input-1"
+            },
+            "dependency_edge_inputs": [
+              {
+                "id": "edge-input-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/edge-input-1"
+              }
+            ],
+            "high_watermark": {
+              "journal_id": "journal-melchior",
+              "expected": 3,
+              "next": 4
+            },
+            "provider_settlement": {
+              "request_id": "provider-request-1",
+              "expected_status": "PENDING",
+              "next_status": "APPLIED_VERIFIED",
+              "verification_ref": {
+                "id": "provider-verification-1",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "objects/provider-verification-1"
+              }
+            },
+            "pending_transition": {
+              "journal_id": "journal-melchior",
+              "expected": 1,
+              "next": 0
+            }
+          },
+          "quiescence": null,
+          "closure": null,
+          "send": null,
+          "outbox_kinds": [
+            "COMMIT_RECORDED",
+            "JOURNAL_ADMIT"
+          ]
+        }
       },
       "transaction": {
         "locks": [
@@ -1724,9 +2272,9 @@
         "same_request": true,
         "same_target": true,
         "same_token": true,
-        "same_write_set": true,
         "lineage_present": true,
-        "resend": false
+        "resend": false,
+        "same_plan": true
       },
       "action": {
         "state": "AUDIT_READY",
@@ -1735,7 +2283,9 @@
         "gateway_id": "gateway-1",
         "gateway_generation": 9,
         "remote_mode": "FENCED_IDEMPOTENT",
-        "send_attempts": 0
+        "send_attempts": 0,
+        "encoded_request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "row_version": 1
       },
       "admission": {
         "kind": "ORDINARY",
@@ -1746,7 +2296,11 @@
         "reverse_edges_complete": true,
         "provider_registered": true,
         "journal_high_watermark": 3,
-        "local_next_sequence": 4
+        "local_next_sequence": 4,
+        "journal_id": "journal-melchior",
+        "provider_request_id": "provider-request-1",
+        "provider_status": "PENDING",
+        "pending_count": 1
       },
       "governance": {
         "root_available": true,
@@ -1812,6 +2366,31 @@
       "freshness": {
         "observed_at": "2026-10-24T00:59:31.000Z",
         "max_age_ms": 30000
+      },
+      "audit_access": {
+        "status": "ALLOWED",
+        "requester": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "authenticated_principal": {
+          "subject_id": "auditor-1",
+          "identity_source_id": "audit-ca",
+          "identity_source_version": "r3"
+        },
+        "identity_source_available": true,
+        "authenticated": true,
+        "permitted_case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "permitted_unique_key": "candidate:case-1:1",
+        "permitted_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "lineage_integrity_verified": true,
+        "trusted_historical_issuer": "authority-1",
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "valid_until": "2026-10-26T01:00:01.000Z"
       }
     }
   },
@@ -2010,7 +2589,7 @@
       "expected": "WRITE_SET",
       "mutations": [
         {
-          "path": "commit/complete_write_set",
+          "path": "commit/write_plan/mutation_set",
           "value": [
             "candidate",
             "closure",
@@ -2122,7 +2701,7 @@
           "value": "a3027398ec616985981b950ab791c9c3f4a9ceb289083ad96672fce4d0c804ad"
         },
         {
-          "path": "token/write_set_digest",
+          "path": "token/plan_digest",
           "value": "aaf96f411e375ad3b1a507cda132b36146916f99f522cf00fbe41a319b62f7f3"
         }
       ]
@@ -2302,7 +2881,7 @@
           "value": "ORIGINAL"
         },
         {
-          "path": "replay/same_write_set",
+          "path": "replay/same_plan",
           "value": false
         }
       ]
@@ -2480,13 +3059,16 @@
       "expected": "WRITE_SET",
       "mutations": [
         {
-          "path": "commit/complete_write_set",
+          "path": "commit/write_plan/mutation_set",
           "value": [
             "admission",
             "dependency_edges",
             "journal_event",
+            "journal_high_watermark",
             "lineage",
             "outbox",
+            "pending_transition",
+            "provider_settlement",
             "token_consumed"
           ]
         }
@@ -2504,7 +3086,7 @@
       "expected": "WRITE_SET",
       "mutations": [
         {
-          "path": "commit/complete_write_set",
+          "path": "commit/write_plan/mutation_set",
           "value": [
             "fence",
             "journal_states",
@@ -2979,6 +3561,350 @@
         {
           "path": "freshness/observed_at",
           "value": "2026-10-24T01:00:01.001Z"
+        }
+      ]
+    },
+    {
+      "name": "review_omit_journal_high_watermark",
+      "base": "journal_admit",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/write_plan/mutation_set",
+          "value": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "lineage",
+            "outbox",
+            "pending_transition",
+            "provider_settlement",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "review_omit_provider_settlement",
+      "base": "journal_admit",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/write_plan/mutation_set",
+          "value": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "journal_high_watermark",
+            "lineage",
+            "outbox",
+            "pending_transition",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "review_omit_pending_transition",
+      "base": "journal_admit",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/write_plan/mutation_set",
+          "value": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "journal_high_watermark",
+            "lineage",
+            "outbox",
+            "provider_settlement",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "review_omit_action_transition",
+      "base": "send",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/write_plan/mutation_set",
+          "value": [
+            "lineage",
+            "logical_operation_binding",
+            "outbox",
+            "quota",
+            "send_record",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "review_omit_logical_operation_binding",
+      "base": "send",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/write_plan/mutation_set",
+          "value": [
+            "action_transition",
+            "lineage",
+            "outbox",
+            "quota",
+            "send_record",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "review_send_detached_action",
+      "base": "send",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "action/action_id",
+          "value": "action-2"
+        },
+        {
+          "path": "current/witness/action_id",
+          "value": "action-2"
+        }
+      ]
+    },
+    {
+      "name": "review_send_swapped_intent",
+      "base": "send",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "action/intent_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "path": "current/witness/intent_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "review_original_denied_audit",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/status",
+          "value": "DENIED"
+        }
+      ]
+    },
+    {
+      "name": "review_original_unavailable_audit",
+      "base": "send",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/status",
+          "value": "UNAVAILABLE"
+        }
+      ]
+    },
+    {
+      "name": "review_original_unauthenticated",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/authenticated",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "review_original_wrong_identity_source",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/requester/identity_source_id",
+          "value": "untrusted"
+        }
+      ]
+    },
+    {
+      "name": "review_original_other_target_scope",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/permitted_target_id",
+          "value": "action-2"
+        }
+      ]
+    },
+    {
+      "name": "review_original_lineage_unknown",
+      "base": "send",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/lineage_integrity_verified",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "review_original_old_mutation_revoked_expired_auditor_current",
+      "base": "send",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "current/revoked",
+          "value": true
+        },
+        {
+          "path": "current/trusted_now",
+          "value": "2026-10-25T01:00:00.000Z"
+        },
+        {
+          "path": "governance/root_available",
+          "value": false
+        },
+        {
+          "path": "governance/authenticated_subject",
+          "value": "retired-worker"
+        },
+        {
+          "path": "audit_access/trusted_now",
+          "value": "2026-10-25T01:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "review_original_audit_expired",
+      "base": "send",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "audit_access/trusted_now",
+          "value": "2026-10-26T01:00:01.000Z"
+        }
+      ]
+    },
+    {
+      "name": "review_missing_logical_binding",
+      "base": "send",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "current/logical_binding/exists",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "review_changed_business_binding",
+      "base": "send",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "current/logical_binding/business_parameter_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "review_unsupported_derivation_profile",
+      "base": "send",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "commit/write_plan/derivation_profile",
+          "value": "future/9"
+        }
+      ]
+    },
+    {
+      "name": "review_plan_future_commit_field",
+      "base": "send",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "commit/write_plan/commit_id",
+          "value": "invented-future-id"
+        }
+      ]
+    },
+    {
+      "name": "review_actual_encoded_request_swapped",
+      "base": "send",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "action/encoded_request_digest",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "name": "review_action_version_changed",
+      "base": "send",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "action/row_version",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "review_quota_version_changed",
+      "base": "send",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/quota_version",
+          "value": 2
         }
       ]
     }

@@ -26,7 +26,7 @@ func main() {
 		panic(err)
 	}
 	defs := doc["$defs"].(map[string]any)
-	for name, value := range map[string]any{"Subject": Subject{}, "CaseRound": CaseRound{}, "ScopedEpoch": ScopedEpoch{}, "Dependency": ExactDependency{}, "VerifyRequest": VerifyRequest{}, "VerifiedToken": VerifiedToken{}, "ExpectedState": ExpectedState{}} {
+	for name, value := range map[string]any{"Subject": Subject{}, "CaseRound": CaseRound{}, "ScopedEpoch": ScopedEpoch{}, "Dependency": ExactDependency{}, "VerifyRequest": VerifyRequest{}, "VerifiedToken": VerifiedToken{}, "ExpectedState": ExpectedState{}, "IntentBinding": IntentBinding{}, "PreparedObject": PreparedObject{}, "HighWatermarkPlan": HighWatermarkPlan{}, "ProviderSettlementPlan": ProviderSettlementPlan{}, "PendingTransitionPlan": PendingTransitionPlan{}, "JournalAdmissionPlan": JournalAdmissionPlan{}, "StateTransitionPlan": StateTransitionPlan{}, "QuiescencePlan": QuiescencePlan{}, "JournalClosurePlan": JournalClosurePlan{}, "CandidateClosurePlan": CandidateClosurePlan{}, "ActionTransitionPlan": ActionTransitionPlan{}, "QuotaTransitionPlan": QuotaTransitionPlan{}, "LogicalOperationPlan": LogicalOperationPlan{}, "SendPlan": SendPlan{}, "CompleteWritePlan": CompleteWritePlan{}} {
 		var fields []string
 		t := reflect.TypeOf(value)
 		for i := 0; i < t.NumField(); i++ {
