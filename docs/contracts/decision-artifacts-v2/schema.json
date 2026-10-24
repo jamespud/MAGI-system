@@ -90,7 +90,7 @@
           "$ref": "#/$defs/Token"
         },
         "version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         },
         "digest_alg": {
           "const": "sha256"
@@ -118,7 +118,7 @@
           "$ref": "#/$defs/Token"
         },
         "identity_source_version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         }
       },
       "required": [
@@ -201,7 +201,7 @@
           ]
         },
         "version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         },
         "content_digest": {
           "$ref": "#/$defs/Digest"
@@ -327,7 +327,7 @@
           "uniqueItems": true
         },
         "source_dependency_index_version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         },
         "context_revocation_epoch": {
           "type": "integer",
@@ -1034,7 +1034,7 @@
           "$ref": "#/$defs/Token"
         },
         "source_version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         },
         "raw_content_digest": {
           "$ref": "#/$defs/Digest"
@@ -1238,7 +1238,7 @@
           "maximum": 9007199254740991
         },
         "source_dependency_index_version": {
-          "$ref": "#/$defs/Token"
+          "$ref": "#/$defs/FixedVersion"
         },
         "events": {
           "type": "array",
@@ -2062,7 +2062,7 @@
           "const": "RiskClassificationRecord"
         },
         "record_version": {
-          "const": "2.0"
+          "const": "2.1"
         },
         "candidate_id": {
           "$ref": "#/$defs/Token"
@@ -2173,6 +2173,12 @@
         },
         "valid_until": {
           "$ref": "#/$defs/Time"
+        },
+        "candidate_input_profile": {
+          "const": "magi-risk-input/1"
+        },
+        "candidate_input_digest": {
+          "$ref": "#/$defs/Digest"
         }
       },
       "required": [
@@ -2188,7 +2194,22 @@
         "input_attribute_values",
         "input_evidence_refs",
         "matched_rule_ids",
-        "valid_until"
+        "valid_until",
+        "candidate_input_profile",
+        "candidate_input_digest"
+      ]
+    },
+    "FixedVersion": {
+      "description": "C1-B1 fixedVersion: no case-insensitive alias component; arbitrary fixed Token encodings allowed.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/Token"
+        },
+        {
+          "not": {
+            "pattern": "(^|[^A-Za-z0-9])([Ll][Aa][Tt][Ee][Ss][Tt]|[Cc][Uu][Rr][Rr][Ee][Nn][Tt]|[Ss][Tt][Aa][Bb][Ll][Ee]|[Mm][Aa][Ii][Nn]|[Mm][Aa][Ss][Tt][Ee][Rr]|[Hh][Ee][Aa][Dd]|[Dd][Ee][Ff][Aa][Uu][Ll][Tt]|[Aa][Cc][Tt][Ii][Vv][Ee]|[Nn][Ee][Ww][Ee][Ss][Tt]|[Nn][Ee][Xx][Tt]|[Xx])([^A-Za-z0-9]|$)"
+          }
+        }
       ]
     }
   }

@@ -59,7 +59,8 @@ Envelope = {artifact_id,digest,canonical_profile:"magi-cj/1",digest_alg:"sha256"
 `PendingItem={code,description}`；Candidate 的 `conditions=[{statement,must_hold:bool}]`；
 `Candidate.risk_classification_ref:ExternalRef` 新增为必填，指向先存的风险分类记录
 （候选稳定 ID、domain ID、rules_version、input_attribute_values、input_evidence_refs、
-matched_rule_ids、risk_level、rule_ref、classified_by/classified_at、valid_until）；
+matched_rule_ids、risk_level、rule_ref、classified_by/classified_at、valid_until、
+candidate_input_profile、candidate_input_digest；原件 record_version 为 2.1，见 §1.2）；
 输入属性以 `{attribute_id,knowledge,value:[bool|Token|Quantity]}` 表示，KNOWN 恰好一值，
 UNKNOWN 显式空数组，禁止猜测补值。分类记录在提交时须仍有效；规则解析与独立风险
 算法由 C1-B/候选切片核验，规则/属性证据依赖进入后继闭包。该记录不得引用未来
@@ -69,6 +70,58 @@ CandidateSnapshot ID。`AgendaEvent.notified:[SubjectRef]`；`source` 为外部�
 `PairPreference.rationale:[enum]` 长度 0..1：INCOMPARABLE 恰好一项，其余为空，
 这是对 v1 可选值的显式表示，不改变票型。金额和权重使用带量纲的安全整数，不引入 float。set 数组按稳定代码/ID 的 UTF-16 序排序，
 事件按 sequence；偏好对按 `(candidate_a,candidate_b)` 排序。Schema 不代替完整语义验证。
+
+### 1.2 风险分类的精确输入绑定（F39-01）
+
+原 Draft 的候选稳定 ID 不代表候选内容版本。新增外置分类记录 `record_version="2.1"`，
+必填 `candidate_input_profile="magi-risk-input/1"` 和 `candidate_input_digest:Digest`。
+旧 2.0 记录缺少精确输入绑定，不能补默认后作为新契约的有效分类依据。
+这是本 Draft 的显式修订，不改 C0 的类型域、已发布字节或版本白名单。
+
+输入摘要采用以下**独立、非 C0 工件类型**的计算域（最后的 `\n` 是一个 LF 字节）：
+
+```text
+input = {
+  candidate_input_profile: "magi-risk-input/1",
+  domain_profile_id,
+  candidate: {candidate_id, proposal, is_no_action, originated_by,
+              conditions, parent_candidate_ids, state},
+  classification_input: {rules_version, rule_ref,
+                         input_attribute_values, input_evidence_refs}
+}
+candidate_input_digest = lowercase_hex(SHA256(
+    UTF8("magi:decision-risk-input:v1\n") || magi_cj_1(input)))
+```
+
+上述对象封闭、全部字段必填；类型、数组次序和集合排序继承对应 Candidate/分类记录字段。
+摘要只覆盖精确候选输入及分类输入，**不含**分类输出 risk_level、matched_rule_ids、
+分类记录自身引用/摘要、CandidateSnapshot ID 或后继确认/closure/票据。
+`risk_level` 仍须与分类输出独立匹配；本摘要不替代真正的风险算法或证据资格核验。
+先固定上述输入 → 计算摘要 → 产生分类原件 → Candidate 引用原件，故无反向摘要环。
+
+消费者必须从实际候选与实际分类输入重算，不能信任同一 candidate_id、模型声明或原件
+自带的任意 64 位值。修改 proposal、conditions 或任一分类输入时，即使已合法重新寻址
+Candidate 和所有下游，也必须因 `RISK_INPUT` 拒绝旧记录；需要重新分类并产生新外置记录。
+`risk-input-golden.json` 固定独立 Python 期望字节/摘要，Go 以现有 C0 编码器加上述域复核。
+本次 v2 Draft 的七份下游 Golden 因原件引用变化更新；Charter/Manifest 两份及所有
+C0/C0-R、C1-A、DomainProfile、PersonaSpec 旧 Golden 不变，初版 v2 保留在 `9fe9c2c` 历史中。
+
+### 1.3 不可变引用的版本规则（F39-02）
+
+`FixedVersion` 复用 C1-B1 `references.go.fixedVersion` 已冻结的语义：先满足 Token，
+再按非 ASCII 字母/数字分段，忽略大小写，拒绝任一片段等于
+`latest,current,stable,main,master,head,default,active,newest,next,x`。
+因此 `release/latest`、`v1-latest`、`v1.x` 也拒绝；不把任意固定版本限制为 SemVer。
+例如 `release/2026-10-24-r17`、时间/构建编码、固定 hash 均可继续使用。
+这是现有冻结规则的复用，不声称能仅凭字符串证明外部源确实不可变。
+
+覆盖 `ExternalRef.version`、`SnapshotRef.version`、所有 `SubjectRef.identity_source_version`、
+`SourceNode.source_version`、Manifest/ReadSet 的 `source_dependency_index_version`；
+后者仍须与唯一 DEPENDENCY_INDEX descriptor 精确同值，不能用可变别名冒充快照 ID。
+其他通用 Token 不套用此规则。Schema 的 FixedVersion 与离线递归语义检查共同拒绝别名，
+`version-cases.json` 对合法固定编码、完整别名及复合片段做 Go C1-B1 / Python / Schema
+差分校验；Go 直接调用现有离线 DomainProfile 公共入口，生产代码不新增导出函数或改规则。
+来源原件、批准及在线撤销仍由 C1-C/C2 的真实解析器负责。
 
 ## 2. 持久唯一身份与各代次（D2-03）
 
@@ -237,7 +290,8 @@ C2 负责认证根/委托链/撤销及资格；C3 负责可比较权威顺序、
 | 普通发布新 Domain/Persona | 旧轮不热替换 | 新任务显式解析一次后冻结，旧轮仍需在线撤销检查 |
 
 启用前 producer、store、reader、受控注入、seal、submit、aggregate、adjudicate、C2、C3
-均声明接受的 `(artifact_type,schema_version,canonical_profile)`，包含输入 v1 和上述四类 v2。
+均声明接受的 `(artifact_type,schema_version,canonical_profile)`，包含输入 v1 和上述四类 v2；
+外置风险分类消费者还须显式支持 record_version=2.1 / magi-risk-input/1。
 任何环节未知/不支持则阻断新模式，不启用后自动降级。Capability 本身来自部署权威，不能由
 模型或工件正文授予。现有 C1 Schema 仍拒绝新类型；未来消费者须另行实现。
 

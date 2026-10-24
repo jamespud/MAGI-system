@@ -1359,5 +1359,507 @@
         ]
       }
     ]
+  },
+  {
+    "name": "F39-01-stale-risk-after-proposal-change",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "candidates",
+          "0",
+          "proposal"
+        ],
+        "value": "Replace no action with a destructive operation"
+      }
+    ]
+  },
+  {
+    "name": "F39-01-stale-risk-after-conditions-change",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "candidates",
+          "0",
+          "conditions"
+        ],
+        "value": [
+          {
+            "statement": "May affect unbounded resources",
+            "must_hold": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "F39-02-consistent-snapshot-version-latest",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.melchior",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.balthasar",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.melchior",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.balthasar",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.melchior",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.balthasar",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "final_shared_inputs",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.melchior",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.melchior",
+          "body",
+          "dependency_nodes",
+          "1",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.balthasar",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.balthasar",
+          "body",
+          "dependency_nodes",
+          "1",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "dependency_nodes",
+          "1",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "completeness.melchior",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "completeness.balthasar",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "completeness.casper",
+          "body",
+          "events",
+          "0",
+          "source",
+          "source_version"
+        ],
+        "value": "latest"
+      }
+    ]
+  },
+  {
+    "name": "F39-02-consistent-external-ref-version-latest",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "candidate",
+          "body",
+          "final_shared_delivery_receipt_refs",
+          "casper",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "final_shared_delivery_receipt_ref",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "receipt.casper",
+          "ref",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "confirmation.casper",
+          "body",
+          "receipt_ref",
+          "version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "closure",
+          "body",
+          "receipt_refs",
+          "casper",
+          "version"
+        ],
+        "value": "latest"
+      }
+    ]
+  },
+  {
+    "name": "F39-02-consistent-dependency-index-latest",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "manifest",
+          "body",
+          "source_dependency_index_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.melchior",
+          "body",
+          "source_dependency_index_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.balthasar",
+          "body",
+          "source_dependency_index_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "readset.casper",
+          "body",
+          "source_dependency_index_version"
+        ],
+        "value": "latest"
+      },
+      {
+        "op": "set",
+        "path": [
+          "artifacts",
+          "manifest",
+          "body",
+          "snapshot_refs",
+          "5",
+          "snapshot_id"
+        ],
+        "value": "latest"
+      }
+    ]
+  },
+  {
+    "name": "F39-01-stale-risk-after-classifier-attribute-change",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "input_attribute_values",
+          "0"
+        ],
+        "value": {
+          "attribute_id": "bounded",
+          "knowledge": "KNOWN",
+          "value": [
+            true
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "name": "F39-01-stale-risk-after-classifier-rule-change",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "rule_ref",
+          "version"
+        ],
+        "value": "2"
+      }
+    ]
+  },
+  {
+    "name": "F39-01-stale-risk-after-classifier-evidence-change",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "input_evidence_refs",
+          "0",
+          "content_digest"
+        ],
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    ]
+  },
+  {
+    "name": "F39-01-arbitrary-candidate-input-digest",
+    "expected": "RISK_INPUT",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "candidate_input_digest"
+        ],
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  {
+    "name": "F39-01-legacy-classification-2.0",
+    "expected": "SCHEMA",
+    "reseal": true,
+    "patches": [
+      {
+        "op": "set",
+        "path": [
+          "records",
+          "classification.no-action",
+          "body",
+          "record_version"
+        ],
+        "value": "2.0"
+      }
+    ]
   }
 ]

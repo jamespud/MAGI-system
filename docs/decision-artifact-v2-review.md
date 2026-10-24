@@ -15,7 +15,7 @@ C1-A/DomainProfile/PersonaSpec 既有身份。没有新协议生产 Go/DB/会话
 显式 Domain、Manifest、case/round、共同包、三回执、本人视图、ReadSet ID/digest 和 scoped epochs；
 自身 ID/digest 与后置批准/确认/closure 均不塞进被其引用的正文。
 新正文 schema_version=2.0 继续用 C0 原类型域及前缀，固定九份独立 Python 字节/摘要/ID Golden，
-再由现有 Go C0 校验。旧期望值、Schema 和生产者不改写。合成 Golden 是内容身份探针，
+再由现有 Go C0 校验。既有 v1/C0/C1 期望值、Schema 和生产者不改写。合成 Golden 是内容身份探针，
 不是获批工件、ROLLOUT-LAB 有效配置或发布资格证明。
 
 ## C. RED → GREEN 与反例
@@ -28,7 +28,7 @@ PASS positive: ACCEPT
 AssertionError: charter-domain-mismatch: expected DOMAIN, got ACCEPT
 ```
 
-补入离线绑定检查后通过；最终 5 个正向边界、78 个命名负例、9 份 Python/Go Golden
+补入离线绑定检查后通过；初次提交 `9fe9c2c` 的 5 个正向边界、78 个命名负例、9 份 Python/Go Golden
 通过。没有把环境错误算作 RED；只声明上述实际观察到的单项 Schema-only RED，
 不声称每个后来补入的负例都逐项经历过 RED。
 首次默认 Go/npm 缓存因 sandbox 只读失败（EROFS），改用 `/tmp` 缓存后重跑。
@@ -38,7 +38,8 @@ Schema 闭合、重新寻址后语义拒绝、未重哈希身份篡改分别检�
 
 ## D. 实际命令与 CI
 
-本次本地命令均成功（Go 使用 `GOCACHE=/tmp/magi-v2-go-build`，npm 安装缓存在 `/tmp`）：
+初次交付本地命令均成功（Go 使用 `GOCACHE=/tmp/magi-v2-go-build`，npm 安装缓存在 `/tmp`）；
+下表记录 `9fe9c2c` 的结果，后续 F39 修订验证单列于 §E.1：
 
 | 命令 | 实际结果 / 证明范围 |
 | --- | --- |
@@ -75,9 +76,49 @@ PR 描述，避免把旧 Head 的成功带到新提交。本文不提前声明�
 
 作者另修正 Candidate 上下文 SourceNode 的 raw_content_digest：使用原始字节 SHA-256，
 与 C0 类型域摘要分开。全部外置记录仍为合成声明，不能当签名或发布资格证明。
-独立 reviewer 对最后一项修正再次复核：全部 P2 已闭合，无剩余 blocker；
+初次独立 reviewer 对当时最后一项修正再次复核：当时提出的 P2 已闭合，无剩余 blocker；
 独立运行通过 9 份身份、5 个正向边界、78 个负例。该判断仅支持 Draft 审阅，
 不授权 Ready/merge，也不证明运行时集成。
+
+### E.1 PR #39 独立审阅后修订（2026-10-24）
+
+后续源码审阅提出 F39-01/F39-02 两项 P2；初次 CI 成功没有覆盖这两个语义缺口。
+先在原 Head `9fe9c2c` 实际运行五个新增变体，分别修改 proposal、conditions、
+跨工件一致的 SnapshotRef.version、ExternalRef.version、依赖索引版本，并合法重新寻址
+全部后继。五例的 Go Schema/C0/ID/Adopt 均通过，旧语义检查也全部错误接受；
+回归断言进程退出 1，得到如下 RED（不是环境失败）：
+
+```text
+F39-01-stale-risk-after-proposal-change: expected RISK_INPUT, got ACCEPT
+F39-01-stale-risk-after-conditions-change: expected RISK_INPUT, got ACCEPT
+F39-02-consistent-snapshot-version-latest: expected SCHEMA, got ACCEPT
+F39-02-consistent-external-ref-version-latest: expected SCHEMA, got ACCEPT
+F39-02-consistent-dependency-index-latest: expected SCHEMA, got ACCEPT
+5/5 regression expectations failed
+```
+
+| 发现 | 修订与区分能力 |
+| --- | --- |
+| F39-01：分类没有绑定精确候选输入 | RiskClassificationRecord 显式升为 2.1；新增 magi-risk-input/1 域分隔摘要，覆盖候选内容、domain、规则和输入属性/证据，排除后继 Snapshot ID 与分类输出。离线消费者重算；重寻址不自动刷新分类摘要。两个旧分类变体按 RISK_INPUT 拒绝，合法重新分类的变更提案接受。 |
+| F39-02：普通引用版本接受可变别名 | Schema FixedVersion 与 Python 语义检查复用 C1-B1 的完整别名分段规则；28 项矩阵与冻结 Go 公共消费者差分。三个一致引用变体按 SCHEMA 拒绝；非 SemVer 固定编码正例接受。 |
+
+修订后的完整门禁通过 **7 正向边界、88 命名负例、9 完整工件 Python/Go Golden**，
+另有 **1 风险输入 Python/Go Golden、28 版本规则 Go/Python/Schema 差分用例**。
+增加的其余五例覆盖分类属性、规则、证据、任意摘要和旧记录版本；
+不声称这五例也各自经历了修复前 RED。
+新风险记录引用导致七份下游 Draft Golden 改变；Charter、Manifest 两份不变，
+原始 Draft 向量保留于 `9fe9c2c`。既有 C0/C0-R/C1-A/Domain/Persona 路径逐项核对无改动。
+
+本轮重新运行 v2 门禁、既有 C0/Domain/Persona Python Golden、C1-A 结构检查、
+backend `go test -race ./...`、`go vet ./...`、新 Go 脚本 vet/gofmt 与 `git diff --check`。
+远端最终 Head 的六个 CI jobs 结果在 PR 描述中以精确 SHA/run 记录。
+本轮不把初次本地 frontend/运维验证冒充为再次本地运行；这些由最终 Head CI 再验。
+
+独立只读 reviewer 针对本轮差异复核后未发现可行动问题，判定 F39-01/F39-02
+在离线契约范围内通过；独立运行完整门禁退出 0，并重新加载原 Head 的语义检查器，
+确认原五个回归均 ACCEPT。复核确认 proposal/conditions 变体保留分类原件不变，
+同时重新寻址 Candidate、三个 ReadSet 和三个 Ballot；摘要无后继引用环，
+版本差分直接复用冻结 Go 入口。该结论只支持继续 Draft 独立审阅。
 
 ## F. 发布边界
 

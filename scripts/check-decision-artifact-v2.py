@@ -9,6 +9,7 @@ import hashlib
 from datetime import datetime
 import importlib.util
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -20,6 +21,8 @@ spec = importlib.util.spec_from_file_location(
 reference = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reference)
 ROLES = ('melchior', 'balthasar', 'casper')
+RISK_INPUT_PROFILE = 'magi-risk-input/1'
+RISK_INPUT_DOMAIN = b'magi:decision-risk-input:v1\n'
 SCOPES = ('execution_generation', 'context_revocation_scope_id',
           'context_revocation_epoch', 'authority_scope_id', 'authority_epoch',
           'credential_scope_id', 'credential_epoch')
@@ -31,6 +34,22 @@ def envelope(body):
     return dict(artifact_id=reference.TYPE_PREFIXES[body['artifact_type']] + '_' + digest,
                 digest=digest, canonical_profile='magi-cj/1', digest_alg='sha256',
                 body=body, canonical_bytes_hex=raw.hex())
+
+
+def risk_input(candidate, classification, domain_profile_id):
+    # Closed preimage: neither the output risk level nor a backward ref to the
+    # classification (or future Snapshot ID) participates in this input digest.
+    return dict(candidate_input_profile=RISK_INPUT_PROFILE,
+                domain_profile_id=domain_profile_id,
+                candidate={k: candidate[k] for k in (
+                    'candidate_id', 'proposal', 'is_no_action', 'originated_by',
+                    'conditions', 'parent_candidate_ids', 'state')},
+                classification_input={k: classification[k] for k in (
+                    'rules_version', 'rule_ref', 'input_attribute_values', 'input_evidence_refs')})
+
+
+def risk_input_digest(value):
+    return hashlib.sha256(RISK_INPUT_DOMAIN + reference.canonical_bytes(value)).hexdigest()
 
 
 def replace(value, before, after):
@@ -97,7 +116,30 @@ def require(condition, code):
         raise Rejected(code)
 
 
+# Keep this exact C1-B1 rule, with differential probes through the existing Go
+# public DomainProfile validator. This is not a SemVer restriction.
+VERSION_ALIASES = frozenset(('latest', 'current', 'stable', 'main', 'master',
+                             'head', 'default', 'active', 'newest', 'next', 'x'))
+
+
+def fixed_version(value):
+    return bool(value) and not (set(re.split('[^a-z0-9]+', value.lower())) & VERSION_ALIASES)
+
+
+def immutable_versions(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in ('version', 'source_version', 'identity_source_version',
+                       'source_dependency_index_version', 'rules_version'):
+                require(isinstance(child, str) and fixed_version(child), 'VERSION')
+            immutable_versions(child)
+    elif isinstance(value, list):
+        for child in value:
+            immutable_versions(child)
+
+
 def semantic(bundle):
+    immutable_versions(bundle)
     a = bundle['artifacts']
     b = {name: entry['body'] for name, entry in a.items()}
     charter, manifest, candidate = (b[n] for n in ('charter', 'manifest', 'candidate'))
@@ -189,6 +231,9 @@ def semantic(bundle):
         require(classification['candidate_id'] == item['candidate_id'] and
                 classification['domain_profile_id'] == charter['domain_profile_id'] and
                 classification['risk_level'] == item['risk_level'], 'RISK')
+        require(classification['candidate_input_profile'] == RISK_INPUT_PROFILE and
+                classification['candidate_input_digest'] == risk_input_digest(
+                    risk_input(item, classification, candidate['domain_profile_id'])), 'RISK_INPUT')
         require(ordered(classification['classified_at'], candidate['frozen_at']), 'ORDER')
 
     expected_round = dict(case_id=manifest['case_id'], round=manifest['round'],
@@ -359,6 +404,13 @@ def main():
         actual = envelope(entry['body'])
         for field, expected in golden[name].items():
             require(actual[field] == expected == entry[field], 'GOLDEN:' + name + ':' + field)
+    risk_golden = reference.parse((DATA / 'risk-input-golden.json').read_bytes())
+    risk_value = risk_input(baseline['artifacts']['candidate']['body']['candidates'][0],
+                            baseline['records']['classification.no-action']['body'],
+                            baseline['artifacts']['candidate']['body']['domain_profile_id'])
+    require(risk_value == risk_golden['input'] and
+            reference.canonical_bytes(risk_value).hex() == risk_golden['canonical_bytes_hex'] and
+            risk_input_digest(risk_value) == risk_golden['candidate_input_digest'], 'RISK_GOLDEN')
     cases = [('positive', baseline, '')]
     retries = copy.deepcopy(baseline)
     retries['round_bindings'].append(copy.deepcopy(retries['round_bindings'][0]))
@@ -396,6 +448,37 @@ def main():
         ballot = boundary['artifacts']['ballot.' + role]['body']
         ballot['submitted_at'] = ballot['frozen_at'] = '2026-10-23T00:00:33.000Z'
     cases.append(('freshness-exactly-30000ms', reseal(boundary), ''))
+    fixed = copy.deepcopy(baseline)
+    candidate_id = fixed['artifacts']['candidate']['artifact_id']
+
+    def fixed_encodings(value):
+        if isinstance(value, dict):
+            for field, child in value.items():
+                if field == 'identity_source_version' or (field == 'version' and 'artifact_type' not in value):
+                    value[field] = 'release/2026-10-24-r17'
+                elif field == 'source_version' and value['source_entry_id'] != candidate_id:
+                    value[field] = 'release/2026-10-24-r17'
+                else:
+                    fixed_encodings(child)
+        elif isinstance(value, list):
+            for child in value:
+                fixed_encodings(child)
+    fixed_encodings(fixed)
+    fixed = replace(fixed, fixed['artifacts']['manifest']['body']['source_dependency_index_version'],
+                    'dependency-index/release-20261024-r17')
+    for item in fixed['artifacts']['candidate']['body']['candidates']:
+        classification = next(e['body'] for e in fixed['records'].values()
+                              if e['ref'] == item['risk_classification_ref'])
+        classification['candidate_input_digest'] = risk_input_digest(risk_input(
+            item, classification, fixed['artifacts']['candidate']['body']['domain_profile_id']))
+    cases.append(('non-semver-fixed-reference-encodings', reseal(fixed), ''))
+    reclassified = copy.deepcopy(baseline)
+    item = reclassified['artifacts']['candidate']['body']['candidates'][0]
+    item['proposal'] = 'Keep the synthetic resources unchanged'
+    classification = reclassified['records']['classification.no-action']['body']
+    classification['candidate_input_digest'] = risk_input_digest(risk_input(
+        item, classification, reclassified['artifacts']['candidate']['body']['domain_profile_id']))
+    cases.append(('changed-proposal-with-new-risk-classification', reseal(reclassified), ''))
     negatives = reference.parse((DATA / 'negative-cases.json').read_bytes())
     for case in negatives:
         changes = copy.deepcopy(case['patches'])
@@ -406,6 +489,17 @@ def main():
             changed = reseal(changed)
         cases.append((case['name'], changed, case['expected']))
     probes = [p for _, b, _ in cases for p in structure_probes(b)]
+    case_probe_count = len(probes)
+    probes.append(dict(risk_input=risk_golden['input'],
+                       digest=risk_golden['candidate_input_digest'],
+                       canonical_bytes_hex=risk_golden['canonical_bytes_hex']))
+    version_cases = reference.parse((DATA / 'version-cases.json').read_bytes())
+    for case in version_cases:
+        require(fixed_version(case['value']) == case['valid'], 'FIXED_VERSION_PYTHON')
+        probes.append(dict(fixed_version=case['value']))
+        schema_probe = copy.deepcopy(baseline['artifacts']['charter']['body'])
+        schema_probe['created_by']['identity_source_version'] = case['value']
+        probes.append(envelope(schema_probe))
     result = subprocess.run(['go', 'run', '../scripts/check-decision-artifact-v2.go'],
                             cwd=ROOT / 'backend', input=json.dumps(probes), text=True,
                             capture_output=True)
@@ -414,6 +508,12 @@ def main():
         raise RuntimeError('Go structure oracle failed; this is not a negative-case pass')
     statuses = json.loads(result.stdout)
     require(len(statuses) == len(probes), 'ORACLE_COUNT')
+    extra = statuses[case_probe_count:]
+    require(extra[0] == '', 'RISK_GOLDEN_GO')
+    for i, case in enumerate(version_cases):
+        require(extra[1 + 2 * i] == ('' if case['valid'] else 'VERSION'), 'FIXED_VERSION_GO')
+        require(extra[2 + 2 * i] == ('' if case['valid'] else 'SCHEMA'), 'FIXED_VERSION_SCHEMA')
+    statuses = statuses[:case_probe_count]
     offset = 0
     for name, bundle, expected in cases:
         count = len(structure_probes(bundle))
@@ -429,6 +529,8 @@ def main():
             raise AssertionError(f'{name}: expected {expected or "ACCEPT"}, got {actual or "ACCEPT"}')
         print(f'PASS {name}: {actual or "ACCEPT"}')
     print(f'{len(baseline["artifacts"])} Python/Go Golden identities; {len(cases)-len(negatives)} positive boundaries; {len(negatives)} named negative fixture gates')
+    print('1 independent Python/Go risk-input Golden (magi-risk-input/1)')
+    print(f'{len(version_cases)} fixed-version parity cases: C1-B1 Go / Python / Schema')
     print('Static declarations only; MySQL/session/C2-C3 fault injection: NOT RUN / BLOCKED')
 
 

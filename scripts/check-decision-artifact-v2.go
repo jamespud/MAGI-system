@@ -4,22 +4,65 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/jamespud/magi/backend/domain/canonical"
+	"github.com/jamespud/magi/backend/domain/inputartifact"
 	"github.com/jamespud/magi/backend/domain/validation"
 )
 
 type probe struct {
+	FixedVersion *string         `json:"fixed_version"`
+	RiskInput    json.RawMessage `json:"risk_input"`
 	Body         json.RawMessage `json:"body"`
 	ID           string          `json:"artifact_id"`
 	Digest       string          `json:"digest"`
 	CanonicalHex string          `json:"canonical_bytes_hex"`
 	Profile      string          `json:"canonical_profile"`
 	Algorithm    string          `json:"digest_alg"`
+}
+
+// Reuse the frozen, private fixedVersion rule through its existing public
+// consumer; no new production export, copied Go rule, or SemVer approximation.
+func fixedVersionProbe(version string) string {
+	raw, err := os.ReadFile("domain/inputartifact/testdata/domain_profile.json")
+	if err != nil {
+		panic(err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		panic(err)
+	}
+	var ref map[string]json.RawMessage
+	if err := json.Unmarshal(body["governance_policy_ref"], &ref); err != nil {
+		panic(err)
+	}
+	ref["version"], err = json.Marshal(version)
+	if err != nil {
+		panic(err)
+	}
+	body["governance_policy_ref"], err = json.Marshal(ref)
+	if err != nil {
+		panic(err)
+	}
+	changed, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+	_, err = inputartifact.ValidateDomainProfile(changed, "", inputartifact.ValidationOptions{})
+	if err != nil {
+		var failure *inputartifact.Error
+		if errors.As(err, &failure) && failure.Kind == "VERSION" {
+			return "VERSION"
+		}
+		panic(err)
+	}
+	return ""
 }
 
 func main() {
@@ -34,6 +77,21 @@ func main() {
 	validator := validation.NewJSONSchemaValidator()
 	results := make([]string, len(probes))
 	for i, p := range probes {
+		if p.FixedVersion != nil {
+			results[i] = fixedVersionProbe(*p.FixedVersion)
+			continue
+		}
+		if p.RiskInput != nil {
+			c, err := canonical.Canonicalize(p.RiskInput)
+			if err != nil {
+				panic(err)
+			}
+			digest := sha256.Sum256(append([]byte("magi:decision-risk-input:v1\n"), c.Bytes()...))
+			if hex.EncodeToString(digest[:]) != p.Digest || hex.EncodeToString(c.Bytes()) != p.CanonicalHex {
+				results[i] = "RISK_INPUT"
+			}
+			continue
+		}
 		var header struct {
 			Type canonical.ArtifactType `json:"artifact_type"`
 		}
