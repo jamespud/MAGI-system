@@ -51,12 +51,23 @@ func lockActiveExecution(tx *gorm.DB, owner *entity.ExecutionContext) (*Decision
 	if err != nil {
 		return nil, nil, err
 	}
-	if job.Status != string(entity.DecisionJobRunning) || job.WorkerID != owner.WorkerID ||
-		job.ExecutionGeneration != owner.ExecutionGeneration || c.ExecutionGeneration != owner.ExecutionGeneration ||
-		job.LeaseUntil == nil || !job.LeaseUntil.After(now) {
-		return nil, nil, port.ErrLeaseLost
+	if err := validateActiveExecutionAt(job, c, owner, now); err != nil {
+		return nil, nil, err
 	}
 	return job, c, nil
+}
+
+// validateActiveExecutionAt re-evaluates the locked owner predicate against a
+// trusted DB timestamp. Read paths call it again after long validation so an
+// initially active lease cannot release material after expiring.
+func validateActiveExecutionAt(job *DecisionJobModel, c *CaseModel, owner *entity.ExecutionContext, now time.Time) error {
+	if job == nil || c == nil || owner == nil || !owner.IsDurable() ||
+		job.Status != string(entity.DecisionJobRunning) || job.WorkerID != owner.WorkerID ||
+		job.ExecutionGeneration != owner.ExecutionGeneration || c.ExecutionGeneration != owner.ExecutionGeneration ||
+		job.LeaseUntil == nil || !job.LeaseUntil.After(now) {
+		return port.ErrLeaseLost
+	}
+	return nil
 }
 
 func expectedCaseStatus(c *CaseModel, expected []entity.CaseStatus) bool {
