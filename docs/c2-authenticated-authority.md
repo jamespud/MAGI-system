@@ -115,7 +115,8 @@ standard base64 Ed25519。所有签名 body 使用既有 C0 canonical encoder。
 | Proof scope evidence | `ScopedEpoch` | `magi:authority-proof-scope-evidence:v1\n` |
 | Revocation command | `magi-authority-revocation-command/1` | `magi:authority-revocation-command-signature:v1\n` |
 | Credential rotation command | `magi-authority-credential-rotation-command/1` | `magi:authority-credential-rotation-command-signature:v1\n` |
-| Command result identity | signed command envelope | `magi:authority-command-evidence:v1\n` |
+| Command evidence digest | canonical signed command envelope (`SignedRevocationCommand` / `SignedCredentialRotationCommand`) | `magi:authority-command-evidence:v1\n` |
+| Command result digest | revocation: canonical `EpochState`; rotation: canonical `Credential` | `magi:authority-command-result:v1\n` |
 
 Proof 身份只覆盖 canonical proof body，不覆盖外层 signature；外层
 `proof_id` 必须等于 body 的 C0 `aprf_` 身份，signature 必须覆盖 body，
@@ -138,9 +139,13 @@ proof signature 使用不同 domain。
 - proof structure limits: `delegations<=16`、`approvals<=64`、
   owner policy `owners<=64`。
 - revocation/rotation commands: body 内 `command_id` 和 signed raw 必须持久
-  绑定原结果；id 在 trust domain 内不复用。command result 另有 canonical
-  result digest，replay 会校验 result scope/epoch/row_version/revoked 或
-  exact NewCredential lineage。
+  绑定原结果；id 在 trust domain 内不复用。
+  - command-evidence digest 使用 `magi:authority-command-evidence:v1\n`，
+    preimage 是 canonical signed command envelope。
+  - command-result digest 使用 `magi:authority-command-result:v1\n`；revocation
+    的 preimage 是 canonical `EpochState`，rotation 的 preimage 是 canonical
+    `Credential`。replay 会校验 result scope/epoch/row_version/revoked 或
+    exact NewCredential lineage。
 - rotation: `OldCredential.RootIncarnation` 必须等于 current trust state root；
   root-old active credential 不能被“升级”进 current root。
 - consent evidence columns: 除 raw/digest 外，必须 exact compare
