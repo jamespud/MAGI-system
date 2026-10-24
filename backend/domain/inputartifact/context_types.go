@@ -89,7 +89,8 @@ type ContextValidationOptions struct {
 	EnvelopeLimits               ResourceLimits
 	RequireCompleteQualification bool
 	// RequireCompleteBindings requires every local selection, validated domain/
-	// persona, descriptor and raw snapshot. It still cannot grant qualification.
+	// persona, descriptor and raw snapshot, with all Persona DomainRelations
+	// CHECKED_OFFLINE. Partial relations fail closed; this cannot grant qualification.
 	RequireCompleteBindings bool
 	Selection               *ContextSelection
 	DomainProfile           *ValidatedDomainProfile

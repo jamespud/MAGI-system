@@ -137,9 +137,9 @@ func checkContextBindings(m ContextManifest, opts ContextValidationOptions, iv c
 		if p.DomainProfileID() != "" && p.DomainProfileID() != m.DomainProfileID {
 			return bindErr(path, "Persona was validated against a different domain identity")
 		}
-		if p.DomainProfileID() == "" || p.Status().DomainRelations == "UNVERIFIABLE_REFERENCE" {
+		if p.DomainProfileID() == "" || p.Status().DomainRelations != "CHECKED_OFFLINE" {
 			status.Bindings = "PARTIAL_OFFLINE"
-			unavailable(path, "Persona has no checked selected domain context")
+			unavailable(path, "Persona selected domain relations are not fully checked offline")
 		}
 		if e := mergeValidity(p.Body().Validity, "$.roles."+role+".persona.validity"); e != nil {
 			return nil, ContextValidationStatus{}, e

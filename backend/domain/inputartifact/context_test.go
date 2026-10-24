@@ -59,6 +59,93 @@ func contextOptions(t *testing.T, m ContextManifest) ContextValidationOptions {
 	return opts
 }
 func strptr(s string) *string { return &s }
+
+// Fully checked local relations use separately validated, extension-free
+// Personas. The frozen Golden Personas retain their unresolved extensions.
+func contextCompleteOptions(t *testing.T, m *ContextManifest) ContextValidationOptions {
+	t.Helper()
+	opts := contextOptions(t, *m)
+	for _, role := range contextRoles {
+		body := personaFixture(t, role)
+		body["domain_extensions"] = []any{}
+		p, err := ValidatePersonaSpec(encode(t, body), "", personaOptions(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Status().DomainRelations != "CHECKED_OFFLINE" {
+			t.Fatalf("%s relations not fully checked: %+v", role, p.Status())
+		}
+		opts.Personas[role] = p
+		v := m.Roles[role]
+		v.PersonaSpecID = p.ArtifactID()
+		m.Roles[role] = v
+		selected := opts.Selection.Roles[role]
+		selected.PersonaSpecID = p.ArtifactID()
+		opts.Selection.Roles[role] = selected
+	}
+	return opts
+}
+
+// F41-02: exact identity, role and supplied domain bytes cannot upgrade a
+// Persona's unresolved extension relations into complete Context bindings.
+func TestContextPartialPersonaDomainRelations(t *testing.T) {
+	t.Run("all-checked", func(t *testing.T) {
+		m := contextFixture(t)
+		opts := contextCompleteOptions(t, &m)
+		opts.RequireCompleteBindings = true
+		v, err := ValidateContextManifest(encode(t, m), "", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ContextValidationStatus{Structure: "VALID_OFFLINE", Bindings: "CHECKED_OFFLINE", SnapshotBytes: "CHECKED_OFFLINE", Qualification: "UNVERIFIABLE_REFERENCE", ActualReads: "NOT_RUN"}
+		if v.Status() != want || len(v.PendingDependencies()) == 0 {
+			t.Fatalf("complete local relations changed qualification/reads: %+v", v.Status())
+		}
+	})
+	for _, role := range contextRoles {
+		t.Run(role, func(t *testing.T) {
+			m := contextFixture(t)
+			opts := contextCompleteOptions(t, &m)
+			p := personaValid(t, role)
+			if p.Status().DomainRelations != "PARTIAL_OFFLINE" || p.DomainProfileID() != opts.DomainProfile.ArtifactID() || p.Body().PersonaID != role {
+				t.Fatal("regression requires a partially checked Persona with correct domain and role")
+			}
+			opts.Personas[role] = p
+			view := m.Roles[role]
+			view.PersonaSpecID = p.ArtifactID()
+			m.Roles[role] = view
+			selected := opts.Selection.Roles[role]
+			selected.PersonaSpecID = p.ArtifactID()
+			opts.Selection.Roles[role] = selected
+			contextSchemaValid(t, m)
+			t.Run("partial", func(t *testing.T) {
+				v, err := ValidateContextManifest(encode(t, m), "", opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := ContextValidationStatus{Structure: "VALID_OFFLINE", Bindings: "PARTIAL_OFFLINE", SnapshotBytes: "CHECKED_OFFLINE", Qualification: "UNVERIFIABLE_REFERENCE", ActualReads: "NOT_RUN"}
+				if v.Status() != want {
+					t.Errorf("partial Persona domain relations promoted: %+v", v.Status())
+				}
+				found := false
+				for _, dep := range v.PendingDependencies() {
+					if dep.Kind == "UNVERIFIABLE_REQUIREMENT_BINDING" && dep.Path == "$.roles."+role+".persona.domain_extensions[0].minimum_investigation[0]" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("unresolved Persona extension dependency lost")
+				}
+			})
+			t.Run("strict", func(t *testing.T) {
+				opts.RequireCompleteBindings = true
+				v, err := ValidateContextManifest(encode(t, m), "", opts)
+				contextError(t, v, err, "UNVERIFIABLE_REFERENCE")
+			})
+		})
+	}
+}
+
 func contextValid(t *testing.T) ValidatedContextManifest {
 	t.Helper()
 	m := contextFixture(t)
@@ -93,7 +180,6 @@ func TestContextGolden(t *testing.T) {
 				t.Fatal(err)
 			}
 			opts := contextOptions(t, m)
-			opts.RequireCompleteBindings = true
 			v, err := ValidateContextManifest(read(t, "testdata/"+name+".json"), "", opts)
 			if err != nil {
 				t.Fatal(err)
@@ -108,13 +194,16 @@ func TestContextGolden(t *testing.T) {
 			if v.ArtifactID() != g.ID || v.Digest() != g.Digest || !bytes.Equal(v.CanonicalBytes(), read(t, "testdata/"+name+".canonical.json")) {
 				t.Fatal("independent Python golden mismatch")
 			}
-			want := ContextValidationStatus{Structure: "VALID_OFFLINE", Bindings: "CHECKED_OFFLINE", SnapshotBytes: "CHECKED_OFFLINE", Qualification: "UNVERIFIABLE_REFERENCE", ActualReads: "NOT_RUN"}
+			want := ContextValidationStatus{Structure: "VALID_OFFLINE", Bindings: "PARTIAL_OFFLINE", SnapshotBytes: "CHECKED_OFFLINE", Qualification: "UNVERIFIABLE_REFERENCE", ActualReads: "NOT_RUN"}
 			if v.Status() != want {
 				t.Fatalf("status: %+v", v.Status())
 			}
 			if len(v.PendingDependencies()) == 0 {
 				t.Fatal("offline identity erased qualification dependencies")
 			}
+			opts.RequireCompleteBindings = true
+			v, err = ValidateContextManifest(read(t, "testdata/"+name+".json"), "", opts)
+			contextError(t, v, err, "UNVERIFIABLE_REFERENCE")
 		})
 	}
 }
@@ -331,11 +420,11 @@ func TestContextFrozenSchemaAndC0(t *testing.T) {
 }
 
 func TestContextQualificationAndDependencies(t *testing.T) {
-	m := contextFixture(t)
 	for _, complete := range []bool{false, true} {
+		m := contextFixture(t)
 		opts := ContextValidationOptions{}
 		if complete {
-			opts = contextOptions(t, m)
+			opts = contextCompleteOptions(t, &m)
 		}
 		v, err := ValidateContextManifest(encode(t, m), "", opts)
 		if err != nil {
@@ -361,7 +450,8 @@ func TestContextQualificationAndDependencies(t *testing.T) {
 	}
 	for _, field := range []string{"selection", "domain", "personas", "snapshots", "snapshot-bytes"} {
 		t.Run(field, func(t *testing.T) {
-			opts := contextOptions(t, m)
+			m := contextFixture(t)
+			opts := contextCompleteOptions(t, &m)
 			opts.RequireCompleteBindings = true
 			switch field {
 			case "selection":
@@ -474,7 +564,7 @@ func TestContextAuthorityIntegration(t *testing.T) {
 
 func TestContextPersonaDomainEvidenceCannotBeInferredFromSelectedID(t *testing.T) {
 	m := contextFixture(t)
-	opts := contextOptions(t, m)
+	opts := contextCompleteOptions(t, &m)
 	// The Persona's selected ID can be present even though Persona validation
 	// never received domain bytes. An ID assertion is not a checked relation.
 	p, err := ValidatePersonaSpec(read(t, "testdata/persona_casper.json"), "", PersonaValidationOptions{DomainProfileID: m.DomainProfileID})
@@ -482,6 +572,12 @@ func TestContextPersonaDomainEvidenceCannotBeInferredFromSelectedID(t *testing.T
 		t.Fatal(err)
 	}
 	opts.Personas["casper"] = p
+	view := m.Roles["casper"]
+	view.PersonaSpecID = p.ArtifactID()
+	m.Roles["casper"] = view
+	selected := opts.Selection.Roles["casper"]
+	selected.PersonaSpecID = p.ArtifactID()
+	opts.Selection.Roles["casper"] = selected
 	opts.RequireCompleteBindings = true
 	v, err := ValidateContextManifest(encode(t, m), "", opts)
 	contextError(t, v, err, "UNVERIFIABLE_REFERENCE")
@@ -529,7 +625,7 @@ func TestContextUsageCannotPrecedeFreeze(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := contextFixture(t)
 			m.FrozenAt = "2026-10-22T03:00:00.000Z"
-			opts := contextOptions(t, m)
+			opts := contextCompleteOptions(t, &m)
 			opts.RequireCompleteBindings = true
 			opts.UsageWindow = &Validity{NotBefore: tc.start, ValidUntil: strptr("2026-10-22T04:00:00.000Z")}
 			contextSchemaValid(t, m)

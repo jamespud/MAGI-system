@@ -29,7 +29,7 @@ ReadContextManifestEnvelope(raw []byte, expectedID string, opts ContextValidatio
 
 `ContextCharterBinding` **只是外部声明**，当前显式接受 schema_version=2.0 的选择上下文，检查其精确 `chtr_` ID、声明版本、领域 ID、声明有效期和 horizon。它不是 ValidatedCharter；本切片没有生产 Charter 解析器，原始 Charter 字节、完整 Schema/语义、主体确认、disclosure 约束及消费者 v2 兼容能力始终为 `UNVERIFIABLE_REFERENCE`。不能用这份声明证明 Charter 已批准，也不能把声明中的政策当作权限。没有选择上下文仍可检查本地闭包，但其跨工件选择状态不完整。
 
-Domain/Persona 必须来自已有不可变验证结果。所选 Persona 的 `persona_id` 必须匹配角色，且其实际检查过的领域上下文必须匹配 Manifest。仅填写领域 ID、没有领域原件的 Persona 验证结果不能被提升为完整关系。两类工件的待核验依赖全部向上传递，组合后再检查同一外部 namespace/object/version 的摘要冲突。
+Domain/Persona 必须来自已有不可变验证结果。所选 Persona 的 `persona_id` 必须匹配角色，且其实际检查过的领域上下文必须匹配 Manifest。仅填写领域 ID、没有领域原件的 Persona 验证结果不能被提升为完整关系。三角色的 `DomainRelations` 必须全部为 `CHECKED_OFFLINE`，Context 才能报告完整本地绑定；任一 `PARTIAL_OFFLINE` 或未核验关系均保守传播为 `Bindings=PARTIAL_OFFLINE`，不因 ID/角色正确或已提供 DomainProfile 而升级。两类工件的待核验依赖全部向上传递，组合后再检查同一外部 namespace/object/version 的摘要冲突。
 
 `ContextSnapshot` 的独立 descriptor 必须逐字段相同；可选 `RawBytes` 按原始字节 SHA-256 比对，不使用 C0 工件域，也不规范化外部原文。nil 表示缺原件，非 nil 的空字节有明确空串摘要；摘要正确不证明快照内容完备、受控空经验/空偏好语义、角色归属或来源真实性。snapshot 的摘要与 source_ref 原件摘要不被无依据地当作同一种字节包。
 
@@ -37,13 +37,13 @@ Domain/Persona 必须来自已有不可变验证结果。所选 Persona 的 `per
 
 默认正文资源上限为 262144 bytes / depth 24 / members 4096 / string bytes 16384，正数选项可覆盖工程限额；Envelope 分别派生 bytes+1024、depth+1、members+5、string 至少 69，支持独立更严格上限并防加法溢出。正文在 Envelope 中仍单独受限。原始快照另有每份 262144 / 总计 1048576 bytes 的默认工程上限，采用剩余预算扣减避免总和溢出。没有截断材料路径。
 
-结果的 `Body()`、`CanonicalBytes()`、`PendingDependencies()` 均为独立副本，`Status()` 返回值。资格始终 `UNVERIFIABLE_REFERENCE`，实际读取始终 `NOT_RUN`；`RequireCompleteQualification=true` 始终失败关闭。`RequireCompleteBindings=true` 只要求全部本地选择、Domain/Persona 关系、descriptor 和原始快照齐全，仍不认证 Charter 或权限。
+结果的 `Body()`、`CanonicalBytes()`、`PendingDependencies()` 均为独立副本，`Status()` 返回值。资格始终 `UNVERIFIABLE_REFERENCE`，实际读取始终 `NOT_RUN`；`RequireCompleteQualification=true` 始终失败关闭。`RequireCompleteBindings=true` 要求全部本地选择、Domain/Persona 关系、descriptor 和原始快照齐全，且全部 Persona 的本地领域关系完成；部分关系以 `UNVERIFIABLE_REFERENCE` 失败关闭并返回零值结果，仍不认证 Charter 或权限。
 
 | 状态 | 证明范围 |
 | --- | --- |
 | `Structure=VALID_OFFLINE` | 冻结 Schema、本地语义和精确描述符闭包通过 |
-| `Bindings=CHECKED_OFFLINE` | 调用方精确选择与已验证 Domain/Persona 关系一致；没有资格结论 |
-| `Bindings=PARTIAL_OFFLINE/UNVERIFIABLE_REFERENCE` | 缺选择或已检查的 Domain/Persona 关系 |
+| `Bindings=CHECKED_OFFLINE` | 调用方精确选择与已验证 Domain/Persona 关系一致，全部 Persona DomainRelations 为 CHECKED_OFFLINE；没有资格结论 |
+| `Bindings=PARTIAL_OFFLINE/UNVERIFIABLE_REFERENCE` | 缺选择或完整 Domain/Persona 关系；包括 Persona 扩展调查关系部分未核验 |
 | `SnapshotBytes=CHECKED_OFFLINE` | 所有独立 descriptor 和原始字节摘要匹配；没有来源真实性结论 |
 | `SnapshotBytes=PARTIAL_OFFLINE` | 至少一份 descriptor/原始字节缺失 |
 | `Qualification=UNVERIFIABLE_REFERENCE` | Charter、签发者、发布、访问/披露、偏好确认、作用域/撤销及唯一轮次登记未认证 |
@@ -61,7 +61,11 @@ Schema 漂移命令的初始空比较实现实际放行 9 个有效漂移反例�
 
 临时 RED 日志位于 `/tmp/magi-c1c1-{api-red,semantic-red,read-red,persona-domain-red,schema-red}.log`，不是持久发布工件。可复现证据为提交的具名测试和最终 Head CI。
 
+F41-02 的 `TestContextPartialPersonaDomainRelations` 在修复前实际出现 6 项语义失败：分别只替换 Melchior/Balthasar/Casper 中一份为正确 ID/角色/领域的部分核验 Persona，普通模式错误提升为 `CHECKED_OFFLINE`，严格模式错误放行。最小修复后全部转绿，原扩展待核验路径保留，资格和读取状态不变。另有三角色全部完成本地关系的严格模式正例。RED 日志为 `/tmp/magi-f41-02-red.log`，同样只是本机临时证据。
+
 两份全量新 Fixture 的 canonical bytes / digest / `ctxm_` ID 由独立 Python C0 参考先计算，Go 再核对；未从 Go 生成期望值。完整视图含 12 份 descriptor，空 Allowed Context 视图含 6 份；三角色经验均显式独立固定。Fixture 和原始快照均标记 synthetic/offline，不代表真实批准或权限。
+
+这两份 Context Golden 使用的三份冻结 Persona 均为 `DomainRelations=PARTIAL_OFFLINE`，因此普通验证的预期绑定状态为 `PARTIAL_OFFLINE`，严格模式拒绝。F41-02 没有修改任何 Context/Persona Fixture、canonical bytes 或 Golden 身份。完整本地绑定及 F41-01 等需要独立完整基线的测试，使用在内存中移除扩展、重新实际验证并精确重绑新 ID 的 Persona 变体；没有伪造验证状态。
 
 | Fixture | Canonical bytes | ArtifactID |
 | --- | ---: | --- |
@@ -93,7 +97,7 @@ cd ..
 git diff --check
 ```
 
-本轮 inputartifact 包共 675 个通过事件、7 个跳过事件（含子测试）；其中 Context 为 13 个顶层通过、116 个通过事件、2 个边界跳过。旧 C0/C0-R、Domain/Persona、C1-A、F36-01、Decision v2 的检查保持存在；v2 仍为 9 份工件 Golden、1 份风险输入 Golden、7 正例、88 负例、28 版本差分。
+F41-02 修复后重新执行：inputartifact 包共 686 个通过事件、7 个跳过事件（含子测试）；其中 Context 为 14 个顶层通过、127 个通过事件、2 个边界跳过。旧 C0/C0-R、Domain/Persona、C1-A、F36-01、Decision v2 的检查保持存在；v2 仍为 9 份工件 Golden、1 份风险输入 Golden、7 正例、88 负例、28 版本差分。
 
 本地没有配置 `MAGI_TEST_MYSQL_DSN`；全量 Go 成功不能证明真实 MySQL 迁移、writer cutover 或新 Evidence Closure 事务。CI 的既有 MySQL Jobs 测试的是既有数据库契约，也不能变成尚未实现的 C1-C2 Evidence Closure 证据。
 
@@ -104,7 +108,8 @@ git diff --check
 3. **同一引用版本不能有两种摘要。** Manifest、Domain、Persona 的组合依赖再次检查；缺资格不掩盖局部可判定矛盾。
 4. **绑定和资格分开。** 完整字节/本地关系通过仍保留 Charter 原件/批准、签发资格、数据访问/披露、人格发布、偏好认证、scope 当前 epoch、唯一轮次登记和可信时序依赖。
 5. **F41-01 使用窗口早于冻结已修复。** 独立只读审阅复现：即使全部本地绑定齐全、有效期相交，03:00 冻结的清单仍接受 01:00 开始的使用窗口。具名 `TestContextUsageCannotPrecedeFreeze` 实际 RED 后转绿，另覆盖同毫秒及之后的边界。修复只拒绝声明之间的已知时间矛盾，不证明真实交付或可信时间。
-6. **完整视图不等于已读取。** 没有 Agent Loop、provider session、可信回执、ReadSetJournal 或 Evidence Closure；没有模型人格行为实验。
+6. **F41-02 部分 Persona 领域关系被提升已修复。** `PARTIAL_OFFLINE` 不再被 Context 提升为 `CHECKED_OFFLINE`；只有三角色本地领域关系全部完成才满足严格绑定选项。三角色各自的普通/严格模式反例实际 RED→GREEN；完整绑定正例、冻结 Golden 与原缺领域证据回归均保留。
+7. **完整视图不等于已读取。** 没有 Agent Loop、provider session、可信回执、ReadSetJournal 或 Evidence Closure；没有模型人格行为实验。
 
 ## F. 放行与后续
 
