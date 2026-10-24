@@ -67,6 +67,12 @@ jobs:
           python3 ../scripts/check-context-schema-parity.py
           python3 ../scripts/test-context-schema-parity.py
 
+      - name: ReadSet v2 offline full-body identity and frozen schema parity
+        run: |
+          python3 domain/inputartifact/testdata/verify_readset_golden.py
+          python3 ../scripts/check-readset-schema-parity.py
+          python3 ../scripts/test-readset-schema-parity.py
+
       - name: Input artifact contract structure
         run: go run ../scripts/check-input-artifact-contract.go
 
