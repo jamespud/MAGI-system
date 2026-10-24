@@ -138,6 +138,9 @@ func validateCredentialReplacement(oldRef CredentialRef, replacement Credential,
 	if result.Outcome != "" {
 		return fmt.Errorf("old credential is not registered")
 	}
+	if old.Ref.RootIncarnation != state.RootIncarnation {
+		return fmt.Errorf("old credential belongs to another root incarnation")
+	}
 	if old.Status != CredentialActive {
 		return fmt.Errorf("old credential is not active")
 	}

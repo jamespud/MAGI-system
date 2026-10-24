@@ -26,6 +26,7 @@ const (
 	authorityConsentEvidenceDomain     = "magi:authority-consent-evidence:v1\n"
 	authorityScopeEvidenceDomain       = "magi:authority-proof-scope-evidence:v1\n"
 	authorityCommandEvidenceDomain     = "magi:authority-command-evidence:v1\n"
+	authorityCommandResultDomain       = "magi:authority-command-result:v1\n"
 )
 
 // AuthorityRepositoryConfig gates C2 persistence. The zero value is disabled.
@@ -109,6 +110,7 @@ type authorityCommandRow struct {
 	ResultCredentialID      string
 	ResultCredentialVersion uint64
 	ResultCredentialRaw     []byte
+	ResultDigest            string
 }
 
 type authorityEpochRow struct {
@@ -459,10 +461,13 @@ func (r *AuthorityRepository) verifyProofInTx(tx *gorm.DB, request authority.Ver
 
 func (r *AuthorityRepository) lockTrustState(tx *gorm.DB, root authorityRootRow, signedProof authority.SignedProof, requireEvidence bool) (authority.TrustState, authority.Result) {
 	proof := signedProof.Proof
+	var consentThreshold uint64
 	if requireEvidence {
-		if result := lockProofEvidence(tx, root.TrustDomain, signedProof); result.Outcome != "" {
+		threshold, result := lockProofEvidence(tx, root.TrustDomain, signedProof)
+		if result.Outcome != "" {
 			return authority.TrustState{}, result
 		}
+		consentThreshold = threshold
 	}
 	state := authority.TrustState{}
 	refs := make(map[authority.CredentialRef]struct{})
@@ -506,6 +511,9 @@ func (r *AuthorityRepository) lockTrustState(tx *gorm.DB, root authorityRootRow,
 		return authority.TrustState{}, result
 	}
 	if result.Outcome == "" {
+		if requireEvidence && policy.Threshold != consentThreshold {
+			return authority.TrustState{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: "consent threshold differs from the authenticated owner policy"}
+		}
 		state.Policies = append(state.Policies, policy)
 	}
 	scopes := append([]authority.ScopedEpoch(nil), proof.Scopes...)
@@ -528,7 +536,7 @@ func (r *AuthorityRepository) lockTrustState(tx *gorm.DB, root authorityRootRow,
 	return state, authority.Result{}
 }
 
-func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.SignedProof) authority.Result {
+func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.SignedProof) (uint64, authority.Result) {
 	proof := signedProof.Proof
 	type scopeKeyEvidence struct {
 		ScopeKind string
@@ -537,7 +545,7 @@ func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.Si
 	var evidenceKeys []scopeKeyEvidence
 	if err := tx.Raw(`SELECT scope_kind, scope_id FROM magi_authority_proof_scope
 		WHERE trust_domain = ? AND proof_id = ?`, trustDomain, signedProof.ProofID).Scan(&evidenceKeys).Error; err != nil {
-		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+		return 0, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 	}
 	sort.Slice(evidenceKeys, func(i, j int) bool {
 		return authority.ScopeKeyCompare(
@@ -561,7 +569,7 @@ func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.Si
 			trustDomain, signedProof.ProofID, key.ScopeKind, key.ScopeID).
 			Row().Scan(&evidence.ScopeKind, &evidence.ScopeID, &evidence.Epoch, &evidence.ScopeDigest, &evidence.RawScope)
 		if err != nil {
-			return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+			return 0, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 		}
 		scopes = append(scopes, evidence)
 	}
@@ -573,19 +581,19 @@ func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.Si
 		) < 0
 	})
 	if len(scopes) != len(expectedScopes) {
-		return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence row count differs from the signed proof"}
+		return 0, authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence row count differs from the signed proof"}
 	}
 	for i, expected := range expectedScopes {
 		if scopes[i].ScopeKind != string(expected.Kind) || scopes[i].ScopeID != expected.ScopeID || scopes[i].Epoch != expected.Epoch {
-			return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence differs from the signed proof"}
+			return 0, authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence differs from the signed proof"}
 		}
 		canonicalScope, err := canonicalStructBytes(expected)
 		if err != nil {
-			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: err.Error()}
+			return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: err.Error()}
 		}
 		if !bytes.Equal(scopes[i].RawScope, canonicalScope) ||
 			scopes[i].ScopeDigest != authorityEvidenceDigest(authorityScopeEvidenceDomain, canonicalScope) {
-			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: "scope evidence bytes or digest do not match the signed proof"}
+			return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: "scope evidence bytes or digest do not match the signed proof"}
 		}
 	}
 
@@ -600,53 +608,60 @@ func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.Si
 		FROM magi_authority_proof_delegation
 		WHERE trust_domain = ? AND proof_id = ? ORDER BY hop_index FOR UPDATE`,
 		trustDomain, signedProof.ProofID).Scan(&delegations).Error; err != nil {
-		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+		return 0, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 	}
 	if len(delegations) != len(proof.Delegations) {
-		return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_EVIDENCE_MISSING", Detail: "delegation evidence row count differs from the signed proof"}
+		return 0, authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_EVIDENCE_MISSING", Detail: "delegation evidence row count differs from the signed proof"}
 	}
 	for i, hop := range proof.Delegations {
 		canonicalHop, err := canonicalStructBytes(hop)
 		if err != nil {
-			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: err.Error()}
+			return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: err.Error()}
 		}
 		if delegations[i].HopIndex != i || delegations[i].DelegationID != hop.Body.DelegationID ||
 			!bytes.Equal(delegations[i].RawDelegation, canonicalHop) ||
 			delegations[i].DelegationDigest != authorityEvidenceDigest(authorityDelegationEvidenceDomain, canonicalHop) {
-			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: "delegation evidence does not match the signed proof"}
+			return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: "delegation evidence does not match the signed proof"}
 		}
 	}
 
 	type consentEvidence struct {
-		ConsentID     string
-		PolicyID      string
-		PolicyVersion string
-		ConsentDigest string
-		RawConsent    []byte
+		ConsentID           string
+		PolicyID            string
+		PolicyVersion       string
+		ConsentDigest       string
+		ExecutionGeneration uint64
+		Threshold           uint64
+		ApprovalCount       uint64
+		RawConsent          []byte
 	}
 	var consent consentEvidence
-	err := tx.Raw(`SELECT consent_id, policy_id, policy_version, consent_digest, raw_consent
+	err := tx.Raw(`SELECT consent_id, policy_id, policy_version, consent_digest,
+			execution_generation, threshold, approval_count, raw_consent
 		FROM magi_authority_proof_consent WHERE trust_domain = ? AND proof_id = ? FOR UPDATE`,
 		trustDomain, signedProof.ProofID).
-		Row().Scan(&consent.ConsentID, &consent.PolicyID, &consent.PolicyVersion, &consent.ConsentDigest, &consent.RawConsent)
+		Row().Scan(&consent.ConsentID, &consent.PolicyID, &consent.PolicyVersion, &consent.ConsentDigest,
+		&consent.ExecutionGeneration, &consent.Threshold, &consent.ApprovalCount, &consent.RawConsent)
 	if errors.Is(err, sql.ErrNoRows) {
-		return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_EVIDENCE_MISSING", Detail: "consent evidence is missing"}
+		return 0, authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_EVIDENCE_MISSING", Detail: "consent evidence is missing"}
 	}
 	if err != nil {
-		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+		return 0, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 	}
 	canonicalConsent, err := canonicalStructBytes(proof.Consent)
 	if err != nil {
-		return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: err.Error()}
+		return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: err.Error()}
 	}
 	if consent.ConsentID != proof.Consent.Body.ConsentID ||
 		consent.PolicyID != proof.Consent.Body.PolicyID ||
 		consent.PolicyVersion != proof.Consent.Body.PolicyVersion ||
+		consent.ExecutionGeneration != proof.Consent.Body.ExecutionGeneration ||
+		consent.ApprovalCount != uint64(len(proof.Consent.Approvals)) ||
 		!bytes.Equal(consent.RawConsent, canonicalConsent) ||
 		consent.ConsentDigest != authorityEvidenceDigest(authorityConsentEvidenceDomain, canonicalConsent) {
-		return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: "consent evidence does not match the signed proof"}
+		return 0, authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_EVIDENCE_CORRUPT", Detail: "consent evidence does not match the signed proof"}
 	}
-	return authority.Result{}
+	return consent.Threshold, authority.Result{}
 }
 
 func lockCredential(tx *gorm.DB, trustDomain string, ref authority.CredentialRef) (authority.Credential, authority.Result) {
@@ -955,13 +970,13 @@ func lockAuthorityCommand(tx *gorm.DB, trustDomain, kind, commandID string) (*au
 	var row authorityCommandRow
 	err := tx.Raw(`SELECT command_kind, command_digest, raw_command,
 			result_scope_kind, result_scope_id, result_epoch, result_row_version, result_revoked,
-			result_credential_id, result_credential_version, result_credential_raw
+			result_credential_id, result_credential_version, result_credential_raw, result_digest
 		FROM magi_authority_command
 		WHERE trust_domain = ? AND command_id = ? FOR UPDATE`,
 		trustDomain, commandID).
 		Row().Scan(&row.CommandKind, &row.CommandDigest, &row.RawCommand,
 		&row.ResultScopeKind, &row.ResultScopeID, &row.ResultEpoch, &row.ResultRowVersion, &row.ResultRevoked,
-		&row.ResultCredentialID, &row.ResultCredentialVersion, &row.ResultCredentialRaw)
+		&row.ResultCredentialID, &row.ResultCredentialVersion, &row.ResultCredentialRaw, &row.ResultDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, authority.Result{}
 	}
@@ -982,7 +997,7 @@ func commandEvidence(command any) ([]byte, string, authority.Result) {
 	return raw, authorityEvidenceDigest(authorityCommandEvidenceDomain, raw), authority.Result{}
 }
 
-func replayRevocationCommand(row authorityCommandRow, raw []byte) (authority.EpochState, authority.Result) {
+func replayRevocationCommand(row authorityCommandRow, raw []byte, body authority.RevocationCommandBody) (authority.EpochState, authority.Result) {
 	if row.CommandKind != authorityCommandRevocation ||
 		row.CommandDigest != authorityEvidenceDigest(authorityCommandEvidenceDomain, row.RawCommand) {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
@@ -990,18 +1005,24 @@ func replayRevocationCommand(row authorityCommandRow, raw []byte) (authority.Epo
 	if !bytes.Equal(row.RawCommand, raw) {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_ID_CONFLICT"}
 	}
-	if row.ResultScopeKind != string(authority.ScopeContext) &&
-		row.ResultScopeKind != string(authority.ScopeAuthority) &&
-		row.ResultScopeKind != string(authority.ScopeCredential) {
+	if row.ResultScopeKind != string(body.Scope.Kind) || row.ResultScopeID != body.Scope.ScopeID ||
+		body.ExpectedEpoch == ^uint64(0) || body.ExpectedRowVersion == ^uint64(0) ||
+		row.ResultEpoch != body.ExpectedEpoch+1 || row.ResultRowVersion != body.ExpectedRowVersion+1 ||
+		!row.ResultRevoked {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
 	}
-	return authority.EpochState{
+	state := authority.EpochState{
 		Scope: authority.ScopeKey{Kind: authority.ScopeKind(row.ResultScopeKind), ScopeID: row.ResultScopeID},
 		Epoch: row.ResultEpoch, Revoked: row.ResultRevoked, RowVersion: row.ResultRowVersion,
-	}, authority.Result{Outcome: authority.OutcomeValid, Code: "REVOCATION_COMMAND_REPLAY"}
+	}
+	stateRaw, err := canonicalStructBytes(state)
+	if err != nil || row.ResultDigest != authorityEvidenceDigest(authorityCommandResultDomain, stateRaw) {
+		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	return state, authority.Result{Outcome: authority.OutcomeValid, Code: "REVOCATION_COMMAND_REPLAY"}
 }
 
-func replayCredentialRotationCommand(row authorityCommandRow, raw []byte) (authority.Credential, authority.Result) {
+func replayCredentialRotationCommand(row authorityCommandRow, raw []byte, body authority.CredentialRotationCommandBody) (authority.Credential, authority.Result) {
 	if row.CommandKind != authorityCommandRotation ||
 		row.CommandDigest != authorityEvidenceDigest(authorityCommandEvidenceDomain, row.RawCommand) {
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
@@ -1019,8 +1040,14 @@ func replayCredentialRotationCommand(row authorityCommandRow, raw []byte) (autho
 	if err := json.Unmarshal(row.ResultCredentialRaw, &credential); err != nil {
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
 	}
-	if credential.Ref.CredentialID != row.ResultCredentialID || credential.Ref.CredentialVersion != row.ResultCredentialVersion {
-		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_RESULT_CORRUPT"}
+	if credential.Ref.CredentialID != row.ResultCredentialID || credential.Ref.CredentialVersion != row.ResultCredentialVersion ||
+		credential != body.NewCredential {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	credentialRaw, err := canonicalStructBytes(credential)
+	if err != nil || !bytes.Equal(credentialRaw, row.ResultCredentialRaw) ||
+		row.ResultDigest != authorityEvidenceDigest(authorityCommandResultDomain, credentialRaw) {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
 	}
 	return credential, authority.Result{Outcome: authority.OutcomeValid, Code: "CREDENTIAL_ROTATION_COMMAND_REPLAY"}
 }
@@ -1030,7 +1057,8 @@ func insertAuthorityCommand(tx *gorm.DB, trustDomain, kind, commandID string, co
 	var scopeKind, scopeID, credentialID string
 	var epochValue, rowVersion, credentialVersion uint64
 	var revoked bool
-	var credentialRaw []byte
+	var credentialRaw, resultRaw []byte
+	var resultDigest string
 	if epoch != nil {
 		scopeKind, scopeID = string(epoch.Scope.Kind), epoch.Scope.ScopeID
 		epochValue, rowVersion, revoked = epoch.Epoch, epoch.RowVersion, epoch.Revoked
@@ -1043,14 +1071,27 @@ func insertAuthorityCommand(tx *gorm.DB, trustDomain, kind, commandID string, co
 			return authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
 		}
 	}
+	if credential != nil {
+		resultRaw = credentialRaw
+	} else if epoch != nil {
+		var err error
+		resultRaw, err = canonicalStructBytes(*epoch)
+		if err != nil {
+			return authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
+		}
+	}
+	if len(resultRaw) == 0 {
+		return authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	resultDigest = authorityEvidenceDigest(authorityCommandResultDomain, resultRaw)
 	if err := tx.Exec(`INSERT INTO magi_authority_command
 			(trust_domain, command_kind, command_id, command_digest, raw_command,
 			 result_scope_kind, result_scope_id, result_epoch, result_row_version, result_revoked,
-			 result_credential_id, result_credential_version, result_credential_raw, completed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 result_credential_id, result_credential_version, result_credential_raw, result_digest, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		trustDomain, kind, commandID, commandDigest, commandRaw,
 		scopeKind, scopeID, epochValue, rowVersion, revoked,
-		credentialID, credentialVersion, credentialRaw, completedAt).Error; err != nil {
+		credentialID, credentialVersion, credentialRaw, resultDigest, completedAt).Error; err != nil {
 		return authorityDuplicateOrStoreError(err, "COMMAND_ID_CONFLICT")
 	}
 	return authority.Result{}
@@ -1117,7 +1158,7 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 		_ = tx.Rollback().Error
 		return authority.EpochState{}, lookupResult
 	} else if existing != nil {
-		replayState, replayResult := replayRevocationCommand(*existing, commandRaw)
+		replayState, replayResult := replayRevocationCommand(*existing, commandRaw, body)
 		if replayResult.Outcome != authority.OutcomeValid {
 			_ = tx.Rollback().Error
 			return replayState, replayResult
@@ -1219,7 +1260,7 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 		_ = tx.Rollback().Error
 		return authority.Credential{}, lookupResult
 	} else if existing != nil {
-		replayCredential, replayResult := replayCredentialRotationCommand(*existing, commandRaw)
+		replayCredential, replayResult := replayCredentialRotationCommand(*existing, commandRaw, body)
 		if replayResult.Outcome != authority.OutcomeValid {
 			_ = tx.Rollback().Error
 			return replayCredential, replayResult

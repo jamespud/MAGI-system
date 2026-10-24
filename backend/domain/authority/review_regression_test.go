@@ -506,3 +506,30 @@ func TestReviewScopeIDsRequireNFC(t *testing.T) {
 		t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
 	}
 }
+
+func TestReviewOldRootCredentialCannotBeRotated(t *testing.T) {
+	state, _, _, _ := proofFixture(t)
+	current := state.Credentials[0]
+	old := credentialFor(1, "cred-governance-old-root", "governance", "identity-source", "identity-v1", "credential-scope")
+	old.Ref.RootIncarnation = "root-0"
+	old.PublicKey = current.PublicKey
+	state.Credentials = append(state.Credentials, old)
+	replacement := credentialFor(11, "cred-governance-old-root", "governance", "identity-source", "identity-v1", "credential-scope")
+	replacement.Ref.CredentialVersion = old.Ref.CredentialVersion + 1
+	body := authority.CredentialRotationCommandBody{
+		Version: authority.CredentialRotationCommandVersion, CommandID: "rotate-old-root",
+		TrustDomain: "tenant-a", RootIncarnation: "root-1",
+		OldCredential: old.Ref, NewCredential: replacement,
+		ExpectedEpoch: 5, ExpectedRowVersion: 1, Reason: "must fail",
+		IssuedAt: "2026-10-24T09:30:00.000Z", ExpiresAt: "2026-10-24T09:40:00.000Z",
+	}
+	msg := append([]byte("magi:authority-credential-rotation-command-signature:v1\n"), canonicalBytes(t, body)...)
+	command := authority.SignedCredentialRotationCommand{
+		Body: body, Signer: current.Ref,
+		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(fixedPrivateKey(1), msg)),
+	}
+	result := authority.VerifyCredentialRotationCommand(command, state)
+	if result.Outcome != authority.OutcomeDenied || result.Code != "CREDENTIAL_ROTATION_COMMAND_INVALID" {
+		t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+	}
+}

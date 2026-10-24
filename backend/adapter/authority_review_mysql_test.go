@@ -285,3 +285,157 @@ func TestReviewMySQL_BootstrapCredentialScopeKindRejected(t *testing.T) {
 		t.Fatalf("roots=%d err=%v", roots, err)
 	}
 }
+
+func TestReviewMySQL_OldRootCredentialCannotBeRotated(t *testing.T) {
+	f := newAuthorityMySQL(t)
+	ctx := context.Background()
+	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
+		t.Fatal(result)
+	}
+	old := credentialForReview(1, "cred-old", "governance", "root-old", "credential-scope", f)
+	rawCredential := authorityCanonical(t, old)
+	publicKey, err := base64.StdEncoding.DecodeString(old.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := f.base.now
+	if err := f.db.Exec(`INSERT INTO magi_authority_credential
+		(trust_domain, root_incarnation, credential_id, credential_version,
+		 subject_id, identity_source_id, identity_source_version, algorithm,
+		 public_key, not_before, expires_at, status, credential_scope_id,
+		 created_at, raw_credential)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"tenant-a", old.Ref.RootIncarnation, old.Ref.CredentialID, old.Ref.CredentialVersion,
+		old.Subject.SubjectID, old.Subject.IdentitySourceID, old.Subject.IdentitySourceVersion,
+		old.Algorithm, publicKey, now.Add(-time.Hour), now.Add(2*time.Hour), old.Status,
+		old.Scope.ScopeID, now, rawCredential).Error; err != nil {
+		t.Fatal(err)
+	}
+	replacement := authorityCredential(11, old.Ref.CredentialVersion+1, old.Ref.CredentialID,
+		"governance", "credential-scope", now.Add(-time.Hour), now.Add(2*time.Hour))
+	command := authorityRotationCommand(t, f, "rotate-old-root", old.Ref, replacement, 5, 1, "must fail")
+	if _, result := f.repo.RotateCredential(ctx, command); result.Outcome != authority.OutcomeDenied || result.Code != "CREDENTIAL_ROTATION_COMMAND_INVALID" {
+		t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+	}
+	var activeOld, createdNew int64
+	if err := f.db.Raw(`SELECT COUNT(*) FROM magi_authority_credential
+		WHERE trust_domain = ? AND root_incarnation = ? AND credential_id = ? AND status = 'ACTIVE'`,
+		"tenant-a", old.Ref.RootIncarnation, old.Ref.CredentialID).Scan(&activeOld).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Raw(`SELECT COUNT(*) FROM magi_authority_credential
+		WHERE trust_domain = ? AND root_incarnation = ? AND credential_id = ?`,
+		"tenant-a", replacement.Ref.RootIncarnation, replacement.Ref.CredentialID).Scan(&createdNew).Error; err != nil {
+		t.Fatal(err)
+	}
+	if activeOld != 1 || createdNew != 0 {
+		t.Fatalf("active old=%d created current=%d", activeOld, createdNew)
+	}
+}
+
+func credentialForReview(seed byte, id, subject, root, scopeID string, f *authoritySQLFixture) authority.Credential {
+	return authorityCredentialAtRoot(seed, 1, id, subject, root, scopeID, f.base.now.Add(-time.Hour), f.base.now.Add(2*time.Hour))
+}
+
+func authorityCredentialAtRoot(seed byte, version uint64, id, subject, root, scopeID string, notBefore, expiresAt time.Time) authority.Credential {
+	credential := authorityCredential(seed, version, id, subject, scopeID, notBefore, expiresAt)
+	credential.Ref.RootIncarnation = root
+	return credential
+}
+
+func TestReviewMySQL_CommandResultTamperFailsClosed(t *testing.T) {
+	t.Run("revocation epoch", func(t *testing.T) {
+		f := newAuthorityMySQL(t)
+		ctx := context.Background()
+		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "context-scope"}
+		command := authorityRevocationCommand(t, f, "revoke-result-tamper", scope, 4, 1, "first")
+		if _, result := f.repo.RevokeScope(ctx, command); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		if err := f.db.Exec(`UPDATE magi_authority_command SET result_epoch = result_epoch + 1
+			WHERE trust_domain = ? AND command_id = ?`, "tenant-a", command.Body.CommandID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, result := f.repo.RevokeScope(ctx, command); result.Outcome != authority.OutcomeUnknown || result.Code != "COMMAND_RESULT_CORRUPT" {
+			t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+		}
+	})
+
+	t.Run("revocation row version", func(t *testing.T) {
+		f := newAuthorityMySQL(t)
+		ctx := context.Background()
+		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "context-scope"}
+		command := authorityRevocationCommand(t, f, "revoke-row-tamper", scope, 4, 1, "first")
+		if _, result := f.repo.RevokeScope(ctx, command); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		if err := f.db.Exec(`UPDATE magi_authority_command SET result_row_version = result_row_version + 1
+			WHERE trust_domain = ? AND command_id = ?`, "tenant-a", command.Body.CommandID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, result := f.repo.RevokeScope(ctx, command); result.Outcome != authority.OutcomeUnknown || result.Code != "COMMAND_RESULT_CORRUPT" {
+			t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+		}
+	})
+
+	t.Run("rotation credential", func(t *testing.T) {
+		f := newAuthorityMySQL(t)
+		ctx := context.Background()
+		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		replacement := authorityCredential(11, 2, "cred-governance", "governance", "credential-scope",
+			f.base.now.Add(-time.Hour), f.base.now.Add(2*time.Hour))
+		command := authorityRotationCommand(t, f, "rotate-result-tamper", f.base.governance.Ref, replacement, 5, 1, "first")
+		if _, result := f.repo.RotateCredential(ctx, command); result.Outcome != authority.OutcomeValid {
+			t.Fatal(result)
+		}
+		tampered := replacement
+		tampered.PublicKey = authorityCredential(13, 2, "cred-governance", "governance", "credential-scope",
+			f.base.now.Add(-time.Hour), f.base.now.Add(2*time.Hour)).PublicKey
+		tamperedRaw := authorityCanonical(t, tampered)
+		if err := f.db.Exec(`UPDATE magi_authority_command SET result_credential_raw = ?
+			WHERE trust_domain = ? AND command_id = ?`, tamperedRaw, "tenant-a", command.Body.CommandID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, result := f.repo.RotateCredential(ctx, command); result.Outcome != authority.OutcomeUnknown || result.Code != "COMMAND_RESULT_CORRUPT" {
+			t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+		}
+	})
+}
+
+func TestReviewMySQL_ConsentEvidenceColumnsTamperFailsClosed(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"execution generation", "UPDATE magi_authority_proof_consent SET execution_generation = execution_generation + 1 WHERE trust_domain = ? AND proof_id = ?"},
+		{"threshold", "UPDATE magi_authority_proof_consent SET threshold = threshold + 1 WHERE trust_domain = ? AND proof_id = ?"},
+		{"approval count", "UPDATE magi_authority_proof_consent SET approval_count = approval_count + 1 WHERE trust_domain = ? AND proof_id = ?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAuthorityMySQL(t)
+			ctx := context.Background()
+			if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
+				t.Fatal(result)
+			}
+			if result := f.repo.RegisterProof(ctx, f.base.proofRaw, f.base.proofID); result.Outcome != authority.OutcomeValid {
+				t.Fatal(result)
+			}
+			if err := f.db.Exec(tc.query, "tenant-a", f.base.proofID).Error; err != nil {
+				t.Fatal(err)
+			}
+			result := f.repo.VerifyProof(ctx, f.base.request)
+			if result.Outcome != authority.OutcomeDenied || result.Code != "PROOF_EVIDENCE_CORRUPT" {
+				t.Fatalf("outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+			}
+		})
+	}
+}

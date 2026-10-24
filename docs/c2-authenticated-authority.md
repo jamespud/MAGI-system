@@ -66,15 +66,17 @@ witness、Egress、发送资格或远端执行事实。
 | A46-09 | 逐跳 resources/actions/tenants/operations 必须是父集合子集；proof 必须位于 root grant 和最后 hop；非最后 hop 必须 `delegable=true`；所有 validity 不得扩大到 parent/proof 之外。 |
 | A46-10 | owner policy 由 bootstrap 认证并单独持久化且必须是 root grant 子集；ALL/THRESHOLD/SINGLE_DELEGATE 语义固定，重复 owner approval 不增加票数，owners/approvals 各最多 64。 |
 | A46-11 | owner approval 必须绑定 consent body digest、exact owner、credential ref、proof 目标和非零 positive ExecutionGeneration；错 owner、坏签名、generation 替换、阈值不足均拒绝。 |
-| A46-12 | revocation/key rotation 由 current governance credential 签名，使用 expected epoch + row version CAS；epoch 只增不减，revoked row 不删除、不复用。 |
+| A46-12 | revocation/key rotation 由 current governance credential 签名，使用 expected epoch + row version CAS；epoch 只增不减，revoked row 不删除、不复用；old credential ref 必须属于 current root incarnation。 |
 | A46-13 | 所有 C2 写者与在线验证先锁同一 pinned active-root row；随后锁 proof/evidence/credential/policy/epoch；可信时间在全部所需行锁之后读取。 |
 | A46-14 | MySQL 原始 proof/delegation/consent/scope evidence 必须 exact canonical bytes 且与 digest/列值一致；scope evidence 缺 digest/raw 也失败关闭。 |
 | A46-15 | 不存在内存 authority cache；重启后 root fingerprint、root status、proof version、key status 和 revocation 从 MySQL 重新读取。非 ACTIVE root 不得被重建成 ACTIVE。 |
 | A46-16 | 任何非 `VALID` 均不产生权限；`VALID` 也仅设置 `LocalAuthenticationOnly=true`，commit/mutation flags 恒为 false。 |
 | A46-17 | CREDENTIAL scope closure 必须恰好等于全部 used credentials 的 scope 集合：proof signer、每个 delegation issuer credential、每个 owner approval signer；每个 credential scope kind 必须是 CREDENTIAL。 |
 | A46-18 | 全部 used credential ref 必须 pin 到 current root incarnation；旧 root 的 key/subject/window/status 即使有效也不能通过。 |
-| A46-19 | command identity 以 `(trust_domain, command_id)` 持久化；exact reply-loss retry 返回原 lineage，same id/different bytes 返回 `CONFLICT`。 |
+| A46-19 | command identity 以 `(trust_domain, command_id)` 持久化；exact reply-loss retry 返回原 lineage，same id/different bytes 返回 `CONFLICT`；result fields 由 persisted result digest 绑定。 |
 | A46-20 | 结构上限在昂贵锁工作前检查：delegation ≤16、owner approvals ≤64、policy owners ≤64。 |
+| A46-21 | 旧 root 的 active credential 不能通过 current governance 签名被 rotation 成 current-root credential；旧行不得被 retire，new row 不得插入。 |
+| A46-22 | persisted consent evidence 的 consent id、policy id/version、raw/digest、execution_generation、approval_count 必须匹配 signed proof；threshold 必须匹配 authenticated policy。 |
 
 ## 3. 威胁模型
 
@@ -136,7 +138,14 @@ proof signature 使用不同 domain。
 - proof structure limits: `delegations<=16`、`approvals<=64`、
   owner policy `owners<=64`。
 - revocation/rotation commands: body 内 `command_id` 和 signed raw 必须持久
-  绑定原结果；id 在 trust domain 内不复用。
+  绑定原结果；id 在 trust domain 内不复用。command result 另有 canonical
+  result digest，replay 会校验 result scope/epoch/row_version/revoked 或
+  exact NewCredential lineage。
+- rotation: `OldCredential.RootIncarnation` 必须等于 current trust state root；
+  root-old active credential 不能被“升级”进 current root。
+- consent evidence columns: 除 raw/digest 外，必须 exact compare
+  `execution_generation`、`threshold`（对 authenticated policy）和
+  `approval_count`（对 signed approvals）。
 
 ## 5. 验证顺序与 typed outcome
 
@@ -176,6 +185,12 @@ proof signature 使用不同 domain。
 迁移：`docker/atlas/migrations/magi_s32_authority_proof.sql`。全部表为
 `magi_authority_*` InnoDB 表，仅新增，不 seed 任何 root/key/policy/epoch。
 
+**S32 fresh-install only:** 该文件在未合并 review 过程中改变过 table shape。
+`CREATE TABLE IF NOT EXISTS` 不会给已存在的旧 draft 表补列/改列，因此任何
+曾经应用过 earlier unmerged S32 draft 的数据库都不得把当前文件当作 in-place
+upgrade；必须另行编写、审查和执行独立 migration。本文档不提供也不声称该
+升级路径。
+
 - `magi_authority_root`：pinned root raw/fingerprint、identity source、
   governance subject、status；`(trust_domain, active_slot)` 保证单个 active root。
 - `magi_authority_credential`：exact credential ref/version、subject/source、
@@ -188,9 +203,11 @@ proof signature 使用不同 domain。
 - `magi_authority_proof_scope`：每个 scope 的 kind/id/epoch + canonical raw
   bytes/digest；readback 必须 exact compare。
 - `magi_authority_proof_delegation` / `..._consent`：逐跳和 owner consent
-  原始 evidence；consent 另存 exact `execution_generation`。
-- `magi_authority_command`：signed command raw/digest 与 revocation/rotation
-  原 result lineage；command id 在同一 trust domain 内不复用。
+  原始 evidence；consent 另存 exact `execution_generation`、threshold 和
+  approval_count，并与 signed proof/authenticated policy 交叉核对。
+- `magi_authority_command`：signed command raw/digest、canonical result digest
+  与 revocation/rotation 原 result lineage；command id 在同一 trust domain
+  内不复用。
 
 没有 `magi_authority_sequence`。C2 的串行化锁顺序是：
 
@@ -234,6 +251,9 @@ same command id/different bytes 为 `CONFLICT`。状态已撤销或 key 已轮�
   只能只读保留历史，不能消费为 authority。
 - S32 未提供自动 down migration。删除表只能作为经批准的全域恢复/灾难操作，
   且必须确认没有 #47 lineage 或审计引用；普通回滚不得 drop。
+- 若某环境曾应用 earlier unmerged S32 draft，先阻断 C2、导出审计证据，再由
+  独立 reviewed migration 对齐 schema；禁止用当前 `CREATE TABLE IF NOT EXISTS`
+  文件掩盖 schema drift。
 
 ## 8. A–F 证据
 
@@ -357,7 +377,7 @@ MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&p
 PASS
 ```
 
-### C.2 Finding closure matrix
+### C.2 First independent review finding matrix
 
 | Review finding | Status | Focused evidence |
 | --- | --- | --- |
@@ -372,6 +392,52 @@ PASS
 | P2-9 UTF-16 ordering | CLOSED | domain comparator + repository per-row lock order + non-BMP test |
 | P2-10 structures limits | CLOSED | ≤16 hops / ≤64 approvals / ≤64 owners；pre-lock and MySQL tests |
 | P2-11 bootstrap credential scope kind | CLOSED | domain and MySQL bootstrap rejection tests |
+
+### C.3 Closure re-review RED → GREEN
+
+P1 old-root rotation：
+
+```text
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./domain/authority -run '^TestReviewOldRootCredentialCannotBeRotated$' -count=1 -v
+FAIL: outcome=VALID code=CREDENTIAL_ROTATION_COMMAND_AUTHENTICATED
+
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' \
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^TestReviewMySQL_OldRootCredentialCannotBeRotated$' -count=1 -v
+FAIL: outcome=VALID code=CREDENTIAL_ROTATED
+```
+
+P2 command result binding 与 consent columns：
+
+```text
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' \
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter \
+  -run '^TestReviewMySQL_(CommandResultTamperFailsClosed|ConsentEvidenceColumnsTamperFailsClosed)$' -count=1 -v
+
+FAIL: revocation epoch tamper → VALID/REVOCATION_COMMAND_REPLAY
+FAIL: revocation row-version tamper → VALID/REVOCATION_COMMAND_REPLAY
+FAIL: rotation credential tamper → VALID/CREDENTIAL_ROTATION_COMMAND_REPLAY
+FAIL: consent execution_generation tamper → VALID
+FAIL: consent threshold tamper → VALID
+FAIL: consent approval_count tamper → VALID
+```
+
+GREEN：
+
+```text
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./domain/authority -count=1
+PASS
+
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' \
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^(TestAuthorityMySQL_|TestReviewMySQL_)' -count=1
+PASS
+```
+
+| Closure re-review finding | Status | Evidence |
+| --- | --- | --- |
+| P1 old-root rotation | CLOSED | domain old-root check；MySQL active old row remains ACTIVE，no current replacement inserted |
+| P2 command result binding | CLOSED | persisted canonical result digest；epoch/row-version/scope/revoked or exact NewCredential replay validation |
+| P2 consent columns | CLOSED | generation/threshold/approval_count + all stored consent fields compared to signed evidence/policy |
+| P2 S32 draft upgrade boundary | DOCUMENTED / NOT SUPPORTED | migration header + §6/§7 fresh-install warning；separate migration required if prior draft applied |
 
 ### D. 回归、race 与 vet
 
@@ -422,15 +488,20 @@ OK (0 failures)
 - reused consent conflict、migration 幂等且无 seed/no sequence table；
 - review P0/P1/P2：credential-scope closure、root status、old-root key、consent
   generation、Operations、command reply loss/conflict、scope raw evidence、
-  non-BMP UTF-16 ordering、oversized structures、bootstrap credential scope kind。
+  non-BMP UTF-16 ordering、oversized structures、bootstrap credential scope kind；
+- closure re-review：old-root rotation refusal、command result digest/lineage
+  tamper、consent generation/threshold/approval_count tamper。
 
 ### F. 边界与依赖
 
 本切片的 authoritative store 是单一 MySQL trust domain 的 C2 子状态，不是
 C3 的 CommitIfCurrent store，也不声称是 #47 common-order 实现。所有
 `a45_*`/#45 trace 名称、Commit token、Journal、witness 和 send 均未被本次
-实现消费或创建。独立 review 的 11 项 finding 均有 focused regression，且
-在本次本地验证范围内全部 CLOSED；这不等于 PR-head CI、独立复审或生产激活。
+实现消费或创建。C.2 只记录第一次 independent review 的 11 项 finding；其后
+closure re-review 又发现 1 个 P1 和 2 个行为 P2 以及 S32 draft migration
+边界，记录在 C.3。因此不能把 C.2 表述为“所有可能 review finding 已关闭”。
+本次修复范围内，两轮已报告 finding 均有 focused regression 并通过本地
+GREEN；这仍不等于 PR-head CI、后续独立复审或生产激活。
 
 ## 9. NOT RUN / BLOCKED matrix
 
@@ -462,3 +533,5 @@ C3 的 CommitIfCurrent store，也不声称是 #47 common-order 实现。所有
 - P2：CONTEXT/AUTHORITY scope 的 resource/operation 映射仍由签名 proof 和
   owner consent 声明，C2 不单独证明完整 Context/Authority 闭包；该部分与
   C3/#47 commit predicate 合并后仍需真实集成验收。
+- P2：当前 S32 只支持 fresh install；已应用 earlier unmerged draft 的环境
+  需要独立 migration，当前文件不是 supported upgrade path。

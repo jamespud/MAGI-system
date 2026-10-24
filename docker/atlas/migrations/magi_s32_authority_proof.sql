@@ -1,5 +1,10 @@
 -- MAGI S32: authenticated C2 authority evidence and scoped revocation state.
 --
+-- FRESH S32 INSTALL ONLY: this file's table shape changed during review.
+-- CREATE TABLE IF NOT EXISTS is not an in-place upgrade. Any database that
+-- applied an earlier unmerged S32 draft requires a separate reviewed migration
+-- before this file can be applied. Do not treat this as a supported upgrade.
+--
 -- Additive only. This migration installs no trust root, recovery key, issuer,
 -- governance principal, owner policy, or revocation. It deliberately defines no
 -- authority sequence: cross-C2/C3 total ordering remains blocked on #47.
@@ -160,6 +165,7 @@ CREATE TABLE IF NOT EXISTS magi_authority_command (
     result_credential_id VARCHAR(191) NOT NULL DEFAULT '',
     result_credential_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
     result_credential_raw LONGBLOB NULL,
+    result_digest CHAR(64) NOT NULL,
     completed_at DATETIME(3) NOT NULL,
     PRIMARY KEY (trust_domain, command_id),
     UNIQUE KEY uk_authority_command_digest (trust_domain, command_kind, command_digest),
