@@ -126,11 +126,12 @@ require Design Change before implementation.
 
 ## F. Review, CI and delivery status
 
-Initial independent read-only review of `17917a98f5e968edc2531822fd1412a3e0b07631`: CHANGES REQUIRED (B-01..B-04). Corrections below await scoped rereview. Exact-head remote CI:
-PENDING controller push/Draft PR. This worker performed no remote action. Keep
-Draft. No Ready/merge, issue/Epic/CAS-9 closure, terminal authorization, production
-permissions or protected send. Controller stage ledger records later review/CI
-URLs and exact final hash; this report claims no future result.
+Initial independent read-only review of `17917a98f5e968edc2531822fd1412a3e0b07631`:
+CHANGES REQUIRED (B-01..B-04). The complete correction range through
+`3d65567` subsequently received an independent scoped PASS with no remaining
+P0/P1/P2 in those four obligations. Exact-head remote CI is recorded separately
+after the final evidence commit. Keep Draft. No Ready/merge, issue/Epic/CAS-9
+closure, terminal authorization, production permissions or protected send.
 
 
 ## Review correction wave — B-01 through B-04
@@ -206,8 +207,13 @@ exit 0; log: /tmp/magi-joint-stage-43/b/review-script-vet.log
 New review regression is wired into the same backend CI static gate. Existing
 baseline/full backend race/vet and eight frozen gates from §A/D are prior results;
 this script/schema/doc-only correction did not repeat unchanged backend suites.
-Exact-head CI remains controller-owned/pending. `git diff --check` passes.
+Independent scoped rereview of `17917a98..3d65567` passed B-01 through B-04,
+including the B-02-R1 quota identity correction, with no new P0/P1/P2. It reran
+the focused 8-test review suite, four original contract tests, 108 declarations,
+script vet and diff check. Exact-head CI remains controller-owned/pending.
+`git diff --check` passes.
 All construction rows/tokens/audit decisions are synthetic declarations; new
 MySQL/issuer/provider/independent witness/egress remains NOT RUN/BLOCKED as in §E.
-No push/PR, Ready/merge, closure or activation by this worker. Scoped independent
-rereview of the complete fix-base→fix-head delta is required before delivery.
+The final evidence-only commit records this independent outcome; the verified
+contract code head is `3d65567`. Keep Draft and make Ready, merge, closure and
+activation separate decisions.
