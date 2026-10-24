@@ -1,0 +1,2934 @@
+{
+  "bases": {
+    "candidate": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "CANDIDATE_CLOSE",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "CANDIDATE_CLOSE",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "request_digest": "12f63ef1a76fa24ee71aa9e88b67d70adaf3c462236478b1c66bc88bdd49307a",
+        "write_set_digest": "35b4b1e66156e9ae6bc531bdef04b4085e45431623fbe88cc747cb5a729770c8",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "QUIESCING",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "candidate:case-1:1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "QUIESCING",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "candidate",
+          "closure",
+          "evidence_closed",
+          "journal:balthasar",
+          "journal:casper",
+          "journal:melchior",
+          "lineage",
+          "outbox",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    },
+    "send": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "SEND_COMMIT",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "action-1",
+        "unique_key": "send:action-1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "SEND_COMMIT",
+        "exact_target_id": "action-1",
+        "unique_key": "send:action-1",
+        "request_digest": "a3027398ec616985981b950ab791c9c3f4a9ceb289083ad96672fce4d0c804ad",
+        "write_set_digest": "aaf96f411e375ad3b1a507cda132b36146916f99f522cf00fbe41a319b62f7f3",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "e86564b3ca75189b46273db2a26a1aaaa7d6c3dd3afad10e07277f72819471a0"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "AUDIT_READY",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "send:action-1",
+        "exact_target_id": "action-1",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "AUDIT_READY",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "lineage",
+          "outbox",
+          "quota",
+          "send_record",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    },
+    "journal_admit": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "JOURNAL_ADMIT",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "JOURNAL_ADMIT",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
+        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "OPEN",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "candidate:case-1:1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "OPEN",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "admission",
+          "dependency_edges",
+          "journal_event",
+          "lineage",
+          "outbox",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    },
+    "quiesce": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "QUIESCE",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "QUIESCE",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "request_digest": "1c1ea2f2037e4f9ae35e008da6a460d95e181f064a1120d783f01e3bb86ad02e",
+        "write_set_digest": "fcb4d591ffabb7c87fd3ce1feba5806b2d70342393bee768d406bced11ed1e2b",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "ccda2a9ad778e559506ae8731da0059be0e91913f3dfb58a5120c4582d68f557"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "OPEN",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "candidate:case-1:1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "OPEN",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "fence",
+          "journal_states",
+          "lineage",
+          "outbox",
+          "round_state",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    },
+    "quiescing_admit": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "JOURNAL_ADMIT",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "JOURNAL_ADMIT",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
+        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "6d7eb171071668cb504a3567854190c774c0a1de3c44ea61def371d9881da06b"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "QUIESCING",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "candidate:case-1:1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "QUIESCING",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "admission",
+          "dependency_edges",
+          "journal_event",
+          "lineage",
+          "outbox",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    },
+    "closed_admit": {
+      "contract_version": "magi-authority/1",
+      "request": {
+        "operation": "JOURNAL_ADMIT",
+        "principal": {
+          "subject_id": "coordinator",
+          "identity_source_id": "workload-ca",
+          "identity_source_version": "r17"
+        },
+        "case_round": {
+          "case_id": "case-1",
+          "round": 1
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "exact_dependencies": [
+          {
+            "id": "dep-a",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": 1,
+            "parents": []
+          },
+          {
+            "id": "dep-b",
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "version": 2,
+            "parents": [
+              "dep-a"
+            ]
+          }
+        ],
+        "proof_id": "proof-1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "trusted_now": "2026-10-24T01:00:00.000Z"
+      },
+      "token": {
+        "token_id": "token-1",
+        "issuer": "authority-1",
+        "principal_id": "coordinator",
+        "operation": "JOURNAL_ADMIT",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "unique_key": "candidate:case-1:1",
+        "request_digest": "59d0c881c153e0b5f3d169cdde8c0309f5198f9ad8a07089d89957886e70041f",
+        "write_set_digest": "6e6b9184e69eb3662f453fc71bee17c5dcbd89e909d42989e45fb54e53009e82",
+        "issued_at": "2026-10-24T01:00:00.000Z",
+        "expires_at": "2026-10-24T01:00:05.000Z",
+        "authority_version": 11,
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "expected_state_digest": "0ee43b753c8aa69735b73c702f1614a6a27f830169e698793e7b7a2346d71822"
+      },
+      "current": {
+        "principal_id": "coordinator",
+        "owner_id": "worker-1",
+        "execution_generation": 7,
+        "authority_version": 11,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "resource-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-1",
+            "epoch": 2
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "coordinator-key",
+            "epoch": 4
+          }
+        ],
+        "trusted_now": "2026-10-24T01:00:01.000Z",
+        "lease_until": "2026-10-24T01:00:10.000Z",
+        "dependencies_valid": true,
+        "proof_valid": true,
+        "time_trusted": true,
+        "witness_available": true,
+        "revoked": false,
+        "expected_state": "INPUT_CLOSED",
+        "pending_injections": 0,
+        "receipts": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmations": [
+          "melchior",
+          "balthasar",
+          "casper"
+        ],
+        "confirmation_target_ids": [
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "witness": {
+          "action_id": "action-1",
+          "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "trust_domain": "witness-domain",
+          "durable": true,
+          "signature_valid": true,
+          "valid_until": "2026-10-24T01:00:05.000Z"
+        },
+        "egress_domain": "egress-domain",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9
+      },
+      "commit": {
+        "unique_key": "candidate:case-1:1",
+        "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "token_id": "token-1",
+        "expected_state": {
+          "state": "INPUT_CLOSED",
+          "owner_id": "worker-1",
+          "execution_generation": 7,
+          "authority_version": 11,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ],
+          "gateway_id": "gateway-1",
+          "gateway_generation": 9
+        },
+        "complete_write_set": [
+          "admission",
+          "dependency_edges",
+          "journal_event",
+          "lineage",
+          "outbox",
+          "token_consumed",
+          "unique_binding"
+        ]
+      },
+      "transaction": {
+        "locks": [
+          "sequence",
+          "epochs",
+          "owner",
+          "round",
+          "journals",
+          "dependencies",
+          "token",
+          "unique_key",
+          "witness",
+          "gateway"
+        ],
+        "steps": [
+          "lock",
+          "trusted_time",
+          "revalidate",
+          "write_all",
+          "commit"
+        ],
+        "authority_sequence": 21,
+        "revoke_sequence": 0,
+        "candidate_visible_after_commit": true,
+        "journals_closed_together": true
+      },
+      "replay": {
+        "mode": "NEW",
+        "same_request": true,
+        "same_target": true,
+        "same_token": true,
+        "same_write_set": true,
+        "lineage_present": true,
+        "resend": false
+      },
+      "action": {
+        "state": "AUDIT_READY",
+        "action_id": "action-1",
+        "intent_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "gateway_id": "gateway-1",
+        "gateway_generation": 9,
+        "remote_mode": "FENCED_IDEMPOTENT",
+        "send_attempts": 0
+      },
+      "admission": {
+        "kind": "ORDINARY",
+        "fence_id": "fence-1",
+        "registered_fence_id": "fence-1",
+        "node_admitted_sequence": 19,
+        "cutoff_sequence": 20,
+        "reverse_edges_complete": true,
+        "provider_registered": true,
+        "journal_high_watermark": 3,
+        "local_next_sequence": 4
+      },
+      "governance": {
+        "root_available": true,
+        "root_installed_before_target": true,
+        "root_id": "root-1",
+        "authenticated_subject": "coordinator",
+        "resource_id": "resource-1",
+        "chain": [
+          {
+            "issuer": "root-1",
+            "subject": "delegate-1",
+            "resources": [
+              "resource-1",
+              "resource-2"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": true,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          },
+          {
+            "issuer": "delegate-1",
+            "subject": "coordinator",
+            "resources": [
+              "resource-1"
+            ],
+            "operations": [
+              "CANDIDATE_CLOSE",
+              "JOURNAL_ADMIT",
+              "QUIESCE",
+              "SEND_COMMIT"
+            ],
+            "delegable": false,
+            "not_before": "2026-10-24T00:00:00.000Z",
+            "valid_until": "2026-10-24T01:05:00.000Z"
+          }
+        ],
+        "owner_rule": {
+          "mode": "OWNER_ALL",
+          "owners": [
+            "owner-a",
+            "owner-b"
+          ],
+          "consents": [
+            "owner-a",
+            "owner-b"
+          ],
+          "threshold": 2,
+          "threshold_preapproved": true,
+          "delegates": [
+            "delegate-1"
+          ]
+        },
+        "authenticated_identity_source_id": "workload-ca",
+        "authenticated_identity_source_version": "r17",
+        "expected_token_issuer": "authority-1"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "candidate_atomic_close",
+      "base": "candidate",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "epoch_revoke_after_verify",
+      "base": "candidate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/scoped_epochs",
+          "value": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 4
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "same_epoch_other_scope",
+      "base": "candidate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/scoped_epochs",
+          "value": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "other-resource",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "owner_ABA_new_generation",
+      "base": "candidate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/execution_generation",
+          "value": 9
+        }
+      ]
+    },
+    {
+      "name": "owner_ABA_new_version",
+      "base": "candidate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/authority_version",
+          "value": 13
+        }
+      ]
+    },
+    {
+      "name": "expired_at_boundary",
+      "base": "candidate",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "current/trusted_now",
+          "value": "2026-10-24T01:00:05.000Z"
+        }
+      ]
+    },
+    {
+      "name": "lease_lost_while_waiting_for_lock",
+      "base": "candidate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/lease_until",
+          "value": "2026-10-24T01:00:01.000Z"
+        }
+      ]
+    },
+    {
+      "name": "missing_dependency",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/dependencies_valid",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "unknown_time",
+      "base": "candidate",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "current/time_trusted",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "authority_revoked",
+      "base": "candidate",
+      "expected": "REVOKED",
+      "mutations": [
+        {
+          "path": "current/revoked",
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "proof_invalid",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/proof_valid",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "pending_injection_blocks_close",
+      "base": "candidate",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "current/pending_injections",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "missing_role_confirmation",
+      "base": "candidate",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "current/confirmations",
+          "value": [
+            "melchior",
+            "balthasar"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wrong_candidate_confirmation",
+      "base": "candidate",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "current/confirmation_target_ids",
+          "value": [
+            "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "csnp_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "partial_close_write_set",
+      "base": "candidate",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/complete_write_set",
+          "value": [
+            "candidate",
+            "closure",
+            "evidence_closed",
+            "journal:balthasar",
+            "journal:melchior",
+            "lineage",
+            "outbox",
+            "token_consumed",
+            "unique_binding"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "early_candidate_visibility",
+      "base": "candidate",
+      "expected": "ATOMICITY",
+      "mutations": [
+        {
+          "path": "transaction/candidate_visible_after_commit",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "journals_closed_separately",
+      "base": "candidate",
+      "expected": "ATOMICITY",
+      "mutations": [
+        {
+          "path": "transaction/journals_closed_together",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "time_before_locks",
+      "base": "candidate",
+      "expected": "ORDER",
+      "mutations": [
+        {
+          "path": "transaction/steps",
+          "value": [
+            "trusted_time",
+            "lock",
+            "revalidate",
+            "write_all",
+            "commit"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wrong_lock_order",
+      "base": "candidate",
+      "expected": "ORDER",
+      "mutations": [
+        {
+          "path": "transaction/locks",
+          "value": [
+            "gateway",
+            "witness",
+            "unique_key",
+            "token",
+            "dependencies",
+            "journals",
+            "round",
+            "owner",
+            "epochs",
+            "sequence"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "token_target_swap",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "commit/exact_target_id",
+          "value": "csnp_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "token_principal_swap",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "token/principal_id",
+          "value": "attacker"
+        }
+      ]
+    },
+    {
+      "name": "token_operation_swap",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "token/operation",
+          "value": "SEND_COMMIT"
+        },
+        {
+          "path": "token/request_digest",
+          "value": "a3027398ec616985981b950ab791c9c3f4a9ceb289083ad96672fce4d0c804ad"
+        },
+        {
+          "path": "token/write_set_digest",
+          "value": "aaf96f411e375ad3b1a507cda132b36146916f99f522cf00fbe41a319b62f7f3"
+        }
+      ]
+    },
+    {
+      "name": "proof_swap_after_verify",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "request/proof_id",
+          "value": "proof-2"
+        }
+      ]
+    },
+    {
+      "name": "dependency_digest_swap",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "request/exact_dependencies",
+          "value": [
+            {
+              "id": "dep-a",
+              "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "version": 1,
+              "parents": []
+            },
+            {
+              "id": "dep-b",
+              "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "version": 2,
+              "parents": [
+                "dep-a"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "duplicate_scope",
+      "base": "candidate",
+      "expected": "SCOPE_SET",
+      "mutations": [
+        {
+          "path": "request/scoped_epochs",
+          "value": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            },
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "unsorted_scope_set",
+      "base": "candidate",
+      "expected": "SCOPE_SET",
+      "mutations": [
+        {
+          "path": "request/scoped_epochs",
+          "value": [
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "coordinator-key",
+              "epoch": 4
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-1",
+              "epoch": 2
+            },
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "resource-1",
+              "epoch": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dependency_cycle",
+      "base": "candidate",
+      "expected": "DEPENDENCY_DAG",
+      "mutations": [
+        {
+          "path": "request/exact_dependencies",
+          "value": [
+            {
+              "id": "dep-a",
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "version": 1,
+              "parents": [
+                "dep-b"
+              ]
+            },
+            {
+              "id": "dep-b",
+              "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "version": 2,
+              "parents": [
+                "dep-a"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reply_loss_original",
+      "base": "candidate",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        }
+      ]
+    },
+    {
+      "name": "reply_loss_does_not_resend",
+      "base": "candidate",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "replay/resend",
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "unique_key_other_target",
+      "base": "candidate",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "replay/same_target",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "token_replay_other_write_set",
+      "base": "candidate",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "replay/same_write_set",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "unknown_commit_no_lineage",
+      "base": "candidate",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "replay/lineage_present",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "historical_generation_zero",
+      "base": "candidate",
+      "expected": "LEGACY",
+      "mutations": [
+        {
+          "path": "request/execution_generation",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "protected_send_exact_gateway",
+      "base": "send",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "witness_absent",
+      "base": "send",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "current/witness_available",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "witness_not_durable",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/witness/durable",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "witness_not_independent",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/witness/trust_domain",
+          "value": "egress-domain"
+        }
+      ]
+    },
+    {
+      "name": "witness_bad_signature",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/witness/signature_valid",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "witness_wrong_intent",
+      "base": "send",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "current/witness/intent_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "witness_expired",
+      "base": "send",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "current/witness/valid_until",
+          "value": "2026-10-24T01:00:01.000Z"
+        }
+      ]
+    },
+    {
+      "name": "revoke_precedes_send",
+      "base": "send",
+      "expected": "REVOKED",
+      "mutations": [
+        {
+          "path": "transaction/revoke_sequence",
+          "value": 20
+        }
+      ]
+    },
+    {
+      "name": "send_precedes_revoke_inflight",
+      "base": "send",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "transaction/revoke_sequence",
+          "value": 22
+        }
+      ]
+    },
+    {
+      "name": "gateway_takeover_old_qualification",
+      "base": "send",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "current/gateway_generation",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "name": "send_committed_crash_unknown",
+      "base": "send",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "action/state",
+          "value": "OUTCOME_UNKNOWN"
+        }
+      ]
+    },
+    {
+      "name": "nonidempotent_unknown_blind_retry",
+      "base": "send",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "action/state",
+          "value": "OUTCOME_UNKNOWN"
+        },
+        {
+          "path": "action/remote_mode",
+          "value": "UNFENCED_NONIDEMPOTENT"
+        },
+        {
+          "path": "action/send_attempts",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "journal_admit_valid",
+      "base": "journal_admit",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "journal_admit_incomplete",
+      "base": "journal_admit",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/complete_write_set",
+          "value": [
+            "admission",
+            "dependency_edges",
+            "journal_event",
+            "lineage",
+            "outbox",
+            "token_consumed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "quiesce_valid",
+      "base": "quiesce",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "quiesce_incomplete",
+      "base": "quiesce",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "commit/complete_write_set",
+          "value": [
+            "fence",
+            "journal_states",
+            "lineage",
+            "outbox",
+            "round_state",
+            "token_consumed"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "unknown_field",
+      "base": "candidate",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "request/extra",
+          "value": "model_permission"
+        }
+      ]
+    },
+    {
+      "name": "unknown_outcome_operation",
+      "base": "candidate",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "request/operation",
+          "value": "AUTH_OK"
+        }
+      ]
+    },
+    {
+      "name": "float_epoch",
+      "base": "candidate",
+      "expected": "C0",
+      "mutations": [
+        {
+          "path": "request/scoped_epochs/0/epoch",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "generation_overflow",
+      "base": "candidate",
+      "expected": "C0",
+      "mutations": [
+        {
+          "path": "request/execution_generation",
+          "value": 9007199254740992
+        }
+      ]
+    },
+    {
+      "name": "timestamp_precision",
+      "base": "candidate",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "request/trusted_now",
+          "value": "2026-10-24T01:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "token_lifetime_bound",
+      "base": "candidate",
+      "expected": "TOKEN_LIFETIME",
+      "mutations": [
+        {
+          "path": "token/expires_at",
+          "value": "2026-10-24T01:00:30.000Z"
+        }
+      ]
+    },
+    {
+      "name": "original_read_after_expiry",
+      "base": "candidate",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "replay/mode",
+          "value": "ORIGINAL"
+        },
+        {
+          "path": "current/trusted_now",
+          "value": "2026-10-25T01:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "token_expected_owner_swap",
+      "base": "candidate",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "commit/expected_state/owner_id",
+          "value": "worker-2"
+        }
+      ]
+    },
+    {
+      "name": "ordinary_after_fence",
+      "base": "quiescing_admit",
+      "expected": "CONFLICT",
+      "mutations": []
+    },
+    {
+      "name": "final_shared_same_fence",
+      "base": "quiescing_admit",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/kind",
+          "value": "FINAL_SHARED"
+        }
+      ]
+    },
+    {
+      "name": "final_shared_wrong_fence",
+      "base": "quiescing_admit",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission/kind",
+          "value": "FINAL_SHARED"
+        },
+        {
+          "path": "admission/fence_id",
+          "value": "fence-2"
+        }
+      ]
+    },
+    {
+      "name": "closed_reread_prior_node",
+      "base": "closed_admit",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/kind",
+          "value": "REREAD"
+        }
+      ]
+    },
+    {
+      "name": "closed_reread_new_node",
+      "base": "closed_admit",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission/kind",
+          "value": "REREAD"
+        },
+        {
+          "path": "admission/node_admitted_sequence",
+          "value": 21
+        }
+      ]
+    },
+    {
+      "name": "unregistered_delivery",
+      "base": "journal_admit",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission/provider_registered",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "missing_reverse_edge",
+      "base": "journal_admit",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission/reverse_edges_complete",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "local_sequence_gap",
+      "base": "journal_admit",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission/local_next_sequence",
+          "value": 5
+        }
+      ]
+    },
+    {
+      "name": "invalid_calendar_time",
+      "base": "candidate",
+      "expected": "TIME",
+      "mutations": [
+        {
+          "path": "current/trusted_now",
+          "value": "2026-99-24T01:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "proof_resource_scope_expansion",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/chain/1/resources",
+          "value": [
+            "resource-1",
+            "resource-3"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "proof_operation_scope_expansion",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/chain/1/operations",
+          "value": [
+            "CANDIDATE_CLOSE",
+            "DELETE_ROOT"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "proof_nondelegable_parent",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/chain/0/delegable",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "proof_subject_not_authenticated",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/authenticated_subject",
+          "value": "attacker"
+        }
+      ]
+    },
+    {
+      "name": "proof_chain_missing_hop",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/chain/1/issuer",
+          "value": "other-delegate"
+        }
+      ]
+    },
+    {
+      "name": "proof_cycle",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/chain/1/subject",
+          "value": "root-1"
+        }
+      ]
+    },
+    {
+      "name": "bootstrap_target_self_root",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/root_installed_before_target",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "root_source_unavailable",
+      "base": "candidate",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "governance/root_available",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "owner_missing_consent",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/consents",
+          "value": [
+            "owner-a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "threshold_preapproved",
+      "base": "candidate",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/mode",
+          "value": "OWNER_THRESHOLD"
+        },
+        {
+          "path": "governance/owner_rule/threshold",
+          "value": 1
+        },
+        {
+          "path": "governance/owner_rule/consents",
+          "value": [
+            "owner-a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "threshold_invented_after_conflict",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/mode",
+          "value": "OWNER_THRESHOLD"
+        },
+        {
+          "path": "governance/owner_rule/threshold",
+          "value": 1
+        },
+        {
+          "path": "governance/owner_rule/threshold_preapproved",
+          "value": false
+        },
+        {
+          "path": "governance/owner_rule/consents",
+          "value": [
+            "owner-a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "threshold_duplicate_consent",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/mode",
+          "value": "OWNER_THRESHOLD"
+        },
+        {
+          "path": "governance/owner_rule/consents",
+          "value": [
+            "owner-a",
+            "owner-a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "single_delegate_conflict",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/mode",
+          "value": "SINGLE_DELEGATE"
+        },
+        {
+          "path": "governance/owner_rule/delegates",
+          "value": [
+            "delegate-1",
+            "delegate-2"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "owner_default_all_missing",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/owner_rule/mode",
+          "value": "UNDECLARED"
+        },
+        {
+          "path": "governance/owner_rule/consents",
+          "value": [
+            "owner-a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "proof_expired_at_commit",
+      "base": "candidate",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "governance/chain/1/valid_until",
+          "value": "2026-10-24T01:00:01.000Z"
+        }
+      ]
+    },
+    {
+      "name": "principal_same_name_other_identity_source",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/authenticated_identity_source_id",
+          "value": "untrusted-ca"
+        }
+      ]
+    },
+    {
+      "name": "principal_identity_version_mismatch",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "governance/authenticated_identity_source_version",
+          "value": "r18"
+        }
+      ]
+    },
+    {
+      "name": "token_untrusted_issuer",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "token/issuer",
+          "value": "evil-authority"
+        }
+      ]
+    }
+  ]
+}

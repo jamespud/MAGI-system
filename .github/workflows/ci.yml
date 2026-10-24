@@ -73,6 +73,11 @@ jobs:
       - name: Decision Artifact v2 offline contract and negative fixtures
         run: python3 ../scripts/check-decision-artifact-v2.py
 
+      - name: Authority contract typed schema and static traces
+        run: |
+          python3 ../scripts/check-authority-contract.py
+          python3 ../scripts/test-authority-contract.py
+
   scripts:
     name: Operational scripts gate
     runs-on: ubuntu-latest
