@@ -2,11 +2,15 @@ package readsetjournal
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jamespud/magi/backend/domain/canonical"
 	"github.com/jamespud/magi/backend/domain/inputartifact"
 )
 
@@ -135,8 +139,11 @@ func TestOwnerFenceKeepsGenerationSeparateFromScopedEpochs(t *testing.T) {
 	}
 	req = validRegisterRequest()
 	req.Event.ExecutionGeneration = req.Owner.ExecutionGeneration + 1
-	if _, err := PrepareRegistration(enabledConfig(), req); !errors.Is(err, ErrOwnerFence) {
-		t.Fatalf("generation mismatch error = %v", err)
+	if _, err := PrepareRegistration(enabledConfig(), req); err != nil {
+		t.Fatalf("structurally valid cross-generation replay must prepare: %v", err)
+	}
+	if err := ValidateAppendGeneration(req.Owner, req.Event); !errors.Is(err, ErrOwnerFence) {
+		t.Fatalf("cross-generation append error = %v", err)
 	}
 	req = validRegisterRequest()
 	req.Event.AdmissionScope.ContextRevocationEpoch = 0
@@ -319,5 +326,128 @@ func TestRegistrationRequiresFrozenArrayAndUTCTimeShapes(t *testing.T) {
 	req.Event.Source.Validity.NotBefore = "2026-10-24T08:00:00+08:00"
 	if _, err := PrepareRegistration(enabledConfig(), req); !errors.Is(err, ErrInvalidJournal) {
 		t.Fatalf("non-UTC validity error = %v, want ErrInvalidJournal", err)
+	}
+}
+
+func TestSourceFreshnessUsesHalfOpenValidityAcrossAllNodes(t *testing.T) {
+	until := "2026-10-25T00:00:00.000Z"
+	parent := validRegisterRequest().Event.Source
+	parent.Validity.ValidUntil = &until
+	child := parent
+	child.NodeID = "node-derived"
+	child.SourceEntryID = "source-derived"
+	child.Kind = "DERIVED"
+	child.ParentNodeIDs = []string{parent.NodeID}
+	child.Validity = inputartifact.Validity{NotBefore: "2026-10-24T00:00:00.000Z", ValidUntil: &until}
+	at := func(value string) time.Time {
+		parsed, err := time.Parse("2006-01-02T15:04:05.000Z", value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	if err := ValidateNodesFreshAt([]inputartifact.SourceNode{child, parent}, at("2026-10-24T00:00:00.000Z")); err != nil {
+		t.Fatalf("inclusive not-before boundary rejected: %v", err)
+	}
+	if err := ValidateNodesFreshAt([]inputartifact.SourceNode{child, parent}, at("2026-10-25T00:00:00.000Z")); !errors.Is(err, ErrStaleMaterial) {
+		t.Fatalf("exclusive valid-until boundary error=%v", err)
+	}
+	parent.Validity.NotBefore = "2026-10-26T00:00:00.000Z"
+	if err := ValidateNodesFreshAt([]inputartifact.SourceNode{child, parent}, at("2026-10-24T12:00:00.000Z")); !errors.Is(err, ErrStaleMaterial) {
+		t.Fatalf("future ancestor error=%v", err)
+	}
+}
+
+func TestRequestDigestSupportsFullDeclaredNodeClosure(t *testing.T) {
+	const nodeCount = 2048
+	base := validRegisterRequest().Event.Source
+	nodes := make([]inputartifact.SourceNode, nodeCount)
+	for i := range nodes {
+		node := base
+		node.NodeID = fmt.Sprintf("n%04d", i)
+		node.SourceEntryID = fmt.Sprintf("s%04d", i)
+		node.SourceVersion = "1"
+		node.SourceRef.ObjectID = node.SourceEntryID
+		node.ParentNodeIDs = []string{}
+		for child := 2*i + 1; child <= 2*i+2 && child < nodeCount; child++ {
+			node.ParentNodeIDs = append(node.ParentNodeIDs, fmt.Sprintf("n%04d", child))
+		}
+		if len(node.ParentNodeIDs) == 0 {
+			node.Kind = "RAW"
+		} else {
+			node.Kind = "DERIVED"
+		}
+		nodes[i] = node
+	}
+	req := validRegisterRequest()
+	req.Event.Source = nodes[0]
+	req.Event.ParentNodeIDs = append([]string(nil), nodes[0].ParentNodeIDs...)
+	req.Closure = nodes
+	prepared, err := PrepareRegistration(enabledConfig(), req)
+	if err != nil {
+		t.Fatalf("full declared closure rejected: %v", err)
+	}
+	if prepared.RequestDigest == "" || len(prepared.Nodes) != nodeCount {
+		t.Fatalf("prepared closure=%d digest=%q", len(prepared.Nodes), prepared.RequestDigest)
+	}
+}
+
+func TestFrozenReadSetDeclarationRejections(t *testing.T) {
+	t.Run("future_readset_source", func(t *testing.T) {
+		req := validRegisterRequest()
+		req.Event.Source.SourceEntryID = "rset_" + digestOf('f')
+		req.Event.Source.SourceRef.ObjectID = req.Event.Source.SourceEntryID
+		req.Closure[0] = req.Event.Source
+		if _, err := PrepareRegistration(enabledConfig(), req); !errors.Is(err, ErrInvalidJournal) {
+			t.Fatalf("rset source error = %v", err)
+		}
+	})
+	t.Run("debate_initial", func(t *testing.T) {
+		req := validRegisterRequest()
+		req.Event.Kind = "DEBATE"
+		req.Event.Phase = "INITIAL_REVIEW"
+		if _, err := PrepareRegistration(enabledConfig(), req); !errors.Is(err, ErrInvalidJournal) {
+			t.Fatalf("debate initial error = %v", err)
+		}
+	})
+}
+
+func TestReadbackAdoptRejectsFrozenDeclarationViolations(t *testing.T) {
+	prepared, err := PrepareRegistration(enabledConfig(), validRegisterRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations := map[string]func(map[string]any){
+		"future_readset_source": func(plan map[string]any) {
+			source := plan["source"].(map[string]any)
+			source["source_entry_id"] = "rset_" + digestOf('f')
+			source["source_ref"].(map[string]any)["object_id"] = "rset_" + digestOf('f')
+		},
+		"debate_initial": func(plan map[string]any) {
+			plan["kind"] = "DEBATE"
+			plan["phase"] = "INITIAL_REVIEW"
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			var plan map[string]any
+			if err := json.Unmarshal(prepared.EventBytes, &plan); err != nil {
+				t.Fatal(err)
+			}
+			mutate(plan)
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonicalBytes, err := canonical.CanonicalizeWithLimits(raw, canonical.Limits{
+				MaxBytes: 32768, MaxDepth: 16, MaxMembers: 512, MaxStringBytes: 8192,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := AdoptRegistrationEvent(canonicalBytes.Bytes()); !errors.Is(err, ErrInvalidJournal) {
+				t.Fatalf("readback error=%v", err)
+			}
+		})
 	}
 }

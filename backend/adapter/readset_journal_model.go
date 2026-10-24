@@ -3,8 +3,10 @@ package magi
 import "time"
 
 // ReadSetJournalModel is the durable local per-journal header. Its owner fields
-// are diagnostic/durable bindings, not authorization credentials. Every append
-// is fenced by the existing DecisionJob lease + Case ExecutionGeneration.
+// are diagnostic/durable bindings, not authorization credentials. The first
+// append anchors ExecutionGeneration for the journal; later generations may
+// read/replay/reconcile it but cannot append. Every append is fenced by the
+// existing DecisionJob lease + Case ExecutionGeneration.
 type ReadSetJournalModel struct {
 	ID                           string    `gorm:"column:id;primaryKey;size:96"`
 	CaseID                       string    `gorm:"column:case_id;size:64;not null"`

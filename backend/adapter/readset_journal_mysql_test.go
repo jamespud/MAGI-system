@@ -276,8 +276,8 @@ func TestReadSetJournal_OwnerABAAndGenerationChangeMySQL(t *testing.T) {
 	if _, err := repo.Register(ctx, owner1, staleReq); !errors.Is(err, port.ErrLeaseLost) {
 		t.Fatalf("stale generation registration error=%v", err)
 	}
-	if _, err := repo.Register(ctx, owner2, journalRegistration(owner2, "delivery-gen-2")); err != nil {
-		t.Fatalf("current generation registration: %v", err)
+	if _, err := repo.Register(ctx, owner2, journalRegistration(owner2, "delivery-gen-2")); !errors.Is(err, readsetjournal.ErrOwnerFence) {
+		t.Fatalf("cross-generation append error=%v, want ErrOwnerFence", err)
 	}
 
 	requeueArtifactOwner(t, jobs, second, worker)
@@ -290,8 +290,8 @@ func TestReadSetJournal_OwnerABAAndGenerationChangeMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.HighWatermark != 2 || len(view.Events) != 2 {
-		t.Fatalf("stale owner appended: %+v", view)
+	if view.HighWatermark != 1 || len(view.Events) != 1 {
+		t.Fatalf("cross-generation append changed journal: %+v", view)
 	}
 }
 
@@ -488,7 +488,8 @@ func TestReadSetJournal_AppendBeforeExposureFaultCutAndResponseLossMySQL(t *test
 		t.Fatalf("append-before-exposure cut view=%+v err=%v", committed, err)
 	}
 	replay, err := newReadSetJournalRepo(db, true).Register(ctx, owner, req)
-	if err != nil || replay.Created || replay.Sequence != 1 || replay.Event.ProviderState != readsetjournal.ProviderPending {
+	if err != nil || replay.Created || replay.ExposurePermitted || !replay.RequiresReconciliation ||
+		replay.Sequence != 1 || replay.Event.ProviderState != readsetjournal.ProviderPending {
 		t.Fatalf("reply-loss reconciliation replay=%+v err=%v", replay, err)
 	}
 	view, err = newReadSetJournalRepo(db, true).ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req))
@@ -604,4 +605,316 @@ func TestReadSetJournal_MigrationShapeMySQL(t *testing.T) {
 	if !slices.Contains(reverseIndexes, "idx_readset_edge_reverse") {
 		t.Fatalf("reverse dependency index missing: %v", reverseIndexes)
 	}
+}
+
+func TestReadSetJournal_ReplayNeverPermitsExposureMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	_, owner := claimArtifactOwner(t, jobs, job, "journal-replay-permit")
+	repo := newReadSetJournalRepo(db, true)
+	req := journalRegistration(owner, "delivery-replay-permit")
+
+	first, err := repo.Register(ctx, owner, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Created || !first.ExposurePermitted || first.RequiresReconciliation {
+		t.Fatalf("new registration must be the sole exposure permit: %+v", first)
+	}
+	for _, state := range []readsetjournal.ProviderState{
+		readsetjournal.ProviderPending,
+		readsetjournal.ProviderUnknown,
+		readsetjournal.ProviderUnverifiable,
+	} {
+		switch state {
+		case readsetjournal.ProviderUnknown:
+			if _, err := repo.MarkProviderUnknown(ctx, owner, req.Event.JournalKey, reqScope(req), req.Event.DeliveryID, "timeout"); err != nil {
+				t.Fatal(err)
+			}
+		case readsetjournal.ProviderUnverifiable:
+			if _, err := repo.MarkProviderUnverifiable(ctx, owner, req.Event.JournalKey, reqScope(req), req.Event.DeliveryID, "provider unavailable"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		replay, err := repo.Register(ctx, owner, req)
+		if err != nil {
+			t.Fatalf("state %s replay: %v", state, err)
+		}
+		if replay.Created || replay.ExposurePermitted || !replay.RequiresReconciliation {
+			t.Fatalf("state %s duplicate must require reconciliation and never permit exposure: %+v", state, replay)
+		}
+	}
+}
+
+func TestReadSetJournal_ReadRejectsStaleSourceMySQL(t *testing.T) {
+	expiredUntil := "2021-01-01T00:00:00.000Z"
+	cases := []struct {
+		name       string
+		notBefore  string
+		validUntil *string
+	}{
+		{name: "expired", notBefore: "2020-01-01T00:00:00.000Z", validUntil: &expiredUntil},
+		{name: "not_yet_valid", notBefore: "2099-01-01T00:00:00.000Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-freshness-"+tc.name)
+			repo := newReadSetJournalRepo(db, true)
+			req := journalRegistration(owner, "delivery-freshness-"+tc.name)
+			req.Event.Source.Validity = inputartifact.Validity{NotBefore: tc.notBefore, ValidUntil: tc.validUntil}
+			req.Closure[0] = req.Event.Source
+			if _, err := repo.Register(ctx, owner, req); err != nil {
+				t.Fatalf("register stale fixture: %v", err)
+			}
+			if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
+				t.Fatalf("stale source was released for restore: %+v", view)
+			}
+		})
+	}
+}
+
+func TestReadSetJournal_GenerationCannotAppendSecondEventMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	first, owner1 := claimArtifactOwner(t, jobs, job, "journal-generation-anchor")
+	repo := newReadSetJournalRepo(db, true)
+	original := journalRegistration(owner1, "delivery-generation-1")
+	registered, err := repo.Register(ctx, owner1, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requeueArtifactOwner(t, jobs, first, owner1.WorkerID)
+	_, owner2 := claimArtifactOwner(t, jobs, job, owner1.WorkerID)
+	if owner2.ExecutionGeneration == owner1.ExecutionGeneration {
+		t.Fatal("generation did not advance")
+	}
+	if _, err := repo.Register(ctx, owner2, journalRegistration(owner2, "delivery-generation-2")); !errors.Is(err, readsetjournal.ErrOwnerFence) {
+		t.Fatalf("cross-generation append error=%v, want ErrOwnerFence", err)
+	}
+	view, err := repo.ReadJournal(ctx, owner2, original.Event.JournalKey, reqScope(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.HighWatermark != 1 || len(view.Events) != 1 || view.Events[0].Sequence != registered.Sequence {
+		t.Fatalf("cross-generation append increased HWM: %+v", view)
+	}
+
+	replayReq := original
+	replayReq.Owner = readsetjournal.OwnerFence{
+		CaseID: owner2.CaseID, JobID: owner2.JobID, WorkerID: owner2.WorkerID,
+		ExecutionGeneration: owner2.ExecutionGeneration,
+	}
+	replay, err := repo.Register(ctx, owner2, replayReq)
+	if err != nil {
+		t.Fatalf("new generation exact replay: %v", err)
+	}
+	if replay.Created || replay.ExposurePermitted || !replay.RequiresReconciliation || replay.Sequence != registered.Sequence {
+		t.Fatalf("new generation replay semantics=%+v", replay)
+	}
+}
+
+func TestReadSetJournal_ReadbackRecomputesClosureEvidenceMySQL(t *testing.T) {
+	registerDerived := func(t *testing.T, db *gorm.DB, owner *entity.ExecutionContext, suffix string) (readsetjournal.RegisterRequest, readsetjournal.JournalKey, string) {
+		t.Helper()
+		req := journalRegistration(owner, "delivery-evidence-"+suffix)
+		parent := req.Event.Source
+		child := parent
+		child.NodeID = "node-evidence-child"
+		child.SourceEntryID = "source-evidence-child"
+		child.Kind = "DERIVED"
+		child.SourceRef.ObjectID = "source-evidence-child"
+		child.ParentNodeIDs = []string{parent.NodeID}
+		req.Event.Source = child
+		req.Event.ParentNodeIDs = []string{parent.NodeID}
+		req.Event.Kind = "HISTORY_SUMMARY"
+		req.Closure = []inputartifact.SourceNode{parent, child}
+		if _, err := newReadSetJournalRepo(db, true).Register(context.Background(), owner, req); err != nil {
+			t.Fatalf("register evidence fixture: %v", err)
+		}
+		return req, req.Event.JournalKey, readSetJournalIDForCase(t, db, owner.CaseID)
+	}
+
+	cases := []struct {
+		name    string
+		corrupt func(t *testing.T, db *gorm.DB, journalID, parentID, childID string)
+	}{
+		{
+			name: "request_digest",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, _, _ string) {
+				if err := db.Exec("UPDATE readset_journal_event SET request_digest = ? WHERE journal_id = ?", strings.Repeat("0", 64), journalID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "node_first_sequence",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, _, childID string) {
+				if err := db.Exec("UPDATE readset_journal_node SET first_sequence = 2 WHERE journal_id = ? AND node_id = ?", journalID, childID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "node_admission_generation",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, _, childID string) {
+				if err := db.Exec("UPDATE readset_journal_node SET admission_generation = admission_generation + 1 WHERE journal_id = ? AND node_id = ?", journalID, childID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "node_admission_scope",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, _, childID string) {
+				if err := db.Exec("UPDATE readset_journal_node SET admission_scope_id = 'foreign-scope' WHERE journal_id = ? AND node_id = ?", journalID, childID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "edge_created_sequence",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, parentID, childID string) {
+				if err := db.Exec("UPDATE readset_journal_edge SET created_sequence = 99 WHERE journal_id = ? AND parent_node_id = ? AND child_node_id = ?", journalID, parentID, childID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "parent_admission_order",
+			corrupt: func(t *testing.T, db *gorm.DB, journalID, parentID, _ string) {
+				if err := db.Exec("UPDATE readset_journal_node SET first_sequence = 2 WHERE journal_id = ? AND node_id = ?", journalID, parentID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-evidence-"+tc.name)
+			req, key, journalID := registerDerived(t, db, owner, tc.name)
+			tc.corrupt(t, db, journalID, req.Closure[0].NodeID, req.Event.Source.NodeID)
+			if view, err := newReadSetJournalRepo(db, true).ReadJournal(ctx, owner, key, reqScope(req)); err == nil {
+				t.Fatalf("corrupt closure/evidence accepted for restore: %+v", view)
+			}
+		})
+	}
+}
+
+func TestReadSetJournal_FrozenDeclarationRejectionsMySQL(t *testing.T) {
+	appendCases := []struct {
+		name   string
+		mutate func(*readsetjournal.RegisterRequest)
+	}{
+		{
+			name: "future_readset_source",
+			mutate: func(req *readsetjournal.RegisterRequest) {
+				req.Event.Source.SourceEntryID = "rset_" + journalDigest("future-rset")
+				req.Event.Source.SourceRef.ObjectID = req.Event.Source.SourceEntryID
+				req.Closure[0] = req.Event.Source
+			},
+		},
+		{
+			name: "debate_initial",
+			mutate: func(req *readsetjournal.RegisterRequest) {
+				req.Event.Kind = "DEBATE"
+				req.Event.Phase = "INITIAL_REVIEW"
+			},
+		},
+	}
+	for _, tc := range appendCases {
+		t.Run("append_"+tc.name, func(t *testing.T) {
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-declaration-"+tc.name)
+			req := journalRegistration(owner, "delivery-declaration-"+tc.name)
+			tc.mutate(&req)
+			if _, err := newReadSetJournalRepo(db, true).Register(context.Background(), owner, req); err == nil {
+				t.Fatal("frozen ReadSet declaration violation was admitted")
+			}
+		})
+	}
+
+	t.Run("phase_regression_append", func(t *testing.T) {
+		ctx := context.Background()
+		db := openArtifactGenerationMySQL(t)
+		_, jobs, job := seedArtifactGenerationJob(t, db)
+		migrateReadSetJournalMySQL(t, db)
+		_, owner := claimArtifactOwner(t, jobs, job, "journal-phase-regression")
+		repo := newReadSetJournalRepo(db, true)
+		first := journalRegistration(owner, "delivery-phase-cross")
+		first.Event.Phase = "CROSS_EXAMINATION"
+		if _, err := repo.Register(ctx, owner, first); err != nil {
+			t.Fatal(err)
+		}
+		regressed := journalRegistration(owner, "delivery-phase-initial")
+		regressed.Event.Phase = "INITIAL_REVIEW"
+		if _, err := repo.Register(ctx, owner, regressed); !errors.Is(err, readsetjournal.ErrInvalidJournal) {
+			t.Fatalf("phase regression append error=%v", err)
+		}
+		view, err := repo.ReadJournal(ctx, owner, first.Event.JournalKey, reqScope(first))
+		if err != nil || view.HighWatermark != 1 {
+			t.Fatalf("phase regression changed journal: view=%+v err=%v", view, err)
+		}
+	})
+
+	t.Run("phase_regression_readback", func(t *testing.T) {
+		ctx := context.Background()
+		db := openArtifactGenerationMySQL(t)
+		_, jobs, job := seedArtifactGenerationJob(t, db)
+		migrateReadSetJournalMySQL(t, db)
+		_, owner := claimArtifactOwner(t, jobs, job, "journal-phase-readback")
+		repo := newReadSetJournalRepo(db, true)
+		first := journalRegistration(owner, "delivery-phase-readback-1")
+		first.Event.Phase = "CROSS_EXAMINATION"
+		if _, err := repo.Register(ctx, owner, first); err != nil {
+			t.Fatal(err)
+		}
+		second := journalRegistration(owner, "delivery-phase-readback-2")
+		second.Event.Phase = "FINAL_REVIEW"
+		if _, err := repo.Register(ctx, owner, second); err != nil {
+			t.Fatal(err)
+		}
+		corrupted := second
+		corrupted.Event.Phase = "INITIAL_REVIEW"
+		cfg := readsetjournal.DefaultConfig()
+		cfg.Enabled = true
+		prepared, err := readsetjournal.PrepareRegistration(cfg, corrupted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+		if err := db.Exec(`UPDATE readset_journal_event
+			SET payload_json = ?, payload_digest = ?, request_digest = ?, payload_bytes = ?
+			WHERE journal_id = ? AND delivery_id = ?`,
+			prepared.EventBytes, prepared.EventDigest, prepared.RequestDigest, len(prepared.EventBytes),
+			journalID, second.Event.DeliveryID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(`UPDATE readset_journal_delivery SET payload_digest = ?
+			WHERE journal_id = ? AND delivery_id = ?`,
+			prepared.EventDigest, journalID, second.Event.DeliveryID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(`UPDATE readset_journal
+			SET event_bytes = (SELECT COALESCE(SUM(payload_bytes), 0) FROM readset_journal_event WHERE journal_id = ?)
+			WHERE id = ?`, journalID, journalID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if view, err := repo.ReadJournal(ctx, owner, second.Event.JournalKey, reqScope(second)); err == nil {
+			t.Fatalf("phase-regressed journal accepted for restore: %+v", view)
+		}
+	})
 }

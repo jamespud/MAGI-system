@@ -9,8 +9,11 @@
 ## 0. 结论先行
 
 本切片交付一个 **默认关闭、未生产接线** 的本地 durable pre-exposure
-registration primitive：调用方只能在 `Register` 事务成功提交后考虑 provider
-暴露；Journal 登记本身不证明 provider 已应用，也不证明模型真实读取。
+registration primitive：只有新建登记的 `Register` 结果同时满足
+`Created=true`、`ExposurePermitted=true`、`RequiresReconciliation=false` 时，调用方
+才可考虑首次 provider 提交。任何 exact duplicate（包括 pending/reply-loss 和
+UNKNOWN/UNVERIFIABLE）都是 `ExposurePermitted=false` 且必须 reconciliation，不能
+据此重发。Journal 登记本身不证明 provider 已应用，也不证明模型真实读取。
 
 本实现 **不是** #45 `AuthorityContract` 的实现，**不声称与其 wire-compatible**。当前
 `JOURNAL_ADMIT` 的 `CompleteWritePlan` 表示已取得可信应用证据后的 eventual
@@ -34,7 +37,9 @@ post-policy settlement write，不包含“登记先于可能暴露”的 typed 
 - 依赖节点、parent edge 与 reverse index；orphan/cycle/missing ancestor 拒绝。
 - 既有 DecisionJob lease + Case `ExecutionGeneration` owner fence；锁等待后重新校验。
 - context/authority/credential 三类 `(scope_id, epoch)` 与 generation 分离。
-- delivery ID 幂等：同 ID/同字节返回原结果，同 ID/不同字节冲突。
+- delivery ID 幂等：同 ID/同字节返回原结果但绝不返回 exposure permit；同 ID/不同字节冲突。
+- Journal generation 在首次 append 锚定；新 generation 只能 read/replay/reconcile。
+- restore 使用锁后 DB time 对所有 required node 做 half-open freshness 检查。
 - provider timeout/unknown/unverifiable 分类；unknown 不减少 pending，不自动重发。
 - crash/restart 的 read-only reconciliation 与 post-revocation read fence。
 - 仓库内 unit RED→GREEN 和真实 MySQL 并发/故障测试。
@@ -93,14 +98,16 @@ post-policy settlement write，不包含“登记先于可能暴露”的 typed 
 | 调用方伪造 JournalKey/role/generation/epoch | frozen key shape、positive generation、独立 scope 比较、owner fence | Manifest/provider 身份真实性；C2 授权 |
 | stale worker 在锁等待后继续写 | 先锁 DecisionJob/Case，再读 DB time 与 owner/generation/lease；之后才写 Journal | 长事务跨越 lease 截止时的外部执行 |
 | owner A→B→A 字符串 ABA | generation 必须相等且单调前进；旧 generation 返回 `ErrLeaseLost` | 真实部署接管演练 |
+| 新 generation 追加 event 2 | journal/event generation 锚定；新 generation 只可 read/replay/reconcile | 真实多实例接管演练 |
 | 并发 append 重号/跳号 | same-case owner lock + Journal row lock + HWM/state-version CAS；读时验证 `1..HWM` | 未接入旧写者 |
 | 同 delivery 不同 bytes | `(journal_id,delivery_id)` 唯一；payload/request digest 与 exact bytes 比较 | provider 外部 idempotency |
-| 回包丢失 | 同 owner/generation 同 ID/同字节可重放原结果；新 generation 只能 reconcile | provider 是否已暴露 |
+| 回包丢失 | 同 ID/同字节可恢复原事实，但 `ExposurePermitted=false`、`RequiresReconciliation=true`；不得重发 | provider 是否已暴露 |
 | timeout/unknown | `UNKNOWN` 保留 pending；不生成 validator delivery；无 resend API | true external outcome |
 | 无独立 provider 证据 | `UNVERIFIABLE`；APPLIED/authority sequence 不可达 | reconciliation 完整性 |
 | 派生材料先于 parent 或 orphan | 完整 ancestor closure、edge 精确匹配、cycle/extra-node 拒绝 | parent 原件真实性/撤销 |
 | post-revocation cache replay | 当前 scope/epoch 与登记精确不等即 `ErrRevoked` | 当前 scope 的可信来源；生产 resolver BLOCKED |
-| 超大/截断 | event 32768B、members 512、string 8192B、depth 16、nodes 2048、parents 64、events 512、journal 16MiB | 未经版本审阅调整阈值 |
+| 超大/截断 | event 32768B、members 512、string 8192B、depth 16、nodes 2048、parents 64、events 512、closure/journal 16MiB | 未经版本审阅调整阈值 |
+| future/expired source | 锁后 DB time 对全部 required nodes 做 `[not_before, valid_until)` 检查 | 真实 C2 freshness/revocation source |
 | 存储损坏 | canonical bytes + raw SHA-256、columns 与 payload 交叉核对、graph 重建 | MySQL 管理员恶意破坏持久性 |
 
 信任边界：本切片信任既有 DecisionJob/Case 表与其锁语义，并把 caller 提供的
@@ -116,11 +123,16 @@ post-policy settlement write，不包含“登记先于可能暴露”的 typed 
 - `readsetjournal.PrepareRegistration` 先做纯校验/canonicalization；
 - adapter 在一个 MySQL transaction 中锁 owner、Journal、event/delivery 相关行；
 - 成功提交后才返回 `ReadSetJournalRegistration`；
-- 不调用 provider，不返回 provider capability；
-- 失败/回滚时不返回可暴露 permit。
+- 只有新事务创建的登记返回 `Created=true, ExposurePermitted=true,
+  RequiresReconciliation=false`；
+- exact duplicate 一律返回 `Created=false, ExposurePermitted=false,
+  RequiresReconciliation=true`，即使 delivery 仍为 PENDING；
+- 不调用 provider；失败/回滚/duplicate 都不返回可暴露 permit。
 
 `Register` 的 exact duplicate 判定包含 canonical payload、closure node digests 和
-provider request binding；只相同 payload digest 不足以重放不同 closure。
+provider request binding；只相同 payload digest 不足以重放不同 closure。新 generation
+可以用原 event bytes + 当前 owner fence 做 exact replay，但 duplicate 分支在 append
+generation 检查之前返回，且永不授权重发。
 
 ### 4.2 状态分离
 
@@ -139,9 +151,12 @@ provider request binding；只相同 payload digest 不足以重放不同 closur
 
 ### 4.3 crash/restart
 
-- 新 generation 的当前 owner 可以 `ReadJournal`/`ReconcileDelivery` 原登记。
-- 旧 canonical bytes 不会静默改写为新 generation；新 owner 只能读取/分类原结果。
-- same-generation response-loss retry 可按 delivery ID 恢复原 sequence。
+- 新 generation 的当前 owner 可以 `ReadJournal`/`ReconcileDelivery`/exact replay 原登记。
+- 旧 canonical bytes 不会静默改写为新 generation；新 generation 不能 append event 2。
+- same-generation response-loss retry 可按 delivery ID 恢复原 sequence，但结果仍是
+  reconciliation-only，`ExposurePermitted=false`。
+- `ReadJournal` 在 owner/journal 锁后读取 MySQL `CURRENT_TIMESTAMP(6)`；任一 required
+  node 未生效或在 `valid_until` 半开边界之外即拒绝恢复。
 - 没有自动 resend、自动 retry provider 或“unknown 视为未执行”的路径。
 
 ## 5. 持久不变量
@@ -152,7 +167,7 @@ provider request binding；只相同 payload digest 不足以重放不同 closur
 | RJ-02 | `local_sequence` 每 Journal 从 1 连续；`high_watermark == event count == delivery count`。 |
 | RJ-03 | event payload 必须已是 `magi-cj/1` canonical bytes；raw SHA-256 与列一致。 |
 | RJ-04 | registration 与 provider apply 分离；本地状态不进入 #42 Deliveries。 |
-| RJ-05 | owner/job/worker/generation 使用既有 durable DecisionJob lease；generation 必须正数。 |
+| RJ-05 | owner/job/worker/generation 使用既有 durable DecisionJob lease；generation 必须正数；首个 append 锚定 journal generation。 |
 | RJ-06 | context/authority/credential 各自绑定 `(scope_id,epoch)`；零 epoch 合法；不得与 generation 或 round 互代。 |
 | RJ-07 | 同一 node ID 描述不可变；同 source/version 不得映射不同 node；parent IDs 排序且唯一。 |
 | RJ-08 | DERIVED 必须有 parent；RAW/EMPTY_RESULT 必须无 parent；边表必须精确等于 node parent 集。 |
@@ -162,6 +177,11 @@ provider request binding；只相同 payload digest 不足以重放不同 closur
 | RJ-12 | 当前 scope 任一 ID/epoch 不同即拒绝 read/settlement；实际撤销源 BLOCKED。 |
 | RJ-13 | `APPLIED_VERIFIED` 若持久记录缺 authority sequence/canonical verification ref/injected/verified time，读路径 fail closed。 |
 | RJ-14 | `ReadSetDeliveries` 只为 APPLIED fact 构造 frozen `ReadEvent`；不构造 Sources、不提升 ActualReads/Authority。 |
+| RJ-15 | duplicate 永不允许 exposure；仅新建登记可 `ExposurePermitted=true`。 |
+| RJ-16 | restore 锁后取 DB time，对 raw/derived/empty 全部 node 做 half-open freshness。 |
+| RJ-17 | RequestDigest 从 event bytes + exact ancestor closure 重算，预算由 node/closure 上限而非 event 上限决定。 |
+| RJ-18 | node FirstSequence/AdmissionGeneration/AdmissionScopeID、edge CreatedSequence 与 parent-admission order 必须与 journal anchor 一致。 |
+| RJ-19 | 拒绝 `rset_` source、DEBATE/INITIAL_REVIEW 和 phase regression。 |
 
 ## 6. MySQL 存储与事务
 
@@ -214,7 +234,20 @@ provider request binding；只相同 payload digest 不足以重放不同 closur
 
 由于 APPLIED 路径 BLOCKED，本切片没有“真实 provider 读取已适配通过”的声明。
 
-## 8. A–F 证据
+## 8. 独立审查修正（CHANGES REQUIRED）
+
+| 审查项 | 实际 RED | 修正与 GREEN |
+| --- | --- | --- |
+| P1 exact replay 不得成为 exposure permit | `TestReadSetJournal_ReplayNeverPermitsExposureMySQL` build failed：`ExposurePermitted`/`RequiresReconciliation` 未定义 | 新登记唯一 permit；所有 duplicate reconciliation-only。测试覆盖 PENDING/UNKNOWN/UNVERIFIABLE，PASS |
+| P1 restore source freshness | MySQL stale test 实际返回 journal 并失败；domain helper 测试 build failed | 锁后 DB time + 全部节点 half-open validity；expired/not-yet-valid/future-ancestor PASS |
+| P1 禁止跨 generation append | `TestReadSetJournal_GenerationCannotAppendSecondEventMySQL` 中 event 2 被接受，返回 `nil`；HWM 增至 2 | journal generation 锚定；新 generation exact replay/read 可用、append 返回 `ErrOwnerFence`、HWM 保持 1，PASS |
+| P2 2048-node RequestDigest | 2048-node near-limit test 先因 closure 1MiB cap 被拒绝 | `RequestDigestFor` 使用 node/closure budget；closure cap 16MiB；2048-node closure PASS |
+| P2 readback closure/evidence 重算 | corruption 子测试均被接受 | 重算 exact ancestor RequestDigest；校验 FirstSequence/Generation/Scope/CreatedSequence/parent ordering；六个 corruption 子测试 PASS |
+| P2 frozen #42 declaration rejection | `rset_`、DEBATE/INITIAL、phase regression append/readback 被接受 | append/readback 双重拒绝；domain/readback/MySQL 测试 PASS |
+
+本轮修复没有修改 frozen #42 Schema/Golden/身份，也没有扩大 provider/C2/C3 能力。
+
+## 9. A–F 证据
 
 ### A. 问题与边界
 
@@ -248,7 +281,8 @@ provider request binding；只相同 payload digest 不足以重放不同 closur
 | domain RED shape | 同上 | nil parent array / 非 UTC 时间被接受，frozen-array/time-shape 测试真实失败 |
 | domain GREEN | 同上 | PASS |
 | adapter RED | `go test ./adapter -run ReadSetJournal -count=1` | build failed：`ReadSetJournalRepository`/result 未定义 |
-| adapter MySQL GREEN | 下述 DSN 命令 | 9 个顶层验收测试全部 PASS（含 response-loss 子测试） |
+| review P1/P2 REDs | 见第 8 节；日志保存在 `/tmp/magi-wave2-44-fix{1..6}-*.log` | 六项均先观察实际失败，再实现 |
+| adapter MySQL GREEN | 下述 DSN 命令 | 14 个顶层验收测试全部 PASS（含 review regression 子测试） |
 | domain regression | `go test ./domain/readsetjournal ./domain/inputartifact ./domain/canonical -count=1` | PASS；未修改 #42 frozen tests |
 | domain race | `go test -race ./domain/readsetjournal -count=1` | PASS |
 | MySQL race | 下述 DSN 命令加 `-race` | PASS |
@@ -278,6 +312,11 @@ go test ./adapter -run ReadSetJournal -count=1 -v
 - `TestReadSetJournal_DAGReverseIndexAndOrphanRejectionMySQL`
 - `TestReadSetJournal_DefaultDisabledDoesNotWriteMySQL`
 - `TestReadSetJournal_MigrationShapeMySQL`
+- `TestReadSetJournal_ReplayNeverPermitsExposureMySQL`
+- `TestReadSetJournal_ReadRejectsStaleSourceMySQL`
+- `TestReadSetJournal_GenerationCannotAppendSecondEventMySQL`
+- `TestReadSetJournal_ReadbackRecomputesClosureEvidenceMySQL`
+- `TestReadSetJournal_FrozenDeclarationRejectionsMySQL`
 
 覆盖：24 并发 append 的连续 `1..24` 前缀；same-ID/same-bytes replay 与
 same-ID/different-bytes conflict；scope conflict；same-worker owner ABA、generation
@@ -285,7 +324,10 @@ change、stale unknown settlement；等锁期间 lease 到期后 `ErrLeaseLost` 
 重启后新 generation readback；unknown → unverifiable、pending 保留、validator
 deliveries 为空；insert failure 整体回滚；post-commit reply loss 后 durable row 已
 存在且 exact replay 恢复原 sequence；DAG/reverse index 与 orphan rejection；默认
-disabled 零写入；真实 migration 列和 reverse index shape。
+disabled 零写入；真实 migration 列和 reverse index shape；duplicate 永不 permit；
+expired/future source restore 拒绝；跨 generation append 保持 HWM；2048-node closure
+RequestDigest；RequestDigest/node/edge/parent-order corruption 拒绝；future `rset_`
+source、DEBATE/INITIAL 和 phase regression 拒绝。
 
 ### E. 自审与残余风险
 
@@ -294,7 +336,9 @@ disabled 零写入；真实 migration 列和 reverse index shape。
 | 当前 scope 由调用方提供，未接 C2 可信 resolver | P0（生产启用） | BLOCKED；默认关闭 |
 | #45 无 pre-exposure typed transaction | P0（生产启用） | Design Change required |
 | 无真实 provider apply/authority sequence | P0（C1-C2B 完整性） | BLOCKED / NOT RUN |
-| 无自动 resend 是设计约束，不是恢复已完成 | P1 | 已实现“不重发”；真实恢复 NOT RUN |
+| 无自动 resend 是设计约束，不是恢复已完成 | P1 | 已实现“不重发”与 duplicate 永不 permit；真实 provider 恢复 NOT RUN |
+| DB-time freshness 不替代 C2 当前撤销源 | P1 | 仅 half-open declared validity；真实 revocation BLOCKED |
+| 16MiB closure budget 的内存/CPU 上限未压测 | P2 | 2048-node identity 已测；大 body load test 未运行 |
 | same-case 写者通过 DecisionJob 串行，吞吐而非细粒度并发 | P2 | 有界 slice 可接受；需压测 |
 | APPLIED 读路径只能做 shape/fail-closed 映射 | P1 | provider/C2/C3 BLOCKED |
 | Journal QUIESCING/INPUT_CLOSED 无生产转换 | P1 | 后续关闭切片 |

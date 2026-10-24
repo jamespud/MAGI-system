@@ -30,12 +30,17 @@ type ReadSetJournalRepository struct {
 }
 
 // ReadSetJournalRegistration is a committed local registration or an exact
-// same-ID/same-bytes replay. Its provider state is separate from registration.
+// same-ID/same-bytes replay. ExposurePermitted is true only for the transaction
+// that newly created the registration. Every duplicate is reconciliation-only,
+// including a pending duplicate after a lost reply and any UNKNOWN/UNVERIFIABLE
+// delivery. Provider state remains separate from registration state.
 type ReadSetJournalRegistration struct {
-	JournalID string
-	Sequence  int64
-	Created   bool
-	Event     readsetjournal.EventFact
+	JournalID              string
+	Sequence               int64
+	Created                bool
+	ExposurePermitted      bool
+	RequiresReconciliation bool
+	Event                  readsetjournal.EventFact
 }
 
 func NewReadSetJournalRepository(db *gorm.DB, cfg readsetjournal.Config) *ReadSetJournalRepository {
@@ -43,9 +48,10 @@ func NewReadSetJournalRepository(db *gorm.DB, cfg readsetjournal.Config) *ReadSe
 }
 
 // Register validates and atomically appends one canonical registration, its
-// exact dependency nodes/edges and its PENDING delivery row. The caller must not
-// expose material until this method returns success or recovers an exact
-// duplicate by delivery ID.
+// exact dependency nodes/edges and its PENDING delivery row. A caller may
+// submit material for the first time only when ExposurePermitted is true. An
+// exact duplicate is a read-only recovery result and must be reconciled; it is
+// never permission to resend or expose.
 func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.ExecutionContext, req readsetjournal.RegisterRequest) (ReadSetJournalRegistration, error) {
 	if r == nil || !r.config.Enabled {
 		return ReadSetJournalRegistration{}, readsetjournal.ErrDisabled
@@ -102,12 +108,36 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 			if err != nil {
 				return err
 			}
-			result = ReadSetJournalRegistration{JournalID: journal.ID, Sequence: existing.LocalSequence, Created: false, Event: fact}
+			result = ReadSetJournalRegistration{
+				JournalID: journal.ID, Sequence: existing.LocalSequence, Created: false,
+				ExposurePermitted: false, RequiresReconciliation: true, Event: fact,
+			}
 			return nil
 		case !errors.Is(eventErr, gorm.ErrRecordNotFound):
 			return eventErr
 		}
 
+		if err := readsetjournal.ValidateAppendGeneration(req.Owner, prepared.Event); err != nil {
+			return err
+		}
+		if journal.ExecutionGeneration != owner.ExecutionGeneration {
+			return fmt.Errorf("%w: journal generation is anchored at %d", readsetjournal.ErrOwnerFence, journal.ExecutionGeneration)
+		}
+		var prior ReadSetJournalEventModel
+		priorErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("journal_id = ?", journal.ID).Order("local_sequence desc").First(&prior).Error
+		switch {
+		case priorErr == nil:
+			priorPlan, err := readsetjournal.DecodeRegistrationEvent(prior.PayloadJSON)
+			if err != nil {
+				return err
+			}
+			if err := readsetjournal.ValidatePhaseOrder([]readsetjournal.RegistrationPlan{priorPlan, prepared.Event}); err != nil {
+				return err
+			}
+		case !errors.Is(priorErr, gorm.ErrRecordNotFound):
+			return priorErr
+		}
 		var providerReuse int64
 		if err := tx.Model(&ReadSetJournalEventModel{}).
 			Where("journal_id = ? AND provider_request_id = ?", journal.ID, prepared.Event.ProviderRequestID).
@@ -196,7 +226,10 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 		if err != nil {
 			return err
 		}
-		result = ReadSetJournalRegistration{JournalID: journal.ID, Sequence: nextSequence, Created: true, Event: fact}
+		result = ReadSetJournalRegistration{
+			JournalID: journal.ID, Sequence: nextSequence, Created: true,
+			ExposurePermitted: true, RequiresReconciliation: false, Event: fact,
+		}
 		return nil
 	})
 	if err != nil {
@@ -206,8 +239,10 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 }
 
 // ReadJournal performs a bounded, current-owner read and verifies the
-// continuous local prefix plus exact canonical payload bytes. A changed scoped
-// epoch/ID rejects the read before any cached material can be restored.
+// continuous local prefix, exact canonical payload bytes, recomputed closure
+// RequestDigest, node/edge admission evidence, phase order, and source freshness
+// using trusted database time after locking. A changed scoped epoch/ID or any
+// stale/future required node rejects the read before material can be restored.
 func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entity.ExecutionContext, key readsetjournal.JournalKey, current readsetjournal.AdmissionScope) (readsetjournal.JournalView, error) {
 	if r == nil || !r.config.Enabled {
 		return readsetjournal.JournalView{}, readsetjournal.ErrDisabled
@@ -340,12 +375,16 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			return fmt.Errorf("%w: persisted node count exceeds ceiling", readsetjournal.ErrLimit)
 		}
 		nodes := make([]inputartifact.SourceNode, len(nodeModels))
+		nodeByID := make(map[string]inputartifact.SourceNode, len(nodeModels))
+		nodeModelByID := make(map[string]*ReadSetJournalNodeModel, len(nodeModels))
 		for i := range nodeModels {
 			node, err := decodeStoredNode(&nodeModels[i])
 			if err != nil {
 				return err
 			}
 			nodes[i] = node
+			nodeByID[node.NodeID] = node
+			nodeModelByID[node.NodeID] = &nodeModels[i]
 		}
 		maxEdges := r.config.MaxNodes * r.config.MaxParents
 		var edges []ReadSetJournalEdgeModel
@@ -361,6 +400,67 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			domainEdges[i] = readsetjournal.DependencyEdge{ParentNodeID: edge.ParentNodeID, ChildNodeID: edge.ChildNodeID}
 		}
 		if err := readsetjournal.ValidateJournalGraph(plans, nodes, domainEdges); err != nil {
+			return err
+		}
+		if err := readsetjournal.ValidatePhaseOrder(plans); err != nil {
+			return err
+		}
+		expectedFirstSequence := make(map[string]int64, len(nodeModels))
+		for i, plan := range plans {
+			closure, err := exactAncestorClosure(plan.Source.NodeID, nodeByID, nodeModelByID, r.config.MaxNodes)
+			if err != nil {
+				return err
+			}
+			prepared := make([]readsetjournal.PreparedNode, len(closure))
+			for j, node := range closure {
+				model := nodeModelByID[node.NodeID]
+				prepared[j] = readsetjournal.PreparedNode{
+					Node: node, Bytes: append([]byte(nil), model.NodeJSON...), Digest: model.NodeDigest,
+				}
+				if _, ok := expectedFirstSequence[node.NodeID]; !ok {
+					expectedFirstSequence[node.NodeID] = int64(i + 1)
+				}
+			}
+			digest, err := readsetjournal.RequestDigestFor(events[i].PayloadJSON, prepared, r.config)
+			if err != nil {
+				return err
+			}
+			if digest != events[i].RequestDigest {
+				return fmt.Errorf("%w: event %d RequestDigest differs from exact closure", readsetjournal.ErrInvalidJournal, i+1)
+			}
+		}
+		for i := range nodeModels {
+			model := &nodeModels[i]
+			expectedSequence, ok := expectedFirstSequence[model.NodeID]
+			if !ok || model.FirstSequence != expectedSequence || model.FirstSequence < 1 || model.FirstSequence > journal.HighWatermark {
+				return fmt.Errorf("%w: node %q first admission sequence is not the exact closure sequence", readsetjournal.ErrInvalidJournal, model.NodeID)
+			}
+			if model.AdmissionGeneration != journal.ExecutionGeneration {
+				return fmt.Errorf("%w: node %q admission generation differs from journal anchor", readsetjournal.ErrInvalidJournal, model.NodeID)
+			}
+			if model.AdmissionScopeID != journal.AdmissionScopeID {
+				return fmt.Errorf("%w: node %q admission scope differs from journal scope", readsetjournal.ErrInvalidJournal, model.NodeID)
+			}
+		}
+		for _, edge := range edges {
+			child := nodeModelByID[edge.ChildNodeID]
+			parent := nodeModelByID[edge.ParentNodeID]
+			if child == nil || parent == nil || edge.CreatedSequence != child.FirstSequence ||
+				edge.CreatedSequence < 1 || edge.CreatedSequence > journal.HighWatermark {
+				return fmt.Errorf("%w: edge created sequence is not bound to child admission", readsetjournal.ErrInvalidJournal)
+			}
+			if parent.FirstSequence > child.FirstSequence {
+				return fmt.Errorf("%w: parent %q admitted after child %q", readsetjournal.ErrDependency, parent.NodeID, child.NodeID)
+			}
+		}
+		// Sample trusted DB time only after every lock and validation step, then
+		// make freshness the final release gate. A slow graph/evidence check must
+		// not let material expire between the clock sample and the return.
+		readAt, err := databaseNow(tx)
+		if err != nil {
+			return err
+		}
+		if err := readsetjournal.ValidateNodesFreshAt(nodes, readAt); err != nil {
 			return err
 		}
 		reverse := make(map[string][]string)
@@ -693,4 +793,37 @@ func validateJournalReadTarget(owner *entity.ExecutionContext, key readsetjourna
 		return err
 	}
 	return nil
+}
+
+func exactAncestorClosure(sourceID string, nodes map[string]inputartifact.SourceNode, models map[string]*ReadSetJournalNodeModel, limit int) ([]inputartifact.SourceNode, error) {
+	seen := make(map[string]bool)
+	closure := make([]inputartifact.SourceNode, 0, len(nodes))
+	var visit func(string) error
+	visit = func(id string) error {
+		if seen[id] {
+			return nil
+		}
+		node, ok := nodes[id]
+		if !ok {
+			return fmt.Errorf("%w: event source or ancestor %q is missing", readsetjournal.ErrDependency, id)
+		}
+		if models[id] == nil {
+			return fmt.Errorf("%w: stored node model %q is missing", readsetjournal.ErrInvalidJournal, id)
+		}
+		seen[id] = true
+		closure = append(closure, node)
+		if len(closure) > limit {
+			return fmt.Errorf("%w: ancestor closure exceeds node ceiling", readsetjournal.ErrLimit)
+		}
+		for _, parent := range node.ParentNodeIDs {
+			if err := visit(parent); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(sourceID); err != nil {
+		return nil, err
+	}
+	return closure, nil
 }

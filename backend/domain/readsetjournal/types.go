@@ -34,6 +34,7 @@ var (
 	ErrNotFound          = errors.New("readset journal record not found")
 	ErrProviderBlocked   = errors.New("provider verification is blocked")
 	ErrAppliedUnverified = errors.New("APPLIED_VERIFIED lacks trusted verification evidence")
+	ErrStaleMaterial     = errors.New("readset journal source material is outside validity")
 )
 
 // JournalKey is the frozen ReadSet v2 journal identity.
@@ -140,7 +141,7 @@ func DefaultConfig() Config {
 		MaxParents:          64,
 		MaxEventsPerJournal: 512,
 		MaxJournalBytes:     16 * 1024 * 1024,
-		MaxClosureBytes:     1024 * 1024,
+		MaxClosureBytes:     16 * 1024 * 1024,
 	}
 }
 

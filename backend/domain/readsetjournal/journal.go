@@ -46,13 +46,13 @@ func PrepareRegistration(cfg Config, req RegisterRequest) (PreparedRegistration,
 	cfg = cfg.effective()
 	if cfg.MaxEventBytes > 32768 || cfg.MaxEventMembers > 512 || cfg.MaxStringBytes > 8192 ||
 		cfg.MaxGraphDepth > 16 || cfg.MaxNodes > 2048 || cfg.MaxParents > 64 ||
-		cfg.MaxEventsPerJournal > 512 || cfg.MaxJournalBytes > 16*1024*1024 || cfg.MaxClosureBytes > 1024*1024 {
+		cfg.MaxEventsPerJournal > 512 || cfg.MaxJournalBytes > 16*1024*1024 || cfg.MaxClosureBytes > 16*1024*1024 {
 		return PreparedRegistration{}, limitErr("configuration exceeds frozen ReadSet journal ceilings")
 	}
 	if err := validateJournalKey(req.Event.JournalKey); err != nil {
 		return PreparedRegistration{}, err
 	}
-	if err := validateOwner(req.Owner, req.Event.JournalKey, req.Event.ExecutionGeneration); err != nil {
+	if err := validateOwnerShape(req.Owner, req.Event.JournalKey); err != nil {
 		return PreparedRegistration{}, err
 	}
 	if err := validatePlan(req.Event, cfg); err != nil {
@@ -77,26 +77,51 @@ func PrepareRegistration(cfg Config, req RegisterRequest) (PreparedRegistration,
 		return PreparedRegistration{}, err
 	}
 	eventDigest := rawDigest(eventCanonical.Bytes())
-	nodeDigests := make([]string, len(nodes))
-	for i := range nodes {
-		nodeDigests[i] = nodes[i].Digest
+	requestDigest, err := RequestDigestFor(eventCanonical.Bytes(), nodes, cfg)
+	if err != nil {
+		return PreparedRegistration{}, err
+	}
+	return PreparedRegistration{
+		JournalID: journalID, JournalKey: req.Event.JournalKey, Scope: req.Event.AdmissionScope,
+		Event: req.Event, EventBytes: eventCanonical.Bytes(), EventDigest: eventDigest,
+		RequestDigest: requestDigest, Nodes: nodes, MaxGraphDepth: depth,
+	}, nil
+}
+
+// RequestDigestFor binds one canonical event to the exact node-closure bytes.
+// Its input ceiling follows the declared node/closure budget, never the much
+// smaller per-event byte ceiling.
+func RequestDigestFor(eventBytes []byte, nodes []PreparedNode, cfg Config) (string, error) {
+	cfg = cfg.effective()
+	if len(nodes) > cfg.MaxNodes {
+		return "", limitErr("request identity node count exceeds ceiling")
+	}
+	ordered := append([]PreparedNode(nil), nodes...)
+	slices.SortFunc(ordered, func(a, b PreparedNode) int { return strings.Compare(a.Node.NodeID, b.Node.NodeID) })
+	nodeDigests := make([]string, len(ordered))
+	for i := range ordered {
+		nodeDigests[i] = ordered[i].Digest
 	}
 	identity := struct {
 		Protocol    string   `json:"protocol"`
 		EventDigest string   `json:"event_digest"`
 		NodeDigests []string `json:"node_digests"`
-	}{Protocol: Protocol, EventDigest: eventDigest, NodeDigests: nodeDigests}
+	}{Protocol: Protocol, EventDigest: rawDigest(eventBytes), NodeDigests: nodeDigests}
+	// The C0 in-memory budget uses a worst-case escape bound per string.
+	identityBytes := cfg.MaxNodes*(64*6+16) + 4096
+	if identityBytes < cfg.MaxEventBytes {
+		identityBytes = cfg.MaxEventBytes
+	}
+	if identityBytes > cfg.MaxClosureBytes {
+		identityBytes = cfg.MaxClosureBytes
+	}
 	identityCanonical, err := canonical.CanonicalizeStructWithLimits(identity, canonical.Limits{
-		MaxBytes: cfg.MaxEventBytes, MaxDepth: 4, MaxMembers: cfg.MaxNodes + 4, MaxStringBytes: 128,
+		MaxBytes: identityBytes, MaxDepth: 4, MaxMembers: cfg.MaxNodes + 8, MaxStringBytes: 64,
 	})
 	if err != nil {
-		return PreparedRegistration{}, canonicalLimitOrInvalid(err, "registration identity")
+		return "", canonicalLimitOrInvalid(err, "registration identity")
 	}
-	return PreparedRegistration{
-		JournalID: journalID, JournalKey: req.Event.JournalKey, Scope: req.Event.AdmissionScope,
-		Event: req.Event, EventBytes: eventCanonical.Bytes(), EventDigest: eventDigest,
-		RequestDigest: rawDigest(identityCanonical.Bytes()), Nodes: nodes, MaxGraphDepth: depth,
-	}, nil
+	return rawDigest(identityCanonical.Bytes()), nil
 }
 
 // JournalIDFor derives a stable local journal identifier from the frozen key.
@@ -148,6 +173,55 @@ func DecodeRegistrationEvent(raw []byte) (RegistrationPlan, error) {
 	return plan, nil
 }
 
+// ValidateNodesFreshAt applies half-open validity to every required node:
+// at >= not_before and, when present, at < valid_until. A stale ancestor blocks
+// release of the complete derived/raw/empty history or cached replay.
+func ValidateNodesFreshAt(nodes []inputartifact.SourceNode, at time.Time) error {
+	if at.IsZero() {
+		return fmt.Errorf("%w: trusted read time is unavailable", ErrStaleMaterial)
+	}
+	at = at.UTC()
+	for _, node := range nodes {
+		notBefore, err := parseFrozenTime(node.Validity.NotBefore)
+		if err != nil {
+			return fmt.Errorf("%w: node %q has invalid not_before", ErrStaleMaterial, node.NodeID)
+		}
+		if at.Before(notBefore.UTC()) {
+			return fmt.Errorf("%w: node %q is not yet valid", ErrStaleMaterial, node.NodeID)
+		}
+		if node.Validity.ValidUntil != nil {
+			until, err := parseFrozenTime(*node.Validity.ValidUntil)
+			if err != nil {
+				return fmt.Errorf("%w: node %q has invalid valid_until", ErrStaleMaterial, node.NodeID)
+			}
+			if !at.Before(until.UTC()) {
+				return fmt.Errorf("%w: node %q is expired", ErrStaleMaterial, node.NodeID)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidatePhaseOrder enforces the frozen ReadSet phase progression over the
+// ordered event prefix. Repeated phases are legal; regression is not.
+func ValidatePhaseOrder(plans []RegistrationPlan) error {
+	last := 0
+	for _, plan := range plans {
+		rank := map[string]int{"INITIAL_REVIEW": 1, "CROSS_EXAMINATION": 2, "FINAL_REVIEW": 3}[plan.Phase]
+		if rank == 0 {
+			return fmt.Errorf("%w: unsupported phase %q", ErrInvalidJournal, plan.Phase)
+		}
+		if plan.Kind == "DEBATE" && plan.Phase == "INITIAL_REVIEW" {
+			return fmt.Errorf("%w: DEBATE cannot occur in INITIAL_REVIEW", ErrInvalidJournal)
+		}
+		if rank < last {
+			return fmt.Errorf("%w: phase regressed from rank %d to %d", ErrInvalidJournal, last, rank)
+		}
+		last = rank
+	}
+	return nil
+}
+
 // ValidateCurrentScope compares exact scoped identities/epochs. Any difference
 // is fail-closed: a read attempt cannot select an older or foreign scope.
 func ValidateCurrentScope(admitted, current AdmissionScope) error {
@@ -163,13 +237,22 @@ func ValidateCurrentScope(admitted, current AdmissionScope) error {
 	return nil
 }
 
-func validateOwner(owner OwnerFence, key JournalKey, eventGeneration int64) error {
+func validateOwnerShape(owner OwnerFence, key JournalKey) error {
 	if owner.CaseID == "" || owner.CaseID != key.CaseID || !validToken(owner.JobID) ||
 		!validToken(owner.WorkerID) || owner.ExecutionGeneration <= 0 || owner.ExecutionGeneration > canonical.MaxSafeInteger {
 		return fmt.Errorf("%w: durable case/job/worker/positive generation required", ErrOwnerFence)
 	}
-	if eventGeneration != owner.ExecutionGeneration || eventGeneration <= 0 || eventGeneration > canonical.MaxSafeInteger {
-		return fmt.Errorf("%w: event generation %d differs from owner generation %d", ErrOwnerFence, eventGeneration, owner.ExecutionGeneration)
+	return nil
+}
+
+// ValidateAppendGeneration permits a new append only while the current owner
+// still holds the generation anchored by the original journal event. Exact
+// replay is handled before this check and is always reconciliation-only, so a
+// newer generation may recover/read the original bytes but cannot extend it.
+func ValidateAppendGeneration(owner OwnerFence, plan RegistrationPlan) error {
+	if owner.ExecutionGeneration <= 0 || plan.ExecutionGeneration <= 0 ||
+		owner.ExecutionGeneration != plan.ExecutionGeneration {
+		return fmt.Errorf("%w: journal generation %d is anchored; owner generation is %d", ErrOwnerFence, plan.ExecutionGeneration, owner.ExecutionGeneration)
 	}
 	return nil
 }
@@ -203,6 +286,9 @@ func validatePlan(plan RegistrationPlan, cfg Config) error {
 	}
 	if _, ok := eventPhases[plan.Phase]; !ok {
 		return fmt.Errorf("%w: unsupported phase %q", ErrInvalidJournal, plan.Phase)
+	}
+	if plan.Kind == "DEBATE" && plan.Phase == "INITIAL_REVIEW" {
+		return fmt.Errorf("%w: DEBATE cannot occur in INITIAL_REVIEW", ErrInvalidJournal)
 	}
 	if plan.TargetPersona != plan.JournalKey.PersonaID {
 		return fmt.Errorf("%w: target persona differs from journal role", ErrInvalidJournal)
@@ -255,6 +341,9 @@ func validateScope(scope AdmissionScope, cfg Config) error {
 }
 
 func validateNode(node inputartifact.SourceNode, cfg Config) error {
+	if strings.HasPrefix(node.SourceEntryID, "rset_") {
+		return fmt.Errorf("%w: source entry cannot reference a future ReadSet identity", ErrInvalidJournal)
+	}
 	for _, value := range []string{node.NodeID, node.SourceEntryID, node.SourceVersion, node.RawContentDigest} {
 		if len(value) > cfg.MaxStringBytes {
 			return limitErr("source node string exceeds ceiling")
