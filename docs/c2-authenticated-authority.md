@@ -31,7 +31,8 @@ witness、Egress、发送资格或远端执行事实。
 - versioned Ed25519 credentials、validity window、retire/rotation；
 - C0 proof body identity、domain-separated signature、原始字节回读；
 - 多跳 delegation、owner consent threshold、scoped epoch；
-- MySQL root/key/proof/delegation/consent/revocation/epoch 持久化；
+- credential-scope exact closure、UTF-16 scope ordering、结构上限；
+- MySQL root/key/proof/delegation/consent/command/revocation/epoch 持久化；
 - `VALID` / `DENIED` / `REVOKED` / `EXPIRED` / `STALE` / `CONFLICT` /
   `UNKNOWN` typed outcomes。
 
@@ -44,7 +45,11 @@ witness、Egress、发送资格或远端执行事实。
   CAS 串行化自身状态，跨 C2/C3 共同顺序仍是 #47 的阻断前提；
 - 不把 ExecutionGeneration 用作 round 或 scoped epoch；
 - 不把 JSON Schema、Persona、Charter、Context、模型输出或缓存当成权限；
-- 不安装任何生产 root/recovery key。
+- 不安装任何生产 root/recovery key；
+- 不声称 C2 独立闭合 CONTEXT/AUTHORITY scope。C2 只校验签名 proof/owner
+  consent 明确列出的 scope 与全部 used credential scope 的 CREDENTIAL
+  closure；更广的 Context/Authority→resource 映射和最终使用约束仍由 C3/#47
+  commit 边界核对。
 
 ## 2. 不变量
 
@@ -56,16 +61,20 @@ witness、Egress、发送资格或远端执行事实。
 | A46-04 | proof signature 使用 Ed25519，签名输入为固定 domain prefix + canonical body；不把 envelope 或任意缓存字节当签名输入。 |
 | A46-05 | signer credential 必须 exact binding `(root incarnation, credential id, credential version)`，状态当前有效，且 credential window 覆盖 proof window。 |
 | A46-06 | proof subject、identity source、resource、action、tenant、operation、case、round、execution generation 与验证请求精确相等。 |
-| A46-07 | scoped epochs 恰有 CONTEXT/AUTHORITY/CREDENTIAL 三类，按 `(kind, scope id)` 唯一稳定排序；不允许把另一 kind、generation 或 round 代入。 |
-| A46-08 | delegation 逐跳签名、issuer 连续、delegate 连续；重复 delegation/subject 形成 loop 时拒绝。 |
-| A46-09 | 逐跳 resources/actions/tenants 必须是父集合子集；非最后 hop 必须 `delegable=true`；所有 validity 不得扩大到 parent/proof 之外。 |
-| A46-10 | owner policy 由 bootstrap 认证并单独持久化；ALL/THRESHOLD/SINGLE_DELEGATE 语义固定，重复 owner approval 不增加票数。 |
-| A46-11 | owner approval 必须绑定 consent body digest、exact owner、credential ref 与 proof 目标；错 owner、坏签名、阈值不足均拒绝。 |
+| A46-07 | scoped epochs 恰有 CONTEXT/AUTHORITY/CREDENTIAL 三类，按 kind + NFC UTF-16 code unit 唯一稳定排序；不允许把另一 kind、generation 或 round 代入。 |
+| A46-08 | delegation 逐跳签名、issuer 连续、delegate 连续；重复 delegation/subject 形成 loop 时拒绝；最多 16 hops。 |
+| A46-09 | 逐跳 resources/actions/tenants/operations 必须是父集合子集；proof 必须位于 root grant 和最后 hop；非最后 hop 必须 `delegable=true`；所有 validity 不得扩大到 parent/proof 之外。 |
+| A46-10 | owner policy 由 bootstrap 认证并单独持久化且必须是 root grant 子集；ALL/THRESHOLD/SINGLE_DELEGATE 语义固定，重复 owner approval 不增加票数，owners/approvals 各最多 64。 |
+| A46-11 | owner approval 必须绑定 consent body digest、exact owner、credential ref、proof 目标和非零 positive ExecutionGeneration；错 owner、坏签名、generation 替换、阈值不足均拒绝。 |
 | A46-12 | revocation/key rotation 由 current governance credential 签名，使用 expected epoch + row version CAS；epoch 只增不减，revoked row 不删除、不复用。 |
 | A46-13 | 所有 C2 写者与在线验证先锁同一 pinned active-root row；随后锁 proof/evidence/credential/policy/epoch；可信时间在全部所需行锁之后读取。 |
-| A46-14 | MySQL 原始 proof/delegation/consent/scope evidence 必须 exact canonical bytes 且与 digest/列值一致；坏行失败关闭。 |
-| A46-15 | 不存在内存 authority cache；重启后 root fingerprint、proof version、key status 和 revocation 从 MySQL 重新读取。 |
+| A46-14 | MySQL 原始 proof/delegation/consent/scope evidence 必须 exact canonical bytes 且与 digest/列值一致；scope evidence 缺 digest/raw 也失败关闭。 |
+| A46-15 | 不存在内存 authority cache；重启后 root fingerprint、root status、proof version、key status 和 revocation 从 MySQL 重新读取。非 ACTIVE root 不得被重建成 ACTIVE。 |
 | A46-16 | 任何非 `VALID` 均不产生权限；`VALID` 也仅设置 `LocalAuthenticationOnly=true`，commit/mutation flags 恒为 false。 |
+| A46-17 | CREDENTIAL scope closure 必须恰好等于全部 used credentials 的 scope 集合：proof signer、每个 delegation issuer credential、每个 owner approval signer；每个 credential scope kind 必须是 CREDENTIAL。 |
+| A46-18 | 全部 used credential ref 必须 pin 到 current root incarnation；旧 root 的 key/subject/window/status 即使有效也不能通过。 |
+| A46-19 | command identity 以 `(trust_domain, command_id)` 持久化；exact reply-loss retry 返回原 lineage，same id/different bytes 返回 `CONFLICT`。 |
+| A46-20 | 结构上限在昂贵锁工作前检查：delegation ≤16、owner approvals ≤64、policy owners ≤64。 |
 
 ## 3. 威胁模型
 
@@ -101,13 +110,33 @@ standard base64 Ed25519。所有签名 body 使用既有 C0 canonical encoder。
 | Delegation | `magi-authority-delegation/1` | `magi:authority-delegation-signature:v1\n` |
 | Consent evidence | `magi-authority-consent/1` | `magi:authority-consent-evidence:v1\n` |
 | Consent approval | consent version | `magi:authority-consent-approval:v1\n` + consent digest |
+| Proof scope evidence | `ScopedEpoch` | `magi:authority-proof-scope-evidence:v1\n` |
 | Revocation command | `magi-authority-revocation-command/1` | `magi:authority-revocation-command-signature:v1\n` |
 | Credential rotation command | `magi-authority-credential-rotation-command/1` | `magi:authority-credential-rotation-command-signature:v1\n` |
+| Command result identity | signed command envelope | `magi:authority-command-evidence:v1\n` |
 
 Proof 身份只覆盖 canonical proof body，不覆盖外层 signature；外层
 `proof_id` 必须等于 body 的 C0 `aprf_` 身份，signature 必须覆盖 body，
 因此 envelope 替换无法绕过。root bootstrap signature、root fingerprint 和
 proof signature 使用不同 domain。
+
+### DC-46-01 fields updated by review
+
+- `AuthorityGrant`: `resources`, `actions`, `tenants`, `operations` 四个集合均
+  非空、sorted/unique；proof 和 owner policy 都必须逐维包含于 root grant。
+- `DelegationBody`: `resources`, `actions`, `tenants`, `operations` 四个集合均
+  非空、sorted/unique；逐维只能缩小，final hop 必须覆盖 proof 四维。
+- `ConsentBody`: 新增 `execution_generation`，必须 equal
+  proof/request 且 `>0`；generation 0 仍是历史、非权威。
+- proof `scopes`: CREDENTIAL kind 的集合必须 exact equal 全部 used
+  credentials 的 `Credential.Scope` 集合；used credentials 包括 proof
+  signer、delegation issuer credentials 和 owner approval signers。
+- scope ordering: kind 后按 NFC UTF-16 code unit 比较，不使用 UTF-8 byte
+  order；集合包含 at least one scope of every kind。
+- proof structure limits: `delegations<=16`、`approvals<=64`、
+  owner policy `owners<=64`。
+- revocation/rotation commands: body 内 `command_id` 和 signed raw 必须持久
+  绑定原结果；id 在 trust domain 内不复用。
 
 ## 5. 验证顺序与 typed outcome
 
@@ -115,8 +144,10 @@ proof signature 使用不同 domain。
 
 1. 锁 active root；缺失返回 `UNKNOWN/TRUST_ROOT_MISSING`。
 2. 锁 proof row，严格 canonical parse，核对 C0 ID、stored digest/version/root。
-3. 锁 proof scope、delegation、consent evidence，核对原始 bytes 与 digest。
-4. 锁 signer/hop/owner credentials、owner policy、全部 scoped epochs。
+3. 锁 proof scope、delegation、consent evidence，核对原始 bytes 与 digest；
+   proof scope 按 UTF-16 code-unit 顺序逐行锁定。
+4. 锁 signer/hop/owner credentials、owner policy、全部 scoped epochs；
+   核对 credential root incarnation、CREDENTIAL scope closure 和结构上限。
 5. 在全部所需锁之后读取 MySQL `UTC_TIMESTAMP(3)`。
 6. re-authenticate pinned bootstrap raw/fingerprint，但不复活历史 credential；
    当前 credential/policy 期限另行检查。
@@ -133,7 +164,7 @@ proof signature 使用不同 domain。
 | `REVOKED` | root/credential/scope 已撤销 |
 | `EXPIRED` | proof/credential/policy/consent/delegation/command window 过期 |
 | `STALE` | epoch、round、generation、key version 或请求状态不再当前 |
-| `CONFLICT` | 重复 root/证据、delegation loop、ambiguous policy/owner/evidence |
+| `CONFLICT` | 重复 root/证据、delegation loop、ambiguous policy/owner/evidence、same command id/different bytes |
 | `UNKNOWN` | root/credential/policy/epoch/时间/存储不可确定；绝不能当 VALID |
 
 `ParseSignedProof` 的 `PROOF_BYTES_VALID` 只表示结构、canonical 和 C0 身份可
@@ -154,16 +185,19 @@ proof signature 使用不同 domain。
   revoked、row_version、reason。
 - `magi_authority_proof`：原始 proof、C0 digest、version、root、目标绑定、
   signer ref 和 registration time。
-- `magi_authority_proof_scope`：proof 的三类 epoch evidence。
+- `magi_authority_proof_scope`：每个 scope 的 kind/id/epoch + canonical raw
+  bytes/digest；readback 必须 exact compare。
 - `magi_authority_proof_delegation` / `..._consent`：逐跳和 owner consent
-  原始 evidence。
+  原始 evidence；consent 另存 exact `execution_generation`。
+- `magi_authority_command`：signed command raw/digest 与 revocation/rotation
+  原 result lineage；command id 在同一 trust domain 内不复用。
 
 没有 `magi_authority_sequence`。C2 的串行化锁顺序是：
 
 ```text
 active root
 → proof row
-→ proof scope / delegation / consent evidence
+→ proof scope (UTF-16 order) / delegation / consent evidence
 → credentials (canonical key order)
 → owner policy
 → scoped epochs (canonical kind/scope order)
@@ -181,7 +215,9 @@ credential 设为 `RETIRED`、插入精确下一版本并推进 CREDENTIAL epoch
 重启不依赖内存状态：新 repository 从 MySQL 重新读取并验证 pinned root raw、
 proof raw/digest、credential status、policy 和 revocation。相同 proof
 registration/root bootstrap 原始 bytes 的 reply-loss retry 只回读原记录；
-状态已撤销或 key 已轮换时，旧 proof replay 返回 `REVOKED`/`STALE`。
+revocation/rotation exact command retry 返回 persisted original lineage，
+same command id/different bytes 为 `CONFLICT`。状态已撤销或 key 已轮换时，
+旧 proof replay 仍返回 `REVOKED`/`STALE`。
 
 ## 7. Capability 与回滚
 
@@ -264,6 +300,79 @@ GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^TestAuthorityMySQL_
 PASS
 ```
 
+### C.1 Independent review CHANGES REQUIRED → GREEN
+
+独立 review 的 P0/P1/P2 均先写 focused regression，并在旧行为上取得 semantic
+RED；没有把 compile/schema-missing 失败当作 RED。
+
+P0 credential-scope bypass、root-grant、old-root credential、UTF-16、limits、
+bootstrap scope-kind 的首个 domain RED：
+
+```text
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./domain/authority -run '^TestReview' -count=1 -v
+FAIL: TestReviewCredentialScopeClosure 三个子例均返回 VALID
+FAIL: zero-hop RootGrant 外 proof 返回 VALID
+FAIL: RootGrant 外 owner policy 返回 VALID BOOTSTRAP_AUTHENTICATED
+FAIL: old-root signer credential 返回 VALID
+FAIL: UTF-16 顺序 scopes 返回 DENIED/REQUEST_INVALID
+FAIL: 17 hops → CONFLICT/DELEGATION_CYCLE, 65 approvals → OWNER_CONSENT_DUPLICATE,
+      65 owners → VALID
+FAIL: bootstrap credential scope kind 错误仍返回 VALID BOOTSTRAP_AUTHENTICATED
+```
+
+对应 MySQL RED：
+
+```text
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^TestReviewMySQL_' -count=1 -v
+FAIL: TestReviewMySQL_CredentialScopeClosure → VALID/PROOF_REGISTERED
+FAIL: TestReviewMySQL_RootStatusFailsClosed/RETIRED|REVOKED|FUTURE → VALID
+FAIL: TestReviewMySQL_CredentialRootIncarnationPinned → VALID/PROOF_REGISTERED
+```
+
+Consent generation 与 delegation Operations 的字段最小骨架加入后、行为尚未
+实现时：
+
+```text
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./domain/authority -run '^(TestReviewConsentExecutionGenerationBinding|TestReviewRootAndDelegationOperationContainment)$' -count=1 -v
+FAIL: generation substitution/zero → VALID
+FAIL: zero-hop/final-delegation/policy operation containment 四个子例 → VALID
+```
+
+Command replay 与 scope raw evidence 的 MySQL RED：
+
+```text
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^TestReviewMySQL_(CommandReplyLossAndConflict|ScopeEvidenceExactBytes)$' -count=1 -v
+FAIL: revocation exact retry → STALE/EPOCH_CAS_STALE
+FAIL: rotation exact retry → STALE/CREDENTIAL_RETIRED
+FAIL: scope raw tamper，在新增 raw/digest 列后仍 → VALID
+```
+
+独立 review 修复后的 focused GREEN：
+
+```text
+GOCACHE=/tmp/magi-wave2-46-go-cache go test ./domain/authority -run '^TestReview' -count=1 -v
+PASS
+
+MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' GOCACHE=/tmp/magi-wave2-46-go-cache go test ./adapter -run '^(TestAuthorityMySQL_|TestReviewMySQL_)' -count=1 -v
+PASS
+```
+
+### C.2 Finding closure matrix
+
+| Review finding | Status | Focused evidence |
+| --- | --- | --- |
+| P0-1 credential-scope bypass | CLOSED | proof signer、delegation issuer、owner approval scope closure；missing/extra/ambiguous/stale/revoked domain tests + MySQL register rejection |
+| P1-2 RootGrant containment | CLOSED | zero-hop proof、delegation、owner policy 的 resource/action/tenant/operation subset tests |
+| P1-3 retired/non-ACTIVE root | CLOSED | repository preserves root status；MySQL RETIRED/REVOKED/FUTURE tests |
+| P1-4 old-root credential | CLOSED | domain signer/delegation/owner cases + MySQL old-root signer rejection |
+| P1-5 consent generation | CLOSED | signed/persisted `execution_generation`; substitution and zero-generation tests |
+| P1-6 delegation operations | CLOSED | RootGrant/delegation/policy/proof operation tests |
+| P2-7 command reply loss | CLOSED | persisted command raw/result；exact retry and same-id/different-bytes tests |
+| P2-8 scope raw/digest evidence | CLOSED | canonical raw/digest columns and exact readback tamper test |
+| P2-9 UTF-16 ordering | CLOSED | domain comparator + repository per-row lock order + non-BMP test |
+| P2-10 structures limits | CLOSED | ≤16 hops / ≤64 approvals / ≤64 owners；pre-lock and MySQL tests |
+| P2-11 bootstrap credential scope kind | CLOSED | domain and MySQL bootstrap rejection tests |
+
 ### D. 回归、race 与 vet
 
 实际执行并通过：
@@ -276,7 +385,7 @@ GOCACHE=/tmp/magi-wave2-46-go-cache go test -race ./domain/authority -count=1
 PASS
 
 MAGI_TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:33306)/magi_wave2?charset=utf8mb4&parseTime=True' \
-GOCACHE=/tmp/magi-wave2-46-go-cache go test -race ./adapter -run '^TestAuthorityMySQL_' -count=1
+GOCACHE=/tmp/magi-wave2-46-go-cache go test -race ./adapter -run '^(TestAuthorityMySQL_|TestReviewMySQL_)' -count=1
 PASS
 
 GOCACHE=/tmp/magi-wave2-46-go-cache go vet ./...
@@ -310,14 +419,18 @@ OK (0 failures)
 - stale epoch、generation/epoch 混淆、round/generation/epoch 独立；
 - proof/digest/scope/delegation/consent evidence tamper；
 - unauthenticated revocation/rotation/proof；
-- reused consent conflict、migration 幂等且无 seed/no sequence table。
+- reused consent conflict、migration 幂等且无 seed/no sequence table；
+- review P0/P1/P2：credential-scope closure、root status、old-root key、consent
+  generation、Operations、command reply loss/conflict、scope raw evidence、
+  non-BMP UTF-16 ordering、oversized structures、bootstrap credential scope kind。
 
 ### F. 边界与依赖
 
 本切片的 authoritative store 是单一 MySQL trust domain 的 C2 子状态，不是
 C3 的 CommitIfCurrent store，也不声称是 #47 common-order 实现。所有
 `a45_*`/#45 trace 名称、Commit token、Journal、witness 和 send 均未被本次
-实现消费或创建。
+实现消费或创建。独立 review 的 11 项 finding 均有 focused regression，且
+在本次本地验证范围内全部 CLOSED；这不等于 PR-head CI、独立复审或生产激活。
 
 ## 9. NOT RUN / BLOCKED matrix
 
@@ -335,12 +448,17 @@ C3 的 CommitIfCurrent store，也不声称是 #47 common-order 实现。所有
 
 ## 10. 风险与后续
 
-- P0：无已知；但生产激活前若把本地 `VALID` 当成 commit/send 资格即为 P0。
+- P0：独立 review 的 credential-scope bypass 已关闭，当前无已知 P0。生产
+  激活前若把本地 `VALID` 当成 commit/send 资格仍会形成 P0。
 - P1：C2/C3 共享总序仍缺失，任何真实 mutation 必须等 #47 原子接桥。
 - P1：生产 recovery/governance 密钥的带外流程、root recovery quorum、KMS/
   HSM、部署身份源和审计保留尚未验证。
 - P2：解析 proof 的返回仍使用同一 typed `Outcome` 类型，但以
   `PROOF_BYTES_VALID` 和不设置 local-authority flag 区分；调用方必须只把
   live-state `VerifySignedProof` 的 `VALID` 当作本地认证结果。
-- P2：namespace 未覆盖 root rotation/retirement API；root pin 与同 root
-  credential rotation 已验证，root 更新需独立设计。
+- P2：namespace 未覆盖 root rotation/retirement command/API；root pin、
+  non-ACTIVE status rejection 与同 root credential rotation 已验证，root
+  更新仍需独立设计。
+- P2：CONTEXT/AUTHORITY scope 的 resource/operation 映射仍由签名 proof 和
+  owner consent 声明，C2 不单独证明完整 Context/Authority 闭包；该部分与
+  C3/#47 commit predicate 合并后仍需真实集成验收。

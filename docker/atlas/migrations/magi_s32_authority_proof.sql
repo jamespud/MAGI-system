@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS magi_authority_proof_scope (
     scope_kind VARCHAR(16) NOT NULL,
     scope_id VARCHAR(191) NOT NULL,
     epoch BIGINT UNSIGNED NOT NULL,
+    scope_digest CHAR(64) NOT NULL,
+    raw_scope LONGBLOB NOT NULL,
     PRIMARY KEY (trust_domain, proof_id, scope_kind, scope_id),
     CONSTRAINT chk_authority_proof_scope_kind CHECK (scope_kind IN ('CONTEXT', 'AUTHORITY', 'CREDENTIAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -138,7 +140,29 @@ CREATE TABLE IF NOT EXISTS magi_authority_proof_consent (
     consent_digest CHAR(64) NOT NULL,
     threshold BIGINT UNSIGNED NOT NULL,
     approval_count BIGINT UNSIGNED NOT NULL,
+    execution_generation BIGINT UNSIGNED NOT NULL DEFAULT 0,
     raw_consent LONGBLOB NOT NULL,
     PRIMARY KEY (trust_domain, proof_id),
     UNIQUE KEY uk_authority_proof_consent_id (trust_domain, consent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS magi_authority_command (
+    trust_domain VARCHAR(191) NOT NULL,
+    command_kind VARCHAR(32) NOT NULL,
+    command_id VARCHAR(191) NOT NULL,
+    command_digest CHAR(64) NOT NULL,
+    raw_command LONGBLOB NOT NULL,
+    result_scope_kind VARCHAR(16) NOT NULL DEFAULT '',
+    result_scope_id VARCHAR(191) NOT NULL DEFAULT '',
+    result_epoch BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    result_row_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    result_revoked TINYINT(1) NOT NULL DEFAULT 0,
+    result_credential_id VARCHAR(191) NOT NULL DEFAULT '',
+    result_credential_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    result_credential_raw LONGBLOB NULL,
+    completed_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (trust_domain, command_id),
+    UNIQUE KEY uk_authority_command_digest (trust_domain, command_kind, command_digest),
+    KEY idx_authority_command_kind (trust_domain, command_kind),
+    CONSTRAINT chk_authority_command_kind CHECK (command_kind IN ('REVOCATION', 'CREDENTIAL_ROTATION'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

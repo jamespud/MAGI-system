@@ -33,7 +33,8 @@ func delegationFixture(t *testing.T) (authority.TrustState, authority.Verificati
 		Issuer: governance.Subject, IssuerCredential: governance.Ref,
 		Delegate:  delegate.Subject,
 		Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
-		NotBefore: "2026-10-24T09:00:00.000Z", ExpiresAt: "2026-10-24T12:00:00.000Z", Delegable: false,
+		Operations: []string{"PUBLISH_ARTIFACT"},
+		NotBefore:  "2026-10-24T09:00:00.000Z", ExpiresAt: "2026-10-24T12:00:00.000Z", Delegable: false,
 	}, 1)
 	policy := state.Policies[0]
 	consentBody := authority.ConsentBody{
@@ -42,7 +43,7 @@ func delegationFixture(t *testing.T) (authority.TrustState, authority.Verificati
 		PolicyID: policy.PolicyID, PolicyVersion: policy.PolicyVersion,
 		DelegatedSubject: delegate.Subject,
 		Resource:         "case/42", Action: "PUBLISH", Tenant: "tenant-a", Operation: "PUBLISH_ARTIFACT",
-		CaseID: "case-42", Round: 2, Scopes: scopes,
+		CaseID: "case-42", Round: 2, ExecutionGeneration: 7, Scopes: scopes,
 		NotBefore: "2026-10-24T09:00:00.000Z", ExpiresAt: "2026-10-24T12:00:00.000Z",
 	}
 	consent := signConsent(t, consentBody, struct {

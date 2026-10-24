@@ -140,7 +140,7 @@ func proofFixture(t *testing.T) (authority.TrustState, authority.VerificationReq
 		DelegatedSubject: governance.Subject,
 		Resource:         "case/42", Action: "PUBLISH", Tenant: "tenant-a",
 		Operation: "PUBLISH_ARTIFACT", CaseID: "case-42",
-		Round: 2, Scopes: scopes,
+		Round: 2, ExecutionGeneration: 7, Scopes: scopes,
 		NotBefore: "2026-10-24T09:00:00.000Z", ExpiresAt: "2026-10-24T12:00:00.000Z",
 	}
 	consent := signConsent(t, consentBody, struct {
@@ -175,9 +175,10 @@ func proofFixture(t *testing.T) (authority.TrustState, authority.VerificationReq
 		IdentitySourceVersion: "identity-v1",
 		GovernanceSubject:     governance.Subject,
 		RootGrant: authority.AuthorityGrant{
-			Resources: []string{"case/42"},
-			Actions:   []string{"PUBLISH"},
-			Tenants:   []string{"tenant-a"},
+			Resources:  []string{"case/42"},
+			Actions:    []string{"PUBLISH"},
+			Tenants:    []string{"tenant-a"},
+			Operations: []string{"PUBLISH_ARTIFACT"},
 		},
 		TrustedNow:  now,
 		Credentials: []authority.Credential{governance, owner},

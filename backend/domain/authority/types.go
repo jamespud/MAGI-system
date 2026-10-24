@@ -5,6 +5,12 @@
 package authority
 
 const (
+	MaxDelegationHops = 16
+	MaxOwnerApprovals = 64
+	MaxPolicyOwners   = 64
+)
+
+const (
 	ContractVersion           = "magi-authority-c2/1"
 	ProofVersion              = "magi-authority-proof/1"
 	DelegationVersion         = "magi-authority-delegation/1"
@@ -143,6 +149,7 @@ type DelegationBody struct {
 	Resources        []string      `json:"resources"`
 	Actions          []string      `json:"actions"`
 	Tenants          []string      `json:"tenants"`
+	Operations       []string      `json:"operations"`
 	NotBefore        string        `json:"not_before"`
 	ExpiresAt        string        `json:"expires_at"`
 	Delegable        bool          `json:"delegable"`
@@ -154,22 +161,23 @@ type SignedDelegation struct {
 }
 
 type ConsentBody struct {
-	Version          string        `json:"version"`
-	ConsentID        string        `json:"consent_id"`
-	TrustDomain      string        `json:"trust_domain"`
-	RootIncarnation  string        `json:"root_incarnation"`
-	PolicyID         string        `json:"policy_id"`
-	PolicyVersion    string        `json:"policy_version"`
-	DelegatedSubject Subject       `json:"delegated_subject"`
-	Resource         string        `json:"resource"`
-	Action           string        `json:"action"`
-	Tenant           string        `json:"tenant"`
-	Operation        string        `json:"operation"`
-	CaseID           string        `json:"case_id"`
-	Round            uint64        `json:"round"`
-	Scopes           []ScopedEpoch `json:"scopes"`
-	NotBefore        string        `json:"not_before"`
-	ExpiresAt        string        `json:"expires_at"`
+	Version             string        `json:"version"`
+	ConsentID           string        `json:"consent_id"`
+	TrustDomain         string        `json:"trust_domain"`
+	RootIncarnation     string        `json:"root_incarnation"`
+	PolicyID            string        `json:"policy_id"`
+	PolicyVersion       string        `json:"policy_version"`
+	DelegatedSubject    Subject       `json:"delegated_subject"`
+	Resource            string        `json:"resource"`
+	Action              string        `json:"action"`
+	Tenant              string        `json:"tenant"`
+	Operation           string        `json:"operation"`
+	CaseID              string        `json:"case_id"`
+	Round               uint64        `json:"round"`
+	ExecutionGeneration uint64        `json:"execution_generation"`
+	Scopes              []ScopedEpoch `json:"scopes"`
+	NotBefore           string        `json:"not_before"`
+	ExpiresAt           string        `json:"expires_at"`
 }
 
 type ConsentApproval struct {
@@ -225,9 +233,10 @@ type VerificationRequest struct {
 }
 
 type AuthorityGrant struct {
-	Resources []string `json:"resources"`
-	Actions   []string `json:"actions"`
-	Tenants   []string `json:"tenants"`
+	Resources  []string `json:"resources"`
+	Actions    []string `json:"actions"`
+	Tenants    []string `json:"tenants"`
+	Operations []string `json:"operations"`
 }
 
 type TrustState struct {

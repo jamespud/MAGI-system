@@ -24,6 +24,8 @@ const (
 	authorityOwnerPolicyEvidenceDomain = "magi:authority-owner-policy-evidence:v1\n"
 	authorityDelegationEvidenceDomain  = "magi:authority-delegation-evidence:v1\n"
 	authorityConsentEvidenceDomain     = "magi:authority-consent-evidence:v1\n"
+	authorityScopeEvidenceDomain       = "magi:authority-proof-scope-evidence:v1\n"
+	authorityCommandEvidenceDomain     = "magi:authority-command-evidence:v1\n"
 )
 
 // AuthorityRepositoryConfig gates C2 persistence. The zero value is disabled.
@@ -95,6 +97,20 @@ type authorityPolicyRow struct {
 	RawPolicy       []byte
 }
 
+type authorityCommandRow struct {
+	CommandKind             string
+	CommandDigest           string
+	RawCommand              []byte
+	ResultScopeKind         string
+	ResultScopeID           string
+	ResultEpoch             uint64
+	ResultRowVersion        uint64
+	ResultRevoked           bool
+	ResultCredentialID      string
+	ResultCredentialVersion uint64
+	ResultCredentialRaw     []byte
+}
+
 type authorityEpochRow struct {
 	ScopeKind  string
 	ScopeID    string
@@ -136,6 +152,19 @@ func lockActiveAuthorityRoot(tx *gorm.DB, trustDomain string) (authorityRootRow,
 		return authorityRootRow{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 	}
 	return row, authority.Result{}
+}
+
+func authorityRootStatusResult(status string) authority.Result {
+	switch status {
+	case "ACTIVE":
+		return authority.Result{}
+	case "RETIRED":
+		return authority.Result{Outcome: authority.OutcomeRevoked, Code: "TRUST_ROOT_RETIRED"}
+	case "REVOKED":
+		return authority.Result{Outcome: authority.OutcomeRevoked, Code: "TRUST_ROOT_REVOKED"}
+	default:
+		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "TRUST_ROOT_STATUS_UNKNOWN"}
+	}
 }
 
 func lockAuthorityProof(tx *gorm.DB, trustDomain, proofID string) (*authorityProofRow, authority.Result) {
@@ -193,6 +222,10 @@ func (r *AuthorityRepository) BootstrapRoot(ctx context.Context, raw []byte) (au
 	// Concurrent first installs are additionally constrained by the unique
 	// active_slot key; no authority sequence is created by C2.
 	if existing, result := lockActiveAuthorityRoot(tx, preflight.TrustDomain); result.Outcome == "" {
+		if statusResult := authorityRootStatusResult(existing.Status); statusResult.Outcome != "" {
+			_ = tx.Rollback().Error
+			return authority.TrustBootstrap{}, "", statusResult
+		}
 		now, timeResult := authorityDBTime(tx)
 		if timeResult.Outcome != "" {
 			_ = tx.Rollback().Error
@@ -300,14 +333,17 @@ func (r *AuthorityRepository) ReadRoot(ctx context.Context, trustDomain string) 
 		return nil, "", *result
 	}
 	var raw []byte
-	var fingerprint string
-	if err := r.db.WithContext(ctx).Raw(`SELECT raw_bootstrap, root_fingerprint
+	var fingerprint, status string
+	if err := r.db.WithContext(ctx).Raw(`SELECT raw_bootstrap, root_fingerprint, status
 		FROM magi_authority_root WHERE trust_domain = ? AND active_slot = 1`, trustDomain).
-		Row().Scan(&raw, &fingerprint); err != nil {
+		Row().Scan(&raw, &fingerprint, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", authority.Result{Outcome: authority.OutcomeUnknown, Code: "TRUST_ROOT_MISSING"}
 		}
 		return nil, "", authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+	}
+	if result := authorityRootStatusResult(status); result.Outcome != "" {
+		return nil, "", result
 	}
 	now, result := authorityDBTime(r.db.WithContext(ctx))
 	if result.Outcome != "" {
@@ -373,6 +409,9 @@ func (r *AuthorityRepository) verifyProofInTx(tx *gorm.DB, request authority.Ver
 	if result.Outcome != "" {
 		return result
 	}
+	if result := authorityRootStatusResult(root.Status); result.Outcome != "" {
+		return result
+	}
 	proofRow, result := lockAuthorityProof(tx, request.TrustDomain, request.ProofID)
 	if result.Outcome != "" {
 		return result
@@ -383,6 +422,9 @@ func (r *AuthorityRepository) verifyProofInTx(tx *gorm.DB, request authority.Ver
 	proof, parseResult := authority.ParseSignedProof(proofRow.RawProof, request.ProofID)
 	if parseResult.Outcome != authority.OutcomeValid {
 		return parseResult
+	}
+	if result := authority.ValidateProofStructureLimits(proof); result.Outcome != "" {
+		return result
 	}
 	digest, _, err := authority.ProofDigest(proof.Proof)
 	if err != nil || digest != proofRow.ProofDigest {
@@ -406,7 +448,7 @@ func (r *AuthorityRepository) verifyProofInTx(tx *gorm.DB, request authority.Ver
 	state.TrustDomain = body.TrustDomain
 	state.RootIncarnation = body.RootIncarnation
 	state.RootFingerprint = fingerprint
-	state.RootStatus = authority.RootActive
+	state.RootStatus = authority.RootStatus(root.Status)
 	state.IdentitySourceID = body.IdentitySourceID
 	state.IdentitySourceVersion = body.IdentitySourceVersion
 	state.GovernanceSubject = body.GovernanceSubject
@@ -468,10 +510,10 @@ func (r *AuthorityRepository) lockTrustState(tx *gorm.DB, root authorityRootRow,
 	}
 	scopes := append([]authority.ScopedEpoch(nil), proof.Scopes...)
 	sort.Slice(scopes, func(i, j int) bool {
-		if scopes[i].Kind != scopes[j].Kind {
-			return scopes[i].Kind < scopes[j].Kind
-		}
-		return scopes[i].ScopeID < scopes[j].ScopeID
+		return authority.ScopeKeyCompare(
+			authority.ScopeKey{Kind: scopes[i].Kind, ScopeID: scopes[i].ScopeID},
+			authority.ScopeKey{Kind: scopes[j].Kind, ScopeID: scopes[j].ScopeID},
+		) < 0
 	})
 	for _, scope := range scopes {
 		epoch, result := lockEpoch(tx, root.TrustDomain, authority.ScopeKey{Kind: scope.Kind, ScopeID: scope.ScopeID})
@@ -488,23 +530,47 @@ func (r *AuthorityRepository) lockTrustState(tx *gorm.DB, root authorityRootRow,
 
 func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.SignedProof) authority.Result {
 	proof := signedProof.Proof
-	type scopeEvidence struct {
+	type scopeKeyEvidence struct {
 		ScopeKind string
 		ScopeID   string
-		Epoch     uint64
 	}
-	var scopes []scopeEvidence
-	if err := tx.Raw(`SELECT scope_kind, scope_id, epoch FROM magi_authority_proof_scope
-		WHERE trust_domain = ? AND proof_id = ? ORDER BY scope_kind, scope_id FOR UPDATE`,
-		trustDomain, signedProof.ProofID).Scan(&scopes).Error; err != nil {
+	var evidenceKeys []scopeKeyEvidence
+	if err := tx.Raw(`SELECT scope_kind, scope_id FROM magi_authority_proof_scope
+		WHERE trust_domain = ? AND proof_id = ?`, trustDomain, signedProof.ProofID).Scan(&evidenceKeys).Error; err != nil {
 		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+	}
+	sort.Slice(evidenceKeys, func(i, j int) bool {
+		return authority.ScopeKeyCompare(
+			authority.ScopeKey{Kind: authority.ScopeKind(evidenceKeys[i].ScopeKind), ScopeID: evidenceKeys[i].ScopeID},
+			authority.ScopeKey{Kind: authority.ScopeKind(evidenceKeys[j].ScopeKind), ScopeID: evidenceKeys[j].ScopeID},
+		) < 0
+	})
+	type scopeEvidence struct {
+		ScopeKind   string
+		ScopeID     string
+		Epoch       uint64
+		ScopeDigest string
+		RawScope    []byte
+	}
+	scopes := make([]scopeEvidence, 0, len(evidenceKeys))
+	for _, key := range evidenceKeys {
+		var evidence scopeEvidence
+		err := tx.Raw(`SELECT scope_kind, scope_id, epoch, scope_digest, raw_scope
+			FROM magi_authority_proof_scope
+			WHERE trust_domain = ? AND proof_id = ? AND scope_kind = ? AND scope_id = ? FOR UPDATE`,
+			trustDomain, signedProof.ProofID, key.ScopeKind, key.ScopeID).
+			Row().Scan(&evidence.ScopeKind, &evidence.ScopeID, &evidence.Epoch, &evidence.ScopeDigest, &evidence.RawScope)
+		if err != nil {
+			return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+		}
+		scopes = append(scopes, evidence)
 	}
 	expectedScopes := append([]authority.ScopedEpoch(nil), proof.Scopes...)
 	sort.Slice(expectedScopes, func(i, j int) bool {
-		if expectedScopes[i].Kind != expectedScopes[j].Kind {
-			return expectedScopes[i].Kind < expectedScopes[j].Kind
-		}
-		return expectedScopes[i].ScopeID < expectedScopes[j].ScopeID
+		return authority.ScopeKeyCompare(
+			authority.ScopeKey{Kind: expectedScopes[i].Kind, ScopeID: expectedScopes[i].ScopeID},
+			authority.ScopeKey{Kind: expectedScopes[j].Kind, ScopeID: expectedScopes[j].ScopeID},
+		) < 0
 	})
 	if len(scopes) != len(expectedScopes) {
 		return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence row count differs from the signed proof"}
@@ -512,6 +578,14 @@ func lockProofEvidence(tx *gorm.DB, trustDomain string, signedProof authority.Si
 	for i, expected := range expectedScopes {
 		if scopes[i].ScopeKind != string(expected.Kind) || scopes[i].ScopeID != expected.ScopeID || scopes[i].Epoch != expected.Epoch {
 			return authority.Result{Outcome: authority.OutcomeConflict, Code: "PROOF_SCOPE_EVIDENCE_MISMATCH", Detail: "scope evidence differs from the signed proof"}
+		}
+		canonicalScope, err := canonicalStructBytes(expected)
+		if err != nil {
+			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: err.Error()}
+		}
+		if !bytes.Equal(scopes[i].RawScope, canonicalScope) ||
+			scopes[i].ScopeDigest != authorityEvidenceDigest(authorityScopeEvidenceDomain, canonicalScope) {
+			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: "scope evidence bytes or digest do not match the signed proof"}
 		}
 	}
 
@@ -671,6 +745,9 @@ func (r *AuthorityRepository) RegisterProof(ctx context.Context, raw []byte, exp
 	if parseResult.Outcome != authority.OutcomeValid {
 		return parseResult
 	}
+	if result := authority.ValidateProofStructureLimits(proof); result.Outcome != "" {
+		return result
+	}
 	tx := r.begin(ctx)
 	if tx.Error != nil {
 		return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: tx.Error.Error()}
@@ -679,6 +756,10 @@ func (r *AuthorityRepository) RegisterProof(ctx context.Context, raw []byte, exp
 	trustDomain := proof.Proof.TrustDomain
 	root, result := lockActiveAuthorityRoot(tx, trustDomain)
 	if result.Outcome != "" {
+		_ = tx.Rollback().Error
+		return result
+	}
+	if result := authorityRootStatusResult(root.Status); result.Outcome != "" {
 		_ = tx.Rollback().Error
 		return result
 	}
@@ -727,7 +808,7 @@ func (r *AuthorityRepository) RegisterProof(ctx context.Context, raw []byte, exp
 	state.TrustDomain = body.TrustDomain
 	state.RootIncarnation = body.RootIncarnation
 	state.RootFingerprint = fingerprint
-	state.RootStatus = authority.RootActive
+	state.RootStatus = authority.RootStatus(root.Status)
 	state.IdentitySourceID = body.IdentitySourceID
 	state.IdentitySourceVersion = body.IdentitySourceVersion
 	state.GovernanceSubject = body.GovernanceSubject
@@ -756,9 +837,16 @@ func (r *AuthorityRepository) RegisterProof(ctx context.Context, raw []byte, exp
 		return authorityDuplicateOrStoreError(err, "PROOF_ID_REUSE_CONFLICT")
 	}
 	for _, scope := range proof.Proof.Scopes {
+		scopeRaw, err := canonicalStructBytes(scope)
+		if err != nil {
+			_ = tx.Rollback().Error
+			return authority.Result{Outcome: authority.OutcomeDenied, Code: "PROOF_SCOPE_EVIDENCE_CORRUPT", Detail: err.Error()}
+		}
 		if err := tx.Exec(`INSERT INTO magi_authority_proof_scope
-				(trust_domain, proof_id, scope_kind, scope_id, epoch) VALUES (?, ?, ?, ?, ?)`,
-			trustDomain, proof.ProofID, scope.Kind, scope.ScopeID, scope.Epoch).Error; err != nil {
+				(trust_domain, proof_id, scope_kind, scope_id, epoch, scope_digest, raw_scope)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			trustDomain, proof.ProofID, scope.Kind, scope.ScopeID, scope.Epoch,
+			authorityEvidenceDigest(authorityScopeEvidenceDomain, scopeRaw), scopeRaw).Error; err != nil {
 			_ = tx.Rollback().Error
 			return authorityDuplicateOrStoreError(err, "PROOF_SCOPE_EVIDENCE_CONFLICT")
 		}
@@ -788,11 +876,12 @@ func (r *AuthorityRepository) RegisterProof(ctx context.Context, raw []byte, exp
 	policy := state.Policies[0]
 	if err := tx.Exec(`INSERT INTO magi_authority_proof_consent
 			(trust_domain, proof_id, consent_id, policy_id, policy_version, consent_digest,
-			 threshold, approval_count, raw_consent)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 threshold, approval_count, execution_generation, raw_consent)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		trustDomain, proof.ProofID, proof.Proof.Consent.Body.ConsentID, policy.PolicyID, policy.PolicyVersion,
 		authorityEvidenceDigest(authorityConsentEvidenceDomain, consentRaw),
-		policy.Threshold, len(proof.Proof.Consent.Approvals), consentRaw).Error; err != nil {
+		policy.Threshold, len(proof.Proof.Consent.Approvals),
+		proof.Proof.Consent.Body.ExecutionGeneration, consentRaw).Error; err != nil {
 		_ = tx.Rollback().Error
 		return authorityDuplicateOrStoreError(err, "CONSENT_EVIDENCE_CONFLICT")
 	}
@@ -857,6 +946,116 @@ func authorityDuplicateOrStoreError(err error, code string) authority.Result {
 	return authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
 }
 
+const (
+	authorityCommandRevocation = "REVOCATION"
+	authorityCommandRotation   = "CREDENTIAL_ROTATION"
+)
+
+func lockAuthorityCommand(tx *gorm.DB, trustDomain, kind, commandID string) (*authorityCommandRow, authority.Result) {
+	var row authorityCommandRow
+	err := tx.Raw(`SELECT command_kind, command_digest, raw_command,
+			result_scope_kind, result_scope_id, result_epoch, result_row_version, result_revoked,
+			result_credential_id, result_credential_version, result_credential_raw
+		FROM magi_authority_command
+		WHERE trust_domain = ? AND command_id = ? FOR UPDATE`,
+		trustDomain, commandID).
+		Row().Scan(&row.CommandKind, &row.CommandDigest, &row.RawCommand,
+		&row.ResultScopeKind, &row.ResultScopeID, &row.ResultEpoch, &row.ResultRowVersion, &row.ResultRevoked,
+		&row.ResultCredentialID, &row.ResultCredentialVersion, &row.ResultCredentialRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, authority.Result{}
+	}
+	if err != nil {
+		return nil, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+	}
+	if row.CommandKind != kind {
+		return nil, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_ID_CONFLICT"}
+	}
+	return &row, authority.Result{}
+}
+
+func commandEvidence(command any) ([]byte, string, authority.Result) {
+	raw, err := canonicalStructBytes(command)
+	if err != nil {
+		return nil, "", authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_INVALID", Detail: err.Error()}
+	}
+	return raw, authorityEvidenceDigest(authorityCommandEvidenceDomain, raw), authority.Result{}
+}
+
+func replayRevocationCommand(row authorityCommandRow, raw []byte) (authority.EpochState, authority.Result) {
+	if row.CommandKind != authorityCommandRevocation ||
+		row.CommandDigest != authorityEvidenceDigest(authorityCommandEvidenceDomain, row.RawCommand) {
+		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	if !bytes.Equal(row.RawCommand, raw) {
+		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_ID_CONFLICT"}
+	}
+	if row.ResultScopeKind != string(authority.ScopeContext) &&
+		row.ResultScopeKind != string(authority.ScopeAuthority) &&
+		row.ResultScopeKind != string(authority.ScopeCredential) {
+		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	return authority.EpochState{
+		Scope: authority.ScopeKey{Kind: authority.ScopeKind(row.ResultScopeKind), ScopeID: row.ResultScopeID},
+		Epoch: row.ResultEpoch, Revoked: row.ResultRevoked, RowVersion: row.ResultRowVersion,
+	}, authority.Result{Outcome: authority.OutcomeValid, Code: "REVOCATION_COMMAND_REPLAY"}
+}
+
+func replayCredentialRotationCommand(row authorityCommandRow, raw []byte) (authority.Credential, authority.Result) {
+	if row.CommandKind != authorityCommandRotation ||
+		row.CommandDigest != authorityEvidenceDigest(authorityCommandEvidenceDomain, row.RawCommand) {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	if !bytes.Equal(row.RawCommand, raw) {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_ID_CONFLICT"}
+	}
+	if len(row.ResultCredentialRaw) == 0 {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	if err := requireCanonicalStored(row.ResultCredentialRaw); err != nil {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
+	}
+	var credential authority.Credential
+	if err := json.Unmarshal(row.ResultCredentialRaw, &credential); err != nil {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
+	}
+	if credential.Ref.CredentialID != row.ResultCredentialID || credential.Ref.CredentialVersion != row.ResultCredentialVersion {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeConflict, Code: "COMMAND_RESULT_CORRUPT"}
+	}
+	return credential, authority.Result{Outcome: authority.OutcomeValid, Code: "CREDENTIAL_ROTATION_COMMAND_REPLAY"}
+}
+
+func insertAuthorityCommand(tx *gorm.DB, trustDomain, kind, commandID string, commandRaw []byte, commandDigest string,
+	epoch *authority.EpochState, credential *authority.Credential, completedAt time.Time) authority.Result {
+	var scopeKind, scopeID, credentialID string
+	var epochValue, rowVersion, credentialVersion uint64
+	var revoked bool
+	var credentialRaw []byte
+	if epoch != nil {
+		scopeKind, scopeID = string(epoch.Scope.Kind), epoch.Scope.ScopeID
+		epochValue, rowVersion, revoked = epoch.Epoch, epoch.RowVersion, epoch.Revoked
+	}
+	if credential != nil {
+		credentialID, credentialVersion = credential.Ref.CredentialID, credential.Ref.CredentialVersion
+		var err error
+		credentialRaw, err = canonicalStructBytes(credential)
+		if err != nil {
+			return authority.Result{Outcome: authority.OutcomeDenied, Code: "COMMAND_RESULT_CORRUPT", Detail: err.Error()}
+		}
+	}
+	if err := tx.Exec(`INSERT INTO magi_authority_command
+			(trust_domain, command_kind, command_id, command_digest, raw_command,
+			 result_scope_kind, result_scope_id, result_epoch, result_row_version, result_revoked,
+			 result_credential_id, result_credential_version, result_credential_raw, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		trustDomain, kind, commandID, commandDigest, commandRaw,
+		scopeKind, scopeID, epochValue, rowVersion, revoked,
+		credentialID, credentialVersion, credentialRaw, completedAt).Error; err != nil {
+		return authorityDuplicateOrStoreError(err, "COMMAND_ID_CONFLICT")
+	}
+	return authority.Result{}
+}
+
 func (r *AuthorityRepository) ReadEpoch(ctx context.Context, trustDomain string, scope authority.ScopeKey) (authority.EpochState, authority.Result) {
 	if result := r.capabilityResult(); result != nil {
 		return authority.EpochState{}, *result
@@ -892,6 +1091,9 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 	if strings.TrimSpace(body.TrustDomain) == "" || !validAuthorityScope(body.Scope) || body.ExpectedRowVersion == 0 {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "SCOPE_INVALID"}
 	}
+	if strings.TrimSpace(body.CommandID) == "" {
+		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "REVOCATION_COMMAND_INVALID"}
+	}
 	tx := r.begin(ctx)
 	if tx.Error != nil {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: tx.Error.Error()}
@@ -901,6 +1103,29 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 	if result.Outcome != "" {
 		_ = tx.Rollback().Error
 		return authority.EpochState{}, result
+	}
+	if result := authorityRootStatusResult(root.Status); result.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.EpochState{}, result
+	}
+	commandRaw, commandDigest, commandResult := commandEvidence(command)
+	if commandResult.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.EpochState{}, commandResult
+	}
+	if existing, lookupResult := lockAuthorityCommand(tx, body.TrustDomain, authorityCommandRevocation, body.CommandID); lookupResult.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.EpochState{}, lookupResult
+	} else if existing != nil {
+		replayState, replayResult := replayRevocationCommand(*existing, commandRaw)
+		if replayResult.Outcome != authority.OutcomeValid {
+			_ = tx.Rollback().Error
+			return replayState, replayResult
+		}
+		if err := tx.Commit().Error; err != nil {
+			return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_COMMIT_UNKNOWN", Detail: err.Error()}
+		}
+		return replayState, replayResult
 	}
 	current, result := lockEpoch(tx, body.TrustDomain, body.Scope)
 	if result.Outcome != "" {
@@ -946,6 +1171,11 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 		_ = tx.Rollback().Error
 		return current, authority.Result{Outcome: authority.OutcomeStale, Code: "EPOCH_CAS_STALE"}
 	}
+	if result := insertAuthorityCommand(tx, body.TrustDomain, authorityCommandRevocation,
+		body.CommandID, commandRaw, commandDigest, &next, nil, now); result.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.EpochState{}, result
+	}
 	if err := tx.Commit().Error; err != nil {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_COMMIT_UNKNOWN", Detail: err.Error()}
 	}
@@ -963,6 +1193,9 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 	if strings.TrimSpace(body.TrustDomain) == "" || body.ExpectedRowVersion == 0 {
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "CREDENTIAL_ROTATION_INVALID"}
 	}
+	if strings.TrimSpace(body.CommandID) == "" {
+		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeDenied, Code: "CREDENTIAL_ROTATION_INVALID"}
+	}
 	tx := r.begin(ctx)
 	if tx.Error != nil {
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: tx.Error.Error()}
@@ -972,6 +1205,29 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 	if result.Outcome != "" {
 		_ = tx.Rollback().Error
 		return authority.Credential{}, result
+	}
+	if result := authorityRootStatusResult(root.Status); result.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.Credential{}, result
+	}
+	commandRaw, commandDigest, commandResult := commandEvidence(command)
+	if commandResult.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.Credential{}, commandResult
+	}
+	if existing, lookupResult := lockAuthorityCommand(tx, body.TrustDomain, authorityCommandRotation, body.CommandID); lookupResult.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.Credential{}, lookupResult
+	} else if existing != nil {
+		replayCredential, replayResult := replayCredentialRotationCommand(*existing, commandRaw)
+		if replayResult.Outcome != authority.OutcomeValid {
+			_ = tx.Rollback().Error
+			return replayCredential, replayResult
+		}
+		if err := tx.Commit().Error; err != nil {
+			return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_COMMIT_UNKNOWN", Detail: err.Error()}
+		}
+		return replayCredential, replayResult
 	}
 	if body.NewCredential.Scope.Kind != authority.ScopeCredential || !validAuthorityScope(body.NewCredential.Scope) {
 		_ = tx.Rollback().Error
@@ -1055,6 +1311,11 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 		}
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeStale, Code: "CREDENTIAL_ROTATION_STALE"}
 	}
+	if result := insertAuthorityCommand(tx, body.TrustDomain, authorityCommandRotation,
+		body.CommandID, commandRaw, commandDigest, &nextEpoch, &body.NewCredential, now); result.Outcome != "" {
+		_ = tx.Rollback().Error
+		return authority.Credential{}, result
+	}
 	if err := tx.Commit().Error; err != nil {
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_COMMIT_UNKNOWN", Detail: err.Error()}
 	}
@@ -1062,6 +1323,9 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 }
 
 func (r *AuthorityRepository) lockCommandState(tx *gorm.DB, root authorityRootRow, refs []authority.CredentialRef) (authority.TrustState, time.Time, authority.Result) {
+	if result := authorityRootStatusResult(root.Status); result.Outcome != "" {
+		return authority.TrustState{}, time.Time{}, result
+	}
 	unique := make(map[authority.CredentialRef]struct{}, len(refs))
 	for _, ref := range refs {
 		unique[ref] = struct{}{}
@@ -1102,7 +1366,7 @@ func (r *AuthorityRepository) lockCommandState(tx *gorm.DB, root authorityRootRo
 	state.TrustDomain = body.TrustDomain
 	state.RootIncarnation = body.RootIncarnation
 	state.RootFingerprint = fingerprint
-	state.RootStatus = authority.RootActive
+	state.RootStatus = authority.RootStatus(root.Status)
 	state.IdentitySourceID = body.IdentitySourceID
 	state.IdentitySourceVersion = body.IdentitySourceVersion
 	state.GovernanceSubject = body.GovernanceSubject

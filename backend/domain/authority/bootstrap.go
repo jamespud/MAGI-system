@@ -115,9 +115,10 @@ func validateBootstrap(body TrustBootstrap, trust BootstrapTrust, enforceCurrent
 		return failure(OutcomeDenied, "BOOTSTRAP_IDENTITY_SOURCE_MISMATCH", "governance subject uses a different identity source/version")
 	}
 	for name, values := range map[string][]string{
-		"root resources": body.RootGrant.Resources,
-		"root actions":   body.RootGrant.Actions,
-		"root tenants":   body.RootGrant.Tenants,
+		"root resources":  body.RootGrant.Resources,
+		"root actions":    body.RootGrant.Actions,
+		"root tenants":    body.RootGrant.Tenants,
+		"root operations": body.RootGrant.Operations,
 	} {
 		if result := requireCanonicalNonEmptySet(name, values); result.Outcome != "" {
 			return result
@@ -159,6 +160,9 @@ func validateBootstrap(body TrustBootstrap, trust BootstrapTrust, enforceCurrent
 		subjects[credential.Subject] = struct{}{}
 		if !subjectUsesIdentitySource(credential.Subject, trust.IdentitySourceID, trust.IdentitySourceVersion) {
 			return failure(OutcomeDenied, "BOOTSTRAP_IDENTITY_SOURCE_MISMATCH", fmt.Sprintf("credential %d uses an untrusted identity source", i))
+		}
+		if credential.Scope.Kind != ScopeCredential || strings.TrimSpace(credential.Scope.ScopeID) == "" {
+			return failure(OutcomeDenied, "BOOTSTRAP_CREDENTIAL_SCOPE_INVALID", fmt.Sprintf("credential %d must carry a non-empty CREDENTIAL scope", i))
 		}
 		if enforceCurrentValidity {
 			if result := verifyCredentialWindow(credential, state, now); result.Outcome != "" {
@@ -213,6 +217,9 @@ func validateBootstrap(body TrustBootstrap, trust BootstrapTrust, enforceCurrent
 		if policy.Status != PolicyActive {
 			return failure(OutcomeDenied, "BOOTSTRAP_OWNER_POLICY_INVALID", "bootstrap policies must be active")
 		}
+		if len(policy.Owners) > MaxPolicyOwners {
+			return failure(OutcomeDenied, "BOOTSTRAP_OWNER_POLICY_LIMIT_EXCEEDED", "owner policy exceeds 64 owners")
+		}
 		if _, err := requiredOwnerApprovals(policy); err != nil {
 			return failure(OutcomeDenied, "BOOTSTRAP_OWNER_POLICY_INVALID", err.Error())
 		}
@@ -240,6 +247,12 @@ func validateBootstrap(body TrustBootstrap, trust BootstrapTrust, enforceCurrent
 			if result := requireCanonicalNonEmptySet(name, values); result.Outcome != "" {
 				return result
 			}
+		}
+		if !isSubset(policy.Resources, body.RootGrant.Resources) ||
+			!isSubset(policy.Actions, body.RootGrant.Actions) ||
+			!isSubset(policy.Tenants, body.RootGrant.Tenants) ||
+			!isSubset(policy.Operations, body.RootGrant.Operations) {
+			return failure(OutcomeDenied, "BOOTSTRAP_OWNER_POLICY_OUTSIDE_ROOT_GRANT", "owner policy exceeds the pinned root grant")
 		}
 	}
 	return Result{}

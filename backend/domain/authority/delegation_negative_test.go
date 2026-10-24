@@ -47,7 +47,8 @@ func TestDelegationRejectsWideningCyclesAndIdentityConfusion(t *testing.T) {
 					Issuer: delegateA, IssuerCredential: credentialFor(3, "cred-delegate", "delegate-a", "identity-source", "identity-v1", "credential-scope").Ref,
 					Delegate:  delegateB.Subject,
 					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
-					NotBefore: "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
+					Operations: []string{"PUBLISH_ARTIFACT"},
+					NotBefore:  "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
 				}, 3)
 				proof.Proof.Delegations = []authority.SignedDelegation{first, second}
 				proof.Proof.Issuer = delegateB.Subject
@@ -70,7 +71,8 @@ func TestDelegationRejectsWideningCyclesAndIdentityConfusion(t *testing.T) {
 					Issuer: delegateA, IssuerCredential: credentialFor(3, "cred-delegate", "delegate-a", "identity-source", "identity-v1", "credential-scope").Ref,
 					Delegate:  state.GovernanceSubject,
 					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
-					NotBefore: "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
+					Operations: []string{"PUBLISH_ARTIFACT"},
+					NotBefore:  "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
 				}, 3)
 				proof.Proof.Delegations = []authority.SignedDelegation{first, second}
 				proof.Proof.Issuer = state.GovernanceSubject
@@ -95,7 +97,8 @@ func TestDelegationRejectsWideningCyclesAndIdentityConfusion(t *testing.T) {
 					Issuer: state.GovernanceSubject, IssuerCredential: credentialFor(1, "cred-governance", "governance", "identity-source", "identity-v1", "credential-scope").Ref,
 					Delegate:  delegateB.Subject,
 					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
-					NotBefore: "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
+					Operations: []string{"PUBLISH_ARTIFACT"},
+					NotBefore:  "2026-10-24T09:05:00.000Z", ExpiresAt: "2026-10-24T11:00:00.000Z", Delegable: false,
 				}, 1)
 				proof.Proof.Delegations = []authority.SignedDelegation{first, second}
 				proof.Proof.Issuer = delegateB.Subject

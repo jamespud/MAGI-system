@@ -11,8 +11,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/jamespud/magi/backend/domain/canonical"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -126,6 +129,12 @@ func ParseSignedProof(raw []byte, expectedID string) (SignedProof, Result) {
 // under the C2 transaction/lock order before calling it.
 func VerifySignedProof(proof SignedProof, request VerificationRequest, state TrustState) Result {
 	body := proof.Proof
+	if result := ValidateProofStructureLimits(proof); result.Outcome != "" {
+		return result
+	}
+	if body.ExecutionGeneration == 0 || request.ExecutionGeneration == 0 {
+		return failure(OutcomeDenied, "EXECUTION_GENERATION_INVALID", "execution_generation must be positive; generation 0 is historical")
+	}
 	if err := validateRequest(request); err != nil {
 		return failure(OutcomeDenied, "REQUEST_INVALID", err.Error())
 	}
@@ -199,6 +208,9 @@ func VerifySignedProof(proof SignedProof, request VerificationRequest, state Tru
 	if !ed25519.Verify(pub, msg, sig) {
 		return failure(OutcomeDenied, "PROOF_SIGNATURE_INVALID", "Ed25519 signature does not verify")
 	}
+	if result := verifyCredentialScopeClosure(body, state); result.Outcome != "" {
+		return result
+	}
 	if result := verifyDelegationChain(body, state, now); result.Outcome != "" {
 		return result
 	}
@@ -209,6 +221,18 @@ func VerifySignedProof(proof SignedProof, request VerificationRequest, state Tru
 		return result
 	}
 	return validResult()
+}
+
+// ValidateProofStructureLimits rejects oversized authenticated structures before
+// persistence acquires credential/policy/epoch locks.
+func ValidateProofStructureLimits(proof SignedProof) Result {
+	if len(proof.Proof.Delegations) > MaxDelegationHops {
+		return failure(OutcomeDenied, "DELEGATION_LIMIT_EXCEEDED", "delegation chain exceeds 16 hops")
+	}
+	if len(proof.Proof.Consent.Approvals) > MaxOwnerApprovals {
+		return failure(OutcomeDenied, "OWNER_CONSENT_LIMIT_EXCEEDED", "owner approvals exceed 64")
+	}
+	return Result{}
 }
 
 func validateRequest(r VerificationRequest) error {
@@ -230,6 +254,9 @@ func validateRequest(r VerificationRequest) error {
 	}
 	if r.Round == 0 {
 		return fmt.Errorf("round must be positive")
+	}
+	if r.ExecutionGeneration == 0 {
+		return fmt.Errorf("execution_generation must be positive; generation 0 is historical")
 	}
 	if err := validateScopeSet(r.Scopes); err != nil {
 		return err
@@ -326,6 +353,9 @@ func findCredential(credentials []Credential, ref CredentialRef) (Credential, Re
 }
 
 func verifyCredentialWindow(c Credential, state TrustState, now time.Time) Result {
+	if c.Ref.RootIncarnation != state.RootIncarnation {
+		return failure(OutcomeDenied, "CREDENTIAL_ROOT_MISMATCH", "credential belongs to another root incarnation")
+	}
 	if c.Algorithm != SignatureAlgorithmEd25519 {
 		return failure(OutcomeDenied, "CREDENTIAL_ALGORITHM_UNSUPPORTED", "credential algorithm is not ed25519")
 	}
@@ -380,6 +410,12 @@ func verifyConsent(body Proof, request VerificationRequest, state TrustState, no
 		return failure(OutcomeDenied, "CONSENT_VERSION_UNSUPPORTED", "consent version is not supported")
 	}
 	cb := consent.Body
+	if cb.ExecutionGeneration != body.ExecutionGeneration {
+		return failure(OutcomeDenied, "OWNER_CONSENT_GENERATION_MISMATCH", "owner consent generation differs from the proof")
+	}
+	if cb.ExecutionGeneration == 0 {
+		return failure(OutcomeDenied, "OWNER_CONSENT_GENERATION_MISMATCH", "owner consent generation must be positive")
+	}
 	if cb.TrustDomain != body.TrustDomain || cb.RootIncarnation != body.RootIncarnation ||
 		cb.DelegatedSubject != body.Subject || cb.Resource != body.Resource ||
 		cb.Action != body.Action || cb.Tenant != body.Tenant || cb.Operation != body.Operation ||
@@ -404,6 +440,9 @@ func verifyConsent(body Proof, request VerificationRequest, state TrustState, no
 			return failure(OutcomeStale, "OWNER_POLICY_RETIRED", "owner policy version is retired")
 		}
 		return failure(OutcomeUnknown, "OWNER_POLICY_STATUS_UNKNOWN", "owner policy status is not recognized")
+	}
+	if len(policy.Owners) > MaxPolicyOwners {
+		return failure(OutcomeDenied, "OWNER_POLICY_LIMIT_EXCEEDED", "owner policy exceeds 64 owners")
 	}
 	if err := validateWindow(policy.NotBefore, policy.ExpiresAt, now); err != nil {
 		return failure(OutcomeExpired, "OWNER_POLICY_EXPIRED", err.Error())
@@ -592,7 +631,13 @@ func validateScopeSet(scopes []ScopedEpoch) error {
 		}
 		seenKeys[key] = true
 		counts[scope.Kind]++
-		if i > 0 && scopeKeyLess(key, previous) {
+		if !utf8.ValidString(scope.ScopeID) {
+			return fmt.Errorf("scope %d has invalid UTF-8 id", i)
+		}
+		if !norm.NFC.IsNormalString(scope.ScopeID) {
+			return fmt.Errorf("scope %d id is not NFC", i)
+		}
+		if i > 0 && ScopeKeyCompare(key, previous) < 0 {
 			return fmt.Errorf("scopes must be sorted by kind and scope id")
 		}
 		previous = key
@@ -617,11 +662,39 @@ func sameScopes(a, b []ScopedEpoch) bool {
 	return true
 }
 
-func scopeKeyLess(a, b ScopeKey) bool {
-	if a.Kind != b.Kind {
-		return a.Kind < b.Kind
+// ScopeKeyCompare implements the #45 ordering rule: kind first, then NFC
+// strings by UTF-16 code units. Callers must pass valid UTF-8 (canonical inputs
+// already enforce NFC).
+func ScopeKeyCompare(a, b ScopeKey) int {
+	if a.Kind < b.Kind {
+		return -1
 	}
-	return a.ScopeID < b.ScopeID
+	if a.Kind > b.Kind {
+		return 1
+	}
+	au := utf16.Encode([]rune(a.ScopeID))
+	bu := utf16.Encode([]rune(b.ScopeID))
+	for i := 0; i < len(au) && i < len(bu); i++ {
+		if au[i] < bu[i] {
+			return -1
+		}
+		if au[i] > bu[i] {
+			return 1
+		}
+	}
+	if len(au) < len(bu) {
+		return -1
+	}
+	if len(au) > len(bu) {
+		return 1
+	}
+	return 0
+}
+
+func sortScopes(scopes []ScopedEpoch) {
+	sort.Slice(scopes, func(i, j int) bool {
+		return ScopeKeyCompare(ScopeKey{Kind: scopes[i].Kind, ScopeID: scopes[i].ScopeID}, ScopeKey{Kind: scopes[j].Kind, ScopeID: scopes[j].ScopeID}) < 0
+	})
 }
 
 func exactMember(set []string, value string) bool {
@@ -672,11 +745,52 @@ func isSubset(child, parent []string) bool {
 	return true
 }
 
+func verifyCredentialScopeClosure(proof Proof, state TrustState) Result {
+	refs := make([]CredentialRef, 0, 1+len(proof.Delegations)+len(proof.Consent.Approvals))
+	refs = append(refs, proof.Signer)
+	for _, hop := range proof.Delegations {
+		refs = append(refs, hop.Body.IssuerCredential)
+	}
+	for _, approval := range proof.Consent.Approvals {
+		refs = append(refs, approval.Signer)
+	}
+	used := make(map[ScopeKey]struct{}, len(refs))
+	for _, ref := range refs {
+		credential, result := findCredential(state.Credentials, ref)
+		if result.Outcome != "" {
+			return result
+		}
+		if credential.Ref.RootIncarnation != state.RootIncarnation {
+			return failure(OutcomeDenied, "CREDENTIAL_ROOT_MISMATCH", "credential ref is not pinned to the current root incarnation")
+		}
+		if credential.Scope.Kind != ScopeCredential || strings.TrimSpace(credential.Scope.ScopeID) == "" {
+			return failure(OutcomeDenied, "CREDENTIAL_SCOPE_KIND_INVALID", "used credential must carry a non-empty CREDENTIAL scope")
+		}
+		used[credential.Scope] = struct{}{}
+	}
+	declared := make(map[ScopeKey]struct{})
+	for _, scope := range proof.Scopes {
+		if scope.Kind == ScopeCredential {
+			declared[ScopeKey{Kind: scope.Kind, ScopeID: scope.ScopeID}] = struct{}{}
+		}
+	}
+	if len(used) != len(declared) {
+		return failure(OutcomeDenied, "CREDENTIAL_SCOPE_CLOSURE_MISMATCH", "declared credential scope set differs from every used credential")
+	}
+	for scope := range used {
+		if _, ok := declared[scope]; !ok {
+			return failure(OutcomeDenied, "CREDENTIAL_SCOPE_CLOSURE_MISMATCH", "used credential scope is missing from proof closure")
+		}
+	}
+	return Result{}
+}
+
 func verifyDelegationChain(proof Proof, state TrustState, now time.Time) Result {
 	issuer := state.GovernanceSubject
 	parentResources := state.RootGrant.Resources
 	parentActions := state.RootGrant.Actions
 	parentTenants := state.RootGrant.Tenants
+	parentOperations := state.RootGrant.Operations
 	var parentNotBefore, parentExpiresAt time.Time
 	seenIDs := make(map[string]struct{}, len(proof.Delegations))
 	seenSubjects := make(map[Subject]struct{}, len(proof.Delegations)*2)
@@ -723,7 +837,12 @@ func verifyDelegationChain(proof Proof, state TrustState, now time.Time) Result 
 		if err != nil || len(tenants) == 0 || !sameStringOrder(tenants, body.Tenants) {
 			return failure(OutcomeDenied, "DELEGATION_SCOPE_INVALID", fmt.Sprintf("hop %d tenants must be sorted and unique", i))
 		}
-		if !isSubset(resources, parentResources) || !isSubset(actions, parentActions) || !isSubset(tenants, parentTenants) {
+		operations, err := normalizeSet(body.Operations)
+		if err != nil || len(operations) == 0 || !sameStringOrder(operations, body.Operations) {
+			return failure(OutcomeDenied, "DELEGATION_SCOPE_INVALID", fmt.Sprintf("hop %d operations must be sorted and unique", i))
+		}
+		if !isSubset(resources, parentResources) || !isSubset(actions, parentActions) ||
+			!isSubset(tenants, parentTenants) || !isSubset(operations, parentOperations) {
 			return failure(OutcomeDenied, "DELEGATION_SCOPE_WIDENED", fmt.Sprintf("hop %d widens parent scope", i))
 		}
 		notBefore, err := parseUTC(body.NotBefore)
@@ -765,14 +884,21 @@ func verifyDelegationChain(proof Proof, state TrustState, now time.Time) Result 
 			return failure(OutcomeDenied, "DELEGATION_SIGNATURE_INVALID", fmt.Sprintf("hop %d signature does not verify", i))
 		}
 		issuer = body.Delegate
-		parentResources, parentActions, parentTenants = resources, actions, tenants
+		parentResources, parentActions, parentTenants, parentOperations = resources, actions, tenants, operations
 	}
 	if !subjectMatches(proof.Issuer, issuer) {
 		return failure(OutcomeDenied, "PROOF_ISSUER_MISMATCH", "final proof issuer is not the authenticated delegate")
 	}
+	if !exactMember(state.RootGrant.Resources, proof.Resource) ||
+		!exactMember(state.RootGrant.Actions, proof.Action) ||
+		!exactMember(state.RootGrant.Tenants, proof.Tenant) ||
+		!exactMember(state.RootGrant.Operations, proof.Operation) {
+		return failure(OutcomeDenied, "PROOF_OUTSIDE_ROOT_GRANT", "proof resource/action/tenant/operation is outside the pinned root grant")
+	}
 	if len(proof.Delegations) > 0 {
 		last := proof.Delegations[len(proof.Delegations)-1].Body
-		if !exactMember(last.Resources, proof.Resource) || !exactMember(last.Actions, proof.Action) || !exactMember(last.Tenants, proof.Tenant) {
+		if !exactMember(last.Resources, proof.Resource) || !exactMember(last.Actions, proof.Action) ||
+			!exactMember(last.Tenants, proof.Tenant) || !exactMember(last.Operations, proof.Operation) {
 			return failure(OutcomeDenied, "PROOF_OUTSIDE_DELEGATION", "proof scope is outside the final delegation")
 		}
 		if !windowCovers(last.NotBefore, last.ExpiresAt, proof.IssuedAt, proof.ExpiresAt) {

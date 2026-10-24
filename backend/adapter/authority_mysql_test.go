@@ -186,7 +186,7 @@ func newC2SignedFixture(t *testing.T) c2SignedFixture {
 		PolicyID: policy.PolicyID, PolicyVersion: policy.PolicyVersion,
 		DelegatedSubject: governance.Subject,
 		Resource:         "case/42", Action: "PUBLISH", Tenant: "tenant-a", Operation: "PUBLISH_ARTIFACT",
-		CaseID: "case-42", Round: 2, Scopes: scopes,
+		CaseID: "case-42", Round: 2, ExecutionGeneration: 7, Scopes: scopes,
 		NotBefore: authorityTime(now.Add(-5 * time.Minute)), ExpiresAt: authorityTime(expiresAt),
 	}
 	proof := authority.Proof{
@@ -205,6 +205,7 @@ func newC2SignedFixture(t *testing.T) c2SignedFixture {
 		GovernanceSubject: governance.Subject,
 		RootGrant: authority.AuthorityGrant{
 			Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
+			Operations: []string{"PUBLISH_ARTIFACT"},
 		},
 		Credentials:   []authority.Credential{governance, ownerA, ownerB, delegateA, delegateB},
 		OwnerPolicies: []authority.OwnerPolicy{policy},
@@ -508,6 +509,7 @@ func alignAuthorityConsent(t *testing.T, proof *authority.Proof, owner authority
 	body.Operation = proof.Operation
 	body.CaseID = proof.CaseID
 	body.Round = proof.Round
+	body.ExecutionGeneration = proof.ExecutionGeneration
 	body.Scopes = append([]authority.ScopedEpoch(nil), proof.Scopes...)
 	proof.Consent = authorityConsent(t, body, authorityApproval(t, body, owner, seed))
 }
@@ -542,7 +544,7 @@ func TestAuthorityMySQL_RejectsInvalidProofChainsAndBindings(t *testing.T) {
 					TrustDomain: "tenant-a", RootIncarnation: "root-c2",
 					Issuer: f.base.governance.Subject, IssuerCredential: f.base.governance.Ref,
 					Delegate:  f.base.delegateA.Subject,
-					Resources: []string{"case/99"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
+					Resources: []string{"case/99"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"}, Operations: []string{"PUBLISH_ARTIFACT"},
 					NotBefore: authorityTime(f.base.now.Add(-5 * time.Minute)), ExpiresAt: authorityTime(f.base.now.Add(time.Hour)), Delegable: false,
 				}, 1)}
 				alignAuthorityConsent(t, &proof, f.base.ownerA, 2)
@@ -558,7 +560,7 @@ func TestAuthorityMySQL_RejectsInvalidProofChainsAndBindings(t *testing.T) {
 					TrustDomain: "tenant-a", RootIncarnation: "root-c2",
 					Issuer: f.base.governance.Subject, IssuerCredential: f.base.governance.Ref,
 					Delegate:  f.base.delegateA.Subject,
-					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
+					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"}, Operations: []string{"PUBLISH_ARTIFACT"},
 					NotBefore: authorityTime(f.base.now.Add(-5 * time.Minute)), ExpiresAt: authorityTime(f.base.now.Add(time.Hour)), Delegable: true,
 				}, 1)
 				second := signAuthorityDelegation(t, authority.DelegationBody{
@@ -566,7 +568,7 @@ func TestAuthorityMySQL_RejectsInvalidProofChainsAndBindings(t *testing.T) {
 					TrustDomain: "tenant-a", RootIncarnation: "root-c2",
 					Issuer: f.base.delegateA.Subject, IssuerCredential: f.base.delegateA.Ref,
 					Delegate:  f.base.governance.Subject,
-					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
+					Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"}, Operations: []string{"PUBLISH_ARTIFACT"},
 					NotBefore: authorityTime(f.base.now.Add(-4 * time.Minute)), ExpiresAt: authorityTime(f.base.now.Add(50 * time.Minute)), Delegable: false,
 				}, 3)
 				proof.Delegations = []authority.SignedDelegation{first, second}
@@ -839,7 +841,7 @@ func TestAuthorityMySQL_EvidenceTamperFailsClosed(t *testing.T) {
 			TrustDomain: "tenant-a", RootIncarnation: "root-c2",
 			Issuer: f.base.governance.Subject, IssuerCredential: f.base.governance.Ref,
 			Delegate:  f.base.delegateA.Subject,
-			Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"},
+			Resources: []string{"case/42"}, Actions: []string{"PUBLISH"}, Tenants: []string{"tenant-a"}, Operations: []string{"PUBLISH_ARTIFACT"},
 			NotBefore: authorityTime(f.base.now.Add(-5 * time.Minute)), ExpiresAt: authorityTime(f.base.now.Add(time.Hour)), Delegable: false,
 		}, 1)}
 		alignAuthorityConsent(t, &proof, f.base.ownerA, 2)
@@ -973,6 +975,7 @@ func TestAuthorityMySQL_MigrationIsAdditiveAndIdempotent(t *testing.T) {
 		"magi_authority_root", "magi_authority_credential",
 		"magi_authority_owner_policy", "magi_authority_epoch", "magi_authority_proof",
 		"magi_authority_proof_scope", "magi_authority_proof_delegation", "magi_authority_proof_consent",
+		"magi_authority_command",
 	} {
 		if !f.db.Migrator().HasTable(table) {
 			t.Fatalf("migration did not create %s", table)
@@ -981,6 +984,7 @@ func TestAuthorityMySQL_MigrationIsAdditiveAndIdempotent(t *testing.T) {
 	for _, table := range []string{
 		"magi_authority_root", "magi_authority_credential",
 		"magi_authority_owner_policy", "magi_authority_epoch", "magi_authority_proof",
+		"magi_authority_command",
 	} {
 		var count int64
 		if err := f.db.Raw("SELECT COUNT(*) FROM " + table).Scan(&count).Error; err != nil || count != 0 {
