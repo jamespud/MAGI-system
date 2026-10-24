@@ -42,7 +42,7 @@ func pendingArtifactReferences(body any, createdBy SubjectRef) ([]Dependency, er
 	walk = func(v any, path string) error {
 		switch x := v.(type) {
 		case map[string]any:
-			if _, ok := x["content_digest"]; ok {
+			if _, ok := x["namespace"]; ok {
 				raw, e := json.Marshal(x)
 				if e != nil {
 					return e

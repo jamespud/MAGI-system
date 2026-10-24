@@ -1,0 +1,10 @@
+{
+  "canonical_profile": "magi-cj/1",
+  "digest_alg": "sha256",
+  "digest": "bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+  "artifact_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+  "canonical_bytes": 10003,
+  "snapshot_count": 12,
+  "qualification": "UNVERIFIABLE_REFERENCE",
+  "actual_reads": "NOT_RUN"
+}
