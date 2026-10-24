@@ -16,7 +16,8 @@
 --
 -- Rollback warning: stop writers and preserve/export these tables before
 -- dropping them. Dropping the journal erases durable pre-exposure facts and
--- cannot be treated as "no exposure happened". A generation-unaware or
+-- cannot be treated as "no exposure happened". Drop transition evidence before
+-- delivery rows, then nodes/edges/events/header. A generation-unaware or
 -- #45-incompatible writer must never share these tables.
 
 CREATE TABLE readset_journal (
@@ -116,6 +117,36 @@ CREATE TABLE readset_journal_delivery (
         state <> 'APPLIED_VERIFIED' OR
         (authority_sequence IS NOT NULL AND authority_sequence > 0 AND
          verification_record_json IS NOT NULL AND injected_at IS NOT NULL AND verified_at IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Append-only local evidence for each provider-state transition. Rows are
+-- inserted in the same transaction as the delivery state_version CAS. This
+-- table is part of fresh S31 installs; S31 is unmerged, so a deployment that
+-- applied an earlier working-tree draft must recreate or append this table
+-- before enabling the writer.
+CREATE TABLE readset_journal_delivery_transition (
+    journal_id VARCHAR(96) NOT NULL,
+    delivery_id VARCHAR(191) NOT NULL,
+    state_version BIGINT UNSIGNED NOT NULL,
+    from_state VARCHAR(32) NOT NULL,
+    to_state VARCHAR(32) NOT NULL,
+    execution_generation BIGINT UNSIGNED NOT NULL,
+    owner_job_id VARCHAR(64) NOT NULL,
+    owner_worker_id VARCHAR(255) NOT NULL,
+    owner_lease_until DATETIME(6) NOT NULL,
+    reason TEXT NOT NULL,
+    transitioned_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (journal_id, delivery_id, state_version),
+    KEY idx_readset_transition_owner (journal_id, execution_generation, owner_worker_id),
+    CONSTRAINT fk_readset_transition_delivery FOREIGN KEY (journal_id, delivery_id)
+        REFERENCES readset_journal_delivery (journal_id, delivery_id),
+    CONSTRAINT chk_readset_transition_version CHECK (state_version > 0),
+    CONSTRAINT chk_readset_transition_generation CHECK (execution_generation > 0),
+    CONSTRAINT chk_readset_transition_states CHECK (
+        from_state IN ('PENDING', 'APPLIED_VERIFIED', 'FAILED', 'UNKNOWN', 'UNVERIFIABLE') AND
+        to_state IN ('PENDING', 'APPLIED_VERIFIED', 'FAILED', 'UNKNOWN', 'UNVERIFIABLE') AND
+        from_state <> to_state
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

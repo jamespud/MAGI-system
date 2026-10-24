@@ -29,8 +29,8 @@ func migrateReadSetJournalMySQL(t *testing.T, db *gorm.DB) {
 	// shape. Do not AutoMigrate here: the real SQL migration is the acceptance
 	// artifact under test.
 	for _, table := range []string{
-		"readset_journal_edge", "readset_journal_node", "readset_journal_delivery",
-		"readset_journal_event", "readset_journal",
+		"readset_journal_delivery_transition", "readset_journal_edge", "readset_journal_node",
+		"readset_journal_delivery", "readset_journal_event", "readset_journal",
 	} {
 		if err := db.Exec("DROP TABLE IF EXISTS " + table).Error; err != nil {
 			t.Fatalf("drop %s: %v", table, err)
@@ -66,8 +66,8 @@ func migrateReadSetJournalMySQL(t *testing.T, db *gorm.DB) {
 		// Exercise the documented rollback order. Foreign keys make a wrong
 		// order observable here rather than silently leaving tables behind.
 		for _, table := range []string{
-			"readset_journal_edge", "readset_journal_node", "readset_journal_delivery",
-			"readset_journal_event", "readset_journal",
+			"readset_journal_delivery_transition", "readset_journal_edge", "readset_journal_node",
+			"readset_journal_delivery", "readset_journal_event", "readset_journal",
 		} {
 			if err := db.Exec("DROP TABLE IF EXISTS " + table).Error; err != nil {
 				t.Errorf("rollback drop %s: %v", table, err)
@@ -580,6 +580,11 @@ func TestReadSetJournal_MigrationShapeMySQL(t *testing.T) {
 		"readset_journal_delivery": {
 			"state", "last_execution_generation", "last_owner_job_id", "last_owner_worker_id",
 			"last_owner_lease_until", "authority_sequence", "verification_record_json", "injected_at", "verified_at",
+		},
+		"readset_journal_delivery_transition": {
+			"journal_id", "delivery_id", "state_version", "from_state", "to_state",
+			"execution_generation", "owner_job_id", "owner_worker_id", "owner_lease_until",
+			"reason", "transitioned_at",
 		},
 		"readset_journal_node": {"node_json", "node_digest", "admission_authority_sequence"},
 		"readset_journal_edge": {"parent_node_id", "child_node_id"},
@@ -1094,7 +1099,7 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 		})
 	}
 
-	t.Run("delivery_generation_two_transition_allowed", func(t *testing.T) {
+	t.Run("fabricated_delivery_generation_two_metadata_rejected", func(t *testing.T) {
 		ctx := context.Background()
 		db := openArtifactGenerationMySQL(t)
 		_, jobs, job := seedArtifactGenerationJob(t, db)
@@ -1114,12 +1119,8 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 			WHERE journal_id = ?`, journalID).Error; err != nil {
 			t.Fatal(err)
 		}
-		view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req))
-		if err != nil {
-			t.Fatalf("generation-2 delivery trace rejected: %v", err)
-		}
-		if view.HighWatermark != 1 {
-			t.Fatalf("delivery trace changed journal anchor: %+v", view)
+		if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
+			t.Fatalf("fabricated generation-2 delivery trace accepted: %+v", view)
 		}
 	})
 }
@@ -1151,5 +1152,188 @@ func TestReadSetJournal_ReadRevalidatesLeaseAfterLongValidationMySQL(t *testing.
 	defer cancel()
 	if view, err := repo.ReadJournal(waitCtx, owner, req.Event.JournalKey, reqScope(req)); !errors.Is(err, port.ErrLeaseLost) {
 		t.Fatalf("slow read view=%+v error=%v, want ErrLeaseLost", view, err)
+	}
+}
+
+func TestReadSetJournal_PendingDeliveryRejectsFabricatedTransitionMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	_, owner := claimArtifactOwner(t, jobs, job, "journal-pending-fabrication")
+	repo := newReadSetJournalRepo(db, true)
+	req := journalRegistration(owner, "delivery-pending-fabrication")
+	if _, err := repo.Register(ctx, owner, req); err != nil {
+		t.Fatal(err)
+	}
+	journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+	if err := db.Exec(`UPDATE readset_journal_delivery SET
+		last_execution_generation = first_execution_generation + 1,
+		last_owner_job_id = 'fabricated-job',
+		last_owner_worker_id = 'fabricated-worker',
+		last_owner_lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE)
+		WHERE journal_id = ? AND delivery_id = ?`, journalID, req.Event.DeliveryID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
+		t.Fatalf("fabricated PENDING generation-2 metadata accepted: %+v", view)
+	}
+}
+
+type readSetTransitionRow struct {
+	JournalID           string
+	DeliveryID          string
+	StateVersion        int64
+	FromState           string
+	ToState             string
+	ExecutionGeneration int64
+	OwnerJobID          string
+	OwnerWorkerID       string
+	OwnerLeaseUntil     time.Time
+	Reason              string
+	TransitionedAt      time.Time
+}
+
+func readSetTransitions(t *testing.T, db *gorm.DB, journalID, deliveryID string) []readSetTransitionRow {
+	t.Helper()
+	var rows []readSetTransitionRow
+	if err := db.Table("readset_journal_delivery_transition").
+		Where("journal_id = ? AND delivery_id = ?", journalID, deliveryID).
+		Order("state_version asc").Scan(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func TestReadSetJournal_TransitionEvidenceMySQL(t *testing.T) {
+	ctx := context.Background()
+	db := openArtifactGenerationMySQL(t)
+	_, jobs, job := seedArtifactGenerationJob(t, db)
+	migrateReadSetJournalMySQL(t, db)
+	first, owner1 := claimArtifactOwner(t, jobs, job, "journal-transition-evidence")
+	repo := newReadSetJournalRepo(db, true)
+	req := journalRegistration(owner1, "delivery-transition-evidence")
+	registered, err := repo.Register(ctx, owner1, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requeueArtifactOwner(t, jobs, first, owner1.WorkerID)
+	_, owner2 := claimArtifactOwner(t, jobs, job, owner1.WorkerID)
+	unknown, err := repo.MarkProviderUnknown(ctx, owner2, req.Event.JournalKey, reqScope(req), req.Event.DeliveryID, "provider timeout")
+	if err != nil || unknown.ProviderState != readsetjournal.ProviderUnknown {
+		t.Fatalf("unknown=%+v err=%v", unknown, err)
+	}
+	journalID := readSetJournalIDForCase(t, db, owner2.CaseID)
+	rows := readSetTransitions(t, db, journalID, req.Event.DeliveryID)
+	if len(rows) != 1 {
+		t.Fatalf("unknown transition rows=%+v", rows)
+	}
+	row := rows[0]
+	if row.StateVersion != 1 || row.FromState != "PENDING" || row.ToState != "UNKNOWN" ||
+		row.ExecutionGeneration != owner2.ExecutionGeneration || row.OwnerJobID != owner2.JobID ||
+		row.OwnerWorkerID != owner2.WorkerID || row.OwnerLeaseUntil.IsZero() || row.Reason != "provider timeout" ||
+		row.TransitionedAt.IsZero() {
+		t.Fatalf("unknown transition record=%+v", row)
+	}
+	var delivery struct {
+		StateVersion            int64
+		LastExecutionGeneration int64
+		LastOwnerJobID          string
+		LastOwnerWorkerID       string
+		LastOwnerLeaseUntil     time.Time
+	}
+	if err := db.Table("readset_journal_delivery").
+		Select("state_version, last_execution_generation, last_owner_job_id, last_owner_worker_id, last_owner_lease_until").
+		Where("journal_id = ? AND delivery_id = ?", journalID, req.Event.DeliveryID).Scan(&delivery).Error; err != nil {
+		t.Fatal(err)
+	}
+	if delivery.StateVersion != 1 || delivery.LastExecutionGeneration != row.ExecutionGeneration ||
+		delivery.LastOwnerJobID != row.OwnerJobID || delivery.LastOwnerWorkerID != row.OwnerWorkerID ||
+		!delivery.LastOwnerLeaseUntil.Equal(row.OwnerLeaseUntil) {
+		t.Fatalf("delivery trace=%+v row=%+v", delivery, row)
+	}
+	view, err := repo.ReadJournal(ctx, owner2, req.Event.JournalKey, reqScope(req))
+	if err != nil || view.Events[0].ProviderState != readsetjournal.ProviderUnknown || view.HighWatermark != registered.Sequence {
+		t.Fatalf("generation-2 unknown readback view=%+v err=%v", view, err)
+	}
+
+	unverifiable, err := repo.MarkProviderUnverifiable(ctx, owner2, req.Event.JournalKey, reqScope(req), req.Event.DeliveryID, "no independent source")
+	if err != nil || unverifiable.ProviderState != readsetjournal.ProviderUnverifiable {
+		t.Fatalf("unverifiable=%+v err=%v", unverifiable, err)
+	}
+	rows = readSetTransitions(t, db, journalID, req.Event.DeliveryID)
+	if len(rows) != 2 || rows[1].StateVersion != 2 || rows[1].FromState != "UNKNOWN" ||
+		rows[1].ToState != "UNVERIFIABLE" || rows[1].ExecutionGeneration != owner2.ExecutionGeneration ||
+		rows[1].OwnerJobID != owner2.JobID || rows[1].OwnerWorkerID != owner2.WorkerID {
+		t.Fatalf("unverifiable transition rows=%+v", rows)
+	}
+	view, err = repo.ReadJournal(ctx, owner2, req.Event.JournalKey, reqScope(req))
+	if err != nil || view.Events[0].ProviderState != readsetjournal.ProviderUnverifiable {
+		t.Fatalf("generation-2 unverifiable readback view=%+v err=%v", view, err)
+	}
+	if _, err := repo.Register(ctx, owner2, journalRegistration(owner2, "delivery-transition-append")); !errors.Is(err, readsetjournal.ErrOwnerFence) {
+		t.Fatalf("generation-2 append error=%v", err)
+	}
+	view, err = repo.ReadJournal(ctx, owner2, req.Event.JournalKey, reqScope(req))
+	if err != nil || view.HighWatermark != registered.Sequence {
+		t.Fatalf("generation-2 append changed HWM: view=%+v err=%v", view, err)
+	}
+}
+
+func TestReadSetJournal_TransitionEvidenceCorruptionMySQL(t *testing.T) {
+	cases := []struct {
+		name  string
+		apply func(t *testing.T, db *gorm.DB, journalID, deliveryID string)
+	}{
+		{name: "missing", apply: func(t *testing.T, db *gorm.DB, journalID, deliveryID string) {
+			if err := db.Exec("DELETE FROM readset_journal_delivery_transition WHERE journal_id = ? AND delivery_id = ?", journalID, deliveryID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "tampered_generation", apply: func(t *testing.T, db *gorm.DB, journalID, deliveryID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery_transition SET execution_generation = execution_generation + 1 WHERE journal_id = ? AND delivery_id = ?", journalID, deliveryID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "state_version_gap", apply: func(t *testing.T, db *gorm.DB, journalID, deliveryID string) {
+			if err := db.Exec("UPDATE readset_journal_delivery_transition SET state_version = 2 WHERE journal_id = ? AND delivery_id = ?", journalID, deliveryID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "duplicate_state_version", apply: func(t *testing.T, db *gorm.DB, journalID, deliveryID string) {
+			if err := db.Exec(`INSERT INTO readset_journal_delivery_transition
+				(journal_id, delivery_id, state_version, from_state, to_state, execution_generation,
+				 owner_job_id, owner_worker_id, owner_lease_until, reason, transitioned_at)
+				SELECT journal_id, delivery_id, state_version, from_state, to_state, execution_generation,
+				 owner_job_id, owner_worker_id, owner_lease_until, reason, transitioned_at
+				FROM readset_journal_delivery_transition WHERE journal_id = ? AND delivery_id = ?`, journalID, deliveryID).Error; err == nil {
+				t.Fatal("duplicate delivery transition state_version accepted")
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-transition-corrupt-"+tc.name)
+			repo := newReadSetJournalRepo(db, true)
+			req := journalRegistration(owner, "delivery-transition-corrupt-"+tc.name)
+			if _, err := repo.Register(ctx, owner, req); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.MarkProviderUnknown(ctx, owner, req.Event.JournalKey, reqScope(req), req.Event.DeliveryID, "timeout"); err != nil {
+				t.Fatal(err)
+			}
+			journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+			tc.apply(t, db, journalID, req.Event.DeliveryID)
+			if tc.name == "duplicate_state_version" {
+				return
+			}
+			if view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req)); err == nil {
+				t.Fatalf("corrupt transition lineage accepted: %+v", view)
+			}
+		})
 	}
 }

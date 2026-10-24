@@ -191,6 +191,7 @@ generation 检查之前返回，且永不授权重发。
 | RJ-22 | 最终 freshness DB-time sample 后、返回材料前再次验证 active owner/lease。 |
 | RJ-23 | closure 仍冻结为 1 MiB；RequestDigest 单独支持 2048 个 digest 元素。 |
 | RJ-24 | delivery `first_execution_generation` 锚定 journal；`last_execution_generation` 记录实际转换 generation，必须为正且 `>= first`。journal/event/node owner 精确绑定锚定 owner；delivery last-owner 可来自后续 reconciliation generation。 |
+| RJ-25 | PENDING 的 StateVersion=0，first/last=anchor，last-owner 精确等于 registering event；非 PENDING 必须有连续 `1..StateVersion` transition rows，latest 与 delivery last_* 完全一致。 |
 
 ## 6. MySQL 存储与事务
 
@@ -201,6 +202,7 @@ generation 检查之前返回，且永不授权重发。
 | `readset_journal` | JournalKey、scope/epochs、owner/lease/generation、HWM、pending/event bytes、lifecycle、row version |
 | `readset_journal_event` | 连续本地序号、event version、delivery/provider request、exact canonical bytes/digests、owner/generation |
 | `readset_journal_delivery` | 与 registration 分离的 provider lifecycle；future trusted evidence 字段保持 NULL |
+| `readset_journal_delivery_transition` | append-only state transition lineage：continuous state_version、from/to、actual generation/owner/lease、reason、trusted DB timestamp |
 | `readset_journal_node` | immutable node bytes/digest、source/version、admission generation/scope |
 | `readset_journal_edge` | child→parent 唯一边与 `(journal,parent,child)` reverse index |
 
@@ -221,10 +223,13 @@ generation 检查之前返回，且永不授权重发。
 - 迁移只新增五张表，不修改 frozen artifact、既有 Event/DecisionJob/Case 表或旧 writer。
 - 上线前必须先关闭本地 ingress；由于 `APPLIED_VERIFIED` 未实现，不能把 rollout 当作
   provider 能力上线。
-- 回滚不是“没有暴露”：登记可能先于 provider 暴露。必须先停写、导出/保留五张表并
-  审计 pending/unknown，再按 FK 依赖逆序删除：
-  `readset_journal_edge` → `readset_journal_node` → `readset_journal_delivery` →
-  `readset_journal_event` → `readset_journal`。
+- S31 仍未合并，迁移按 fresh-install 交付。若某部署应用过更早的未合并 S31 草稿，
+  必须重建 S31 表或显式补齐 `readset_journal_delivery_transition` 后才能启用 writer。
+- 回滚不是“没有暴露”：登记可能先于 provider 暴露。必须先停写、导出/保留六张表并
+  审计 pending/unknown/transition lineage，再按 FK 依赖逆序删除：
+  `readset_journal_delivery_transition` → `readset_journal_edge` →
+  `readset_journal_node` → `readset_journal_delivery` → `readset_journal_event` →
+  `readset_journal`。
 - 不允许 generation-unaware 或与 #45 语义不兼容的 writer 继续共享/重建这些表。
 - 若已有 APPLIED/authority 事实，回滚必须保留只读审计副本，不能删除后重做。
 
@@ -270,11 +275,24 @@ generation 检查之前返回，且永不授权重发。
 
 | 审查项 | 实际 RED | 修正与 GREEN |
 | --- | --- | --- |
-| P2 delivery last generation 与 owner 不一致 | cross-generation unknown test 期望 generation 2，实际写回 anchor generation 1；journal/event/node foreign non-empty owner 与 generation-2 delivery transition 测试失败 | `markUnverified` 写实际 `owner.ExecutionGeneration`；readback 要求 first=anchor、positive last>=first；header/event/node exact anchor owner；delivery non-empty last-owner evidence 可为 generation 2 |
+| P2 delivery last generation 与 owner 不一致 | cross-generation unknown test 期望 generation 2，实际写回 anchor generation 1；journal/event/node foreign non-empty owner 与 generation-2 delivery transition 测试失败 | `markUnverified` 写实际 `owner.ExecutionGeneration`；readback 要求 first=anchor、positive last>=first；header/event/node exact anchor owner；generation-2 delivery metadata 只有 durable transition rows 支撑才接受 |
 
-新增 real-MySQL 覆盖：journal/event/node 的非空 foreign owner ID 拒绝；header owner 缺失/不一致拒绝；node admission generation/owner/scope 精确匹配；delivery generation-2 transition 接受但不得增加 HWM；`first_execution_generation` 仍锚定，generation 0 由数据库约束拒绝。generation-2 的 unknown/unverifiable reconciliation 仍可 read/reconcile，但不能 append。
+新增 real-MySQL 覆盖：journal/event/node 的非空 foreign owner ID 拒绝；header owner 缺失/不一致拒绝；node admission generation/owner/scope 精确匹配；仅靠直接修改 delivery 列伪造 generation-2 transition 会被拒绝；真实 MarkProviderUnknown/Unverifiable 的 generation-2 transition rows 可 read/reconcile，但不得增加 HWM；`first_execution_generation` 仍锚定，generation 0 由数据库约束拒绝。
 
-## 11. A–F 证据
+## 11. Durable delivery-transition evidence
+
+| 审查项 | 实际 RED | 修正与 GREEN |
+| --- | --- | --- |
+| P2 fabricated delivery transition metadata | PENDING generation-2 metadata 被接受；transition table 不存在；真实 generation-2 Mark 没有 durable lineage | 新增 S31 transition table；Mark CAS 与 transition insert 同事务；readback 精确重放 PENDING/非 PENDING lineage。PENDING fabrication、missing、tampered generation、state-version gap 和 duplicate version 均拒绝；真实 generation-2 Unknown→Unverifiable 接受 |
+
+实现约束：
+
+- Mark 只在锁定并重验的 DecisionJob owner 路径中写 transition；不提供 caller-supplied transition API。
+- transition `state_version` 从 1 连续，PK 阻止 duplicate；latest to_state/generation/owner/lease/reason 必须与 delivery 完全一致。
+- PENDING 不得有 transition rows；其 last-owner 证据必须精确等于 registering event owner。
+- generation-2 reconciliation 不改变 journal/event/node anchor，也不能 append event。
+
+## 12. A–F 证据
 
 ### A. 问题与边界
 
@@ -311,7 +329,8 @@ generation 检查之前返回，且永不授权重发。
 | first review P1/P2 REDs | 见第 8 节；日志保存在 `/tmp/magi-wave2-44-fix{1..6}-*.log` | 六项均先观察实际失败，再实现 |
 | closure re-review REDs | 见第 9 节；日志 `/tmp/magi-wave2-44-review2-*.log` | 三项均先观察实际失败，再实现 |
 | final traceability RED/GREEN | 见第 10 节；日志 `/tmp/magi-wave2-44-final-p2-*.log` | cross-generation 写回和 foreign non-empty owner 均先真实失败，再 PASS |
-| adapter MySQL GREEN | 下述 DSN 命令 | 17 个顶层验收测试全部 PASS（含三轮 review regression 子测试） |
+| transition-evidence RED/GREEN | 见第 11 节；日志 `/tmp/magi-wave2-44-transition-*.log` | PENDING fabrication 与缺失 lineage 先真实失败，再 PASS |
+| adapter MySQL GREEN | 下述 DSN 命令 | 20 个顶层验收测试全部 PASS（含四轮 review regression 子测试） |
 | domain regression | `go test ./domain/readsetjournal ./domain/inputartifact ./domain/canonical -count=1` | PASS；未修改 #42 frozen tests |
 | domain race | `go test -race ./domain/readsetjournal -count=1` | PASS |
 | MySQL race | 下述 DSN 命令加 `-race` | PASS |
@@ -349,6 +368,9 @@ go test ./adapter -run ReadSetJournal -count=1 -v
 - `TestReadSetJournal_FrozenDeclarationRejectionsMySQL`
 - `TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL`
 - `TestReadSetJournal_ReadRevalidatesLeaseAfterLongValidationMySQL`
+- `TestReadSetJournal_PendingDeliveryRejectsFabricatedTransitionMySQL`
+- `TestReadSetJournal_TransitionEvidenceMySQL`
+- `TestReadSetJournal_TransitionEvidenceCorruptionMySQL`
 
 覆盖：24 并发 append 的连续 `1..24` 前缀；same-ID/same-bytes replay 与
 same-ID/different-bytes conflict；scope conflict；same-worker owner ABA、generation
@@ -362,7 +384,10 @@ RequestDigest；RequestDigest/node/edge/parent-order corruption 拒绝；future 
 source、DEBATE/INITIAL 和 phase regression 拒绝；stale 首登记零写入；1 MiB
 closure boundary；event/delivery generation/owner/lease corruption 拒绝；slow read
 在最终 lease 到期后拒绝返回；journal/event/node 的 non-empty foreign owner 拒绝；
-delivery generation-2 transition 保留实际 owner/generation 且不改变 journal anchor。
+delivery generation-2 transition 保留实际 owner/generation 且不改变 journal anchor；
+PENDING fabricated generation-2 metadata 拒绝；durable transition rows 的 missing/
+tampered/gap/duplicate corruption 拒绝，真实 generation-2 Unknown→Unverifiable
+lineage 接受。
 
 ### E. 自审与残余风险
 
@@ -374,6 +399,7 @@ delivery generation-2 transition 保留实际 owner/generation 且不改变 jour
 | 无自动 resend 是设计约束，不是恢复已完成 | P1 | 已实现“不重发”与 duplicate 永不 permit；真实 provider 恢复 NOT RUN |
 | DB-time freshness 不替代 C2 当前撤销源 | P1 | 仅 half-open declared validity；真实 revocation BLOCKED |
 | 1MiB closure 与 2048-node digest ceiling 的极端组合未做负载压测 | P2 | 两个边界分别测试；大 body/并发 load test 未运行 |
+| transition append-only 依赖应用写路径与部署权限 | P2 | 当前无 update/delete API；MySQL 管理员恶意改历史仍超出信任边界 |
 | same-case 写者通过 DecisionJob 串行，吞吐而非细粒度并发 | P2 | 有界 slice 可接受；需压测 |
 | APPLIED 读路径只能做 shape/fail-closed 映射 | P1 | provider/C2/C3 BLOCKED |
 | Journal QUIESCING/INPUT_CLOSED 无生产转换 | P1 | 后续关闭切片 |

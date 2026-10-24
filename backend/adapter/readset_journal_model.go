@@ -88,6 +88,27 @@ type ReadSetJournalDeliveryModel struct {
 
 func (ReadSetJournalDeliveryModel) TableName() string { return "readset_journal_delivery" }
 
+// ReadSetJournalDeliveryTransitionModel is append-only evidence for exactly one
+// delivery state change. Rows are created only by the locked MarkProviderUnknown/
+// MarkProviderUnverifiable transaction.
+type ReadSetJournalDeliveryTransitionModel struct {
+	JournalID           string    `gorm:"column:journal_id;primaryKey;size:96"`
+	DeliveryID          string    `gorm:"column:delivery_id;primaryKey;size:191"`
+	StateVersion        int64     `gorm:"column:state_version;primaryKey"`
+	FromState           string    `gorm:"column:from_state;size:32;not null"`
+	ToState             string    `gorm:"column:to_state;size:32;not null"`
+	ExecutionGeneration int64     `gorm:"column:execution_generation;not null"`
+	OwnerJobID          string    `gorm:"column:owner_job_id;size:64;not null"`
+	OwnerWorkerID       string    `gorm:"column:owner_worker_id;size:255;not null"`
+	OwnerLeaseUntil     time.Time `gorm:"column:owner_lease_until;not null"`
+	Reason              string    `gorm:"column:reason;type:text;not null"`
+	TransitionedAt      time.Time `gorm:"column:transitioned_at;not null"`
+}
+
+func (ReadSetJournalDeliveryTransitionModel) TableName() string {
+	return "readset_journal_delivery_transition"
+}
+
 // ReadSetJournalNodeModel stores one immutable dependency descriptor. Its
 // admission_authority_sequence remains NULL until trusted independent evidence
 // exists; local sequence is never substituted for that fact.

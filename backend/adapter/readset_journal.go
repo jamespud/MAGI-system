@@ -364,6 +364,7 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 		}
 		facts := make([]readsetjournal.EventFact, len(events))
 		plans := make([]readsetjournal.RegistrationPlan, len(events))
+		eventByDelivery := make(map[string]*ReadSetJournalEventModel, len(events))
 		var eventBytes int64
 		for i := range events {
 			event := &events[i]
@@ -411,9 +412,84 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 				return err
 			}
 			facts[i] = fact
+			eventByDelivery[event.DeliveryID] = event
 		}
 		if eventBytes != journal.EventBytes {
 			return fmt.Errorf("%w: journal event byte count mismatch", readsetjournal.ErrInvalidJournal)
+		}
+		maxTransitions := len(deliveries) * 4
+		var transitionModels []ReadSetJournalDeliveryTransitionModel
+		if err := tx.Where("journal_id = ?", journal.ID).
+			Order("delivery_id asc, state_version asc").
+			Limit(maxTransitions + 1).Find(&transitionModels).Error; err != nil {
+			return err
+		}
+		if len(transitionModels) > maxTransitions {
+			return fmt.Errorf("%w: delivery transition count exceeds ceiling", readsetjournal.ErrLimit)
+		}
+		transitionsByDelivery := make(map[string][]*ReadSetJournalDeliveryTransitionModel)
+		for i := range transitionModels {
+			transition := &transitionModels[i]
+			transitionsByDelivery[transition.DeliveryID] = append(
+				transitionsByDelivery[transition.DeliveryID], transition,
+			)
+		}
+		for i := range deliveries {
+			delivery := &deliveries[i]
+			event := eventByDelivery[delivery.DeliveryID]
+			if event == nil {
+				return fmt.Errorf("%w: delivery lacks registering event", readsetjournal.ErrInvalidJournal)
+			}
+			rows := transitionsByDelivery[delivery.DeliveryID]
+			delete(transitionsByDelivery, delivery.DeliveryID)
+			if readsetjournal.ProviderState(delivery.State) == readsetjournal.ProviderPending {
+				if delivery.StateVersion != 0 || len(rows) != 0 ||
+					delivery.FirstExecutionGeneration != journal.ExecutionGeneration ||
+					delivery.LastExecutionGeneration != journal.ExecutionGeneration ||
+					delivery.LastOwnerJobID != event.OwnerJobID ||
+					delivery.LastOwnerWorkerID != event.OwnerWorkerID ||
+					!delivery.LastOwnerLeaseUntil.Equal(event.OwnerLeaseUntil) {
+					return fmt.Errorf("%w: PENDING delivery owner/generation trace differs from registering event", readsetjournal.ErrInvalidJournal)
+				}
+				continue
+			}
+			if delivery.StateVersion <= 0 || len(rows) != int(delivery.StateVersion) {
+				return fmt.Errorf("%w: delivery transition count differs from state version", readsetjournal.ErrInvalidJournal)
+			}
+			var previousState string
+			for j, row := range rows {
+				expectedVersion := int64(j + 1)
+				if row.JournalID != journal.ID || row.DeliveryID != delivery.DeliveryID ||
+					row.StateVersion != expectedVersion || row.ExecutionGeneration <= 0 ||
+					row.ExecutionGeneration < delivery.FirstExecutionGeneration ||
+					row.OwnerJobID == "" || row.OwnerWorkerID == "" ||
+					row.OwnerLeaseUntil.IsZero() || row.TransitionedAt.IsZero() {
+					return fmt.Errorf("%w: invalid delivery transition evidence", readsetjournal.ErrInvalidJournal)
+				}
+				if j == 0 {
+					if row.FromState != string(readsetjournal.ProviderPending) {
+						return fmt.Errorf("%w: first delivery transition does not start at PENDING", readsetjournal.ErrInvalidJournal)
+					}
+				} else if row.FromState != previousState {
+					return fmt.Errorf("%w: delivery transition chain is discontinuous", readsetjournal.ErrInvalidJournal)
+				}
+				if row.FromState == row.ToState {
+					return fmt.Errorf("%w: delivery transition does not change state", readsetjournal.ErrInvalidJournal)
+				}
+				previousState = row.ToState
+			}
+			latest := rows[len(rows)-1]
+			if latest.StateVersion != delivery.StateVersion || latest.ToState != delivery.State ||
+				latest.ExecutionGeneration != delivery.LastExecutionGeneration ||
+				latest.OwnerJobID != delivery.LastOwnerJobID ||
+				latest.OwnerWorkerID != delivery.LastOwnerWorkerID ||
+				!latest.OwnerLeaseUntil.Equal(delivery.LastOwnerLeaseUntil) ||
+				latest.Reason != delivery.LastReason {
+				return fmt.Errorf("%w: latest delivery transition differs from delivery trace", readsetjournal.ErrInvalidJournal)
+			}
+		}
+		if len(transitionsByDelivery) != 0 {
+			return fmt.Errorf("%w: transition evidence references unknown delivery", readsetjournal.ErrInvalidJournal)
 		}
 		var nodeModels []ReadSetJournalNodeModel
 		if err := tx.Where("journal_id = ?", journal.ID).Order("node_id asc").
@@ -570,7 +646,7 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 	}
 	var fact readsetjournal.EventFact
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		job, _, err := lockActiveExecution(tx, owner)
+		job, caseModel, err := lockActiveExecution(tx, owner)
 		if err != nil {
 			return err
 		}
@@ -578,6 +654,13 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 			return port.ErrLeaseLost
 		}
 		leaseUntil := *job.LeaseUntil
+		transitionedAt, err := databaseNow(tx)
+		if err != nil {
+			return err
+		}
+		if err := validateActiveExecutionAt(job, caseModel, owner, transitionedAt); err != nil {
+			return err
+		}
 		var journal ReadSetJournalModel
 		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("case_id = ? AND round_no = ? AND context_manifest_id = ? AND persona_id = ?",
@@ -637,6 +720,16 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 		}
 		if update.RowsAffected != 1 {
 			return fmt.Errorf("%w: delivery state CAS failed", readsetjournal.ErrProviderBlocked)
+		}
+		transition := ReadSetJournalDeliveryTransitionModel{
+			JournalID: journal.ID, DeliveryID: deliveryID,
+			StateVersion: delivery.StateVersion + 1, FromState: delivery.State, ToState: string(target),
+			ExecutionGeneration: owner.ExecutionGeneration,
+			OwnerJobID:          owner.JobID, OwnerWorkerID: owner.WorkerID, OwnerLeaseUntil: leaseUntil,
+			Reason: reason, TransitionedAt: transitionedAt,
+		}
+		if err := tx.Create(&transition).Error; err != nil {
+			return err
 		}
 		delivery.State = string(target)
 		delivery.StateVersion++
