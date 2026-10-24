@@ -184,14 +184,15 @@ SELECT UTC_TIMESTAMP(3) AS locked_now;
 
 所有实际 SELECT 的完整列包含验权需要的字段，上面仅显示关键列；实现不得按草图列缺省其他字段。已提交同键的 exact target/token/三个 digest 全同：在当前审计读权限下返回原完整 lineage，ORIGINAL 路径不检查旧 token 是否过期来重授许可；不同即 CONFLICT。数据库故障或找不到完整 lineage => UNKNOWN。否则确认 token 为 UNUSED、issuer/认证主体一致、服务器存储的整个 transcript 相同，重算原件/写集，比较 owner/generation/version/所有 epochs/lease。锁后重新核对 identity/proof/dependency/预算/窗口/风险/同意/回执；变更或未知则回滚。
 
-**线性化语句**：准备且核验完整写集后，持有全部锁，在下列条件 UPDATE 中再次取语句起点时间。`:deadline` 是所有适用上界的最早值（包括 token/lease/证明/数据/任务/操作/见证），`:not_before` 是全部下界最大值。UTC 不可判定则不执行。`ROW_COUNT()` 必须为 1，0 则回滚并分类期限/STALE。此 UPDATE 的 sequence 是条件提交的线性化点，只有后续 COMMIT 成功才生效；外界直到完整事务提交才能读取 NEW。time 比较与序号分配在同一语句，不能用早先 locked_now 延长期限。
+**线性化语句**：准备且核验完整写集后，持有全部锁，在下列条件 UPDATE 中再次取语句起点时间。`:deadline` 是所有适用上界的最早值（包括 token/lease/证明/数据/任务/操作/见证），`:not_before` 是全部下界最大值。新鲜性另用可包含上界 `:inclusive_freshness_limit`（观测时间+已批准 max_age_ms），不能塞入半开 `:deadline` 而错误拒绝等于上限；非适用操作显式无该条件。UTC 不可判定则不执行。`ROW_COUNT()` 必须为 1，0 则回滚并分类期限/STALE。此 UPDATE 的 sequence 是条件提交的线性化点，只有后续 COMMIT 成功才生效；外界直到完整事务提交才能读取 NEW。time 比较与序号分配在同一语句，不能用早先 locked_now 延长期限。
 
 ```sql
 UPDATE a45_sequence
  SET last_sequence=last_sequence+1, linearized_at=UTC_TIMESTAMP(3)
  WHERE trust_domain=:domain AND incarnation=:incarnation
    AND last_sequence=:locked_sequence AND last_sequence<9007199254740991
-   AND UTC_TIMESTAMP(3)>=:not_before AND UTC_TIMESTAMP(3)<:deadline;
+   AND UTC_TIMESTAMP(3)>=:not_before AND UTC_TIMESTAMP(3)<:deadline
+   AND UTC_TIMESTAMP(3)<=:inclusive_freshness_limit; -- when freshness applies
 -- Exactly one affected row, then SELECT last_sequence,linearized_at in same tx.
 -- Write the operation-specific ALL rows below + lineage + token consumption + outbox.
 -- COMMIT last. Any failed insert/CAS/affected-row assertion => ROLLBACK ALL.
@@ -335,7 +336,7 @@ Action: PREPARED -> WITNESS_PENDING -> AUDIT_READY -> SEND_COMMITTED
 
 GOCACHE 仅用于当前环境默认缓存只读的绕行，CI 无须设置。运行 `GOCACHE=/tmp/magi-authority-cache python3 scripts/test-authority-contract.py` 和 `... python3 scripts/check-authority-contract.py`。使用现有 Go C0 与 JSON Schema 引擎；没有新增 JSON Schema 实现。typed API 文件与 oracle 联合编译，关键类型 required 字段漂移直接报基础设施错误。
 
-[traces.json](contracts/authority-v1/traces.json) 用独立 bases + 明确 mutation paths 表示配对场景。非 Schema 负例都必须先通过 C0/Schema 才进入语义断言，期望固定错误码。float/超安全整数由 C0 拒绝；未知字段/枚举/时间精度是 Schema；合法形状但错误 scope/DAG/token/state/write-set/order/witness/重放/逐跳权限/同意门槛/身份源绑定是静态语义。无效 Schema、编译错误、缺文件、异常都让命令失败，不能算拒绝负例通过。坏日历时间另报 TIME。
+[traces.json](contracts/authority-v1/traces.json) 用独立 bases + 明确 mutation paths 表示配对场景。非 Schema 负例都必须先通过 C0/Schema 才进入语义断言，期望固定错误码。float/超安全整数由 C0 拒绝；未知字段/枚举/时间精度是 Schema；合法形状但错误 scope/DAG/token/state/write-set/order/witness/重放/逐跳权限/同意门槛/身份源绑定是静态语义。无效 Schema、编译错误、缺文件、异常都让命令失败，不能算拒绝负例通过。坏日历时间另报 TIME；新鲜性 30000ms 等于允许，超出 1ms 拒绝，未来观测不补成有效。事务步骤显式包含 revalidate 后的 linearize。
 
 checker 只接受四个有写集定义的操作；其余 typed operation 被声明但返回 WRITE_SET（生产实现应 DENIED/UNSUPPORTED_OPERATION），等待各自独立写集审阅。合成 declarations 的 proof_valid/time_trusted/witness_available 等布尔值只是测试输入；不存在验证真实资格的接口。根/签名、scope 完整覆盖、原始 provider 交付、实际风险/预算/新鲜性、每步 MySQL crash/lease/race、独立存储、网络/凭据隔离和远端恢复 **NOT RUN / BLOCKED**。
 

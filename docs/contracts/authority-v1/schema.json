@@ -34,6 +34,9 @@
     },
     "governance": {
       "$ref": "#/$defs/GovernanceDeclaration"
+    },
+    "freshness": {
+      "$ref": "#/$defs/FreshnessDeclaration"
     }
   },
   "required": [
@@ -46,7 +49,8 @@
     "replay",
     "action",
     "admission",
-    "governance"
+    "governance",
+    "freshness"
   ],
   "$defs": {
     "Subject": {
@@ -1049,6 +1053,25 @@
         "authenticated_identity_source_id",
         "authenticated_identity_source_version",
         "expected_token_issuer"
+      ]
+    },
+    "FreshnessDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observed_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "max_age_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "observed_at",
+        "max_age_ms"
       ]
     }
   }

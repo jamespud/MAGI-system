@@ -201,6 +201,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -298,6 +299,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     },
     "send": {
@@ -497,6 +502,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -594,6 +600,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     },
     "journal_admit": {
@@ -794,6 +804,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -891,6 +902,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     },
     "quiesce": {
@@ -1091,6 +1106,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -1188,6 +1204,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     },
     "quiescing_admit": {
@@ -1388,6 +1408,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -1485,6 +1506,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     },
     "closed_admit": {
@@ -1685,6 +1710,7 @@
           "lock",
           "trusted_time",
           "revalidate",
+          "linearize",
           "write_all",
           "commit"
         ],
@@ -1782,6 +1808,10 @@
         "authenticated_identity_source_id": "workload-ca",
         "authenticated_identity_source_version": "r17",
         "expected_token_issuer": "authority-1"
+      },
+      "freshness": {
+        "observed_at": "2026-10-24T00:59:31.000Z",
+        "max_age_ms": 30000
       }
     }
   },
@@ -2927,6 +2957,28 @@
         {
           "path": "token/issuer",
           "value": "evil-authority"
+        }
+      ]
+    },
+    {
+      "name": "freshness_one_ms_over",
+      "base": "candidate",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "current/trusted_now",
+          "value": "2026-10-24T01:00:01.001Z"
+        }
+      ]
+    },
+    {
+      "name": "observation_in_future",
+      "base": "candidate",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "freshness/observed_at",
+          "value": "2026-10-24T01:00:01.001Z"
         }
       ]
     }

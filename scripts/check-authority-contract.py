@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline declarations ONLY. No issuer, authority success, database or send implementation."""
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -73,7 +73,7 @@ def check_semantics(s):
         return True
     if not all(visit(n) for n in ids):
         return 'DEPENDENCY_DAG'
-    if tx['locks'] != LOCK_ORDER or tx['steps'] != ['lock', 'trusted_time', 'revalidate', 'write_all', 'commit']:
+    if tx['locks'] != LOCK_ORDER or tx['steps'] != ['lock', 'trusted_time', 'revalidate', 'linearize', 'write_all', 'commit']:
         return 'ORDER'
     required = WRITE_SETS.get(r['operation'])
     if required is None or q['complete_write_set'] != required:
@@ -149,7 +149,7 @@ def check_semantics(s):
 
     if not utc(t['issued_at']) <= now < utc(t['expires_at']):
         return 'EXPIRED'
-    if not utc(t['issued_at']) < utc(t['expires_at']) or (utc(t['expires_at']) - utc(t['issued_at'])).total_seconds() > 5:
+    if not utc(t['issued_at']) < utc(t['expires_at']) or utc(t['expires_at']) - utc(t['issued_at']) > timedelta(milliseconds=5000):
         return 'TOKEN_LIFETIME'
     expected = q['expected_state']
     if (r['execution_generation'] != c['execution_generation'] or t['authority_version'] != c['authority_version']
@@ -172,6 +172,17 @@ def check_semantics(s):
             return 'CONFLICT'
     if r['operation'] == 'QUIESCE' and c['expected_state'] != 'OPEN':
         return 'CONFLICT'
+    if r['operation'] in ('CANDIDATE_CLOSE', 'SEND_COMMIT'):
+        try:
+            observed = utc(s['freshness']['observed_at'])
+        except ValueError:
+            return 'TIME'
+        delta = now - observed
+        age_ms = delta.days * 86400000 + delta.seconds * 1000 + delta.microseconds // 1000
+        if age_ms < 0:
+            return 'DENIED'
+        if age_ms > s['freshness']['max_age_ms']:
+            return 'EXPIRED'
     if r['operation'] == 'CANDIDATE_CLOSE':
         if (c['expected_state'] != 'QUIESCING' or c['pending_injections'] != 0
                 or len(c['receipts']) != 3 or set(c['receipts']) != ROLES

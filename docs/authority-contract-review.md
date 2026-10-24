@@ -60,11 +60,18 @@ WRITE_SET, witness_absent expected UNKNOWN; all incorrectly got STATIC_VALID.
 The no-op checker/source remain in local evidence staging/build_contract.py,
 not as any permissive production implementation.
 
-After constraints and expanded admission/governance/schema fixtures:
+A second real RED was observed before adding freshness semantics:
+`GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-contract.py`
+exited 1 with two failures (one millisecond over age and future observation);
+log `/tmp/magi-joint-stage-43/b/red-freshness.log`. Equal-to-30000ms remains valid.
+SQL now separates inclusive freshness from half-open expiry, and static steps
+explicitly include `linearize` between revalidation and writes.
+
+After constraints and expanded admission/governance/schema/freshness fixtures:
 
 ```text
 GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/check-authority-contract.py
-exit 0; PASS 84 schema/static trace declarations
+exit 0; PASS 86 schema/static trace declarations
 log: /tmp/magi-joint-stage-43/b/check-authority.log
 GOCACHE=/tmp/magi-joint-stage-43/b/go-cache python3 scripts/test-authority-contract.py
 exit 0; Ran 4 tests; OK
