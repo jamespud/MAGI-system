@@ -118,6 +118,7 @@ func validateReadSetLocal(b ReadSetSnapshot, o ReadSetValidationOptions) error {
 		return longest, nil
 	}
 	deliveries := map[string]bool{}
+	admitted := map[string]bool{}
 	phaseOrder := map[string]int{"INITIAL_REVIEW": 1, "CROSS_EXAMINATION": 2, "FINAL_REVIEW": 3}
 	lastPhase := 0
 	var lastTime time.Time
@@ -182,19 +183,17 @@ func validateReadSetLocal(b ReadSetSnapshot, o ReadSetValidationOptions) error {
 		if e = validAncestors(ev.Source.NodeID); e != nil {
 			return e
 		}
-		if ev.AuthoritySequence > b.EvidenceCutoffSequence {
-			// A cutoff cannot be self-proved by a newly supplied index. Every node in
-			// the reread's closure needs a preceding declared event in this Journal.
-			known := false
-			for j := 0; j < i; j++ {
-				if b.Events[j].Source.NodeID == ev.Source.NodeID && b.Events[j].AuthoritySequence <= b.EvidenceCutoffSequence {
-					known = true
-					break
-				}
+		if ev.AuthoritySequence == b.EvidenceCutoffSequence {
+			return invalid("CUTOFF", p, "input event cannot reuse the EVIDENCE_CLOSED authority sequence")
+		}
+		if ev.AuthoritySequence < b.EvidenceCutoffSequence {
+			// An event admits its complete exact ancestor closure. The index
+			// alone cannot manufacture admission of a new post-cutoff node.
+			for id := range seen {
+				admitted[id] = true
 			}
-			if !known {
-				return invalid("CUTOFF", p, "post-cutoff event introduces a source version absent from the closed prefix")
-			}
+		} else if !admitted[ev.Source.NodeID] {
+			return invalid("CUTOFF", p, "post-cutoff source version absent from the closed event ancestor closure")
 		}
 	}
 	if len(visited) != len(nodes) {

@@ -221,10 +221,12 @@ func checkReadSetBindings(b ReadSetSnapshot, o ReadSetValidationOptions) ([]Depe
 		}
 	}
 	allowed := map[string]SnapshotRef{}
+	knownSnapshots := map[string]SnapshotRef{}
 	if manifest != nil {
 		view := manifest.Roles[b.JournalKey.PersonaID]
 		ids := append([]string{manifest.SharedFactSnapshotID, manifest.UserPreferenceSnapshotID, view.ExperienceSnapshotID}, view.AllowedContextIDs...)
 		for _, s := range manifest.SnapshotRefs {
+			knownSnapshots[s.SnapshotID] = s
 			if slices.Contains(ids, s.SnapshotID) {
 				allowed[s.SnapshotID] = s
 			}
@@ -271,49 +273,74 @@ func checkReadSetBindings(b ReadSetSnapshot, o ReadSetValidationOptions) ([]Depe
 		}
 	}
 	for _, n := range b.DependencyNodes {
-		binding, ok := o.Sources[n.NodeID]
-		if !ok {
+		binding, supplied := o.Sources[n.NodeID]
+		// Resolve identities that the immutable artifacts already identify
+		// before considering a caller's membership or RAW/DERIVED label.
+		// This also applies to ancestors that have no own read event.
+		known := false
+		if n.SourceEntryID == b.CandidateSnapshotID {
+			known = true
+			if supplied && binding.ContextSnapshotID != b.CandidateSnapshotID {
+				return fail("$.sources", "known Candidate identity has contradictory membership")
+			}
+			if candidate == nil {
+				unavailable("$.sources", "Candidate raw-byte binding unavailable")
+			} else {
+				digest := sha256.Sum256(o.Candidate.RawBytes)
+				if n.SourceVersion != candidate.Version || n.RawContentDigest != hex.EncodeToString(digest[:]) {
+					return fail("$.sources", "Candidate source exact version/raw digest mismatch")
+				}
+				for _, stamp := range []string{exposures[n.NodeID].first, exposures[n.NodeID].last} {
+					at, _ := parseTime(stamp, "$.events.injected_at")
+					if e := readSetPoint(candidate.Validity, at, "$.sources.candidate.validity"); e != nil {
+						return nil, ReadSetValidationStatus{}, e
+					}
+				}
+			}
+		} else if snapshot, exists := knownSnapshots[n.SourceEntryID]; exists {
+			known = true
+			if _, allowedRole := allowed[snapshot.SnapshotID]; !allowedRole {
+				return fail("$.sources", "known Manifest snapshot belongs outside this role's allowed view")
+			}
+			if n.SourceVersion != snapshot.Version || n.RawContentDigest != snapshot.ContentDigest || n.SourceRef != snapshot.SourceRef || !reflect.DeepEqual(n.Validity, snapshot.Validity) {
+				return fail("$.sources", "known snapshot source descriptor differs from immutable Manifest")
+			}
+			if supplied && binding.ContextSnapshotID != snapshot.SnapshotID {
+				return fail("$.sources", "known Manifest snapshot has contradictory membership")
+			}
+		}
+		if !supplied {
 			unavailable("$.sources."+n.NodeID, "exact external dependency-index node/membership/admission declaration unavailable")
 			continue
 		}
-		if !reflect.DeepEqual(binding.Node, n) || binding.AdmittedAtSequence < 1 || binding.AdmittedAtSequence > b.EvidenceCutoffSequence {
-			return fail("$.sources."+n.NodeID, "index descriptor must match exactly and preregister node before cutoff")
+		if !reflect.DeepEqual(binding.Node, n) || binding.AdmittedAtSequence < 1 || binding.AdmittedAtSequence >= b.EvidenceCutoffSequence {
+			return fail("$.sources."+n.NodeID, "index descriptor must match exactly and preregister node strictly before closure cutoff")
 		}
 		if binding.AdmittedAtSequence > exposures[n.NodeID].authority {
 			return fail("$.sources", "node or ancestor admission occurs after declared exposure")
 		}
-		// Recursively every node must point into this role's allowed snapshot set;
-		// DERIVED cannot hide a foreign ancestor behind an innocuous event kind.
+		if known {
+			continue
+		}
+		// Genuinely unknown member provenance remains a declaration. A derived
+		// source's complete ancestor closure is checked by the same loop.
 		if n.Kind != "DERIVED" || binding.ContextSnapshotID != "" {
 			if binding.ContextSnapshotID == b.CandidateSnapshotID {
-				if n.SourceEntryID != b.CandidateSnapshotID || candidate == nil {
-					if candidate == nil {
-						unavailable("$.sources", "Candidate raw-byte binding unavailable")
-					} else {
-						return fail("$.sources", "fake Candidate membership")
-					}
-				} else {
-					s := sha256.Sum256(o.Candidate.RawBytes)
-					if n.RawContentDigest != hex.EncodeToString(s[:]) || n.SourceVersion != candidate.Version {
-						return fail("$.sources", "Candidate source exact version/raw digest mismatch")
-					}
-				}
-			} else if manifest != nil {
-				s, ok := allowed[binding.ContextSnapshotID]
-				if !ok {
-					return fail("$.sources", "raw or nested source membership escapes Manifest role access ceiling")
-				}
-				for _, stamp := range []string{exposures[n.NodeID].first, exposures[n.NodeID].last} {
-					at, _ := parseTime(stamp, "$.events.injected_at")
-					if e := readSetPoint(s.Validity, at, "$.sources.snapshot.validity"); e != nil {
-						return nil, ReadSetValidationStatus{}, e
-					}
-				}
-				if n.SourceEntryID == s.SnapshotID && (n.SourceVersion != s.Version || n.RawContentDigest != s.ContentDigest || n.SourceRef != s.SourceRef || !reflect.DeepEqual(n.Validity, s.Validity)) {
-					return fail("$.sources", "exact snapshot source descriptor differs from Manifest")
-				}
-			} else {
+				return fail("$.sources", "Candidate membership requires the exact known Candidate source identity")
+			}
+			if manifest == nil {
 				unavailable("$.sources", "Manifest access ceiling unavailable")
+				continue
+			}
+			snapshot, allowedRole := allowed[binding.ContextSnapshotID]
+			if !allowedRole {
+				return fail("$.sources", "raw or nested source membership escapes Manifest role access ceiling")
+			}
+			for _, stamp := range []string{exposures[n.NodeID].first, exposures[n.NodeID].last} {
+				at, _ := parseTime(stamp, "$.events.injected_at")
+				if e := readSetPoint(snapshot.Validity, at, "$.sources.snapshot.validity"); e != nil {
+					return nil, ReadSetValidationStatus{}, e
+				}
 			}
 		}
 	}
@@ -367,13 +394,19 @@ func checkReadSetBindings(b ReadSetSnapshot, o ReadSetValidationOptions) ([]Depe
 			return fail("$.evidence_closure_record_ref", "closed local prefix exceeds finite journal")
 		}
 		for _, ev := range b.Events {
-			if ev.Sequence <= h && ev.AuthoritySequence > b.EvidenceCutoffSequence || ev.Sequence > h && ev.AuthoritySequence <= b.EvidenceCutoffSequence {
+			if ev.Sequence <= h && ev.AuthoritySequence >= b.EvidenceCutoffSequence || ev.Sequence > h && ev.AuthoritySequence <= b.EvidenceCutoffSequence {
 				return fail("$.evidence_closure_record_ref", "close high watermark must exactly delimit cutoff prefix")
 			}
 		}
 		ct, e := parseTime(closure.CommittedAt, "$.closure.committed_at")
 		if e != nil {
 			return nil, ReadSetValidationStatus{}, e
+		}
+		for _, ev := range b.Events {
+			at, _ := parseTime(ev.InjectedAt, "$.events.injected_at")
+			if ev.Sequence <= h && at.After(ct) || ev.Sequence > h && at.Before(ct) {
+				return fail("$.closure.committed_at", "declared closure time must follow its closed prefix and precede post-closure rereads")
+			}
 		}
 		rf, _ := parseTime(b.FrozenAt, "$.frozen_at")
 		if ct.After(rf) {
