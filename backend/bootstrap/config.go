@@ -110,8 +110,14 @@ type Config struct {
 	RAG           RAGConfig       `yaml:"rag"`
 	Benchmark     BenchmarkConfig `yaml:"benchmark"`
 	ToolQuota     ToolQuotaConfig `yaml:"tool_quota"`
-	Commander     CommanderSpec   `yaml:"commander"`
-	Judge         JudgeSpec       `yaml:"judge"`
+	// Authority gates the C2 authenticated-authority slice. It has no runtime
+	// wiring in this delivery and must remain false unless a separate bootstrap
+	// authorization installs a recovery key and governance trust root.
+	Authority struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"authority"`
+	Commander CommanderSpec `yaml:"commander"`
+	Judge     JudgeSpec     `yaml:"judge"`
 }
 
 // A2AConfig configures the optional A2A server surface.
