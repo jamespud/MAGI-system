@@ -35,16 +35,18 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           }
         ],
         "proof_id": "proof-1",
@@ -60,7 +62,7 @@
         "operation": "CANDIDATE_CLOSE",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "85543b02cd7bdcaa8dc3a2b412a2c6cc468f02f88d12548a1b5314ca1eecd751",
+        "request_digest": "13b8c12791c16f05e64507a19faff4ead414199af9516ee1575505df556d7f97",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -462,24 +464,27 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           },
           {
             "id": "intent-1",
             "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            "version": 1,
             "parents": [
               "dep-b"
-            ]
+            ],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           }
         ],
         "proof_id": "proof-1",
@@ -502,7 +507,7 @@
         "operation": "SEND_COMMIT",
         "exact_target_id": "action-1",
         "unique_key": "send:action-1",
-        "request_digest": "a1a1ae68bb99de7bad4f506db45d3873fa6ff7a3d8747dc09f78cb7661b91f75",
+        "request_digest": "6a0d21b567ca4ca8cafc7de8bf8464693beae7d2729cc4bd355ea4ed429b3771",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -861,16 +866,18 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           }
         ],
         "proof_id": "proof-1",
@@ -886,7 +893,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
+        "request_digest": "2a2ea7067af09d28d9ee5c0d38ca9d3019e41cbb70944b684a74607b41fef441",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -1257,16 +1264,18 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           }
         ],
         "proof_id": "proof-1",
@@ -1282,7 +1291,7 @@
         "operation": "QUIESCE",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "710677bc840bcaf1d9550297a8e9b8a00313fdf23db4a558abbd9942fe2d0720",
+        "request_digest": "4584147b32c27fff8f4a054efdf9c40583b4079b85504f697132759f0bcbab7d",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -1636,16 +1645,18 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           }
         ],
         "proof_id": "proof-1",
@@ -1661,7 +1672,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
+        "request_digest": "2a2ea7067af09d28d9ee5c0d38ca9d3019e41cbb70944b684a74607b41fef441",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -2032,16 +2043,18 @@
           {
             "id": "dep-a",
             "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "version": 1,
-            "parents": []
+            "parents": [],
+            "artifact_version": "1.0.0",
+            "authority_row_version": 1
           },
           {
             "id": "dep-b",
             "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "version": 2,
             "parents": [
               "dep-a"
-            ]
+            ],
+            "artifact_version": "release/2026-10-24-r17",
+            "authority_row_version": 2
           }
         ],
         "proof_id": "proof-1",
@@ -2057,7 +2070,7 @@
         "operation": "JOURNAL_ADMIT",
         "exact_target_id": "csnp_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "unique_key": "candidate:case-1:1",
-        "request_digest": "14d1031ec4bd0af32a15acf4566b9f314f212ad07377235257bcf263dc581f09",
+        "request_digest": "2a2ea7067af09d28d9ee5c0d38ca9d3019e41cbb70944b684a74607b41fef441",
         "issued_at": "2026-10-24T01:00:00.000Z",
         "expires_at": "2026-10-24T01:00:05.000Z",
         "authority_version": 11,
@@ -2728,16 +2741,18 @@
             {
               "id": "dep-a",
               "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-              "version": 1,
-              "parents": []
+              "parents": [],
+              "artifact_version": "1.0.0",
+              "authority_row_version": 1
             },
             {
               "id": "dep-b",
               "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "version": 2,
               "parents": [
                 "dep-a"
-              ]
+              ],
+              "artifact_version": "release/2026-10-24-r17",
+              "authority_row_version": 2
             }
           ]
         }
@@ -2813,18 +2828,20 @@
             {
               "id": "dep-a",
               "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "version": 1,
               "parents": [
                 "dep-b"
-              ]
+              ],
+              "artifact_version": "1.0.0",
+              "authority_row_version": 1
             },
             {
               "id": "dep-b",
               "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "version": 2,
               "parents": [
                 "dep-a"
-              ]
+              ],
+              "artifact_version": "release/2026-10-24-r17",
+              "authority_row_version": 2
             }
           ]
         }

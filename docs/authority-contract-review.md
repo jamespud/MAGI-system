@@ -156,6 +156,27 @@ quota transition, the SQL compares the locked row into the conditional update,
 and `test_B02_review_quota_identity_is_bound` requires `STALE` for that mutation.
 This is the B-02-R1 correction.
 
+### F51-01 artifact version / authority row version
+
+Cross-contract review found that `ExactDependency.Version` was a safe integer even
+though frozen input artifacts permit fixed non-SemVer strings. The corrected typed
+contract uses two explicit fields:
+
+- `artifact_version string` preserves exact C1-A/Decision v2 encodings such as
+  `1.0.0` and `release/2026-10-24-r17`; mutable aliases fail Schema.
+- `authority_row_version SafeUInt` identifies the separate Authority CAS/lineage
+  row and is never derived from the artifact version.
+
+The trace bases and dependency-substitution negatives now use the two fields. A
+new regression recomputes the token transcript for both a frozen ContextManifest
+version and a non-SemVer fixed version, then verifies Schema and static semantics.
+It also proves that independently replacing the exact artifact version or the
+authority row version leaves the trace schema-valid but changes the request
+transcript and is rejected as `TOKEN_BINDING` against the original token. The
+corrected MySQL sketch stores and locks both columns under the same dependency
+identity. This is still a synthetic contract check; actual artifact lookup and
+dependency-row locking remain future implementation evidence.
+
 ### RED
 
 From repository root on the fix base, the original reviewer reproducer confirmed

@@ -50,10 +50,11 @@ type ScopedEpoch struct {
 	Epoch   SafeUInt `json:"epoch"`
 }
 type ExactDependency struct {
-	ID      ExactID   `json:"id"`
-	Digest  Digest    `json:"digest"`
-	Version SafeUInt  `json:"version"`
-	Parents []ExactID `json:"parents"`
+	ID                  ExactID   `json:"id"`
+	Digest              Digest    `json:"digest"`
+	ArtifactVersion     string    `json:"artifact_version"`
+	AuthorityRowVersion SafeUInt  `json:"authority_row_version"`
+	Parents             []ExactID `json:"parents"`
 }
 type IntentBinding struct {
 	ActionID                ExactID `json:"action_id"`

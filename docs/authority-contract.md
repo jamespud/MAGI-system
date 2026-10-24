@@ -40,6 +40,13 @@ CommitIfCurrent(ctx, CommitRequest{
 
 这是服务间的类型契约，不是暴露给模型的 JSON 工具。principal 从认证连接的主体和固定 identity source 取得，再与请求绑定；TrustedNow 由 Authority 的可信时间适配器注入。调用者填写的时间、principal_id、valid=true 或本地 Schema 通过都不能被相信。C2 读取不可变依赖原件、证明、资格登记和反向索引；C0 回读/Schema/语义检查来自对应冻结契约。请求字节/规模继承 C1-A；闭包至多 2048 节点、每节点父至多 64；超限拒绝而非截断。
 
+`ExactDependency` 明确区分两种身份，禁止混用：
+
+- `artifact_version` 是不可变工件的固定字符串，保留 C1-A/Decision v2 的非 SemVer 编码能力，例如 `1.0.0` 或 `release/2026-10-24-r17`；`latest/current/stable` 等可变别名由 Schema 拒绝。
+- `authority_row_version` 是 Authority Store 中对应依赖登记/CAS 行的单调整数，**不是**工件版本，也不参与把字符串版本转换为整数。
+
+`digest` 绑定原始不可变工件，`artifact_version` 绑定该工件声明的固定版本；二者进入 exact dependency 与 token request digest。后续 VerifyAuthority 实现必须从权威依赖行分别回读并核对这两项；静态 trace 通过不能替代真实登记存在性。
+
 本轮独立审阅修订将新 authority Draft 的 `write_set_digest` 改为 `plan_digest`、trace 的标签列表改为 typed `write_plan`；不修改冻结上游契约。`CompleteWriteSet` 参数现在携带的是 `CompleteWritePlan` 类型：封闭的 Admission / Quiescence / CandidateClosure / Send 提案，恰好一个非 null，其余显式 null，必须与 operation 相同。这些 null 仅属于新增 trace/计划契约，不更改冻结工件 nullable 规则。PreparedObject 只引用**已经存在的输入原件**，不能引用未来 closure/event/token/commit/lineage 原件。计划包含全部调用者可控参数、预期行状态、拟执行变更、outbox 事件种类和固定派生 profile；提交器回读输入，再按固定规则构造结果。不能用任意表名/SQL/标签授权写入，mutation_set 只是 typed plan 的必需变更投影，不能替代具体 transition 字段。
 
 | Outcome | VerifyAuthority | CommitIfCurrent |
@@ -177,7 +184,7 @@ bootstrap：独立部署治理者用带外双人核验安装根指纹、身份�
 | a45_round `(trust_domain,case_id,round)` | manifest_id、state、fence_id、candidate_id、cutoff、version；唯一轮次不随 generation 解开 |
 | a45_journal `(trust_domain,case_id,round,role)` | manifest_id、state、fence、high_watermark、close_high_watermark、pending_count |
 | a45_provider_delivery `(trust_domain,provider_request_id)` | status、verification_ref、JournalKey；先于暴露持久 PENDING，未知不转为已验证 |
-| a45_dependency `(trust_domain,node_id)` | digest、version、valid_until、revoked、source/proof/policy refs；外部反向边唯一 `(parent,child,edge_kind)` |
+| a45_dependency `(trust_domain,node_id)` | artifact_version 固定字符串、authority row_version、digest、valid_until、revoked、source/proof/policy refs；外部反向边唯一 `(parent,child,edge_kind)`；两种版本字段不得互换 |
 | a45_token `(trust_domain,token_id)` | request/expected/plan digests、subject、state、expires_at、commit_id；ID 不复用 |
 | a45_unique `(trust_domain,operation,unique_key)` | target_id、token_id、三个 digests、commit_id；原内容永不覆盖 |
 | a45_witness `(trust_domain,action_id,intent_digest)` | 独立签名回执原件、witness_domain/key/checkpoint/sequence、valid_until |
@@ -208,7 +215,7 @@ SELECT manifest_id,state,fence_id,candidate_id,cutoff,version FROM a45_round
 SELECT state,fence,high_watermark,close_high_watermark,pending_count FROM a45_journal
  WHERE trust_domain=:domain AND case_id=:case AND round=:round AND role=:role FOR UPDATE;
 -- Repeat exact balthasar,casper,melchior keys for closure/quiesce; relevant key for admission.
-SELECT digest,version,valid_until,revoked FROM a45_dependency
+SELECT digest,artifact_version,row_version,valid_until,revoked FROM a45_dependency
  WHERE trust_domain=:domain AND node_id=:node FOR UPDATE;
 -- Repeat entire dependency/proof/root/policy closure, never partial set.
 -- JOURNAL_ADMIT native provider request is locked in this dependency phase:

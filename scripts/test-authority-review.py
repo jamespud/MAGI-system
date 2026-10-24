@@ -119,5 +119,29 @@ class ReviewRegression(unittest.TestCase):
         value['audit_access']['identity_source_available'] = False
         self.assertEqual(checker.check_semantics(value), 'UNKNOWN')
 
+    def test_F51_artifact_versions_are_fixed_strings_and_rows_are_separate(self):
+        context = json.loads((ROOT / 'backend/domain/inputartifact/testdata/context_manifest.json').read_text())
+        value = copy.deepcopy(DATA['bases']['send'])
+        deps = value['request']['exact_dependencies']
+        deps[0].update(artifact_version=context['version'], authority_row_version=1)
+        deps[1].update(artifact_version='release/2026-10-24-r17', authority_row_version=2)
+        value['token'].update(checker.proposal_transcript(value))
+        self.assertEqual(checker.schema_results([value]), [''])
+        self.assertEqual(checker.check_semantics(value), 'STATIC_VALID')
+
+        alias = copy.deepcopy(value)
+        alias['request']['exact_dependencies'][0]['artifact_version'] = 'latest'
+        self.assertEqual(checker.schema_results([alias]), ['SCHEMA'])
+
+        replaced = copy.deepcopy(value)
+        replaced['request']['exact_dependencies'][1]['artifact_version'] = 'release/2026-10-25-r18'
+        self.assertEqual(checker.schema_results([replaced]), [''])
+        self.assertEqual(checker.check_semantics(replaced), 'TOKEN_BINDING')
+
+        row_replaced = copy.deepcopy(value)
+        row_replaced['request']['exact_dependencies'][1]['authority_row_version'] += 1
+        self.assertEqual(checker.schema_results([row_replaced]), [''])
+        self.assertEqual(checker.check_semantics(row_replaced), 'TOKEN_BINDING')
+
 if __name__ == '__main__':
     unittest.main()
