@@ -75,6 +75,7 @@ ReadReadSetSnapshotEnvelope(raw, expectedID, opts)
 | `TestReadSetEnvelopeOverflowSafe` | max-int 工程限额派生不溢出 |
 | `TestReadSetExternalMetadataResourceLimit` | 外部 metadata 真实 RED→GREEN |
 | `TestReadSetVersions` / `TestReadSetSchemaMirror` | 固定非 SemVer 版本、mutable aliases、冻结镜像 |
+| `TestReadSetReviewSharedFactValidity` | SHARED_FACT 来源/终审包 descriptor 一致；包在注入前或恰好到期时拒绝，合法交集通过 |
 
 CI 新增 full-body Python Golden、逐字节 Schema parity 和六个独立漂移反例；原 C0/C1/Decision 检查步骤保留。
 
@@ -136,6 +137,25 @@ CI 新增 full-body Python Golden、逐字节 Schema parity 和六个独立漂�
 祖先重读正例把 completeness `recorded_at` 同步设为 `10.500Z`，以覆盖真正的合法重读；原诊断的重读为 `10.500Z`、完整性记录仍为 `10.000Z`，在消除原 CUTOFF 缺陷后会触发正确的 settlement 时序拒绝。这个夹具修正没有放宽生产检查。
 
 本轮修正后重新执行完整 `go test ./...`、`go test -race ./...`、`go vet ./...`，以及 D 节全部原有/新 Golden 和 Schema 检查。日志分别为 `review-full-go-test.log`、`review-full-race.log`、`review-vet.log`、`review-contract-regressions.log`；均 PASS。`gofmt -l .` 和 `git diff --check` 无输出，冻结原件对基线/初始实现的 diff 为空。实际修正 head、范围 diff 和命令退出状态另录本机交接报告；独立复审、actual-head CI、Ready/merge 继续由协调执行器单独决定。
+
+### E.2 F50-01：终审共享包注入时有效性
+
+跨契约复核发现 SHARED_FACT 事件只绑定终审包的 ID、版本、内容摘要和
+SourceRef，没有以该包的 `validity` 检查 `injected_at`。新增
+`TestReadSetReviewSharedFactValidity`，把同一完整本地夹具中的终审包
+`valid_until` 分别设到注入前 1ms 和注入同一毫秒。
+
+旧实现对两个 schema-valid 反例错误接受，真实 RED 日志为
+`/tmp/magi-f50-red.log`。修复后：
+
+- SHARED_FACT 的 `SourceNode.Validity` 必须与
+  `FinalSharedInputs.Validity` 完全一致；
+- 终审包本身必须在共享事件注入时处于 half-open 有效期，因此
+  `injected_at == valid_until` 拒绝；
+- 合法包在到期前注入的正例继续通过完整本地绑定。
+
+检查仍是调用方声明的离线时间一致性；真实可信时间、Candidate/closure/receipt
+资格、provider 实际注入和撤销竞争仍为 NOT RUN/BLOCKED。
 
 ## F. 后续依赖 DAG 与发布门
 

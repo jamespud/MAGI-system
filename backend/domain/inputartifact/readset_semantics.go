@@ -158,6 +158,14 @@ func validateReadSetLocal(b ReadSetSnapshot, o ReadSetValidationOptions) error {
 			return invalid("TIME", p, "injection time must be ordered and no later than freeze")
 		}
 		lastTime = at
+		if ev.Kind == "SHARED_FACT" {
+			if !reflect.DeepEqual(ev.Source.Validity, b.FinalSharedInputs.Validity) {
+				return invalid("BINDING", p, "shared event source validity must equal final package descriptor")
+			}
+			if e = readSetPoint(b.FinalSharedInputs.Validity, at, p+".final_shared_inputs.validity"); e != nil {
+				return e
+			}
+		}
 		if e = readSetPoint(b.Validity, at, p); e != nil {
 			return e
 		}

@@ -50,6 +50,55 @@ func TestReadSetReviewClosureBeforeClosedEvent(t *testing.T) {
 		t.Fatalf("accepted closure at 07.500 before its closed event at 08.000; status=%+v", v.Status())
 	}
 }
+
+func TestReadSetReviewSharedFactValidity(t *testing.T) {
+	t.Run("source_descriptor_mismatch", func(t *testing.T) {
+		b, o := readSetCompleteOptions(t)
+		o.RequireCompleteBindings = true
+		readSetValid(t, b, o)
+		idx := -1
+		for i := range b.DependencyNodes {
+			if b.DependencyNodes[i].NodeID == "node-shared" {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			t.Fatal("missing shared source")
+		}
+		n := b.DependencyNodes[idx]
+		n.Validity.ValidUntil = strptr("2026-10-22T00:00:06.000Z")
+		b.DependencyNodes[idx] = n
+		b.Events[0].Source = n
+		binding := o.Sources[n.NodeID]
+		binding.Node = n
+		o.Sources[n.NodeID] = binding
+		o.Deliveries[b.Events[0].DeliveryID] = b.Events[0]
+		resealReadSetCompleteness(t, &b, &o)
+		if _, e := readSetReviewValidate(t, b, o); e == nil {
+			t.Fatal("shared source descriptor with a different validity was accepted")
+		}
+	})
+	for _, tc := range []struct {
+		name    string
+		expires string
+	}{{"expired_before_injection", "2026-10-22T00:00:04.999Z"}, {"expires_at_injection", "2026-10-22T00:00:05.000Z"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, o := readSetOptions(t)
+			b.FinalSharedInputs.Validity.ValidUntil = strptr(tc.expires)
+			o.Candidate = nil
+			delete(o.Materials, refKey(b.EvidenceClosureRecordRef))
+			delete(o.Materials, refKey(b.FinalSharedDeliveryReceiptRef))
+			if _, e := readSetReviewValidate(t, b, o); e == nil {
+				t.Fatalf("shared package with valid_until=%s accepted at injection 05.000", tc.expires)
+			}
+		})
+	}
+	t.Run("valid_before_expiry", func(t *testing.T) {
+		b, o := readSetCompleteOptions(t)
+		o.RequireCompleteBindings = true
+		readSetValid(t, b, o)
+	})
+}
 func TestReadSetReviewForeignSnapshotMembershipBypass(t *testing.T) {
 	b, o := readSetCompleteOptions(t)
 	o.RequireCompleteBindings = true
