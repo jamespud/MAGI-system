@@ -1,0 +1,114 @@
+[
+  {
+    "value": "latest",
+    "valid": false
+  },
+  {
+    "value": "current",
+    "valid": false
+  },
+  {
+    "value": "stable",
+    "valid": false
+  },
+  {
+    "value": "main",
+    "valid": false
+  },
+  {
+    "value": "master",
+    "valid": false
+  },
+  {
+    "value": "head",
+    "valid": false
+  },
+  {
+    "value": "default",
+    "valid": false
+  },
+  {
+    "value": "active",
+    "valid": false
+  },
+  {
+    "value": "newest",
+    "valid": false
+  },
+  {
+    "value": "next",
+    "valid": false
+  },
+  {
+    "value": "x",
+    "valid": false
+  },
+  {
+    "value": "CURRENT",
+    "valid": false
+  },
+  {
+    "value": "release/latest",
+    "valid": false
+  },
+  {
+    "value": "v1-latest",
+    "valid": false
+  },
+  {
+    "value": "v1.x",
+    "valid": false
+  },
+  {
+    "value": "HEAD/2026",
+    "valid": false
+  },
+  {
+    "value": "release/StaBle/2",
+    "valid": false
+  },
+  {
+    "value": "x.1",
+    "valid": false
+  },
+  {
+    "value": "1",
+    "valid": true
+  },
+  {
+    "value": "1.0",
+    "valid": true
+  },
+  {
+    "value": "20261024",
+    "valid": true
+  },
+  {
+    "value": "release/2026-10-24-r17",
+    "valid": true
+  },
+  {
+    "value": "sha256:09af",
+    "valid": true
+  },
+  {
+    "value": "2026-10-24T00:00:00Z",
+    "valid": true
+  },
+  {
+    "value": "a0b1c2d3",
+    "valid": true
+  },
+  {
+    "value": "mainline",
+    "valid": true
+  },
+  {
+    "value": "headless",
+    "valid": true
+  },
+  {
+    "value": "stable1",
+    "valid": true
+  }
+]
