@@ -190,6 +190,7 @@ generation 检查之前返回，且永不授权重发。
 | RJ-21 | event/delivery generation 必须等于 journal anchor；event/delivery owner ID、lease evidence 与 event/delivery identity 必须完整。 |
 | RJ-22 | 最终 freshness DB-time sample 后、返回材料前再次验证 active owner/lease。 |
 | RJ-23 | closure 仍冻结为 1 MiB；RequestDigest 单独支持 2048 个 digest 元素。 |
+| RJ-24 | delivery `first_execution_generation` 锚定 journal；`last_execution_generation` 记录实际转换 generation，必须为正且 `>= first`。journal/event/node owner 精确绑定锚定 owner；delivery last-owner 可来自后续 reconciliation generation。 |
 
 ## 6. MySQL 存储与事务
 
@@ -265,7 +266,15 @@ generation 检查之前返回，且永不授权重发。
 
 本轮修复未修改 migration、frozen #42 Schema/Golden/身份，也未增加 provider/C2/C3 能力。
 
-## 10. A–F 证据
+## 10. Final traceability fix
+
+| 审查项 | 实际 RED | 修正与 GREEN |
+| --- | --- | --- |
+| P2 delivery last generation 与 owner 不一致 | cross-generation unknown test 期望 generation 2，实际写回 anchor generation 1；journal/event/node foreign non-empty owner 与 generation-2 delivery transition 测试失败 | `markUnverified` 写实际 `owner.ExecutionGeneration`；readback 要求 first=anchor、positive last>=first；header/event/node exact anchor owner；delivery non-empty last-owner evidence 可为 generation 2 |
+
+新增 real-MySQL 覆盖：journal/event/node 的非空 foreign owner ID 拒绝；header owner 缺失/不一致拒绝；node admission generation/owner/scope 精确匹配；delivery generation-2 transition 接受但不得增加 HWM；`first_execution_generation` 仍锚定，generation 0 由数据库约束拒绝。generation-2 的 unknown/unverifiable reconciliation 仍可 read/reconcile，但不能 append。
+
+## 11. A–F 证据
 
 ### A. 问题与边界
 
@@ -301,7 +310,8 @@ generation 检查之前返回，且永不授权重发。
 | adapter RED | `go test ./adapter -run ReadSetJournal -count=1` | build failed：`ReadSetJournalRepository`/result 未定义 |
 | first review P1/P2 REDs | 见第 8 节；日志保存在 `/tmp/magi-wave2-44-fix{1..6}-*.log` | 六项均先观察实际失败，再实现 |
 | closure re-review REDs | 见第 9 节；日志 `/tmp/magi-wave2-44-review2-*.log` | 三项均先观察实际失败，再实现 |
-| adapter MySQL GREEN | 下述 DSN 命令 | 17 个顶层验收测试全部 PASS（含两轮 review regression 子测试） |
+| final traceability RED/GREEN | 见第 10 节；日志 `/tmp/magi-wave2-44-final-p2-*.log` | cross-generation 写回和 foreign non-empty owner 均先真实失败，再 PASS |
+| adapter MySQL GREEN | 下述 DSN 命令 | 17 个顶层验收测试全部 PASS（含三轮 review regression 子测试） |
 | domain regression | `go test ./domain/readsetjournal ./domain/inputartifact ./domain/canonical -count=1` | PASS；未修改 #42 frozen tests |
 | domain race | `go test -race ./domain/readsetjournal -count=1` | PASS |
 | MySQL race | 下述 DSN 命令加 `-race` | PASS |
@@ -351,7 +361,8 @@ expired/future source restore 拒绝；跨 generation append 保持 HWM；2048-n
 RequestDigest；RequestDigest/node/edge/parent-order corruption 拒绝；future `rset_`
 source、DEBATE/INITIAL 和 phase regression 拒绝；stale 首登记零写入；1 MiB
 closure boundary；event/delivery generation/owner/lease corruption 拒绝；slow read
-在最终 lease 到期后拒绝返回。
+在最终 lease 到期后拒绝返回；journal/event/node 的 non-empty foreign owner 拒绝；
+delivery generation-2 transition 保留实际 owner/generation 且不改变 journal anchor。
 
 ### E. 自审与残余风险
 

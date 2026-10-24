@@ -410,8 +410,8 @@ func TestReadSetJournal_UnknownRestartReadbackAndPostRevocationMySQL(t *testing.
 		readSetJournalIDForCase(t, db, owner2.CaseID), req.Event.DeliveryID).Scan(&binding).Error; err != nil {
 		t.Fatal(err)
 	}
-	if binding.Generation != registered.Event.ExecutionGeneration || binding.Worker != owner2.WorkerID {
-		t.Fatalf("provider transition owner binding=%+v, want anchored generation=%d worker=%s", binding, registered.Event.ExecutionGeneration, owner2.WorkerID)
+	if binding.Generation != owner2.ExecutionGeneration || binding.Worker != owner2.WorkerID {
+		t.Fatalf("provider transition owner binding=%+v, want transition generation=%d worker=%s", binding, owner2.ExecutionGeneration, owner2.WorkerID)
 	}
 	// Recovery is reconciliation-only. Reusing the old canonical request under a
 	// different ExecutionGeneration would be a different byte payload and must
@@ -985,6 +985,16 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 		apply       func(t *testing.T, db *gorm.DB, journalID string)
 	}
 	cases := []corruption{
+		{name: "journal_owner_job", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal SET owner_job_id = 'foreign-journal-job' WHERE id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "journal_owner_worker", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal SET owner_worker_id = 'foreign-journal-worker' WHERE id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{name: "event_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
 			if err := db.Exec("UPDATE readset_journal_event SET execution_generation = execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
 				t.Fatal(err)
@@ -992,11 +1002,6 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 		}},
 		{name: "delivery_first_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
 			if err := db.Exec("UPDATE readset_journal_delivery SET first_execution_generation = first_execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
-				t.Fatal(err)
-			}
-		}},
-		{name: "delivery_last_generation_anchor", apply: func(t *testing.T, db *gorm.DB, journalID string) {
-			if err := db.Exec("UPDATE readset_journal_delivery SET last_execution_generation = last_execution_generation + 1 WHERE journal_id = ?", journalID).Error; err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -1017,6 +1022,26 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 		}},
 		{name: "event_owner_worker", apply: func(t *testing.T, db *gorm.DB, journalID string) {
 			if err := db.Exec("UPDATE readset_journal_event SET owner_worker_id = '' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_owner_job_foreign", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET owner_job_id = 'foreign-event-job' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "event_owner_worker_foreign", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_event SET owner_worker_id = 'foreign-event-worker' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "node_admission_job", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_node SET admission_job_id = 'foreign-node-job' WHERE journal_id = ?", journalID).Error; err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "node_admission_worker", apply: func(t *testing.T, db *gorm.DB, journalID string) {
+			if err := db.Exec("UPDATE readset_journal_node SET admission_worker_id = 'foreign-node-worker' WHERE journal_id = ?", journalID).Error; err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -1068,6 +1093,35 @@ func TestReadSetJournal_ReadbackValidatesGenerationAndOwnerMySQL(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("delivery_generation_two_transition_allowed", func(t *testing.T) {
+		ctx := context.Background()
+		db := openArtifactGenerationMySQL(t)
+		_, jobs, job := seedArtifactGenerationJob(t, db)
+		migrateReadSetJournalMySQL(t, db)
+		_, owner := claimArtifactOwner(t, jobs, job, "journal-delivery-gen2-trace")
+		req := journalRegistration(owner, "delivery-gen2-trace")
+		repo := newReadSetJournalRepo(db, true)
+		if _, err := repo.Register(ctx, owner, req); err != nil {
+			t.Fatal(err)
+		}
+		journalID := readSetJournalIDForCase(t, db, owner.CaseID)
+		if err := db.Exec(`UPDATE readset_journal_delivery SET
+			last_execution_generation = first_execution_generation + 1,
+			last_owner_job_id = 'generation-2-job',
+			last_owner_worker_id = 'generation-2-worker',
+			last_owner_lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE)
+			WHERE journal_id = ?`, journalID).Error; err != nil {
+			t.Fatal(err)
+		}
+		view, err := repo.ReadJournal(ctx, owner, req.Event.JournalKey, reqScope(req))
+		if err != nil {
+			t.Fatalf("generation-2 delivery trace rejected: %v", err)
+		}
+		if view.HighWatermark != 1 {
+			t.Fatalf("delivery trace changed journal anchor: %+v", view)
+		}
+	})
 }
 
 func TestReadSetJournal_ReadRevalidatesLeaseAfterLongValidationMySQL(t *testing.T) {

@@ -299,8 +299,9 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 		if journal.ID != journalID {
 			return fmt.Errorf("%w: journal ID differs from frozen key", readsetjournal.ErrInvalidJournal)
 		}
-		if journal.ExecutionGeneration <= 0 {
-			return fmt.Errorf("%w: journal generation anchor is not positive", readsetjournal.ErrInvalidJournal)
+		if journal.ExecutionGeneration <= 0 || journal.OwnerJobID == "" || journal.OwnerWorkerID == "" ||
+			journal.OwnerLeaseUntil.IsZero() {
+			return fmt.Errorf("%w: journal owner/generation anchor is incomplete", readsetjournal.ErrInvalidJournal)
 		}
 		switch readsetjournal.JournalState(journal.State) {
 		case readsetjournal.JournalOpen, readsetjournal.JournalQuiescing, readsetjournal.JournalInputClosed:
@@ -330,9 +331,10 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			delivery := &deliveries[i]
 			deliveryBySequence[delivery.EventSequence] = delivery
 			if delivery.FirstExecutionGeneration != journal.ExecutionGeneration ||
-				delivery.LastExecutionGeneration != journal.ExecutionGeneration ||
-				delivery.FirstExecutionGeneration <= 0 {
-				return fmt.Errorf("%w: delivery generation differs from journal anchor", readsetjournal.ErrInvalidJournal)
+				delivery.FirstExecutionGeneration <= 0 ||
+				delivery.LastExecutionGeneration <= 0 ||
+				delivery.LastExecutionGeneration < delivery.FirstExecutionGeneration {
+				return fmt.Errorf("%w: delivery generation trace is not first-anchor/positive-last", readsetjournal.ErrInvalidJournal)
 			}
 			if delivery.LastOwnerJobID == "" || delivery.LastOwnerWorkerID == "" || delivery.LastOwnerLeaseUntil.IsZero() {
 				return fmt.Errorf("%w: delivery owner/lease evidence is incomplete", readsetjournal.ErrInvalidJournal)
@@ -389,9 +391,10 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			if event.ExecutionGeneration != journal.ExecutionGeneration || event.ExecutionGeneration <= 0 {
 				return fmt.Errorf("%w: event generation differs from journal anchor", readsetjournal.ErrInvalidJournal)
 			}
-			if event.OwnerJobID == "" || event.OwnerWorkerID == "" || event.OwnerLeaseUntil.IsZero() ||
-				event.RegisteredAt.IsZero() || !event.OwnerLeaseUntil.After(event.RegisteredAt) {
-				return fmt.Errorf("%w: event owner/lease evidence is incomplete", readsetjournal.ErrInvalidJournal)
+			if event.OwnerJobID != journal.OwnerJobID || event.OwnerWorkerID != journal.OwnerWorkerID ||
+				event.OwnerLeaseUntil.IsZero() || event.RegisteredAt.IsZero() ||
+				!event.OwnerLeaseUntil.After(event.RegisteredAt) {
+				return fmt.Errorf("%w: event owner/lease evidence differs from journal anchor", readsetjournal.ErrInvalidJournal)
 			}
 			plans[i] = plan
 			eventBytes += int64(len(event.PayloadJSON))
@@ -481,11 +484,11 @@ func (r *ReadSetJournalRepository) ReadJournal(ctx context.Context, owner *entit
 			if !ok || model.FirstSequence != expectedSequence || model.FirstSequence < 1 || model.FirstSequence > journal.HighWatermark {
 				return fmt.Errorf("%w: node %q first admission sequence is not the exact closure sequence", readsetjournal.ErrInvalidJournal, model.NodeID)
 			}
-			if model.AdmissionGeneration != journal.ExecutionGeneration {
-				return fmt.Errorf("%w: node %q admission generation differs from journal anchor", readsetjournal.ErrInvalidJournal, model.NodeID)
-			}
-			if model.AdmissionScopeID != journal.AdmissionScopeID {
-				return fmt.Errorf("%w: node %q admission scope differs from journal scope", readsetjournal.ErrInvalidJournal, model.NodeID)
+			if model.AdmissionGeneration != journal.ExecutionGeneration ||
+				model.AdmissionJobID != journal.OwnerJobID ||
+				model.AdmissionWorkerID != journal.OwnerWorkerID ||
+				model.AdmissionScopeID != journal.AdmissionScopeID {
+				return fmt.Errorf("%w: node %q admission owner/generation/scope differs from journal anchor", readsetjournal.ErrInvalidJournal, model.NodeID)
 			}
 		}
 		for _, edge := range edges {
@@ -623,7 +626,7 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 			Where("journal_id = ? AND delivery_id = ? AND state = ? AND state_version = ?", journal.ID, deliveryID, delivery.State, delivery.StateVersion).
 			Updates(map[string]any{
 				"state": target, "state_version": delivery.StateVersion + 1,
-				"last_execution_generation": journal.ExecutionGeneration,
+				"last_execution_generation": owner.ExecutionGeneration,
 				"last_owner_job_id":         owner.JobID,
 				"last_owner_worker_id":      owner.WorkerID,
 				"last_owner_lease_until":    leaseUntil,
@@ -637,7 +640,7 @@ func (r *ReadSetJournalRepository) markUnverified(ctx context.Context, owner *en
 		}
 		delivery.State = string(target)
 		delivery.StateVersion++
-		delivery.LastExecutionGeneration = journal.ExecutionGeneration
+		delivery.LastExecutionGeneration = owner.ExecutionGeneration
 		delivery.LastOwnerJobID = owner.JobID
 		delivery.LastOwnerWorkerID = owner.WorkerID
 		delivery.LastOwnerLeaseUntil = leaseUntil
