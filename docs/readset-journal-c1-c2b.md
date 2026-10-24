@@ -434,7 +434,7 @@ RED 使用真实 MySQL 8.4，在 `readset_journal_node` 创建后注入受控延
 
 修复位于事务内所有 Journal/Node/Edge/Event/Delivery 写入与 HWM CAS 之后、结果构造之前：
 
-1. 重新读取 `UTC_TIMESTAMP(3)`；
+1. 通过 `databaseNow` 重新读取数据库时间（MySQL `CURRENT_TIMESTAMP(6)`）；
 2. 用 `validateActiveExecutionAt` 复验 owner、generation、case generation 与 lease；
 3. 用同一 DB 时间复验完整 source closure 的 half-open validity；
 4. 任一失败返回 `ErrLeaseLost`/`ErrStaleMaterial`，整个事务回滚并返回零 permit。
