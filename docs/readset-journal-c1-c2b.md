@@ -371,6 +371,7 @@ go test ./adapter -run ReadSetJournal -count=1 -v
 - `TestReadSetJournal_PendingDeliveryRejectsFabricatedTransitionMySQL`
 - `TestReadSetJournal_TransitionEvidenceMySQL`
 - `TestReadSetJournal_TransitionEvidenceCorruptionMySQL`
+- `TestReadSetJournal_RegisterRevalidatesFinalCommitBoundaryMySQL`
 
 覆盖：24 并发 append 的连续 `1..24` 前缀；same-ID/same-bytes replay 与
 same-ID/different-bytes conflict；scope conflict；same-worker owner ABA、generation
@@ -387,7 +388,7 @@ closure boundary；event/delivery generation/owner/lease corruption 拒绝；slo
 delivery generation-2 transition 保留实际 owner/generation 且不改变 journal anchor；
 PENDING fabricated generation-2 metadata 拒绝；durable transition rows 的 missing/
 tampered/gap/duplicate corruption 拒绝，真实 generation-2 Unknown→Unverifiable
-lineage 接受。
+lineage 接受；Register 在所有写入完成后以最终 DB 时间复验 lease 与 source freshness，边界到期时拒绝并整体回滚。
 
 ### E. 自审与残余风险
 
@@ -419,3 +420,25 @@ lineage 接受。
 | Candidate closure/ReadSet seal/ballot | BLOCKED | 非本切片 |
 | provider CI/independent review/Draft PR | 未执行 | 用户明确禁止 push/PR；由协调执行器完成 |
 | 全量 DoD / C2 / C3 | 未完成 | 本切片只报告本地 C1-C2B staged evidence |
+
+## 13. F53-01：Register 最终提交边界复验
+
+独立验收发现 `Register` 只在事务开头验证 lease 与 source freshness；若写入阶段跨过
+`lease_until` 或 `valid_until`，旧实现仍会返回 `ExposurePermitted=true`。
+
+RED 使用真实 MySQL 8.4，在 `readset_journal_node` 创建后注入受控延迟：
+
+- lease 在写入期间到期时，旧 Head 返回 `Created=true/ExposurePermitted=true`；
+- source 在写入期间到期时，旧 Head 同样返回有效 permit；
+- 两个反例均保留完整日志，确认不是编译或夹具错误。
+
+修复位于事务内所有 Journal/Node/Edge/Event/Delivery 写入与 HWM CAS 之后、结果构造之前：
+
+1. 重新读取 `UTC_TIMESTAMP(3)`；
+2. 用 `validateActiveExecutionAt` 复验 owner、generation、case generation 与 lease；
+3. 用同一 DB 时间复验完整 source closure 的 half-open validity；
+4. 任一失败返回 `ErrLeaseLost`/`ErrStaleMaterial`，整个事务回滚并返回零 permit。
+
+GREEN 的 `TestReadSetJournal_RegisterRevalidatesFinalCommitBoundaryMySQL` 覆盖两种
+边界，并断言六张 Journal 表均无残留。已有合法注册、重复登记 reconciliation-only、
+`valid_until` 恰好到期拒绝的测试继续通过。

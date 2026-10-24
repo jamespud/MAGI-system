@@ -69,7 +69,7 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 
 	var result ReadSetJournalRegistration
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		job, _, err := lockActiveExecution(tx, owner)
+		job, caseModel, err := lockActiveExecution(tx, owner)
 		if err != nil {
 			return err
 		}
@@ -244,6 +244,20 @@ func (r *ReadSetJournalRepository) Register(ctx context.Context, owner *entity.E
 		}
 		if update.RowsAffected != 1 {
 			return fmt.Errorf("%w: journal high-watermark CAS failed", readsetjournal.ErrJournalScope)
+		}
+		// The durable append is the exposure linearization point. Re-sample both
+		// the owner lease and material freshness after all writes so a slow
+		// transaction cannot return a permit after either boundary expires. Any
+		// failure rolls back the complete registration.
+		commitAt, err := databaseNow(tx)
+		if err != nil {
+			return err
+		}
+		if err := validateActiveExecutionAt(job, caseModel, owner, commitAt); err != nil {
+			return err
+		}
+		if err := readsetjournal.ValidateNodesFreshAt(freshNodes, commitAt); err != nil {
+			return err
 		}
 		fact, err := eventFactFromModels(&event, &delivery)
 		if err != nil {

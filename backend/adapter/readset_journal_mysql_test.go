@@ -1337,3 +1337,86 @@ func TestReadSetJournal_TransitionEvidenceCorruptionMySQL(t *testing.T) {
 		})
 	}
 }
+
+func TestReadSetJournal_RegisterRevalidatesFinalCommitBoundaryMySQL(t *testing.T) {
+	dbNow := func(t *testing.T, db *gorm.DB) time.Time {
+		t.Helper()
+		var now time.Time
+		if err := db.Raw("SELECT UTC_TIMESTAMP(3)").Scan(&now).Error; err != nil {
+			t.Fatal(err)
+		}
+		return now.UTC()
+	}
+	format := func(value time.Time) string {
+		return value.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	cases := []struct {
+		name    string
+		delay   time.Duration
+		want    error
+		prepare func(t *testing.T, db *gorm.DB, owner *entity.ExecutionContext, req *readsetjournal.RegisterRequest)
+	}{
+		{
+			name:  "lease_expires_during_write",
+			delay: 2500 * time.Millisecond,
+			want:  port.ErrLeaseLost,
+			prepare: func(t *testing.T, db *gorm.DB, owner *entity.ExecutionContext, _ *readsetjournal.RegisterRequest) {
+				if err := db.Exec("UPDATE decision_job SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 2 SECOND) WHERE id = ?", owner.JobID).Error; err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:  "source_validity_expires_during_write",
+			delay: 3500 * time.Millisecond,
+			want:  readsetjournal.ErrStaleMaterial,
+			prepare: func(t *testing.T, db *gorm.DB, _ *entity.ExecutionContext, req *readsetjournal.RegisterRequest) {
+				base := dbNow(t, db)
+				notBefore := format(base.Add(-time.Minute))
+				validUntil := format(base.Add(3 * time.Second))
+				req.Event.Source.Validity = inputartifact.Validity{NotBefore: notBefore, ValidUntil: &validUntil}
+				req.Closure[0] = req.Event.Source
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openArtifactGenerationMySQL(t)
+			_, jobs, job := seedArtifactGenerationJob(t, db)
+			migrateReadSetJournalMySQL(t, db)
+			_, owner := claimArtifactOwner(t, jobs, job, "journal-final-"+tc.name)
+			repo := newReadSetJournalRepo(db, true)
+			req := journalRegistration(owner, "delivery-final-"+tc.name)
+			tc.prepare(t, db, owner, &req)
+
+			callback := "readset-journal:final-commit:" + tc.name
+			if err := db.Callback().Create().After("gorm:create").Register(callback, func(tx *gorm.DB) {
+				if tx.Statement.Table == "readset_journal_node" && tx.Statement.Context.Value(t4ContextKey{}) == tc.name {
+					time.Sleep(tc.delay)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			defer db.Callback().Create().Remove(callback)
+
+			ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), t4ContextKey{}, tc.name), 10*time.Second)
+			defer cancel()
+			result, err := repo.Register(ctx, owner, req)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("result=%+v error=%v, want %v", result, err, tc.want)
+			}
+			if result.Created || result.ExposurePermitted || result.RequiresReconciliation {
+				t.Fatalf("boundary failure returned a permit: %+v", result)
+			}
+			for _, table := range []string{
+				"readset_journal_delivery_transition", "readset_journal_edge", "readset_journal_node",
+				"readset_journal_delivery", "readset_journal_event", "readset_journal",
+			} {
+				var count int64
+				if err := db.Table(table).Count(&count).Error; err != nil || count != 0 {
+					t.Fatalf("boundary failure left %s count=%d err=%v", table, count, err)
+				}
+			}
+		})
+	}
+}
