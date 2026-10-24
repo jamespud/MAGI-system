@@ -1,0 +1,923 @@
+{
+  "body": {
+    "artifact_type": "read_set_snapshot",
+    "schema_version": "2.0",
+    "version": "2.0",
+    "created_by": {
+      "subject_id": "recorder",
+      "identity_source_id": "synthetic-root",
+      "identity_source_version": "1"
+    },
+    "issuance_policy_ref": {
+      "namespace": "synthetic",
+      "object_id": "issuance-policy",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+    },
+    "frozen_at": "2026-10-22T00:00:11.000Z",
+    "validity": {
+      "not_before": "2026-10-22T00:00:00.000Z",
+      "valid_until": "2026-10-23T00:00:00.000Z"
+    },
+    "journal_key": {
+      "case_id": "synthetic-offline-case",
+      "round": 3,
+      "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+      "persona_id": "melchior"
+    },
+    "candidate_snapshot_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+    "persona_spec_id": "pspc_6cb82968cbc4b922fd78bec825ccb8c24cee342a650ee5fcb0d152d99b8ab87e",
+    "experience_snapshot_id": "melchior-experience-1",
+    "user_preference_snapshot_id": "preferences-1",
+    "execution_generation": 7,
+    "context_revocation_scope_id": "synthetic-offline-scope",
+    "context_revocation_epoch": 7,
+    "authority_scope_id": "authority-scope",
+    "authority_epoch": 3,
+    "credential_scope_id": "credential-scope",
+    "credential_epoch": 4,
+    "source_dependency_index_version": "index-1",
+    "events": [
+      {
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "melchior"
+        },
+        "sequence": 1,
+        "authority_sequence": 90,
+        "execution_generation": 7,
+        "delivery_id": "delivery-melchior-1",
+        "kind": "SHARED_FACT",
+        "phase": "FINAL_REVIEW",
+        "source": {
+          "node_id": "node-shared",
+          "source_entry_id": "facts-1",
+          "source_version": "1",
+          "raw_content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+          "kind": "RAW",
+          "source_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          },
+          "derivation_method_ref": {
+            "namespace": "synthetic",
+            "object_id": "raw-collection-method",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+          },
+          "parent_node_ids": []
+        },
+        "parent_node_ids": [],
+        "permission_ref": {
+          "namespace": "synthetic",
+          "object_id": "input-permission",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "producer": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "verification_record_ref": {
+          "namespace": "synthetic",
+          "object_id": "delivery-verification-melchior1",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "injected_at": "2026-10-22T00:00:05.000Z",
+        "target_persona": "melchior"
+      },
+      {
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "melchior"
+        },
+        "sequence": 2,
+        "authority_sequence": 95,
+        "execution_generation": 7,
+        "delivery_id": "delivery-melchior-2",
+        "kind": "DEBATE",
+        "phase": "FINAL_REVIEW",
+        "source": {
+          "node_id": "node-candidate",
+          "source_entry_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+          "source_version": "2.0",
+          "raw_content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec",
+          "kind": "RAW",
+          "source_ref": {
+            "namespace": "synthetic",
+            "object_id": "candidate-context",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          },
+          "derivation_method_ref": {
+            "namespace": "synthetic",
+            "object_id": "candidate-context-method",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+          },
+          "parent_node_ids": []
+        },
+        "parent_node_ids": [],
+        "permission_ref": {
+          "namespace": "synthetic",
+          "object_id": "input-permission",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "producer": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "verification_record_ref": {
+          "namespace": "synthetic",
+          "object_id": "delivery-verification-melchior2",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "injected_at": "2026-10-22T00:00:08.000Z",
+        "target_persona": "melchior"
+      }
+    ],
+    "dependency_nodes": [
+      {
+        "node_id": "node-candidate",
+        "source_entry_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+        "source_version": "2.0",
+        "raw_content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec",
+        "kind": "RAW",
+        "source_ref": {
+          "namespace": "synthetic",
+          "object_id": "candidate-context",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec"
+        },
+        "validity": {
+          "not_before": "2026-10-22T00:00:00.000Z",
+          "valid_until": "2026-10-23T00:00:00.000Z"
+        },
+        "derivation_method_ref": {
+          "namespace": "synthetic",
+          "object_id": "candidate-context-method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "parent_node_ids": []
+      },
+      {
+        "node_id": "node-shared",
+        "source_entry_id": "facts-1",
+        "source_version": "1",
+        "raw_content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+        "kind": "RAW",
+        "source_ref": {
+          "namespace": "synthetic-context-fixture",
+          "object_id": "facts-1",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+        },
+        "validity": {
+          "not_before": "2026-10-22T00:00:00.000Z",
+          "valid_until": "2026-10-23T00:00:00.000Z"
+        },
+        "derivation_method_ref": {
+          "namespace": "synthetic",
+          "object_id": "raw-collection-method",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "parent_node_ids": []
+      }
+    ],
+    "journal_high_watermark": 2,
+    "evidence_cutoff_sequence": 100,
+    "final_shared_inputs": {
+      "snapshot_id": "facts-1",
+      "kind": "SHARED_FACT",
+      "version": "1",
+      "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "facts-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    "final_shared_delivery_receipt_ref": {
+      "namespace": "synthetic",
+      "object_id": "receipt.melchior",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "f518c1f4124867c092e14f942953568bcfe6de3d606493518ccc5ad9664d083b"
+    },
+    "evidence_closure_record_ref": {
+      "namespace": "synthetic",
+      "object_id": "closure",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "dbc5558f01d46e3b9a912f389024759c9bb50dc044c5a9e323a11fcc5e8d386a"
+    },
+    "completeness_record_ref": {
+      "namespace": "synthetic",
+      "object_id": "completeness.melchior",
+      "version": "1",
+      "digest_alg": "sha256",
+      "content_digest": "aea492135e2208c068be4d079f1d2d870455c41f79c247b41b5ab742d677ad5d"
+    }
+  },
+  "candidate": {
+    "artifact_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+    "digest": "33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+    "canonical_profile": "magi-cj/1",
+    "digest_alg": "sha256",
+    "body": {
+      "artifact_type": "candidate_snapshot",
+      "schema_version": "2.0",
+      "version": "2.0",
+      "created_by": {
+        "subject_id": "recorder",
+        "identity_source_id": "synthetic-root",
+        "identity_source_version": "1"
+      },
+      "issuance_policy_ref": {
+        "namespace": "synthetic",
+        "object_id": "issuance-policy",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+      },
+      "frozen_at": "2026-10-22T00:00:07.000Z",
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      },
+      "case_id": "synthetic-offline-case",
+      "round": 3,
+      "charter_id": "chtr_06bd0ffe4363f2912b93e477fc173bd7cd4d6dd7579c752ac7578b1648d8a0e0",
+      "domain_profile_id": "dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+      "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+      "candidate_count": 1,
+      "candidate_entries": 1,
+      "candidates": [
+        {
+          "candidate_id": "no-action",
+          "proposal": "Take no action",
+          "is_no_action": true,
+          "originated_by": "CHARTER",
+          "conditions": [],
+          "parent_candidate_ids": [],
+          "state": "INCLUDED",
+          "risk_level": "R3",
+          "risk_classification_ref": {
+            "namespace": "synthetic",
+            "object_id": "classification.no-action",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0243673808b93af14daa787cbc04ff7300d8fe2f61e27c70d1c49330346cb692"
+          }
+        }
+      ],
+      "material_pending": [],
+      "agenda_log": [
+        {
+          "event_id": "agenda-1",
+          "kind": "INCLUDE",
+          "candidate_ids": [
+            "no-action"
+          ],
+          "rule_id": "synthetic-admission",
+          "evidence_ids": [],
+          "reason": "Retain no action",
+          "notified": [
+            {
+              "subject_id": "recorder",
+              "identity_source_id": "synthetic-root",
+              "identity_source_version": "1"
+            }
+          ],
+          "recorded_at": "2026-10-22T00:00:06.000Z"
+        }
+      ],
+      "final_shared_inputs": {
+        "snapshot_id": "facts-1",
+        "kind": "SHARED_FACT",
+        "version": "1",
+        "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+        "source_ref": {
+          "namespace": "synthetic-context-fixture",
+          "object_id": "facts-1",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+        },
+        "qualification_policy_ref": {
+          "namespace": "synthetic-context-fixture",
+          "object_id": "snapshot-qualification",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "validity": {
+          "not_before": "2026-10-22T00:00:00.000Z",
+          "valid_until": "2026-10-23T00:00:00.000Z"
+        }
+      },
+      "final_shared_delivery_receipt_refs": {
+        "melchior": {
+          "namespace": "synthetic",
+          "object_id": "receipt.melchior",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "f518c1f4124867c092e14f942953568bcfe6de3d606493518ccc5ad9664d083b"
+        },
+        "balthasar": {
+          "namespace": "synthetic",
+          "object_id": "receipt.balthasar",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "f303dc8e1b925ec4f4276f6b881e65e529e792c18acf3c777fec3ef6f6ee150b"
+        },
+        "casper": {
+          "namespace": "synthetic",
+          "object_id": "receipt.casper",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "3547ea1e61865a29ca64da9f9ed24418cd7c2fc054caa8e763085b3fb2637e4f"
+        }
+      },
+      "persona_views": {
+        "melchior": {
+          "persona_spec_id": "pspc_6cb82968cbc4b922fd78bec825ccb8c24cee342a650ee5fcb0d152d99b8ab87e",
+          "experience_snapshot_id": "melchior-experience-1",
+          "allowed_context_ids": [
+            "melchior-context-1",
+            "melchior-context-2"
+          ]
+        },
+        "balthasar": {
+          "persona_spec_id": "pspc_fca8ae6f97e645262eb454fd5ab869cfd2e2ba1d6f38539000890d46dd081721",
+          "experience_snapshot_id": "balthasar-experience-1",
+          "allowed_context_ids": [
+            "balthasar-context-1",
+            "balthasar-context-2"
+          ]
+        },
+        "casper": {
+          "persona_spec_id": "pspc_92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+          "experience_snapshot_id": "casper-experience-1",
+          "allowed_context_ids": [
+            "casper-context-1",
+            "casper-context-2"
+          ]
+        }
+      }
+    },
+    "canonical_bytes_hex": "7b226167656e64615f6c6f67223a5b7b2263616e6469646174655f696473223a5b226e6f2d616374696f6e225d2c226576656e745f6964223a226167656e64612d31222c2265766964656e63655f696473223a5b5d2c226b696e64223a22494e434c554445222c226e6f746966696564223a5b7b226964656e746974795f736f757263655f6964223a2273796e7468657469632d726f6f74222c226964656e746974795f736f757263655f76657273696f6e223a2231222c227375626a6563745f6964223a227265636f72646572227d5d2c22726561736f6e223a2252657461696e206e6f20616374696f6e222c227265636f726465645f6174223a22323032362d31302d32325430303a30303a30362e3030305a222c2272756c655f6964223a2273796e7468657469632d61646d697373696f6e227d5d2c2261727469666163745f74797065223a2263616e6469646174655f736e617073686f74222c2263616e6469646174655f636f756e74223a312c2263616e6469646174655f656e7472696573223a312c2263616e64696461746573223a5b7b2263616e6469646174655f6964223a226e6f2d616374696f6e222c22636f6e646974696f6e73223a5b5d2c2269735f6e6f5f616374696f6e223a747275652c226f726967696e617465645f6279223a2243484152544552222c22706172656e745f63616e6469646174655f696473223a5b5d2c2270726f706f73616c223a2254616b65206e6f20616374696f6e222c227269736b5f636c617373696669636174696f6e5f726566223a7b22636f6e74656e745f646967657374223a2230323433363733383038623933616631346461613738376362633034666637333030643866653266363165323763373064316334393333303334366362363932222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e746865746963222c226f626a6563745f6964223a22636c617373696669636174696f6e2e6e6f2d616374696f6e222c2276657273696f6e223a2231227d2c227269736b5f6c6576656c223a225233222c227374617465223a22494e434c55444544227d5d2c22636173655f6964223a2273796e7468657469632d6f66666c696e652d63617365222c22636861727465725f6964223a22636874725f30366264306666653433363366323931326239336534373766633137336264376364346436646437353739633735326163373537386231363438643861306530222c22636f6e746578745f6d616e69666573745f6964223a226374786d5f62626163386165353937633565343934393538346266373862366536626361663731643130363032336433343061396130383363383364666365666339313562222c22637265617465645f6279223a7b226964656e746974795f736f757263655f6964223a2273796e7468657469632d726f6f74222c226964656e746974795f736f757263655f76657273696f6e223a2231222c227375626a6563745f6964223a227265636f72646572227d2c22646f6d61696e5f70726f66696c655f6964223a22647072665f35396566353263383161386463656261613230316163356361623535376463333632386164336334376234386562316230306563373065386539623861666561222c2266696e616c5f7368617265645f64656c69766572795f726563656970745f72656673223a7b2262616c746861736172223a7b22636f6e74656e745f646967657374223a2266333033646338653162393235656334663432373666366238383165363565353239653739326331386163663363373737666563336566366636656531353062222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e746865746963222c226f626a6563745f6964223a22726563656970742e62616c746861736172222c2276657273696f6e223a2231227d2c22636173706572223a7b22636f6e74656e745f646967657374223a2233353437656131653631383635613239636136346461396639656432343431386364376332666330353463616138653736333038356233666232363337653466222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e746865746963222c226f626a6563745f6964223a22726563656970742e636173706572222c2276657273696f6e223a2231227d2c226d656c6368696f72223a7b22636f6e74656e745f646967657374223a2266353138633166343132343836376330393265313466393432393533353638626366653664653364363036343933353138636363356164393636346430383362222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e746865746963222c226f626a6563745f6964223a22726563656970742e6d656c6368696f72222c2276657273696f6e223a2231227d7d2c2266696e616c5f7368617265645f696e70757473223a7b22636f6e74656e745f646967657374223a2262326538653234383965633237346538383932613065366664356131316465353237386137643064643562613266313131333464313938316239663535306436222c226b696e64223a225348415245445f46414354222c227175616c696669636174696f6e5f706f6c6963795f726566223a7b22636f6e74656e745f646967657374223a2230303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e7468657469632d636f6e746578742d66697874757265222c226f626a6563745f6964223a22736e617073686f742d7175616c696669636174696f6e222c2276657273696f6e223a2231227d2c22736e617073686f745f6964223a2266616374732d31222c22736f757263655f726566223a7b22636f6e74656e745f646967657374223a2262326538653234383965633237346538383932613065366664356131316465353237386137643064643562613266313131333464313938316239663535306436222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e7468657469632d636f6e746578742d66697874757265222c226f626a6563745f6964223a2266616374732d31222c2276657273696f6e223a2231227d2c2276616c6964697479223a7b226e6f745f6265666f7265223a22323032362d31302d32325430303a30303a30302e3030305a222c2276616c69645f756e74696c223a22323032362d31302d32335430303a30303a30302e3030305a227d2c2276657273696f6e223a2231227d2c2266726f7a656e5f6174223a22323032362d31302d32325430303a30303a30372e3030305a222c2269737375616e63655f706f6c6963795f726566223a7b22636f6e74656e745f646967657374223a2261346163326435326234333439653935633934646362613436643939626438366465663533396339623039373737333636613739363039396238623632323531222c226469676573745f616c67223a22736861323536222c226e616d657370616365223a2273796e746865746963222c226f626a6563745f6964223a2269737375616e63652d706f6c696379222c2276657273696f6e223a2231227d2c226d6174657269616c5f70656e64696e67223a5b5d2c22706572736f6e615f7669657773223a7b2262616c746861736172223a7b22616c6c6f7765645f636f6e746578745f696473223a5b2262616c7468617361722d636f6e746578742d31222c2262616c7468617361722d636f6e746578742d32225d2c22657870657269656e63655f736e617073686f745f6964223a2262616c7468617361722d657870657269656e63652d31222c22706572736f6e615f737065635f6964223a22707370635f66636138616536663937653634353236326562343534666435616238363963666432653262613164366633383533393030303839306434366464303831373231227d2c22636173706572223a7b22616c6c6f7765645f636f6e746578745f696473223a5b226361737065722d636f6e746578742d31222c226361737065722d636f6e746578742d32225d2c22657870657269656e63655f736e617073686f745f6964223a226361737065722d657870657269656e63652d31222c22706572736f6e615f737065635f6964223a22707370635f39323834376435653337393036653031336665366230373031613061663663353465636664313261333663333930623239366635333964626430333339336132227d2c226d656c6368696f72223a7b22616c6c6f7765645f636f6e746578745f696473223a5b226d656c6368696f722d636f6e746578742d31222c226d656c6368696f722d636f6e746578742d32225d2c22657870657269656e63655f736e617073686f745f6964223a226d656c6368696f722d657870657269656e63652d31222c22706572736f6e615f737065635f6964223a22707370635f36636238323936386362633462393232666437386265633832356363623863323463656533343261363530656535666362306431353264393962386162383765227d7d2c22726f756e64223a332c22736368656d615f76657273696f6e223a22322e30222c2276616c6964697479223a7b226e6f745f6265666f7265223a22323032362d31302d32325430303a30303a30302e3030305a222c2276616c69645f756e74696c223a22323032362d31302d32335430303a30303a30302e3030305a227d2c2276657273696f6e223a22322e30227d"
+  },
+  "records": {
+    "receipt.melchior": {
+      "ref": {
+        "namespace": "synthetic",
+        "object_id": "receipt.melchior",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "f518c1f4124867c092e14f942953568bcfe6de3d606493518ccc5ad9664d083b"
+      },
+      "body": {
+        "record_type": "TrustedDeliveryReceipt",
+        "record_version": "2.0",
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "melchior"
+        },
+        "persona_spec_id": "pspc_6cb82968cbc4b922fd78bec825ccb8c24cee342a650ee5fcb0d152d99b8ab87e",
+        "experience_snapshot_id": "melchior-experience-1",
+        "user_preference_snapshot_id": "preferences-1",
+        "controlled_session_id": "session-melchior",
+        "provider_request_id": "request-melchior",
+        "final_shared_inputs": {
+          "snapshot_id": "facts-1",
+          "kind": "SHARED_FACT",
+          "version": "1",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+          "source_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+          },
+          "qualification_policy_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        "registered_injection_sequence": 1,
+        "execution_generation": 7,
+        "context_revocation_scope_id": "synthetic-offline-scope",
+        "context_revocation_epoch": 7,
+        "authority_scope_id": "authority-scope",
+        "authority_epoch": 3,
+        "credential_scope_id": "credential-scope",
+        "credential_epoch": 4,
+        "quiescence_fence_id": "fence-1",
+        "delivery_status": "APPLIED_VERIFIED",
+        "verification_record_ref": {
+          "namespace": "synthetic",
+          "object_id": "provider-verification-melchior",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "verified_by": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "verified_at": "2026-10-22T00:00:06.000Z"
+      }
+    },
+    "receipt.balthasar": {
+      "ref": {
+        "namespace": "synthetic",
+        "object_id": "receipt.balthasar",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "f303dc8e1b925ec4f4276f6b881e65e529e792c18acf3c777fec3ef6f6ee150b"
+      },
+      "body": {
+        "record_type": "TrustedDeliveryReceipt",
+        "record_version": "2.0",
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "balthasar"
+        },
+        "persona_spec_id": "pspc_fca8ae6f97e645262eb454fd5ab869cfd2e2ba1d6f38539000890d46dd081721",
+        "experience_snapshot_id": "balthasar-experience-1",
+        "user_preference_snapshot_id": "preferences-1",
+        "controlled_session_id": "session-balthasar",
+        "provider_request_id": "request-balthasar",
+        "final_shared_inputs": {
+          "snapshot_id": "facts-1",
+          "kind": "SHARED_FACT",
+          "version": "1",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+          "source_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+          },
+          "qualification_policy_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        "registered_injection_sequence": 1,
+        "execution_generation": 7,
+        "context_revocation_scope_id": "synthetic-offline-scope",
+        "context_revocation_epoch": 7,
+        "authority_scope_id": "authority-scope",
+        "authority_epoch": 3,
+        "credential_scope_id": "credential-scope",
+        "credential_epoch": 4,
+        "quiescence_fence_id": "fence-1",
+        "delivery_status": "APPLIED_VERIFIED",
+        "verification_record_ref": {
+          "namespace": "synthetic",
+          "object_id": "provider-verification-balthasar",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "verified_by": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "verified_at": "2026-10-22T00:00:06.000Z"
+      }
+    },
+    "receipt.casper": {
+      "ref": {
+        "namespace": "synthetic",
+        "object_id": "receipt.casper",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "3547ea1e61865a29ca64da9f9ed24418cd7c2fc054caa8e763085b3fb2637e4f"
+      },
+      "body": {
+        "record_type": "TrustedDeliveryReceipt",
+        "record_version": "2.0",
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "casper"
+        },
+        "persona_spec_id": "pspc_92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+        "experience_snapshot_id": "casper-experience-1",
+        "user_preference_snapshot_id": "preferences-1",
+        "controlled_session_id": "session-casper",
+        "provider_request_id": "request-casper",
+        "final_shared_inputs": {
+          "snapshot_id": "facts-1",
+          "kind": "SHARED_FACT",
+          "version": "1",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+          "source_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+          },
+          "qualification_policy_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        "registered_injection_sequence": 1,
+        "execution_generation": 7,
+        "context_revocation_scope_id": "synthetic-offline-scope",
+        "context_revocation_epoch": 7,
+        "authority_scope_id": "authority-scope",
+        "authority_epoch": 3,
+        "credential_scope_id": "credential-scope",
+        "credential_epoch": 4,
+        "quiescence_fence_id": "fence-1",
+        "delivery_status": "APPLIED_VERIFIED",
+        "verification_record_ref": {
+          "namespace": "synthetic",
+          "object_id": "provider-verification-casper",
+          "version": "1",
+          "digest_alg": "sha256",
+          "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+        },
+        "verified_by": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "verified_at": "2026-10-22T00:00:06.000Z"
+      }
+    },
+    "closure": {
+      "ref": {
+        "namespace": "synthetic",
+        "object_id": "closure",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "dbc5558f01d46e3b9a912f389024759c9bb50dc044c5a9e323a11fcc5e8d386a"
+      },
+      "body": {
+        "record_type": "EvidenceClosureRecord",
+        "record_version": "2.0",
+        "case_id": "synthetic-offline-case",
+        "round": 3,
+        "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+        "candidate_snapshot_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+        "persona_views": {
+          "melchior": {
+            "persona_spec_id": "pspc_6cb82968cbc4b922fd78bec825ccb8c24cee342a650ee5fcb0d152d99b8ab87e",
+            "experience_snapshot_id": "melchior-experience-1",
+            "allowed_context_ids": [
+              "melchior-context-1",
+              "melchior-context-2"
+            ]
+          },
+          "balthasar": {
+            "persona_spec_id": "pspc_fca8ae6f97e645262eb454fd5ab869cfd2e2ba1d6f38539000890d46dd081721",
+            "experience_snapshot_id": "balthasar-experience-1",
+            "allowed_context_ids": [
+              "balthasar-context-1",
+              "balthasar-context-2"
+            ]
+          },
+          "casper": {
+            "persona_spec_id": "pspc_92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+            "experience_snapshot_id": "casper-experience-1",
+            "allowed_context_ids": [
+              "casper-context-1",
+              "casper-context-2"
+            ]
+          }
+        },
+        "final_shared_inputs": {
+          "snapshot_id": "facts-1",
+          "kind": "SHARED_FACT",
+          "version": "1",
+          "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+          "source_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "facts-1",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+          },
+          "qualification_policy_ref": {
+            "namespace": "synthetic-context-fixture",
+            "object_id": "snapshot-qualification",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "validity": {
+            "not_before": "2026-10-22T00:00:00.000Z",
+            "valid_until": "2026-10-23T00:00:00.000Z"
+          }
+        },
+        "receipt_refs": {
+          "melchior": {
+            "namespace": "synthetic",
+            "object_id": "receipt.melchior",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "f518c1f4124867c092e14f942953568bcfe6de3d606493518ccc5ad9664d083b"
+          },
+          "balthasar": {
+            "namespace": "synthetic",
+            "object_id": "receipt.balthasar",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "f303dc8e1b925ec4f4276f6b881e65e529e792c18acf3c777fec3ef6f6ee150b"
+          },
+          "casper": {
+            "namespace": "synthetic",
+            "object_id": "receipt.casper",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "3547ea1e61865a29ca64da9f9ed24418cd7c2fc054caa8e763085b3fb2637e4f"
+          }
+        },
+        "confirmation_refs": {
+          "melchior": {
+            "namespace": "synthetic",
+            "object_id": "confirmation.melchior",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "250e0c3c330900f7bb602fe0401c33d190ae81e957c5da19e7561d661a799861"
+          },
+          "balthasar": {
+            "namespace": "synthetic",
+            "object_id": "confirmation.balthasar",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "acb914b987d4a24f1f8a981736b158a694ee75bf7096b5459682c6099e11df68"
+          },
+          "casper": {
+            "namespace": "synthetic",
+            "object_id": "confirmation.casper",
+            "version": "1",
+            "digest_alg": "sha256",
+            "content_digest": "1d8ac64fd194b02c3463aaf16aa3d0a5800e163e04b260c0895faf5bd3f265f2"
+          }
+        },
+        "execution_generation": 7,
+        "context_revocation_scope_id": "synthetic-offline-scope",
+        "context_revocation_epoch": 7,
+        "authority_scope_id": "authority-scope",
+        "authority_epoch": 3,
+        "credential_scope_id": "credential-scope",
+        "credential_epoch": 4,
+        "quiescence_fence_id": "fence-1",
+        "evidence_cutoff_sequence": 100,
+        "close_high_watermarks": {
+          "melchior": 2,
+          "balthasar": 2,
+          "casper": 2
+        },
+        "pending_injections": 0,
+        "journal_states": {
+          "melchior": "INPUT_CLOSED",
+          "balthasar": "INPUT_CLOSED",
+          "casper": "INPUT_CLOSED"
+        },
+        "event": "EVIDENCE_CLOSED",
+        "status": "COMMITTED",
+        "commit_id": "commit-1",
+        "committed_at": "2026-10-22T00:00:10.000Z"
+      }
+    },
+    "completeness.melchior": {
+      "ref": {
+        "namespace": "synthetic",
+        "object_id": "completeness.melchior",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "aea492135e2208c068be4d079f1d2d870455c41f79c247b41b5ab742d677ad5d"
+      },
+      "body": {
+        "record_type": "CompletenessRecord",
+        "record_version": "2.0",
+        "journal_key": {
+          "case_id": "synthetic-offline-case",
+          "round": 3,
+          "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+          "persona_id": "melchior"
+        },
+        "events": [
+          {
+            "journal_key": {
+              "case_id": "synthetic-offline-case",
+              "round": 3,
+              "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+              "persona_id": "melchior"
+            },
+            "sequence": 1,
+            "authority_sequence": 90,
+            "execution_generation": 7,
+            "delivery_id": "delivery-melchior-1",
+            "kind": "SHARED_FACT",
+            "phase": "FINAL_REVIEW",
+            "source": {
+              "node_id": "node-shared",
+              "source_entry_id": "facts-1",
+              "source_version": "1",
+              "raw_content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+              "kind": "RAW",
+              "source_ref": {
+                "namespace": "synthetic-context-fixture",
+                "object_id": "facts-1",
+                "version": "1",
+                "digest_alg": "sha256",
+                "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+              },
+              "validity": {
+                "not_before": "2026-10-22T00:00:00.000Z",
+                "valid_until": "2026-10-23T00:00:00.000Z"
+              },
+              "derivation_method_ref": {
+                "namespace": "synthetic",
+                "object_id": "raw-collection-method",
+                "version": "1",
+                "digest_alg": "sha256",
+                "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+              },
+              "parent_node_ids": []
+            },
+            "parent_node_ids": [],
+            "permission_ref": {
+              "namespace": "synthetic",
+              "object_id": "input-permission",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+            },
+            "producer": {
+              "subject_id": "recorder",
+              "identity_source_id": "synthetic-root",
+              "identity_source_version": "1"
+            },
+            "verification_record_ref": {
+              "namespace": "synthetic",
+              "object_id": "delivery-verification-melchior1",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+            },
+            "injected_at": "2026-10-22T00:00:05.000Z",
+            "target_persona": "melchior"
+          },
+          {
+            "journal_key": {
+              "case_id": "synthetic-offline-case",
+              "round": 3,
+              "context_manifest_id": "ctxm_bbac8ae597c5e4949584bf78b6e6bcaf71d106023d340a9a083c83dfcefc915b",
+              "persona_id": "melchior"
+            },
+            "sequence": 2,
+            "authority_sequence": 95,
+            "execution_generation": 7,
+            "delivery_id": "delivery-melchior-2",
+            "kind": "DEBATE",
+            "phase": "FINAL_REVIEW",
+            "source": {
+              "node_id": "node-candidate",
+              "source_entry_id": "csnp_33138d37f6d778a4d03d3b3c4087ccf268030b36e7228da7d70769d7f1ba861f",
+              "source_version": "2.0",
+              "raw_content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec",
+              "kind": "RAW",
+              "source_ref": {
+                "namespace": "synthetic",
+                "object_id": "candidate-context",
+                "version": "1",
+                "digest_alg": "sha256",
+                "content_digest": "85d95f78c0843b8ec9b19671b7fe40473370309619aa81d604a9db10c6990dec"
+              },
+              "validity": {
+                "not_before": "2026-10-22T00:00:00.000Z",
+                "valid_until": "2026-10-23T00:00:00.000Z"
+              },
+              "derivation_method_ref": {
+                "namespace": "synthetic",
+                "object_id": "candidate-context-method",
+                "version": "1",
+                "digest_alg": "sha256",
+                "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+              },
+              "parent_node_ids": []
+            },
+            "parent_node_ids": [],
+            "permission_ref": {
+              "namespace": "synthetic",
+              "object_id": "input-permission",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+            },
+            "producer": {
+              "subject_id": "recorder",
+              "identity_source_id": "synthetic-root",
+              "identity_source_version": "1"
+            },
+            "verification_record_ref": {
+              "namespace": "synthetic",
+              "object_id": "delivery-verification-melchior2",
+              "version": "1",
+              "digest_alg": "sha256",
+              "content_digest": "a4ac2d52b4349e95c94dcba46d99bd86def539c9b09777366a796099b8b62251"
+            },
+            "injected_at": "2026-10-22T00:00:08.000Z",
+            "target_persona": "melchior"
+          }
+        ],
+        "journal_high_watermark": 2,
+        "delivery_settled": true,
+        "recorded_by": {
+          "subject_id": "recorder",
+          "identity_source_id": "synthetic-root",
+          "identity_source_version": "1"
+        },
+        "recorded_at": "2026-10-22T00:00:11.000Z"
+      }
+    }
+  }
+}

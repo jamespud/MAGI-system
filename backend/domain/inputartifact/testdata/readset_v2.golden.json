@@ -1,0 +1,9 @@
+{
+  "canonical_profile": "magi-cj/1",
+  "digest_alg": "sha256",
+  "digest": "d2183668ea2296cff06cc4b8882a2bdd7cf518ba6d771f16a195619ec47e8c06",
+  "artifact_id": "rset_d2183668ea2296cff06cc4b8882a2bdd7cf518ba6d771f16a195619ec47e8c06",
+  "canonical_bytes": 7419,
+  "actual_reads": "NOT_RUN",
+  "qualification": "UNVERIFIABLE_REFERENCE"
+}
