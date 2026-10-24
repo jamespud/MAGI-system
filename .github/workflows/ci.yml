@@ -61,6 +61,12 @@ jobs:
       - name: PersonaSpec offline baselines and cross-language vectors
         run: python3 domain/inputartifact/testdata/verify_persona_golden.py
 
+      - name: ContextManifest offline cross-language vectors and schema parity
+        run: |
+          python3 domain/inputartifact/testdata/verify_context_golden.py
+          python3 ../scripts/check-context-schema-parity.py
+          python3 ../scripts/test-context-schema-parity.py
+
       - name: Input artifact contract structure
         run: go run ../scripts/check-input-artifact-contract.go
 

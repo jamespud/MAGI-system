@@ -1,0 +1,354 @@
+{
+  "artifact_type": "context_manifest",
+  "schema_version": "1.0",
+  "version": "1.0.0",
+  "created_by": {
+    "subject_id": "fixture-publisher",
+    "identity_source_id": "fixture-idp",
+    "identity_source_version": "1"
+  },
+  "issuance_policy_ref": {
+    "namespace": "synthetic-context-fixture",
+    "object_id": "issuance",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "frozen_at": "2026-10-22T00:00:00.000Z",
+  "validity": {
+    "not_before": "2026-10-22T00:00:00.000Z",
+    "valid_until": "2026-10-23T00:00:00.000Z"
+  },
+  "case_id": "synthetic-offline-case",
+  "round": 3,
+  "charter_id": "chtr_06bd0ffe4363f2912b93e477fc173bd7cd4d6dd7579c752ac7578b1648d8a0e0",
+  "domain_profile_id": "dprf_59ef52c81a8dcebaa201ac5cab557dc3628ad3c47b48eb1b00ec70e8e9b8afea",
+  "shared_fact_snapshot_id": "facts-1",
+  "user_preference_snapshot_id": "preferences-1",
+  "roles": {
+    "melchior": {
+      "persona_spec_id": "pspc_6cb82968cbc4b922fd78bec825ccb8c24cee342a650ee5fcb0d152d99b8ab87e",
+      "experience_snapshot_id": "melchior-experience-1",
+      "allowed_context_ids": [
+        "melchior-context-1",
+        "melchior-context-2"
+      ]
+    },
+    "balthasar": {
+      "persona_spec_id": "pspc_fca8ae6f97e645262eb454fd5ab869cfd2e2ba1d6f38539000890d46dd081721",
+      "experience_snapshot_id": "balthasar-experience-1",
+      "allowed_context_ids": [
+        "balthasar-context-1",
+        "balthasar-context-2"
+      ]
+    },
+    "casper": {
+      "persona_spec_id": "pspc_92847d5e37906e013fe6b0701a0af6c54ecfd12a36c390b296f539dbd03393a2",
+      "experience_snapshot_id": "casper-experience-1",
+      "allowed_context_ids": [
+        "casper-context-1",
+        "casper-context-2"
+      ]
+    }
+  },
+  "snapshot_refs": [
+    {
+      "snapshot_id": "balthasar-context-1",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "9bcc9ccd3e5542d4a4de7f6a4605b35c49cb46c6ac94483698e6d4f9369b6cf7",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "balthasar-context-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "9bcc9ccd3e5542d4a4de7f6a4605b35c49cb46c6ac94483698e6d4f9369b6cf7"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "balthasar-context-2",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "315e931462434e77b16f3e5e4560258a8124a6adc88a3aff9ac605e88d6e44b1",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "balthasar-context-2",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "315e931462434e77b16f3e5e4560258a8124a6adc88a3aff9ac605e88d6e44b1"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "balthasar-experience-1",
+      "kind": "EXPERIENCE",
+      "version": "1",
+      "content_digest": "7f354fd660db87e20d128ef0cb7807c314bbe44f954c5d90dbf3c6414df30608",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "balthasar-experience-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "7f354fd660db87e20d128ef0cb7807c314bbe44f954c5d90dbf3c6414df30608"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "casper-context-1",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "7be45924c371455ef7e3eca0c55c3688717533055b56b17fd02f22958565a0d2",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "casper-context-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "7be45924c371455ef7e3eca0c55c3688717533055b56b17fd02f22958565a0d2"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "casper-context-2",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "0fc9cab4bf7eab0242a5096da73950d81f1456e670ce6164d95e83582b7f17b9",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "casper-context-2",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0fc9cab4bf7eab0242a5096da73950d81f1456e670ce6164d95e83582b7f17b9"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "casper-experience-1",
+      "kind": "EXPERIENCE",
+      "version": "1",
+      "content_digest": "2717d168f25aab564247a97915d6d5051a3166c0486d1d041b7082e7026f8cc1",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "casper-experience-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "2717d168f25aab564247a97915d6d5051a3166c0486d1d041b7082e7026f8cc1"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "facts-1",
+      "kind": "SHARED_FACT",
+      "version": "1",
+      "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "facts-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "b2e8e2489ec274e8892a0e6fd5a11de5278a7d0dd5ba2f11134d1981b9f550d6"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "index-1",
+      "kind": "DEPENDENCY_INDEX",
+      "version": "1",
+      "content_digest": "255e7835983b870bc3485cb4f2b6a6e9ca003bc94e8072b6b3532f50bcdae23e",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "index-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "255e7835983b870bc3485cb4f2b6a6e9ca003bc94e8072b6b3532f50bcdae23e"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "melchior-context-1",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "536a65905d6e9843f2b3a4ae37b4d553418bca0b1088914a471efa7f296145a4",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "melchior-context-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "536a65905d6e9843f2b3a4ae37b4d553418bca0b1088914a471efa7f296145a4"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "melchior-context-2",
+      "kind": "CONTEXT",
+      "version": "1",
+      "content_digest": "786988aafb0ca98c1d146d6c1aaf0e40b3c89b04d42de3ff40a3f92a10619d0f",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "melchior-context-2",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "786988aafb0ca98c1d146d6c1aaf0e40b3c89b04d42de3ff40a3f92a10619d0f"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "melchior-experience-1",
+      "kind": "EXPERIENCE",
+      "version": "1",
+      "content_digest": "a09615f8836e168f322be559fbcb4cf809028fddf8d807839f5c2bb9e4773d0f",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "melchior-experience-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "a09615f8836e168f322be559fbcb4cf809028fddf8d807839f5c2bb9e4773d0f"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    },
+    {
+      "snapshot_id": "preferences-1",
+      "kind": "USER_PREFERENCE",
+      "version": "1",
+      "content_digest": "3eb2b61c65c65cfc2e957de7b8fd8554bbdffe024239dadf8be77c18288682ff",
+      "source_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "preferences-1",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "3eb2b61c65c65cfc2e957de7b8fd8554bbdffe024239dadf8be77c18288682ff"
+      },
+      "qualification_policy_ref": {
+        "namespace": "synthetic-context-fixture",
+        "object_id": "snapshot-qualification",
+        "version": "1",
+        "digest_alg": "sha256",
+        "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "validity": {
+        "not_before": "2026-10-22T00:00:00.000Z",
+        "valid_until": "2026-10-23T00:00:00.000Z"
+      }
+    }
+  ],
+  "source_dependency_index_version": "index-1",
+  "context_revocation_epoch": 7,
+  "admission_policy_ref": {
+    "namespace": "synthetic-context-fixture",
+    "object_id": "read-admission",
+    "version": "1",
+    "digest_alg": "sha256",
+    "content_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "context_revocation_scope_id": "synthetic-offline-scope"
+}
