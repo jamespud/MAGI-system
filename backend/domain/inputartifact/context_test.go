@@ -513,3 +513,37 @@ func TestContextCrossArtifactReferenceConflict(t *testing.T) {
 	v, err := ValidateContextManifest(encode(t, m), "", opts)
 	contextError(t, v, err, "REFERENCE")
 }
+
+// F41-01: matching identities and intersecting validity cannot make a
+// Manifest usable before it was frozen. This is local declared ordering only;
+// actual pre-review delivery still requires the later trusted runtime.
+func TestContextUsageCannotPrecedeFreeze(t *testing.T) {
+	for _, tc := range []struct {
+		name, start string
+		reject      bool
+	}{
+		{"before-freeze", "2026-10-22T01:00:00.000Z", true},
+		{"at-freeze", "2026-10-22T03:00:00.000Z", false},
+		{"after-freeze", "2026-10-22T03:00:00.001Z", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := contextFixture(t)
+			m.FrozenAt = "2026-10-22T03:00:00.000Z"
+			opts := contextOptions(t, m)
+			opts.RequireCompleteBindings = true
+			opts.UsageWindow = &Validity{NotBefore: tc.start, ValidUntil: strptr("2026-10-22T04:00:00.000Z")}
+			contextSchemaValid(t, m)
+			v, err := ValidateContextManifest(encode(t, m), "", opts)
+			if tc.reject {
+				contextError(t, v, err, "TIME")
+				var e *Error
+				errors.As(err, &e)
+				if e.Path != "$.usage_window" {
+					t.Fatalf("wrong rejection path: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

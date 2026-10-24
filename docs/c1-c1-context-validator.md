@@ -33,7 +33,7 @@ Domain/Persona 必须来自已有不可变验证结果。所选 Persona 的 `per
 
 `ContextSnapshot` 的独立 descriptor 必须逐字段相同；可选 `RawBytes` 按原始字节 SHA-256 比对，不使用 C0 工件域，也不规范化外部原文。nil 表示缺原件，非 nil 的空字节有明确空串摘要；摘要正确不证明快照内容完备、受控空经验/空偏好语义、角色归属或来源真实性。snapshot 的摘要与 source_ref 原件摘要不被无依据地当作同一种字节包。
 
-已知 Manifest、快照、Domain、Persona 和 Charter 声明区间取共同交集，拒绝空交集及冻结前已到期的依赖。可选 `UsageWindow` 的整个区间必须落在已知交集和 Charter horizon 内；未提供时明确保留使用时有效性依赖。验证器不读取本机时钟，不把固定 Fixture 日期解释为当前有效，不取代外部可信时间、撤销或 freshness 核验。
+已知 Manifest、快照、Domain、Persona 和 Charter 声明区间取共同交集，拒绝空交集及冻结前已到期的依赖。可选 `UsageWindow` 不得早于 `frozen_at`，整个区间必须落在已知交集和 Charter horizon 内；同毫秒时间戳只表示本地无矛盾，不证明真实初审前后顺序。未提供时明确保留使用时有效性依赖。验证器不读取本机时钟，不把固定 Fixture 日期解释为当前有效，不取代外部可信时间、撤销或 freshness 核验。
 
 默认正文资源上限为 262144 bytes / depth 24 / members 4096 / string bytes 16384，正数选项可覆盖工程限额；Envelope 分别派生 bytes+1024、depth+1、members+5、string 至少 69，支持独立更严格上限并防加法溢出。正文在 Envelope 中仍单独受限。原始快照另有每份 262144 / 总计 1048576 bytes 的默认工程上限，采用剩余预算扣减避免总和溢出。没有截断材料路径。
 
@@ -93,7 +93,7 @@ cd ..
 git diff --check
 ```
 
-本轮 inputartifact 包共 671 个通过事件、7 个跳过事件（含子测试）；其中 Context 为 12 个顶层通过、112 个通过事件、2 个边界跳过。旧 C0/C0-R、Domain/Persona、C1-A、F36-01、Decision v2 的检查保持存在；v2 仍为 9 份工件 Golden、1 份风险输入 Golden、7 正例、88 负例、28 版本差分。
+本轮 inputartifact 包共 675 个通过事件、7 个跳过事件（含子测试）；其中 Context 为 13 个顶层通过、116 个通过事件、2 个边界跳过。旧 C0/C0-R、Domain/Persona、C1-A、F36-01、Decision v2 的检查保持存在；v2 仍为 9 份工件 Golden、1 份风险输入 Golden、7 正例、88 负例、28 版本差分。
 
 本地没有配置 `MAGI_TEST_MYSQL_DSN`；全量 Go 成功不能证明真实 MySQL 迁移、writer cutover 或新 Evidence Closure 事务。CI 的既有 MySQL Jobs 测试的是既有数据库契约，也不能变成尚未实现的 C1-C2 Evidence Closure 证据。
 
@@ -103,7 +103,8 @@ git diff --check
 2. **Schema 仍合法的语义错误必须拒绝。** 闭包、排序、同 ID 异内容、错误 kind、错误 index、交叉角色/工件绑定和使用区间单独测试，不靠坏 ID 掩盖。
 3. **同一引用版本不能有两种摘要。** Manifest、Domain、Persona 的组合依赖再次检查；缺资格不掩盖局部可判定矛盾。
 4. **绑定和资格分开。** 完整字节/本地关系通过仍保留 Charter 原件/批准、签发资格、数据访问/披露、人格发布、偏好认证、scope 当前 epoch、唯一轮次登记和可信时序依赖。
-5. **完整视图不等于已读取。** 没有 Agent Loop、provider session、可信回执、ReadSetJournal 或 Evidence Closure；没有模型人格行为实验。
+5. **F41-01 使用窗口早于冻结已修复。** 独立只读审阅复现：即使全部本地绑定齐全、有效期相交，03:00 冻结的清单仍接受 01:00 开始的使用窗口。具名 `TestContextUsageCannotPrecedeFreeze` 实际 RED 后转绿，另覆盖同毫秒及之后的边界。修复只拒绝声明之间的已知时间矛盾，不证明真实交付或可信时间。
+6. **完整视图不等于已读取。** 没有 Agent Loop、provider session、可信回执、ReadSetJournal 或 Evidence Closure；没有模型人格行为实验。
 
 ## F. 放行与后续
 

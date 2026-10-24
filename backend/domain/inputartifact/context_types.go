@@ -96,7 +96,8 @@ type ContextValidationOptions struct {
 	Personas                map[string]ValidatedPersonaSpec
 	Snapshots               map[string]ContextSnapshot
 	// UsageWindow is explicit and deterministic; no local wall clock is consulted.
-	// Its entire interval must fit every known dependency and Charter horizon.
+	// It cannot start before frozen_at; its entire interval must fit every known
+	// dependency and Charter horizon. Equal timestamps do not prove runtime order.
 	UsageWindow *Validity
 	// Original snapshots have independent per-blob and aggregate byte ceilings.
 	// Nonpositive values default to 262144 / 1048576; bytes are never rewritten.

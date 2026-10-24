@@ -189,20 +189,23 @@ func checkContextBindings(m ContextManifest, opts ContextValidationOptions, iv c
 		}
 		unresolved(path+".qualification", "descriptor/raw digest checks do not authenticate source kind, role ownership, access/disclosure scope, complete contents, empty-snapshot semantics, freshness or publication")
 	}
+	frozen, e := parseTime(m.FrozenAt, "$.frozen_at")
+	if e != nil {
+		return nil, ContextValidationStatus{}, e
+	}
 	if opts.UsageWindow != nil {
 		usage, e := contextValidity(*opts.UsageWindow, "$.usage_window")
 		if e != nil {
 			return nil, ContextValidationStatus{}, e
+		}
+		if usage.start.Before(frozen) {
+			return nil, ContextValidationStatus{}, invalid("TIME", "$.usage_window", "declared usage cannot precede Manifest freeze")
 		}
 		if e = coversContext(iv, usage, "$.usage_window"); e != nil {
 			return nil, ContextValidationStatus{}, e
 		}
 	} else {
 		unresolved("$.validity", "no usage window supplied; current validity and future freshness not checked")
-	}
-	frozen, e := parseTime(m.FrozenAt, "$.frozen_at")
-	if e != nil {
-		return nil, ContextValidationStatus{}, e
 	}
 	if iv.end != nil && !frozen.Before(*iv.end) {
 		return nil, ContextValidationStatus{}, invalid("TIME", "$.frozen_at", "a known dependency expired before Manifest freeze")
