@@ -442,3 +442,10 @@ RED 使用真实 MySQL 8.4，在 `readset_journal_node` 创建后注入受控延
 GREEN 的 `TestReadSetJournal_RegisterRevalidatesFinalCommitBoundaryMySQL` 覆盖两种
 边界，并断言六张 Journal 表均无残留。已有合法注册、重复登记 reconciliation-only、
 `valid_until` 恰好到期拒绝的测试继续通过。
+
+## 12. 2026-10-25 v2 Design Change 已登记
+
+M1 所需的 pre-exposure admission / exposure fence / post-apply settlement 已以加法式 v2 契约登记于
+[`authority-journal-admit-v2.md`](authority-journal-admit-v2.md)。本文件的本地 Journal 仍不是
+`JOURNAL_ADMIT` v2 实现，也没有 authority sequence、真实 Provider exposure 或
+`APPLIED_VERIFIED` 入口；在 #47 实现与独立审查完成前，真实接入保持 `BLOCKED`。
