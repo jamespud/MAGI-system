@@ -135,7 +135,7 @@ type V2ProviderCapability struct {
 	MaxLeaseUntil               string `json:"max_lease_until"`
 }
 
-type V2ExistingBinding struct {
+type V2AdmissionBinding struct {
 	RequestDigest     string `json:"request_digest"`
 	AdmissionCommitID string `json:"admission_commit_id"`
 	Generation        uint64 `json:"generation"`
@@ -143,14 +143,26 @@ type V2ExistingBinding struct {
 	ExposurePermitted bool   `json:"exposure_permitted"`
 }
 
+// V2SettlementBinding is created atomically by the first settlement commit.
+// It is absent before that commit and is the exact replay key afterwards.
+type V2SettlementBinding struct {
+	SettlementDigest   string `json:"settlement_digest"`
+	AdmissionCommitID  string `json:"admission_commit_id"`
+	ProviderRequestID  string `json:"provider_request_id"`
+	SettlementCommitID string `json:"settlement_commit_id"`
+	Generation         uint64 `json:"generation"`
+	Status             string `json:"status"`
+}
+
 type V2Trace struct {
-	ContractVersion string               `json:"contract_version"`
-	Operation       V2Operation          `json:"operation"`
-	Admission       V2AdmissionPlan      `json:"admission"`
-	ExposureGate    *V2ExposureGatePlan  `json:"exposure_gate"`
-	Settlement      *V2SettlementPlan    `json:"settlement"`
-	Authority       V2AuthorityState     `json:"authority"`
-	Provider        V2ProviderCapability `json:"provider"`
-	ExistingBinding *V2ExistingBinding   `json:"existing_binding"`
-	RequestDigest   string               `json:"request_digest"`
+	ContractVersion   string               `json:"contract_version"`
+	Operation         V2Operation          `json:"operation"`
+	Admission         V2AdmissionPlan      `json:"admission"`
+	ExposureGate      *V2ExposureGatePlan  `json:"exposure_gate"`
+	Settlement        *V2SettlementPlan    `json:"settlement"`
+	Authority         V2AuthorityState     `json:"authority"`
+	Provider          V2ProviderCapability `json:"provider"`
+	AdmissionBinding  *V2AdmissionBinding  `json:"admission_binding"`
+	SettlementBinding *V2SettlementBinding `json:"settlement_binding"`
+	RequestDigest     string               `json:"request_digest"`
 }

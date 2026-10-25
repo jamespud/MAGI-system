@@ -417,7 +417,7 @@ checker 只接受四个有写集定义的操作；其余 typed operation 被声�
 - 保留本文件 v1 的 `JOURNAL_ADMIT` post-apply settlement 语义、Schema 与历史身份；
 - 新增 `JOURNAL_ADMIT_V2`（pre-exposure admission）、`JOURNAL_EXPOSURE_GATE_V2`（可执行 exposure fence）和 `JOURNAL_SETTLE_V2`（可信 provider 原件后的结算）；
 - `QUERY_ONLY` 不是合法 fence；Provider 不支持 fence/revocation watermark enforcement 时必须 `BLOCKED`；
-- admission replay 只返回原 lineage，不生成新的 exposure permit；settlement replay 必须绑定完整 receipt/verification 原件的独立摘要；
+- admission replay 只返回原 lineage，不生成新的 exposure permit；settlement replay 必须绑定完整 receipt/verification 原件的独立摘要；admission binding 与 settlement binding 分离，首次 settlement 原子创建后者；
 - 静态覆盖位于 `docs/contracts/authority-journal-v2/`，检查器为 `scripts/check-journal-admit-v2.py`。
 
 该修订仍为 **Draft/static only**：没有 `CommitIfCurrent` 实现、真实 MySQL 事务、Provider 连接、实际暴露、读取、Evidence Closure 或 `PASS_M1`。M1-00 的独立证据入口见 Issue [#54](https://github.com/jamespud/MAGI-system/issues/54)。

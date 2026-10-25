@@ -36,9 +36,15 @@
     "provider": {
       "$ref": "#/$defs/V2ProviderCapability"
     },
-    "existing_binding": {
+    "admission_binding": {
       "oneOf": [
-        {"$ref": "#/$defs/V2ExistingBinding"},
+        {"$ref": "#/$defs/V2AdmissionBinding"},
+        {"type": "null"}
+      ]
+    },
+    "settlement_binding": {
+      "oneOf": [
+        {"$ref": "#/$defs/V2SettlementBinding"},
         {"type": "null"}
       ]
     },
@@ -54,7 +60,8 @@
     "settlement",
     "authority",
     "provider",
-    "existing_binding",
+    "admission_binding",
+    "settlement_binding",
     "request_digest"
   ],
   "$defs": {
@@ -283,17 +290,30 @@
       },
       "required": ["available", "enforces_fence", "supports_lease", "enforces_revocation_watermark", "max_lease_until"]
     },
-    "V2ExistingBinding": {
+    "V2AdmissionBinding": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "request_digest": {"$ref": "#/$defs/V2Digest"},
         "admission_commit_id": {"$ref": "#/$defs/V2ID"},
         "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "status": {"enum": ["ADMITTED", "EXPOSURE_GATED", "SETTLED", "UNKNOWN", "REVOKED"]},
+        "status": {"enum": ["ADMITTED", "EXPOSURE_GATED", "UNKNOWN", "REVOKED"]},
         "exposure_permitted": {"type": "boolean"}
       },
       "required": ["request_digest", "admission_commit_id", "generation", "status", "exposure_permitted"]
+    },
+    "V2SettlementBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "settlement_digest": {"$ref": "#/$defs/V2Digest"},
+        "admission_commit_id": {"$ref": "#/$defs/V2ID"},
+        "provider_request_id": {"$ref": "#/$defs/V2ID"},
+        "settlement_commit_id": {"$ref": "#/$defs/V2ID"},
+        "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "status": {"enum": ["COMMITTED", "UNKNOWN"]}
+      },
+      "required": ["settlement_digest", "admission_commit_id", "provider_request_id", "settlement_commit_id", "generation", "status"]
     }
   }
 }

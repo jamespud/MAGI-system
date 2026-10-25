@@ -140,11 +140,17 @@ var (
 		"V2ProviderCapability.supports_lease":                booleanKind,
 		"V2ProviderCapability.enforces_revocation_watermark": booleanKind,
 		"V2ProviderCapability.max_lease_until":               timeRef,
-		"V2ExistingBinding.request_digest":                   digestRef,
-		"V2ExistingBinding.admission_commit_id":              idRef,
-		"V2ExistingBinding.generation":                       positiveUInt(),
-		"V2ExistingBinding.status":                           enumShape("ADMITTED", "EXPOSURE_GATED", "SETTLED", "UNKNOWN", "REVOKED"),
-		"V2ExistingBinding.exposure_permitted":               booleanKind,
+		"V2AdmissionBinding.request_digest":                  digestRef,
+		"V2AdmissionBinding.admission_commit_id":             idRef,
+		"V2AdmissionBinding.generation":                      positiveUInt(),
+		"V2AdmissionBinding.status":                          enumShape("ADMITTED", "EXPOSURE_GATED", "UNKNOWN", "REVOKED"),
+		"V2AdmissionBinding.exposure_permitted":              booleanKind,
+		"V2SettlementBinding.settlement_digest":              digestRef,
+		"V2SettlementBinding.admission_commit_id":            idRef,
+		"V2SettlementBinding.provider_request_id":            idRef,
+		"V2SettlementBinding.settlement_commit_id":           idRef,
+		"V2SettlementBinding.generation":                     positiveUInt(),
+		"V2SettlementBinding.status":                         enumShape("COMMITTED", "UNKNOWN"),
 		"V2Trace.contract_version":                           constShape("magi-authority-journal-v2/1"),
 		"V2Trace.operation":                                  enumShape("JOURNAL_ADMIT_V2", "JOURNAL_EXPOSURE_GATE_V2", "JOURNAL_SETTLE_V2"),
 		"V2Trace.admission":                                  refShape("V2AdmissionPlan"),
@@ -152,7 +158,8 @@ var (
 		"V2Trace.settlement":                                 nullableRefShape("V2SettlementPlan"),
 		"V2Trace.authority":                                  refShape("V2AuthorityState"),
 		"V2Trace.provider":                                   refShape("V2ProviderCapability"),
-		"V2Trace.existing_binding":                           nullableRefShape("V2ExistingBinding"),
+		"V2Trace.admission_binding":                          nullableRefShape("V2AdmissionBinding"),
+		"V2Trace.settlement_binding":                         nullableRefShape("V2SettlementBinding"),
 		"V2Trace.request_digest":                             digestRef,
 	}
 )
@@ -188,7 +195,8 @@ func main() {
 		"V2SettlementPlan":          V2SettlementPlan{},
 		"V2AuthorityState":          V2AuthorityState{},
 		"V2ProviderCapability":      V2ProviderCapability{},
-		"V2ExistingBinding":         V2ExistingBinding{},
+		"V2AdmissionBinding":        V2AdmissionBinding{},
+		"V2SettlementBinding":       V2SettlementBinding{},
 	}
 	for name, shape := range primitiveShapes {
 		definition, ok := defs[name].(map[string]any)

@@ -144,6 +144,8 @@ Admission 唯一键：
 - settlement 只有在 `APPLIED_VERIFIED` 时执行 `N -> N-1`；`UNKNOWN` 与 `UNVERIFIABLE` 必须保持 `N -> N`，不得释放可能已暴露的 pending。
 - 即使 `UNKNOWN`/`UNVERIFIABLE` 不能确定真实读取，也必须保留 pending 和 reconciliation 线索。
 - settlement 必须有独立的不可变 `settlement_digest`，覆盖完整 settlement 请求正文和 provider receipt；摘要域为 `magi:journal-settlement-v2`，计算时排除 `settlement_digest` 自身。
+- `admission_binding` 与 `settlement_binding` 是两种不同的持久身份。Admission 绑定保留原始 admission request digest、Generation 和 admission commit；Settlement 绑定独立保存 settlement digest、admission commit、provider request、Generation 和 settlement commit。
+- 首次 Settlement 前 `settlement_binding` 必须不存在；首次提交在创建 settlement lineage 时原子创建它。`authority.settlement_sequence > 0` 但 binding 不存在时必须 `CONFLICT`，不能把缺失 binding 当作首次提交。
 - 同键且完整原件摘要相同才返回 `REPLAY`；同一 Admission 下更换 receipt/verification 原件必须返回 `CONFLICT`，不能仅凭共享的 admission request digest 判为重放。
 - 同键不同字节：`CONFLICT`，不得覆盖。
 - 旧 Generation 重放同一键：`STALE`，不得取得新 fence。
@@ -202,7 +204,7 @@ token_consumed
 unique_binding
 ```
 
-settlement 不修改 admission 正文、不替换 fence、不删除 unknown 记录。settlement plan 的 `settlement_digest` 必须绑定完整 settlement 正文、receipt 和 verification ref；重放比较使用该摘要，而不是 admission request digest。
+settlement 不修改 admission 正文、不替换 fence、不删除 unknown 记录。settlement plan 的 `settlement_digest` 必须绑定完整 settlement 正文、receipt 和 verification ref；首次 Settlement 原子创建 `settlement_binding`，之后的精确重放只使用该独立 binding，而不是 admission request digest。
 
 ### 7.4 锁序
 
@@ -285,7 +287,7 @@ INSERT INTO a45_provider_settlement (...);
 - [`scripts/check-journal-admit-v2.py`](../scripts/check-journal-admit-v2.py)
 - [`scripts/test-journal-admit-v2.py`](../scripts/test-journal-admit-v2.py)
 
-静态覆盖（45 个 trace）包括：
+静态覆盖（46 个 trace）包括：
 
 - v1 身份不被重定义；
 - admission 与 settlement 分离写集；
@@ -301,7 +303,10 @@ INSERT INTO a45_provider_settlement (...);
 - 同键同字节 replay 只返回 lineage；
 - 同键不同字节 `CONFLICT`；
 - settlement 的 admission/fence 绑定不一致时 `TOKEN_BINDING`；
-- 相同 settlement 原件 `REPLAY`，更换 receipt/verification 原件 `CONFLICT`；
+- Admission → Gate → 首次 Settlement 在 admission binding 不变、settlement binding 不存在时成功；
+- 首次 Settlement 回复丢失后，同 settlement binding/原件返回 `REPLAY`；
+- `settlement_sequence > 0` 但 settlement binding 缺失时返回 `CONFLICT`；
+- 已结算后更换 receipt/verification 原件返回 `CONFLICT`；
 - settlement 自身摘要与正文不一致时 `TOKEN_BINDING`；
 - 未验证 receipt `DENIED`；
 - `UNKNOWN` 不能伪装成 `APPLIED_VERIFIED`；

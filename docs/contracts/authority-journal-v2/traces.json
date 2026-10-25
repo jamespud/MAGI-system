@@ -134,8 +134,9 @@
         "enforces_revocation_watermark": true,
         "max_lease_until": "2026-10-25T01:01:00.000Z"
       },
-      "existing_binding": null,
-      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "admission_binding": null,
+      "settlement_binding": null
     },
     "exposure_gate": {
       "contract_version": "magi-authority-journal-v2/1",
@@ -277,14 +278,15 @@
         "enforces_revocation_watermark": true,
         "max_lease_until": "2026-10-25T01:01:00.000Z"
       },
-      "existing_binding": {
+      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "admission_binding": {
         "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         "admission_commit_id": "commit-admission-melchior-1",
         "generation": 7,
         "status": "ADMITTED",
         "exposure_permitted": false
       },
-      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      "settlement_binding": null
     },
     "settlement": {
       "contract_version": "magi-authority-journal-v2/1",
@@ -458,14 +460,15 @@
         "enforces_revocation_watermark": true,
         "max_lease_until": "2026-10-25T01:01:00.000Z"
       },
-      "existing_binding": {
-        "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+      "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+      "admission_binding": {
+        "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         "admission_commit_id": "commit-admission-melchior-1",
         "generation": 7,
         "status": "EXPOSURE_GATED",
         "exposure_permitted": true
       },
-      "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
+      "settlement_binding": null
     }
   },
   "cases": [
@@ -547,7 +550,7 @@
       "expected": "REPLAY",
       "mutations": [
         {
-          "path": "existing_binding",
+          "path": "admission_binding",
           "value": {
             "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             "admission_commit_id": "commit-admission-melchior-1",
@@ -564,7 +567,7 @@
       "expected": "CONFLICT",
       "mutations": [
         {
-          "path": "existing_binding",
+          "path": "admission_binding",
           "value": {
             "request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "admission_commit_id": "commit-admission-melchior-1",
@@ -581,7 +584,7 @@
       "expected": "STALE",
       "mutations": [
         {
-          "path": "existing_binding",
+          "path": "admission_binding",
           "value": {
             "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             "admission_commit_id": "commit-admission-melchior-0",
@@ -710,11 +713,11 @@
           "value": 11
         },
         {
-          "path": "existing_binding/status",
+          "path": "admission_binding/status",
           "value": "EXPOSURE_GATED"
         },
         {
-          "path": "existing_binding/exposure_permitted",
+          "path": "admission_binding/exposure_permitted",
           "value": true
         }
       ]
@@ -837,8 +840,15 @@
           "value": 12
         },
         {
-          "path": "existing_binding/status",
-          "value": "SETTLED"
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
         }
       ]
     },
@@ -1092,8 +1102,15 @@
           "value": 12
         },
         {
-          "path": "existing_binding/status",
-          "value": "SETTLED"
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
         }
       ]
     },
@@ -1101,21 +1118,28 @@
       "name": "settlement_replay_different_receipt",
       "base": "settlement",
       "expected": "CONFLICT",
-      "preserve_existing_binding_digest": true,
       "mutations": [
         {
           "path": "authority/settlement_sequence",
           "value": 12
         },
         {
-          "path": "existing_binding/status",
-          "value": "SETTLED"
-        },
-        {
           "path": "settlement/receipt/verification_ref/digest",
           "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
         }
-      ]
+      ],
+      "preserve_settlement_binding_digest": true
     },
     {
       "name": "settlement_digest_tamper",
@@ -1126,6 +1150,17 @@
         {
           "path": "settlement/settlement_digest",
           "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "settlement_missing_binding_after_commit",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
         }
       ]
     }

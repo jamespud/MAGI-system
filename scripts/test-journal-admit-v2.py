@@ -13,6 +13,18 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
+
+
+def committed_settlement_binding(value):
+    return {
+        'settlement_digest': value['settlement']['settlement_digest'],
+        'admission_commit_id': value['authority']['admission_commit_id'],
+        'provider_request_id': value['settlement']['provider_request_id'],
+        'settlement_commit_id': 'commit-settlement-melchior-1',
+        'generation': value['admission']['execution_generation'],
+        'status': 'COMMITTED',
+    }
+
 class JournalAdmitV2Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -98,7 +110,7 @@ class JournalAdmitV2Tests(unittest.TestCase):
 
     def test_old_generation_cannot_reacquire_admission(self):
         value = copy.deepcopy(self.data['bases']['admission'])
-        value['existing_binding'] = {
+        value['admission_binding'] = {
             'request_digest': value['request_digest'],
             'admission_commit_id': 'commit-old-generation',
             'generation': value['admission']['execution_generation'] - 1,
@@ -110,25 +122,35 @@ class JournalAdmitV2Tests(unittest.TestCase):
     def test_settlement_replay_requires_receipt_digest_binding(self):
         value = copy.deepcopy(self.data['bases']['settlement'])
         value['authority']['settlement_sequence'] = 12
-        value['existing_binding']['status'] = 'SETTLED'
+        value['settlement_binding'] = committed_settlement_binding(value)
         value['settlement']['receipt']['verification_ref']['digest'] = 'e' * 64
         self.assertEqual(checker.check_semantics(value), 'TOKEN_BINDING')
+
+    def test_cross_stage_admission_gate_first_settlement_succeeds(self):
+        admission = copy.deepcopy(self.data['bases']['admission'])
+        gate = copy.deepcopy(self.data['bases']['exposure_gate'])
+        settlement = copy.deepcopy(self.data['bases']['settlement'])
+        self.assertEqual(checker.check_semantics(admission), 'STATIC_VALID')
+        self.assertEqual(checker.check_semantics(gate), 'STATIC_VALID')
+        self.assertEqual(checker.check_semantics(settlement), 'STATIC_VALID')
+        self.assertEqual(settlement['admission_binding']['request_digest'], admission['request_digest'])
+        self.assertIsNone(settlement['settlement_binding'])
 
     def test_settlement_replay_same_original_is_replay(self):
         value = copy.deepcopy(self.data['bases']['settlement'])
         value['authority']['settlement_sequence'] = 12
-        value['existing_binding']['status'] = 'SETTLED'
+        value['settlement_binding'] = committed_settlement_binding(value)
         self.assertEqual(checker.check_semantics(value), 'REPLAY')
 
     def test_settlement_replay_with_recomputed_different_receipt_is_conflict(self):
         value = copy.deepcopy(self.data['bases']['settlement'])
         value['authority']['settlement_sequence'] = 12
-        value['existing_binding']['status'] = 'SETTLED'
+        value['settlement_binding'] = committed_settlement_binding(value)
         value['settlement']['receipt']['verification_ref']['digest'] = 'e' * 64
         new_digest = checker.settlement_digest(value['settlement'])
         value['settlement']['settlement_digest'] = new_digest
         value['request_digest'] = new_digest
-        # The authoritative existing binding still points at the original receipt.
+        # The authoritative settlement binding still points at the original receipt.
         self.assertEqual(checker.check_semantics(value), 'CONFLICT')
 
     def test_v1_contract_identity_is_unchanged(self):

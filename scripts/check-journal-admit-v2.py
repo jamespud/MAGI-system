@@ -59,8 +59,8 @@ def materialize(data, case):
             digest = settlement_digest(settlement)
             settlement['settlement_digest'] = digest
             result['request_digest'] = digest
-            if result.get('existing_binding') is not None and not case.get('preserve_existing_binding_digest', False):
-                result['existing_binding']['request_digest'] = digest
+            if result.get('settlement_binding') is not None and not case.get('preserve_settlement_binding_digest', False):
+                result['settlement_binding']['settlement_digest'] = digest
     return result
 
 
@@ -105,9 +105,11 @@ def check_common(s):
 def check_admission(s):
     if s['exposure_gate'] is not None or s['settlement'] is not None:
         return 'WRITE_SET'
+    if s['settlement_binding'] is not None:
+        return 'CONFLICT'
     admission = s['admission']
     authority = s['authority']
-    existing = s['existing_binding']
+    binding = s['admission_binding']
     if admission['mutation_set'] != ADMISSION_MUTATIONS:
         return 'WRITE_SET'
     if admission['high_watermark']['next'] != admission['high_watermark']['expected'] + 1:
@@ -124,14 +126,14 @@ def check_admission(s):
     if admission['fence']['lease_id'] == '' or admission['fence']['lease_until'] == '':
         return 'WRITE_SET'
 
-    if existing is not None:
-        if existing['request_digest'] != s['request_digest']:
+    if binding is not None:
+        if binding['request_digest'] != s['request_digest']:
             return 'CONFLICT'
-        if existing['generation'] != admission['execution_generation']:
+        if binding['generation'] != admission['execution_generation']:
             return 'STALE'
-        if existing['status'] == 'REVOKED':
+        if binding['status'] == 'REVOKED':
             return 'REVOKED'
-        if existing['status'] in ('ADMITTED', 'EXPOSURE_GATED', 'SETTLED'):
+        if binding['status'] in ('ADMITTED', 'EXPOSURE_GATED'):
             # A replay may expose the original lineage, never a new permit.
             return 'REPLAY'
         return 'UNKNOWN'
@@ -153,14 +155,22 @@ def check_admission(s):
 def check_gate(s):
     if s['exposure_gate'] is None or s['settlement'] is not None:
         return 'WRITE_SET'
+    if s['settlement_binding'] is not None:
+        return 'CONFLICT'
     admission = s['admission']
     gate = s['exposure_gate']
     authority = s['authority']
-    existing = s['existing_binding']
-    if existing is None or existing['request_digest'] != s['request_digest']:
+    binding = s['admission_binding']
+    if binding is None or binding['request_digest'] != s['request_digest']:
         return 'CONFLICT'
-    if existing['admission_commit_id'] != authority['admission_commit_id']:
+    if binding['admission_commit_id'] != authority['admission_commit_id']:
         return 'TOKEN_BINDING'
+    if binding['generation'] != admission['execution_generation']:
+        return 'STALE'
+    if binding['status'] == 'REVOKED':
+        return 'REVOKED'
+    if binding['status'] == 'UNKNOWN':
+        return 'UNKNOWN'
     if gate['admission_commit_id'] != authority['admission_commit_id']:
         return 'TOKEN_BINDING'
     if gate['fence_id'] != admission['fence']['lease_id']:
@@ -182,10 +192,10 @@ def check_gate(s):
     if utc(authority['trusted_now']) > utc(s['provider']['max_lease_until']):
         return 'BLOCKED'
     if authority['gate_sequence'] > 0:
-        if authority['gate_sequence'] == gate['linearization_sequence'] and existing['status'] == 'EXPOSURE_GATED':
+        if authority['gate_sequence'] == gate['linearization_sequence'] and binding['status'] == 'EXPOSURE_GATED':
             return 'REPLAY'
         return 'CONFLICT'
-    if existing['status'] != 'ADMITTED':
+    if binding['status'] != 'ADMITTED' or binding['exposure_permitted']:
         return 'CONFLICT'
     return 'STATIC_VALID'
 
@@ -197,7 +207,20 @@ def check_settlement(s):
     settlement = s['settlement']
     gate = s['exposure_gate']
     authority = s['authority']
-    existing = s['existing_binding']
+    admission_binding = s['admission_binding']
+    settlement_binding = s['settlement_binding']
+    if admission_binding is None:
+        return 'CONFLICT'
+    if admission_binding['admission_commit_id'] != authority['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if admission_binding['generation'] != admission['execution_generation']:
+        return 'STALE'
+    if admission_binding['status'] == 'REVOKED':
+        return 'REVOKED'
+    if admission_binding['status'] == 'UNKNOWN':
+        return 'UNKNOWN'
+    if admission_binding['status'] != 'EXPOSURE_GATED' or not admission_binding['exposure_permitted']:
+        return 'CONFLICT'
     if settlement['mutation_set'] != SETTLEMENT_MUTATIONS:
         return 'WRITE_SET'
     expected_digest = settlement_digest(settlement)
@@ -219,13 +242,26 @@ def check_settlement(s):
         return 'TOKEN_BINDING'
     if settlement['receipt']['session_scope_id'] != admission['provider_reservation']['session_scope_id']:
         return 'TOKEN_BINDING'
-    if existing is None or existing['request_digest'] != expected_digest:
-        return 'CONFLICT'
-    if existing['admission_commit_id'] != authority['admission_commit_id']:
-        return 'TOKEN_BINDING'
     if authority['gate_sequence'] == 0:
         return 'CONFLICT'
     if gate['linearization_sequence'] != authority['gate_sequence']:
+        return 'CONFLICT'
+
+    if settlement_binding is not None:
+        if settlement_binding['settlement_digest'] != expected_digest:
+            return 'CONFLICT'
+        if settlement_binding['admission_commit_id'] != authority['admission_commit_id']:
+            return 'TOKEN_BINDING'
+        if settlement_binding['provider_request_id'] != settlement['provider_request_id']:
+            return 'TOKEN_BINDING'
+        if settlement_binding['generation'] != admission['execution_generation']:
+            return 'STALE'
+        if settlement_binding['status'] == 'UNKNOWN':
+            return 'UNKNOWN'
+        if settlement_binding['status'] != 'COMMITTED' or authority['settlement_sequence'] == 0:
+            return 'CONFLICT'
+        return 'REPLAY'
+    if authority['settlement_sequence'] != 0:
         return 'CONFLICT'
 
     if not settlement['receipt']['verified']:
@@ -253,14 +289,7 @@ def check_settlement(s):
             return 'REVOKED'
         if authority['settlement_sequence'] == 0:
             return 'UNKNOWN'
-    if authority['settlement_sequence'] > 0:
-        if existing['status'] == 'SETTLED':
-            return 'REPLAY'
-        return 'CONFLICT'
-    if existing['status'] not in ('EXPOSURE_GATED', 'SETTLED'):
-        return 'CONFLICT'
     return 'STATIC_VALID'
-
 
 def check_semantics(s):
     if s['contract_version'] != 'magi-authority-journal-v2/1':
