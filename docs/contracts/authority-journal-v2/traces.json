@@ -434,7 +434,8 @@
           "provider_settlement",
           "token_consumed",
           "unique_binding"
-        ]
+        ],
+        "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
       },
       "authority": {
         "admission_commit_id": "commit-admission-melchior-1",
@@ -458,13 +459,13 @@
         "max_lease_until": "2026-10-25T01:01:00.000Z"
       },
       "existing_binding": {
-        "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
         "admission_commit_id": "commit-admission-melchior-1",
         "generation": 7,
         "status": "EXPOSURE_GATED",
         "exposure_permitted": true
       },
-      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
     }
   },
   "cases": [
@@ -628,7 +629,8 @@
               "provider_settlement",
               "token_consumed",
               "unique_binding"
-            ]
+            ],
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
           }
         }
       ]
@@ -754,7 +756,8 @@
               "provider_settlement",
               "token_consumed",
               "unique_binding"
-            ]
+            ],
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
           }
         }
       ]
@@ -1076,6 +1079,53 @@
         {
           "path": "settlement/pending_transition/next",
           "value": 0
+        }
+      ]
+    },
+    {
+      "name": "settlement_replay_same_original",
+      "base": "settlement",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        },
+        {
+          "path": "existing_binding/status",
+          "value": "SETTLED"
+        }
+      ]
+    },
+    {
+      "name": "settlement_replay_different_receipt",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "preserve_existing_binding_digest": true,
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        },
+        {
+          "path": "existing_binding/status",
+          "value": "SETTLED"
+        },
+        {
+          "path": "settlement/receipt/verification_ref/digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "settlement_digest_tamper",
+      "base": "settlement",
+      "expected": "TOKEN_BINDING",
+      "rebind_settlement": false,
+      "mutations": [
+        {
+          "path": "settlement/settlement_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         }
       ]
     }

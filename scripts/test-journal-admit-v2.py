@@ -107,6 +107,30 @@ class JournalAdmitV2Tests(unittest.TestCase):
         }
         self.assertEqual(checker.check_semantics(value), 'STALE')
 
+    def test_settlement_replay_requires_receipt_digest_binding(self):
+        value = copy.deepcopy(self.data['bases']['settlement'])
+        value['authority']['settlement_sequence'] = 12
+        value['existing_binding']['status'] = 'SETTLED'
+        value['settlement']['receipt']['verification_ref']['digest'] = 'e' * 64
+        self.assertEqual(checker.check_semantics(value), 'TOKEN_BINDING')
+
+    def test_settlement_replay_same_original_is_replay(self):
+        value = copy.deepcopy(self.data['bases']['settlement'])
+        value['authority']['settlement_sequence'] = 12
+        value['existing_binding']['status'] = 'SETTLED'
+        self.assertEqual(checker.check_semantics(value), 'REPLAY')
+
+    def test_settlement_replay_with_recomputed_different_receipt_is_conflict(self):
+        value = copy.deepcopy(self.data['bases']['settlement'])
+        value['authority']['settlement_sequence'] = 12
+        value['existing_binding']['status'] = 'SETTLED'
+        value['settlement']['receipt']['verification_ref']['digest'] = 'e' * 64
+        new_digest = checker.settlement_digest(value['settlement'])
+        value['settlement']['settlement_digest'] = new_digest
+        value['request_digest'] = new_digest
+        # The authoritative existing binding still points at the original receipt.
+        self.assertEqual(checker.check_semantics(value), 'CONFLICT')
+
     def test_v1_contract_identity_is_unchanged(self):
         schema = json.loads((ROOT / 'docs/contracts/authority-v1/schema.json').read_text())
         self.assertEqual(schema['properties']['contract_version']['const'], 'magi-authority/1')

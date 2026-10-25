@@ -119,6 +119,7 @@ var (
 		"V2SettlementPlan.provider_request_id":               idRef,
 		"V2SettlementPlan.expected_status":                   enumShape("ADMITTED"),
 		"V2SettlementPlan.next_status":                       enumShape("APPLIED_VERIFIED", "UNVERIFIABLE"),
+		"V2SettlementPlan.settlement_digest":                 digestRef,
 		"V2SettlementPlan.receipt":                           refShape("V2ProviderReceipt"),
 		"V2SettlementPlan.pending_transition":                refShape("V2PendingTransitionPlan"),
 		"V2SettlementPlan.mutation_set":                      stringArray(1, 6, true),

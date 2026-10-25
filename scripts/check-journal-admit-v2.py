@@ -6,6 +6,7 @@ material, commits settlement or starts a transaction.
 """
 import copy
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -17,6 +18,7 @@ SCHEMA_PATH = ROOT / 'docs/contracts/authority-journal-v2/schema.json'
 ROLES = {'melchior', 'balthasar', 'casper'}
 MAX_PENDING = 512
 EPOCH_KINDS = ('AUTHORITY', 'CONTEXT', 'CREDENTIAL')
+SETTLEMENT_DIGEST_DOMAIN = b'magi:journal-settlement-v2\n'
 ADMISSION_MUTATIONS = [
     'admission', 'dependency_edges', 'exposure_fence', 'journal_event',
     'journal_high_watermark', 'lineage', 'outbox', 'pending_transition',
@@ -32,6 +34,13 @@ def utc(value):
     return datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
 
 
+def settlement_digest(plan):
+    body = copy.deepcopy(plan)
+    body.pop('settlement_digest', None)
+    raw = json.dumps(body, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return hashlib.sha256(SETTLEMENT_DIGEST_DOMAIN + raw).hexdigest()
+
+
 def materialize(data, case):
     result = copy.deepcopy(data['bases'][case['base']])
     for patch in case['mutations']:
@@ -44,6 +53,14 @@ def materialize(data, case):
             del target[key]
         else:
             target[key] = copy.deepcopy(patch['value'])
+    if result.get('operation') == 'JOURNAL_SETTLE_V2' and case.get('rebind_settlement', True):
+        settlement = result.get('settlement')
+        if settlement is not None and 'receipt' in settlement:
+            digest = settlement_digest(settlement)
+            settlement['settlement_digest'] = digest
+            result['request_digest'] = digest
+            if result.get('existing_binding') is not None and not case.get('preserve_existing_binding_digest', False):
+                result['existing_binding']['request_digest'] = digest
     return result
 
 
@@ -183,6 +200,11 @@ def check_settlement(s):
     existing = s['existing_binding']
     if settlement['mutation_set'] != SETTLEMENT_MUTATIONS:
         return 'WRITE_SET'
+    expected_digest = settlement_digest(settlement)
+    if settlement.get('settlement_digest') != expected_digest:
+        return 'TOKEN_BINDING'
+    if s['request_digest'] != expected_digest:
+        return 'TOKEN_BINDING'
     if settlement['pending_transition']['journal_id'] != admission['high_watermark']['journal_id']:
         return 'WRITE_SET'
     if settlement['admission_commit_id'] != authority['admission_commit_id']:
@@ -197,7 +219,7 @@ def check_settlement(s):
         return 'TOKEN_BINDING'
     if settlement['receipt']['session_scope_id'] != admission['provider_reservation']['session_scope_id']:
         return 'TOKEN_BINDING'
-    if existing is None or existing['request_digest'] != s['request_digest']:
+    if existing is None or existing['request_digest'] != expected_digest:
         return 'CONFLICT'
     if existing['admission_commit_id'] != authority['admission_commit_id']:
         return 'TOKEN_BINDING'

@@ -143,6 +143,8 @@ Admission 唯一键：
 - admission 的 pending transition 为 `N -> N+1`，`0 <= N < 512`；允许同一 Journal 存在多个尚未结算的 delivery。
 - settlement 只有在 `APPLIED_VERIFIED` 时执行 `N -> N-1`；`UNKNOWN` 与 `UNVERIFIABLE` 必须保持 `N -> N`，不得释放可能已暴露的 pending。
 - 即使 `UNKNOWN`/`UNVERIFIABLE` 不能确定真实读取，也必须保留 pending 和 reconciliation 线索。
+- settlement 必须有独立的不可变 `settlement_digest`，覆盖完整 settlement 请求正文和 provider receipt；摘要域为 `magi:journal-settlement-v2`，计算时排除 `settlement_digest` 自身。
+- 同键且完整原件摘要相同才返回 `REPLAY`；同一 Admission 下更换 receipt/verification 原件必须返回 `CONFLICT`，不能仅凭共享的 admission request digest 判为重放。
 - 同键不同字节：`CONFLICT`，不得覆盖。
 - 旧 Generation 重放同一键：`STALE`，不得取得新 fence。
 - admission 响应丢失：按同键查询原 lineage，不得再次暴露。
@@ -200,7 +202,7 @@ token_consumed
 unique_binding
 ```
 
-settlement 不修改 admission 正文、不替换 fence、不删除 unknown 记录。
+settlement 不修改 admission 正文、不替换 fence、不删除 unknown 记录。settlement plan 的 `settlement_digest` 必须绑定完整 settlement 正文、receipt 和 verification ref；重放比较使用该摘要，而不是 admission request digest。
 
 ### 7.4 锁序
 
@@ -283,7 +285,7 @@ INSERT INTO a45_provider_settlement (...);
 - [`scripts/check-journal-admit-v2.py`](../scripts/check-journal-admit-v2.py)
 - [`scripts/test-journal-admit-v2.py`](../scripts/test-journal-admit-v2.py)
 
-静态覆盖（42 个 trace）包括：
+静态覆盖（45 个 trace）包括：
 
 - v1 身份不被重定义；
 - admission 与 settlement 分离写集；
@@ -299,6 +301,8 @@ INSERT INTO a45_provider_settlement (...);
 - 同键同字节 replay 只返回 lineage；
 - 同键不同字节 `CONFLICT`；
 - settlement 的 admission/fence 绑定不一致时 `TOKEN_BINDING`；
+- 相同 settlement 原件 `REPLAY`，更换 receipt/verification 原件 `CONFLICT`；
+- settlement 自身摘要与正文不一致时 `TOKEN_BINDING`；
 - 未验证 receipt `DENIED`；
 - `UNKNOWN` 不能伪装成 `APPLIED_VERIFIED`；
 - 缺 fence/receipt 被 Schema 拒绝。

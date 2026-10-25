@@ -101,10 +101,12 @@ type V2ProviderReceipt struct {
 }
 
 type V2SettlementPlan struct {
-	AdmissionCommitID string                  `json:"admission_commit_id"`
-	ProviderRequestID string                  `json:"provider_request_id"`
-	ExpectedStatus    string                  `json:"expected_status"`
-	NextStatus        string                  `json:"next_status"`
+	AdmissionCommitID string `json:"admission_commit_id"`
+	ProviderRequestID string `json:"provider_request_id"`
+	ExpectedStatus    string `json:"expected_status"`
+	NextStatus        string `json:"next_status"`
+	// Domain-separated digest over the exact settlement body, receipt and verification ref.
+	SettlementDigest  string                  `json:"settlement_digest"`
 	Receipt           V2ProviderReceipt       `json:"receipt"`
 	PendingTransition V2PendingTransitionPlan `json:"pending_transition"`
 	MutationSet       []string                `json:"mutation_set"`

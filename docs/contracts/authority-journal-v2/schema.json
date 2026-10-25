@@ -239,6 +239,7 @@
         "provider_request_id": {"$ref": "#/$defs/V2ID"},
         "expected_status": {"enum": ["ADMITTED"]},
         "next_status": {"enum": ["APPLIED_VERIFIED", "UNVERIFIABLE"]},
+        "settlement_digest": {"$ref": "#/$defs/V2Digest"},
         "receipt": {"$ref": "#/$defs/V2ProviderReceipt"},
         "pending_transition": {"$ref": "#/$defs/V2PendingTransitionPlan"},
         "mutation_set": {
@@ -249,7 +250,7 @@
           "uniqueItems": true
         }
       },
-      "required": ["admission_commit_id", "provider_request_id", "expected_status", "next_status", "receipt", "pending_transition", "mutation_set"]
+      "required": ["admission_commit_id", "provider_request_id", "expected_status", "next_status", "settlement_digest", "receipt", "pending_transition", "mutation_set"]
     },
     "V2AuthorityState": {
       "type": "object",
