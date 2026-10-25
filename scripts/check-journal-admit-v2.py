@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TRACE_PATH = ROOT / 'docs/contracts/authority-journal-v2/traces.json'
 SCHEMA_PATH = ROOT / 'docs/contracts/authority-journal-v2/schema.json'
 ROLES = {'melchior', 'balthasar', 'casper'}
+MAX_PENDING = 512
 EPOCH_KINDS = ('AUTHORITY', 'CONTEXT', 'CREDENTIAL')
 ADMISSION_MUTATIONS = [
     'admission', 'dependency_edges', 'exposure_fence', 'journal_event',
@@ -96,7 +97,8 @@ def check_admission(s):
         return 'WRITE_SET'
     if admission['high_watermark']['journal_id'] != admission['pending_transition']['journal_id']:
         return 'WRITE_SET'
-    if admission['pending_transition']['expected'] != 0 or admission['pending_transition']['next'] != 1:
+    pending = admission['pending_transition']
+    if pending['expected'] >= MAX_PENDING or pending['next'] != pending['expected'] + 1:
         return 'WRITE_SET'
     if admission['provider_reservation']['request_id'] != admission['key']['provider_request_id']:
         return 'TOKEN_BINDING'
@@ -148,17 +150,19 @@ def check_gate(s):
         return 'TOKEN_BINDING'
     if authority['admission_sequence'] == 0:
         return 'CONFLICT'
-    if gate['linearization_sequence'] < authority['admission_sequence']:
-        return 'CONFLICT'
+    if gate['linearization_sequence'] <= authority['admission_sequence']:
+        return 'STALE'
+    if gate['trusted_now'] != authority['trusted_now']:
+        return 'STALE'
 
     common = check_common(s)
     if common:
         return common
     if authority['revocation_sequence'] > 0 and authority['revocation_sequence'] <= gate['linearization_sequence']:
         return 'REVOKED'
-    if utc(gate['trusted_now']) >= utc(admission['fence']['lease_until']):
+    if utc(authority['trusted_now']) >= utc(admission['fence']['lease_until']):
         return 'EXPIRED'
-    if utc(gate['trusted_now']) > utc(s['provider']['max_lease_until']):
+    if utc(authority['trusted_now']) > utc(s['provider']['max_lease_until']):
         return 'BLOCKED'
     if authority['gate_sequence'] > 0:
         if authority['gate_sequence'] == gate['linearization_sequence'] and existing['status'] == 'EXPOSURE_GATED':
@@ -181,8 +185,6 @@ def check_settlement(s):
         return 'WRITE_SET'
     if settlement['pending_transition']['journal_id'] != admission['high_watermark']['journal_id']:
         return 'WRITE_SET'
-    if settlement['pending_transition']['expected'] != 1 or settlement['pending_transition']['next'] != 0:
-        return 'WRITE_SET'
     if settlement['admission_commit_id'] != authority['admission_commit_id']:
         return 'TOKEN_BINDING'
     if gate['admission_commit_id'] != settlement['admission_commit_id']:
@@ -201,18 +203,28 @@ def check_settlement(s):
         return 'TOKEN_BINDING'
     if authority['gate_sequence'] == 0:
         return 'CONFLICT'
-    if gate['linearization_sequence'] > authority['gate_sequence']:
+    if gate['linearization_sequence'] != authority['gate_sequence']:
         return 'CONFLICT'
 
     if not settlement['receipt']['verified']:
         return 'DENIED'
     outcome = settlement['receipt']['outcome']
-    if outcome == 'UNKNOWN' and settlement['next_status'] == 'APPLIED_VERIFIED':
+    if outcome == 'APPLIED_VERIFIED':
+        if settlement['next_status'] != 'APPLIED_VERIFIED':
+            return 'CONFLICT'
+    elif outcome in ('UNKNOWN', 'UNVERIFIABLE'):
+        if settlement['next_status'] != 'UNVERIFIABLE':
+            return 'CONFLICT'
+    else:
         return 'CONFLICT'
-    if outcome == 'APPLIED_VERIFIED' and settlement['next_status'] != 'APPLIED_VERIFIED':
-        return 'CONFLICT'
-    if outcome == 'UNVERIFIABLE' and settlement['next_status'] != 'UNVERIFIABLE':
-        return 'CONFLICT'
+
+    pending = settlement['pending_transition']
+    if outcome == 'APPLIED_VERIFIED':
+        if pending['expected'] <= 0 or pending['expected'] > MAX_PENDING or pending['next'] != pending['expected'] - 1:
+            return 'WRITE_SET'
+    elif pending['next'] != pending['expected']:
+        # UNKNOWN and UNVERIFIABLE preserve the possibly exposed delivery.
+        return 'WRITE_SET'
 
     if authority['revocation_sequence'] > 0:
         if authority['revocation_sequence'] <= authority['gate_sequence']:

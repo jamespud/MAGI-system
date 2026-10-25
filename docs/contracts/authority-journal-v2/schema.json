@@ -187,6 +187,7 @@
           "type": "array",
           "items": {"type": "string"},
           "minItems": 1,
+          "maxItems": 11,
           "uniqueItems": true
         },
         "admission_input": {"$ref": "#/$defs/V2PreparedObject"},
@@ -244,6 +245,7 @@
           "type": "array",
           "items": {"type": "string"},
           "minItems": 1,
+          "maxItems": 6,
           "uniqueItems": true
         }
       },

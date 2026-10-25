@@ -118,6 +118,13 @@ v2 将 revocation、admission、gate、settlement 放在同一可比较的 autho
 | revocation 与 gate 并发 | 由同一 authority sequence 的先后决定；没有“双方都成功”的中间态 |
 | revocation 状态不可读 | `UNKNOWN`/失败关闭，不得继续暴露 |
 
+暴露 gate 必须满足：
+
+- `gate.linearization_sequence > authority.admission_sequence`，同序号或更早序号拒绝；
+- `gate.trusted_now` 必须与 `authority.trusted_now` 一致；
+- lease 过期和 Provider 最大 lease 上限均使用 `authority.trusted_now` 判断；
+- settlement 引用的 gate 必须与当前权威记录精确同一 `authority.gate_sequence`，不能引用更早 gate。
+
 R0 只读场景也必须遵守这一顺序。R0 的“无受保护写入”不等于“无数据暴露”，因此仍需要 admission、fence 和 settlement 的真实证据。
 
 ## 6. 幂等、重放与响应丢失
@@ -133,6 +140,9 @@ Admission 唯一键：
 规则：
 
 - 同键同字节 replay：返回原 admission lineage，`exposure_permitted=false`，只能 reconciliation。
+- admission 的 pending transition 为 `N -> N+1`，`0 <= N < 512`；允许同一 Journal 存在多个尚未结算的 delivery。
+- settlement 只有在 `APPLIED_VERIFIED` 时执行 `N -> N-1`；`UNKNOWN` 与 `UNVERIFIABLE` 必须保持 `N -> N`，不得释放可能已暴露的 pending。
+- 即使 `UNKNOWN`/`UNVERIFIABLE` 不能确定真实读取，也必须保留 pending 和 reconciliation 线索。
 - 同键不同字节：`CONFLICT`，不得覆盖。
 - 旧 Generation 重放同一键：`STALE`，不得取得新 fence。
 - admission 响应丢失：按同键查询原 lineage，不得再次暴露。
@@ -254,8 +264,10 @@ SELECT ... FROM a45_provider_reservation, a45_exposure_gate, a45_journal
 -- assert verified provider original and exact request/session/admission binding
 UPDATE a45_provider_reservation
    SET state=? WHERE ... AND state='RESERVED' AND version=?;
+-- Only APPLIED_VERIFIED decrements one pending delivery.
 UPDATE a45_journal SET pending_count=pending_count-1, version=version+1
  WHERE ... AND pending_count>0;
+-- UNKNOWN/UNVERIFIABLE keep pending_count unchanged and retain reconciliation state.
 INSERT INTO a45_provider_settlement (...);
 ```
 
@@ -271,12 +283,15 @@ INSERT INTO a45_provider_settlement (...);
 - [`scripts/check-journal-admit-v2.py`](../scripts/check-journal-admit-v2.py)
 - [`scripts/test-journal-admit-v2.py`](../scripts/test-journal-admit-v2.py)
 
-静态覆盖（30 个 trace）包括：
+静态覆盖（42 个 trace）包括：
 
 - v1 身份不被重定义；
 - admission 与 settlement 分离写集；
 - `QUERY_ONLY` fence 被 Schema 拒绝；
 - 三类 scoped epoch 必须各自唯一且与当前状态一致；
+- 同一 Journal 的多个未结算 delivery 可执行 `N -> N+1` 和 `N -> N-1`，并受 512 上限约束；
+- `UNKNOWN`/`UNVERIFIABLE` 不得减少 pending；
+- gate 必须晚于 admission，使用 authority 可信时间，并与 settlement 引用的 gate 序号精确一致；
 - Provider 缺少 fence/revocation 强制能力时 `BLOCKED`；
 - revocation 先于 admission/gate 时 `REVOKED`；
 - gate 后撤销、settlement 未提交时 `UNKNOWN`；

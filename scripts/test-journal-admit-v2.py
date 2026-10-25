@@ -57,6 +57,25 @@ class JournalAdmitV2Tests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'typed/schema field drift V2Trace'):
                 checker.schema_results([self.values[0]], path)
 
+    def test_schema_type_enum_and_constraint_drift_is_infrastructure_failure(self):
+        mutations = [
+            ('field type', lambda schema: schema['$defs']['V2HighWatermarkPlan']['properties']['expected'].__setitem__('type', 'string')),
+            ('enum member', lambda schema: schema['$defs']['V2AdmissionKey']['properties']['persona_id']['enum'].remove('melchior')),
+            ('numeric bound', lambda schema: schema['$defs']['V2SafeUInt'].__setitem__('maximum', 500)),
+            ('array bound', lambda schema: schema['$defs']['V2AdmissionPlan']['properties']['scoped_epochs'].__setitem__('maxItems', 4)),
+            ('pattern', lambda schema: schema['$defs']['V2Digest'].__setitem__('pattern', '^[0-9a-f]+$')),
+            ('additional properties', lambda schema: schema['$defs']['V2AdmissionKey'].__setitem__('additionalProperties', True)),
+        ]
+        for name, mutate in mutations:
+            with self.subTest(drift=name):
+                schema = copy.deepcopy(json.loads(checker.SCHEMA_PATH.read_text()))
+                mutate(schema)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / 'constraint-drift.json'
+                    path.write_text(json.dumps(schema))
+                    with self.assertRaisesRegex(RuntimeError, 'typed/schema'):
+                        checker.schema_results([self.values[0]], path)
+
     def test_query_only_fence_is_not_a_legal_mode(self):
         schema = json.loads(checker.SCHEMA_PATH.read_text())
         modes = schema['$defs']['V2ExposureFencePlan']['properties']['mode']['enum']

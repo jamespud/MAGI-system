@@ -667,6 +667,10 @@
       "expected": "EXPIRED",
       "mutations": [
         {
+          "path": "authority/trusted_now",
+          "value": "2026-10-25T01:00:31.000Z"
+        },
+        {
           "path": "exposure_gate/trusted_now",
           "value": "2026-10-25T01:00:31.000Z"
         }
@@ -896,6 +900,182 @@
         {
           "path": "admission/fence/scoped_epochs/1/epoch",
           "value": 3
+        }
+      ]
+    },
+    {
+      "name": "admission_increments_pending_from_nonzero",
+      "base": "admission",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 1
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "settlement_decrements_pending_from_nonzero",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/pending_transition/expected",
+          "value": 2
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unknown_keeps_pending",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unknown_cannot_release_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        }
+      ]
+    },
+    {
+      "name": "settlement_unverifiable_keeps_pending",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unverifiable_cannot_release_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        }
+      ]
+    },
+    {
+      "name": "gate_sequence_must_follow_admission",
+      "base": "exposure_gate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "exposure_gate/linearization_sequence",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "name": "gate_time_must_match_authority_time",
+      "base": "exposure_gate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "exposure_gate/trusted_now",
+          "value": "2026-10-25T01:00:11.000Z"
+        }
+      ]
+    },
+    {
+      "name": "settlement_requires_exact_gate_sequence",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/gate_sequence",
+          "value": 12
+        }
+      ]
+    },
+    {
+      "name": "admission_increments_pending_at_limit",
+      "base": "admission",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 511
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 512
+        }
+      ]
+    },
+    {
+      "name": "admission_rejects_pending_above_limit",
+      "base": "admission",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 512
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 513
+        }
+      ]
+    },
+    {
+      "name": "settlement_rejects_zero_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/pending_transition/expected",
+          "value": 0
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 0
         }
       ]
     }
