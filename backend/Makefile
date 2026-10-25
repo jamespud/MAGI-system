@@ -6,7 +6,7 @@
 GO ?= go
 BIN := ../bin/magi
 
-.PHONY: install build run test test-race fmt vet tidy lint clean
+.PHONY: install build run m1-e2e test test-race fmt vet tidy lint clean
 
 install:
 	$(GO) mod download
@@ -17,6 +17,9 @@ build:
 
 run:
 	$(GO) run ./cmd/magi-server
+
+m1-e2e:
+	$(GO) run ./cmd/m1-e2e -mode $${M1_MODE:-real}
 
 test:
 	$(GO) test ./...
