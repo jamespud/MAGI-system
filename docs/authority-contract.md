@@ -409,3 +409,15 @@ GOCACHE 仅用于当前环境默认缓存只读的绕行，CI 无须设置。运
 checker 只接受四个有写集定义的操作；其余 typed operation 被声明但返回 WRITE_SET（生产实现应 DENIED/UNSUPPORTED_OPERATION），等待各自独立写集审阅。合成 declarations 的 proof_valid/time_trusted/witness_available 等布尔值只是测试输入；不存在验证真实资格的接口。根/签名、scope 完整覆盖、原始 provider 交付、实际风险/预算/新鲜性、每步 MySQL crash/lease/race、独立存储、网络/凭据隔离和远端恢复 **NOT RUN / BLOCKED**。
 
 交付 A–F 与 RED/GREEN 细节见 [authority-contract-review.md](authority-contract-review.md)。CI 新静态 gate 不能替代真实 C2/C3 验收；既有 MySQL CI 即使通过也仅证明旧协议。没有 Ready/merge/生产启用或关闭父 Epic/CAS-9 的自动动作。
+
+## 9. 2026-10-25 加法式 `JOURNAL_ADMIT` v2 Design Change
+
+[`docs/authority-journal-admit-v2.md`](authority-journal-admit-v2.md) 记录 M1 所需的版本化修订：
+
+- 保留本文件 v1 的 `JOURNAL_ADMIT` post-apply settlement 语义、Schema 与历史身份；
+- 新增 `JOURNAL_ADMIT_V2`（pre-exposure admission）、`JOURNAL_EXPOSURE_GATE_V2`（可执行 exposure fence）和 `JOURNAL_SETTLE_V2`（可信 provider 原件后的结算）；
+- `QUERY_ONLY` 不是合法 fence；Provider 不支持 fence/revocation watermark enforcement 时必须 `BLOCKED`；
+- admission replay 只返回原 lineage，不生成新的 exposure permit；
+- 静态覆盖位于 `docs/contracts/authority-journal-v2/`，检查器为 `scripts/check-journal-admit-v2.py`。
+
+该修订仍为 **Draft/static only**：没有 `CommitIfCurrent` 实现、真实 MySQL 事务、Provider 连接、实际暴露、读取、Evidence Closure 或 `PASS_M1`。M1-00 的独立证据入口见 Issue [#54](https://github.com/jamespud/MAGI-system/issues/54)。

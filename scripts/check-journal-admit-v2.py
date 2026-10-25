@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""Offline static checker for the additive JOURNAL_ADMIT v2 design change.
+
+This script never issues authority, creates a provider reservation, exposes
+material, commits settlement or starts a transaction.
+"""
+import copy
+from datetime import datetime
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+TRACE_PATH = ROOT / 'docs/contracts/authority-journal-v2/traces.json'
+SCHEMA_PATH = ROOT / 'docs/contracts/authority-journal-v2/schema.json'
+ROLES = {'melchior', 'balthasar', 'casper'}
+EPOCH_KINDS = ('AUTHORITY', 'CONTEXT', 'CREDENTIAL')
+ADMISSION_MUTATIONS = [
+    'admission', 'dependency_edges', 'exposure_fence', 'journal_event',
+    'journal_high_watermark', 'lineage', 'outbox', 'pending_transition',
+    'provider_reservation', 'token_consumed', 'unique_binding',
+]
+SETTLEMENT_MUTATIONS = [
+    'lineage', 'outbox', 'pending_transition', 'provider_settlement',
+    'token_consumed', 'unique_binding',
+]
+
+
+def utc(value):
+    return datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+def materialize(data, case):
+    result = copy.deepcopy(data['bases'][case['base']])
+    for patch in case['mutations']:
+        target = result
+        parts = patch['path'].split('/')
+        for part in parts[:-1]:
+            target = target[int(part)] if isinstance(target, list) else target[part]
+        key = int(parts[-1]) if isinstance(target, list) else parts[-1]
+        if patch.get('delete'):
+            del target[key]
+        else:
+            target[key] = copy.deepcopy(patch['value'])
+    return result
+
+
+def scope_map(items):
+    return {item['kind']: (item['scope_id'], item['epoch']) for item in items}
+
+
+def check_common(s):
+    admission = s['admission']
+    authority = s['authority']
+    provider = s['provider']
+    if admission['key']['persona_id'] not in ROLES:
+        return 'DENIED'
+    if admission['execution_generation'] != authority['current_generation']:
+        return 'STALE'
+    if admission['execution_generation'] != admission['fence']['execution_generation']:
+        return 'STALE'
+    if len(admission['scoped_epochs']) != 3 or len(admission['fence']['scoped_epochs']) != 3:
+        return 'STALE'
+    admission_scopes = scope_map(admission['scoped_epochs'])
+    fence_scopes = scope_map(admission['fence']['scoped_epochs'])
+    if set(admission_scopes) != set(EPOCH_KINDS) or set(fence_scopes) != set(EPOCH_KINDS):
+        return 'STALE'
+    if admission_scopes != fence_scopes:
+        return 'STALE'
+    current = {
+        'AUTHORITY': authority['current_authority_epoch'],
+        'CONTEXT': authority['current_context_epoch'],
+        'CREDENTIAL': authority['current_credential_epoch'],
+    }
+    if any(admission_scope[1] != current[kind] for kind, admission_scope in admission_scopes.items()):
+        return 'STALE'
+    if not provider['available'] or not provider['enforces_fence']:
+        return 'BLOCKED'
+    if not provider['enforces_revocation_watermark']:
+        return 'BLOCKED'
+    if admission['fence']['mode'] == 'PROVIDER_ENFORCED_LEASE' and not provider['supports_lease']:
+        return 'BLOCKED'
+    return ''
+
+
+def check_admission(s):
+    if s['exposure_gate'] is not None or s['settlement'] is not None:
+        return 'WRITE_SET'
+    admission = s['admission']
+    authority = s['authority']
+    existing = s['existing_binding']
+    if admission['mutation_set'] != ADMISSION_MUTATIONS:
+        return 'WRITE_SET'
+    if admission['high_watermark']['next'] != admission['high_watermark']['expected'] + 1:
+        return 'WRITE_SET'
+    if admission['high_watermark']['journal_id'] != admission['pending_transition']['journal_id']:
+        return 'WRITE_SET'
+    if admission['pending_transition']['expected'] != 0 or admission['pending_transition']['next'] != 1:
+        return 'WRITE_SET'
+    if admission['provider_reservation']['request_id'] != admission['key']['provider_request_id']:
+        return 'TOKEN_BINDING'
+    if admission['provider_reservation']['expected_status'] != 'ABSENT' or admission['provider_reservation']['next_status'] != 'RESERVED':
+        return 'WRITE_SET'
+    if admission['fence']['lease_id'] == '' or admission['fence']['lease_until'] == '':
+        return 'WRITE_SET'
+
+    if existing is not None:
+        if existing['request_digest'] != s['request_digest']:
+            return 'CONFLICT'
+        if existing['generation'] != admission['execution_generation']:
+            return 'STALE'
+        if existing['status'] == 'REVOKED':
+            return 'REVOKED'
+        if existing['status'] in ('ADMITTED', 'EXPOSURE_GATED', 'SETTLED'):
+            # A replay may expose the original lineage, never a new permit.
+            return 'REPLAY'
+        return 'UNKNOWN'
+    if authority['admission_sequence'] != 0:
+        return 'CONFLICT'
+
+    common = check_common(s)
+    if common:
+        return common
+    if authority['revocation_sequence'] > 0:
+        return 'REVOKED'
+    if utc(authority['trusted_now']) >= utc(admission['fence']['lease_until']):
+        return 'EXPIRED'
+    if utc(admission['fence']['lease_until']) > utc(s['provider']['max_lease_until']):
+        return 'BLOCKED'
+    return 'STATIC_VALID'
+
+
+def check_gate(s):
+    if s['exposure_gate'] is None or s['settlement'] is not None:
+        return 'WRITE_SET'
+    admission = s['admission']
+    gate = s['exposure_gate']
+    authority = s['authority']
+    existing = s['existing_binding']
+    if existing is None or existing['request_digest'] != s['request_digest']:
+        return 'CONFLICT'
+    if existing['admission_commit_id'] != authority['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if gate['admission_commit_id'] != authority['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if gate['fence_id'] != admission['fence']['lease_id']:
+        return 'TOKEN_BINDING'
+    if authority['admission_sequence'] == 0:
+        return 'CONFLICT'
+    if gate['linearization_sequence'] < authority['admission_sequence']:
+        return 'CONFLICT'
+
+    common = check_common(s)
+    if common:
+        return common
+    if authority['revocation_sequence'] > 0 and authority['revocation_sequence'] <= gate['linearization_sequence']:
+        return 'REVOKED'
+    if utc(gate['trusted_now']) >= utc(admission['fence']['lease_until']):
+        return 'EXPIRED'
+    if utc(gate['trusted_now']) > utc(s['provider']['max_lease_until']):
+        return 'BLOCKED'
+    if authority['gate_sequence'] > 0:
+        if authority['gate_sequence'] == gate['linearization_sequence'] and existing['status'] == 'EXPOSURE_GATED':
+            return 'REPLAY'
+        return 'CONFLICT'
+    if existing['status'] != 'ADMITTED':
+        return 'CONFLICT'
+    return 'STATIC_VALID'
+
+
+def check_settlement(s):
+    if s['exposure_gate'] is None or s['settlement'] is None:
+        return 'WRITE_SET'
+    admission = s['admission']
+    settlement = s['settlement']
+    gate = s['exposure_gate']
+    authority = s['authority']
+    existing = s['existing_binding']
+    if settlement['mutation_set'] != SETTLEMENT_MUTATIONS:
+        return 'WRITE_SET'
+    if settlement['pending_transition']['journal_id'] != admission['high_watermark']['journal_id']:
+        return 'WRITE_SET'
+    if settlement['pending_transition']['expected'] != 1 or settlement['pending_transition']['next'] != 0:
+        return 'WRITE_SET'
+    if settlement['admission_commit_id'] != authority['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if gate['admission_commit_id'] != settlement['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if gate['fence_id'] != admission['fence']['lease_id']:
+        return 'TOKEN_BINDING'
+    if settlement['provider_request_id'] != admission['key']['provider_request_id']:
+        return 'TOKEN_BINDING'
+    if settlement['receipt']['provider_request_id'] != admission['key']['provider_request_id']:
+        return 'TOKEN_BINDING'
+    if settlement['receipt']['session_scope_id'] != admission['provider_reservation']['session_scope_id']:
+        return 'TOKEN_BINDING'
+    if existing is None or existing['request_digest'] != s['request_digest']:
+        return 'CONFLICT'
+    if existing['admission_commit_id'] != authority['admission_commit_id']:
+        return 'TOKEN_BINDING'
+    if authority['gate_sequence'] == 0:
+        return 'CONFLICT'
+    if gate['linearization_sequence'] > authority['gate_sequence']:
+        return 'CONFLICT'
+
+    if not settlement['receipt']['verified']:
+        return 'DENIED'
+    outcome = settlement['receipt']['outcome']
+    if outcome == 'UNKNOWN' and settlement['next_status'] == 'APPLIED_VERIFIED':
+        return 'CONFLICT'
+    if outcome == 'APPLIED_VERIFIED' and settlement['next_status'] != 'APPLIED_VERIFIED':
+        return 'CONFLICT'
+    if outcome == 'UNVERIFIABLE' and settlement['next_status'] != 'UNVERIFIABLE':
+        return 'CONFLICT'
+
+    if authority['revocation_sequence'] > 0:
+        if authority['revocation_sequence'] <= authority['gate_sequence']:
+            return 'REVOKED'
+        if authority['settlement_sequence'] == 0:
+            return 'UNKNOWN'
+    if authority['settlement_sequence'] > 0:
+        if existing['status'] == 'SETTLED':
+            return 'REPLAY'
+        return 'CONFLICT'
+    if existing['status'] not in ('EXPOSURE_GATED', 'SETTLED'):
+        return 'CONFLICT'
+    return 'STATIC_VALID'
+
+
+def check_semantics(s):
+    if s['contract_version'] != 'magi-authority-journal-v2/1':
+        return 'WRITE_SET'
+    operation = s['operation']
+    if operation == 'JOURNAL_ADMIT_V2':
+        return check_admission(s)
+    if operation == 'JOURNAL_EXPOSURE_GATE_V2':
+        return check_gate(s)
+    if operation == 'JOURNAL_SETTLE_V2':
+        return check_settlement(s)
+    return 'WRITE_SET'
+
+
+def schema_results(values, schema_path=None):
+    result = subprocess.run(
+        ['go', 'run', '../scripts/check-journal-admit-v2.go', '../scripts/journal-admit-v2-api.go',
+         str(schema_path or SCHEMA_PATH)],
+        cwd=ROOT / 'backend', input=json.dumps(values), capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise RuntimeError('schema oracle failed (not an accepted negative): ' + result.stderr)
+    return json.loads(result.stdout)
+
+
+def main():
+    data = json.loads(TRACE_PATH.read_text())
+    cases = data['cases']
+    values = [materialize(data, case) for case in cases]
+    shapes = schema_results(values)
+    if len(shapes) != len(cases):
+        raise RuntimeError('schema oracle result count mismatch')
+    failed = []
+    for case, value, shape in zip(cases, values, shapes):
+        actual = shape or check_semantics(value)
+        if actual != case['expected']:
+            failed.append(f'{case["name"]}: expected {case["expected"]}, got {actual}')
+    if failed:
+        print('\n'.join(failed), file=sys.stderr)
+        return 1
+    print(f'PASS {len(cases)} JOURNAL_ADMIT v2 static declarations; live authority/provider/exposure/settlement NOT RUN')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
