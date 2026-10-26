@@ -108,3 +108,77 @@ backend/internal/m1e2e/testdata/rollout_lab_e2e_01.json
 - 不激活生产能力；
 - 不创建 `PASS_M1`；
 - 不替代独立 M1-GATE。
+
+## 7. A-F 证据
+
+### A. 基线与范围
+
+- 起点 main：`cbfe7668346cc2af1c7435601f19fd77915dd797`（2026-10-25 CI 6/6 success）。
+- 分支：`codex/m1-00-e2e-skeleton`。
+- 本切片只修改 `backend/internal/m1e2e/`、`backend/cmd/m1-e2e/`、`backend/Makefile` 和本文件；没有修改生产 authority、Journal、Provider、Egress 或 M1-GATE。
+
+### B. 需求映射
+
+| Issue #54 要求 | 实现证据 |
+| --- | --- |
+| 固定三个 Persona、C0-C3、R0 目标和 artifact/负例槽位 | `scenario.go` 的冻结目标、C0-C3、22 个 artifact slot、每阶段 artifact 清单与 6+2 负例分类 |
+| REAL / SYNTHETIC 隔离 | `runner.go` 的 `classifyEvidence` 与 `runner_test.go` 正反测试 |
+| 禁止 `PASS_M1` | `ErrPassM1Forbidden` 与 executor 负例 |
+| 每阶段 `BLOCKED` / `NOT_RUN` / `FAIL` / `EVIDENCE_READY` | `RunResult`、稳定 blocker 和 CLI 测试 |
+| 确定性 JSON 与可用 CLI | 重复 CLI 输出逐字节比较、`TestRunnerResultIsDeterministicAndKeepsArtifactSlots` |
+
+### C. Review RED → GREEN
+
+在修复前提交 `3e7328b` 上，用同一语义探针观察到：
+
+```text
+SEMANTIC RED: required delivery_receipt_casper can be removed from both inventories
+SEMANTIC RED: frozen goal and C2 semantics can be changed
+SEMANTIC RED: malformed artifact ID was accepted with status EVIDENCE_READY
+```
+
+修复后：
+
+```text
+cd backend
+GOCACHE=/tmp/magi-m1-go-cache go test ./cmd/m1-e2e ./internal/m1e2e -count=1 -v
+PASS
+
+GOCACHE=/tmp/magi-m1-go-cache go test -race ./cmd/m1-e2e ./internal/m1e2e -count=1
+PASS
+```
+
+### D. 全量回归与静态检查
+
+```text
+GOCACHE=/tmp/magi-m1-go-cache go test ./... -count=1
+PASS
+
+GOCACHE=/tmp/magi-m1-go-cache go vet ./...
+PASS（无输出）
+
+gofmt -l backend/internal/m1e2e backend/cmd/m1-e2e
+无输出
+
+git diff --check
+无输出
+```
+
+### E. 真实/合成隔离观测
+
+```text
+go run ./cmd/m1-e2e -mode real
+status=BLOCKED m1_verdict=NOT_EVALUATED blockers=CAPABILITY_UNAVAILABLE:*
+
+go run ./cmd/m1-e2e -mode synthetic
+status=BLOCKED m1_verdict=NOT_EVALUATED
+```
+
+默认 CLI 没有注入 capability，因此 REAL 模式只显示当前缺口；测试中的 ready executor 仅证明 runner 状态机，不证明真实业务能力。两次 REAL CLI 输出逐字节一致。
+
+### F. 未验证 / 仍阻塞
+
+- 未连接真实 Provider、C2、Journal 或 Egress；没有 MySQL 依赖。
+- 没有执行独立 M1-GATE，未生成 `PASS_M1`。
+- `M1_GATE` 始终为 `NOT_RUN`，这是独立验收边界。
+- artifact digest/source 的真实性与外部原件核验仍由 M1-GATE 负责；M1-00 只校验结构和槽位。
