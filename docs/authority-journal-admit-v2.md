@@ -2,8 +2,11 @@
 
 > 关联：[Roadmap #2](https://github.com/jamespud/MAGI-system/issues/2)、[Stage #43](https://github.com/jamespud/MAGI-system/issues/43)、[#45](https://github.com/jamespud/MAGI-system/issues/45)、[#47](https://github.com/jamespud/MAGI-system/issues/47)、M1-00 [#54](https://github.com/jamespud/MAGI-system/issues/54)。
 >
-> **状态：Draft Design Change / static declarations only。**
-> 本文件不是 `CommitIfCurrent` 实现，不创建 authority sequence、token、provider reservation、Journal event、exposure 或 settlement；不连接真实 Provider；不激活任何生产能力。
+> **状态：M1-02A Admission Commit Core implemented / default-off；Gate 与 Settlement 仍为 Draft。**
+> M1-02A 分支实现已提供真实 MySQL
+> `JOURNAL_ADMIT_V2` 共同权威提交、原子 admission 写集和不可消费的 blocked fence。
+> 本文件不实现 `JOURNAL_EXPOSURE_GATE_V2`、`JOURNAL_SETTLE_V2`、独立 witness、真实
+> Provider 暴露或生产启用；`APPLIED_VERIFIED` 仍无入口。
 
 ## 0. 结论先行
 
@@ -330,14 +333,16 @@ INSERT INTO a45_provider_settlement (...);
 | `REPLAY` | 返回原 lineage；不产生新暴露许可 |
 | `WRITE_SET` | 写集不完整、混入错误阶段或派生计划不合法 |
 
-**NOT RUN / BLOCKED：**
+**M1-02A 已解除 / 仍 BLOCKED：**
 
-- 真实 MySQL 锁、crash、lease、revocation 竞争；
-- 真实 C2 root/signing/delegation/consent；
-- 真实 Provider fence/lease/revocation enforcement；
-- 真实暴露、读取和 provider original reconciliation；
-- `CommitIfCurrent` 实现；
-- 三份 receipt、Evidence Closure、SealedBallot、DecisionRecord；
-- 生产启用、受保护 Egress、push/PR/merge。
+- `JOURNAL_ADMIT_V2` 的 MySQL common order、C2 重验、owner/lease/generation、
+  Journal/HWM/pending CAS、幂等、response-loss 与写点故障已实现并验证；证据见
+  [`m1-02a-authority-commit-core.md`](m1-02a-authority-commit-core.md)。
+- 真实 Provider fence/lease/revocation enforcement 仍为 BLOCKED；
+- `JOURNAL_EXPOSURE_GATE_V2`、`JOURNAL_SETTLE_V2`、独立 witness、
+  真实暴露/读取与 provider original reconciliation 仍为 BLOCKED；
+- 三份 genuine receipt、Evidence Closure、SealedBallot、DecisionRecord 仍为 NOT RUN；
+- 生产启用、受保护 Egress 与外部发送仍未实现。
 
-本 Design Change 只解除 #47 之前的契约歧义；它本身不使 M1 通过，也不授予 `PASS_M1`。
+M1-02A 只解除 #47 的 Admission Commit Core 子集；它不使 M1 通过，也不授予
+`PASS_M1` 或真实 Provider 暴露权限。

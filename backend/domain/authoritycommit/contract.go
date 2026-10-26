@@ -93,6 +93,13 @@ func Validate(req AdmissionRequest) Result {
 			return denied("DIGEST_INVALID")
 		}
 	}
+	dependencyIDs := make(map[string]struct{}, len(a.DependencyEdgeInputs))
+	for _, dependency := range a.DependencyEdgeInputs {
+		if _, exists := dependencyIDs[dependency.ID]; exists {
+			return denied("DEPENDENCY_INVALID")
+		}
+		dependencyIDs[dependency.ID] = struct{}{}
+	}
 	fence := a.Fence
 	if (fence.Mode != "PROVIDER_ENFORCED_LEASE" && fence.Mode != "AUTHORITY_ORDERED_GATE") ||
 		!idPattern.MatchString(fence.LeaseID) || !validUTCMillis(fence.LeaseUntil) {

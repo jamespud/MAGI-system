@@ -103,18 +103,31 @@ type AdmissionPlan struct {
 type AdmissionCommit struct {
 	UniqueKey            string `json:"unique_key"`
 	RequestDigest        string `json:"request_digest"`
+	AdmissionDigest      string `json:"admission_digest"`
 	CommitID             string `json:"commit_id"`
+	ExactTargetID        string `json:"exact_target_id"`
+	CommitToken          string `json:"commit_token"`
+	ProofID              string `json:"proof_id"`
+	JournalID            string `json:"journal_id"`
 	AuthoritySequence    uint64 `json:"authority_sequence"`
+	JournalLocalSequence uint64 `json:"journal_local_sequence"`
 	JournalHighWatermark uint64 `json:"journal_high_watermark"`
+	PendingBefore        uint64 `json:"pending_before"`
+	PendingAfter         uint64 `json:"pending_after"`
+	CommittedAt          string `json:"committed_at"`
 	LineageDigest        string `json:"lineage_digest"`
+	ExposurePermitted    bool   `json:"exposure_permitted"`
 }
 
 // Result reports structural validation or a future persisted commit. A VALID
 // validation result has no Commit and authorizes no mutation. Admission results,
 // including replay, must always leave ExposurePermitted false.
 type Result struct {
-	Outcome           authority.Outcome `json:"outcome"`
-	Code              string            `json:"code"`
-	Commit            *AdmissionCommit  `json:"commit"`
-	ExposurePermitted bool              `json:"exposure_permitted"`
+	Outcome             authority.Outcome `json:"outcome"`
+	Code                string            `json:"code"`
+	Detail              string            `json:"detail,omitempty"`
+	Disposition         string            `json:"disposition,omitempty"`
+	Commit              *AdmissionCommit  `json:"commit"`
+	BlockedCapabilities []string          `json:"blocked_capabilities,omitempty"`
+	ExposurePermitted   bool              `json:"exposure_permitted"`
 }

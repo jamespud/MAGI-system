@@ -589,3 +589,13 @@ func TestAdmissionCommitCarriesUniqueKey(t *testing.T) {
 		t.Fatalf("replayed result lost identity or gained exposure permission: %+v", replay)
 	}
 }
+
+func TestAdmissionRequestRejectsDuplicateDependencyIdentities(t *testing.T) {
+	req := admissionRequest(t)
+	duplicate := req.Admission.DependencyEdgeInputs[0]
+	duplicate.Digest = strings.Repeat("f", 64)
+	req.Admission.DependencyEdgeInputs = append(req.Admission.DependencyEdgeInputs, duplicate)
+	if result := authoritycommit.Validate(req); result.Outcome != authority.OutcomeDenied || result.Code != "DEPENDENCY_INVALID" {
+		t.Fatalf("duplicate dependency result=%+v", result)
+	}
+}
