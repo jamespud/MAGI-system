@@ -349,7 +349,7 @@ func TestAuthorityMySQL_BootstrapProofRestartAndReplyLoss(t *testing.T) {
 }
 
 func TestAuthorityMySQL_RevocationMonotonicAndABA(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("bootstrap outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
@@ -403,7 +403,7 @@ func TestAuthorityMySQL_RevocationMonotonicAndABA(t *testing.T) {
 }
 
 func TestAuthorityMySQL_KeyRotationRejectsOldVersionAndRestart(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("bootstrap outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
@@ -453,7 +453,7 @@ func TestAuthorityMySQL_KeyRotationRejectsOldVersionAndRestart(t *testing.T) {
 }
 
 func TestAuthorityMySQL_ConcurrentRevocationAndVerification(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("bootstrap outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
@@ -681,7 +681,7 @@ func TestAuthorityMySQL_RoundGenerationAndEpochAreIndependent(t *testing.T) {
 }
 
 func TestAuthorityMySQL_ConcurrentKeyRotationAndVerification(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("bootstrap outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
@@ -895,7 +895,7 @@ func authorityRotationCommand(t *testing.T, f *authoritySQLFixture, commandID st
 }
 
 func TestAuthorityMySQL_UnauthenticatedMutationFailsClosed(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("bootstrap outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)

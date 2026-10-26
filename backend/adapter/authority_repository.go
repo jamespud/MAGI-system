@@ -137,6 +137,48 @@ func (r *AuthorityRepository) begin(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).Begin(&sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }
 
+// lockAuthorityHead must precede every C2 root/scope lock in an ordered writer.
+// S33 is required: an unavailable head is an error, never a legacy fallback.
+// The no-op duplicate update locks an existing row without changing a replay's
+// sequence or timestamp. A newly inserted row rolls back with a rejected command.
+func lockAuthorityHead(tx *gorm.DB, trustDomain string) (authorityHeadRow, authority.Result) {
+	var row authorityHeadRow
+	if err := tx.Exec(`INSERT INTO magi_authority_head (trust_domain) VALUES (?)
+		ON DUPLICATE KEY UPDATE trust_domain = trust_domain`, trustDomain).Error; err != nil {
+		return row, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+	}
+	err := tx.Raw(`SELECT trust_domain, last_sequence, last_admission_sequence,
+		last_revocation_sequence, last_gate_sequence, last_settlement_sequence, updated_at
+		FROM magi_authority_head WHERE trust_domain = ? FOR UPDATE`, trustDomain).Row().Scan(
+		&row.TrustDomain, &row.LastSequence, &row.LastAdmissionSequence,
+		&row.LastRevocationSequence, &row.LastGateSequence, &row.LastSettlementSequence, &row.UpdatedAt)
+	if err != nil {
+		return authorityHeadRow{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: err.Error()}
+	}
+	return row, authority.Result{}
+}
+
+// advanceAuthorityHead allocates the next common sequence for a C2 withdrawal.
+// Rotation invalidates credential scope, so it advances the revocation watermark
+// too. Admission allocation with its owner predicate belongs to the v2 consumer.
+func advanceAuthorityHead(tx *gorm.DB, head authorityHeadRow) (authorityHeadRow, authority.Result) {
+	if head.LastSequence == ^uint64(0) {
+		return head, authority.Result{Outcome: authority.OutcomeConflict, Code: "AUTHORITY_SEQUENCE_EXHAUSTED"}
+	}
+	next := head.LastSequence + 1
+	updated := tx.Exec(`UPDATE magi_authority_head
+		SET last_sequence = ?, last_revocation_sequence = ?, updated_at = CURRENT_TIMESTAMP(6)
+		WHERE trust_domain = ? AND last_sequence = ?`, next, next, head.TrustDomain, head.LastSequence)
+	if updated.Error != nil {
+		return head, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: updated.Error.Error()}
+	}
+	if updated.RowsAffected != 1 {
+		return head, authority.Result{Outcome: authority.OutcomeStale, Code: "AUTHORITY_SEQUENCE_STALE"}
+	}
+	head.LastSequence, head.LastRevocationSequence = next, next
+	return head, authority.Result{}
+}
+
 func lockActiveAuthorityRoot(tx *gorm.DB, trustDomain string) (authorityRootRow, authority.Result) {
 	var row authorityRootRow
 	err := tx.Raw(`SELECT trust_domain, root_incarnation, root_fingerprint, bootstrap_version,
@@ -1140,6 +1182,10 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: tx.Error.Error()}
 	}
 	defer func() { _ = tx.Rollback().Error }()
+	head, result := lockAuthorityHead(tx, body.TrustDomain)
+	if result.Outcome != "" {
+		return authority.EpochState{}, result
+	}
 	root, result := lockActiveAuthorityRoot(tx, body.TrustDomain)
 	if result.Outcome != "" {
 		_ = tx.Rollback().Error
@@ -1217,6 +1263,9 @@ func (r *AuthorityRepository) RevokeScope(ctx context.Context, command authority
 		_ = tx.Rollback().Error
 		return authority.EpochState{}, result
 	}
+	if _, result := advanceAuthorityHead(tx, head); result.Outcome != "" {
+		return authority.EpochState{}, result
+	}
 	if err := tx.Commit().Error; err != nil {
 		return authority.EpochState{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_COMMIT_UNKNOWN", Detail: err.Error()}
 	}
@@ -1242,6 +1291,10 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 		return authority.Credential{}, authority.Result{Outcome: authority.OutcomeUnknown, Code: "AUTHORITY_STORE_ERROR", Detail: tx.Error.Error()}
 	}
 	defer func() { _ = tx.Rollback().Error }()
+	head, result := lockAuthorityHead(tx, body.TrustDomain)
+	if result.Outcome != "" {
+		return authority.Credential{}, result
+	}
 	root, result := lockActiveAuthorityRoot(tx, body.TrustDomain)
 	if result.Outcome != "" {
 		_ = tx.Rollback().Error
@@ -1355,6 +1408,9 @@ func (r *AuthorityRepository) RotateCredential(ctx context.Context, command auth
 	if result := insertAuthorityCommand(tx, body.TrustDomain, authorityCommandRotation,
 		body.CommandID, commandRaw, commandDigest, &nextEpoch, &body.NewCredential, now); result.Outcome != "" {
 		_ = tx.Rollback().Error
+		return authority.Credential{}, result
+	}
+	if _, result := advanceAuthorityHead(tx, head); result.Outcome != "" {
 		return authority.Credential{}, result
 	}
 	if err := tx.Commit().Error; err != nil {
