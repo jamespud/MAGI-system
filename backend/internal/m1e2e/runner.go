@@ -58,12 +58,13 @@ type StageResult struct {
 }
 
 type NegativeCaseResult struct {
-	ID              string  `json:"id"`
-	Stage           StageID `json:"stage"`
-	Status          Status  `json:"status"`
-	ExpectedStatus  Status  `json:"expected_status"`
-	ExpectedBlocker string  `json:"expected_blocker"`
-	Note            string  `json:"note"`
+	ID              string              `json:"id"`
+	Stage           StageID             `json:"stage"`
+	Status          Status              `json:"status"`
+	ExpectedStatus  Status              `json:"expected_status"`
+	ExpectedBlocker string              `json:"expected_blocker"`
+	Requirement     NegativeRequirement `json:"requirement"`
+	Note            string              `json:"note"`
 }
 
 type TraceEvent struct {
@@ -110,7 +111,8 @@ func (r Runner) Run(ctx context.Context) (RunResult, error) {
 		result.NegativeCases = append(result.NegativeCases, NegativeCaseResult{
 			ID: negative.ID, Stage: negative.Stage, Status: StatusNotRun,
 			ExpectedStatus: negative.ExpectedStatus, ExpectedBlocker: negative.ExpectedBlocker,
-			Note: "definition only; M1-00 does not execute business negative cases",
+			Requirement: negative.Requirement,
+			Note:        "definition only; M1-00 does not execute business negative cases",
 		})
 	}
 
@@ -240,7 +242,7 @@ func (r Runner) classifyEvidence(stage StageSpec, result *StageResult) string {
 	if r.Mode == ModeReal && result.EvidenceClass != EvidenceReal {
 		return "NON_REAL_EVIDENCE_IN_REAL_MODE"
 	}
-	if blocker := validateArtifacts(stage, result.Artifacts); blocker != "" {
+	if blocker := validateArtifacts(r.Scenario, stage, result.Artifacts); blocker != "" {
 		return blocker
 	}
 	for _, assertion := range result.Assertions {
@@ -257,17 +259,23 @@ func (r Runner) classifyEvidence(stage StageSpec, result *StageResult) string {
 	return ""
 }
 
-func validateArtifacts(stage StageSpec, artifacts []ArtifactRef) string {
+func validateArtifacts(scenario Scenario, stage StageSpec, artifacts []ArtifactRef) string {
 	required := make(map[string]struct{}, len(stage.RequiredArtifacts))
 	for _, slot := range stage.RequiredArtifacts {
 		required[slot] = struct{}{}
+	}
+	slots := make(map[string]ArtifactSlot, len(scenario.ArtifactSlots))
+	for _, slot := range scenario.ArtifactSlots {
+		slots[slot.Name] = slot
 	}
 	seen := make(map[string]struct{}, len(artifacts))
 	for _, artifact := range artifacts {
 		if _, ok := required[artifact.Slot]; !ok {
 			return "UNDECLARED_ARTIFACT:" + artifact.Slot
 		}
-		if artifact.ID == "" || artifact.Source == "" || !digestRE.MatchString(artifact.Digest) {
+		slot, ok := slots[artifact.Slot]
+		if !ok || slot.Stage != stage.ID || !artifactIDRE.MatchString(artifact.ID) || !strings.HasPrefix(artifact.ID, slot.IDPrefix+"_") ||
+			artifact.Source == "" || !digestRE.MatchString(artifact.Digest) {
 			return "INVALID_ARTIFACT:" + artifact.Slot
 		}
 		if _, exists := seen[artifact.Slot]; exists {

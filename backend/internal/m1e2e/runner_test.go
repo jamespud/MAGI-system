@@ -56,10 +56,11 @@ func allExecutors(scenario Scenario, evidence EvidenceClass) map[StageID]StageEx
 		artifacts := make([]ArtifactRef, 0, len(stage.RequiredArtifacts))
 		for i, name := range stage.RequiredArtifacts {
 			slot := slots[name]
+			hexChar := byte('a' + i%6)
 			artifacts = append(artifacts, ArtifactRef{
 				Slot:   name,
-				ID:     slot.IDPrefix + "_" + strings.Repeat(string(rune('a'+i)), 64),
-				Digest: repeatHex(byte('a' + i%6)),
+				ID:     slot.IDPrefix + "_" + strings.Repeat(string(hexChar), 64),
+				Digest: repeatHex(hexChar),
 				Source: "focused-test-executor",
 			})
 		}
@@ -222,6 +223,47 @@ func TestRunnerRejectsPassM1FromStageExecutor(t *testing.T) {
 	}).Run(context.Background())
 	if !errors.Is(err, ErrPassM1Forbidden) {
 		t.Fatalf("Run() error = %v, want ErrPassM1Forbidden", err)
+	}
+}
+
+func TestRunnerRejectsMalformedArtifactIdentity(t *testing.T) {
+	for _, artifactID := range []string{"x", "ctxm_" + strings.Repeat("a", 64)} {
+		t.Run(artifactID, func(t *testing.T) {
+			scenario, err := LoadScenario()
+			if err != nil {
+				t.Fatal(err)
+			}
+			executors := allExecutors(scenario, EvidenceReal)
+			executors[StageCharterContext] = stageExecutorFunc(func(_ context.Context, _ Scenario, stage StageSpec) (StageExecution, error) {
+				return StageExecution{
+					Status: StatusEvidenceReady, EvidenceClass: EvidenceReal,
+					Artifacts: []ArtifactRef{
+						{Slot: "charter", ID: artifactID, Digest: repeatHex('a'), Source: "focused-test-executor"},
+						{Slot: "context_manifest", ID: "ctxm_" + strings.Repeat("b", 64), Digest: repeatHex('b'), Source: "focused-test-executor"},
+					},
+					Assertions: []Assertion{{ID: "stage-contract", Passed: true}},
+				}, nil
+			})
+			result, err := (Runner{
+				Scenario: scenario, Mode: ModeReal, Capabilities: allCapabilities(), Executors: executors,
+			}).Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != StatusFail {
+				t.Fatalf("overall status = %q, want FAIL", result.Status)
+			}
+			for _, stage := range result.Stages {
+				if stage.ID != StageCharterContext {
+					continue
+				}
+				if stage.Status != StatusFail || stage.Blocker != "INVALID_ARTIFACT:charter" {
+					t.Fatalf("charter stage = %+v, want INVALID_ARTIFACT:charter", stage)
+				}
+				return
+			}
+			t.Fatal("charter stage result missing")
+		})
 	}
 }
 

@@ -265,49 +265,57 @@
       "id": "missing_third_receipt",
       "stage": "EVIDENCE_CLOSURE",
       "expected_status": "BLOCKED",
-      "expected_blocker": "THIRD_RECEIPT_MISSING"
+      "expected_blocker": "THIRD_RECEIPT_MISSING",
+      "requirement": "REQUIRED"
     },
     {
       "id": "stale_material",
       "stage": "JOURNAL_ADMISSION",
       "expected_status": "BLOCKED",
-      "expected_blocker": "MATERIAL_STALE"
+      "expected_blocker": "MATERIAL_STALE",
+      "requirement": "REQUIRED"
     },
     {
       "id": "revoked_context",
       "stage": "JOURNAL_ADMISSION",
       "expected_status": "BLOCKED",
-      "expected_blocker": "CONTEXT_REVOKED"
+      "expected_blocker": "CONTEXT_REVOKED",
+      "requirement": "REQUIRED"
     },
     {
       "id": "duplicate_ballot",
       "stage": "SEALED_BALLOTS",
       "expected_status": "FAIL",
-      "expected_blocker": "DUPLICATE_OR_CONFLICTING_BALLOT"
+      "expected_blocker": "DUPLICATE_OR_CONFLICTING_BALLOT",
+      "requirement": "REQUIRED"
     },
     {
       "id": "witness_unavailable",
       "stage": "M1_GATE",
       "expected_status": "BLOCKED",
-      "expected_blocker": "WITNESS_UNAVAILABLE"
+      "expected_blocker": "WITNESS_UNAVAILABLE",
+      "requirement": "REQUIRED"
     },
     {
       "id": "provider_outcome_unknown",
       "stage": "JOURNAL_ADMISSION",
       "expected_status": "BLOCKED",
-      "expected_blocker": "PROVIDER_OUTCOME_UNKNOWN"
+      "expected_blocker": "PROVIDER_OUTCOME_UNKNOWN",
+      "requirement": "REQUIRED"
     },
     {
       "id": "old_generation_replay",
       "stage": "JOURNAL_ADMISSION",
       "expected_status": "BLOCKED",
-      "expected_blocker": "OLD_GENERATION_REPLAY"
+      "expected_blocker": "OLD_GENERATION_REPLAY",
+      "requirement": "SUPPLEMENTAL"
     },
     {
       "id": "protected_send_attempt_r0",
       "stage": "R0_EGRESS_CHECK",
       "expected_status": "FAIL",
-      "expected_blocker": "PROTECTED_WRITE_ATTEMPTED_IN_R0"
+      "expected_blocker": "PROTECTED_WRITE_ATTEMPTED_IN_R0",
+      "requirement": "SUPPLEMENTAL"
     }
   ]
 }

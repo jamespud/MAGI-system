@@ -12,9 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"slices"
-	"strings"
 )
 
 const (
@@ -134,11 +134,19 @@ type StageSpec struct {
 	RequiredArtifacts    []string     `json:"required_artifacts"`
 }
 
+type NegativeRequirement string
+
+const (
+	NegativeRequirementRequired     NegativeRequirement = "REQUIRED"
+	NegativeRequirementSupplemental NegativeRequirement = "SUPPLEMENTAL"
+)
+
 type NegativeCase struct {
-	ID              string  `json:"id"`
-	Stage           StageID `json:"stage"`
-	ExpectedStatus  Status  `json:"expected_status"`
-	ExpectedBlocker string  `json:"expected_blocker"`
+	ID              string              `json:"id"`
+	Stage           StageID             `json:"stage"`
+	ExpectedStatus  Status              `json:"expected_status"`
+	ExpectedBlocker string              `json:"expected_blocker"`
+	Requirement     NegativeRequirement `json:"requirement"`
 }
 
 type Scenario struct {
@@ -164,6 +172,7 @@ var embeddedScenario []byte
 
 var (
 	digestRE              = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	artifactIDRE          = regexp.MustCompile(`^[A-Za-z0-9]+_[0-9a-f]{64}$`)
 	knownArtifactPrefixes = map[string]string{
 		"decision_charter":         "chtr",
 		"context_manifest":         "ctxm",
@@ -178,22 +187,71 @@ var (
 		"decision_record":          "drec",
 		"trusted_report":           "rpt",
 	}
+	expectedGoal = Goal{
+		Statement: "Within the allowed error rate and operational burden, prefer at least a 10% P95 request-latency improvement while preserving stop authority and verifiable recovery.",
+		HardConstraints: []string{
+			"Preserve Requester stop authority.",
+			"Recovery must be independently verifiable.",
+			"Do not expand authorization.",
+			"R0 must not obtain or use a protected write capability.",
+		},
+		PreferenceOrder: []string{"lower verified risk", "lower operational burden", "stronger verified effect"},
+	}
+	expectedCandidates = []Candidate{
+		{CandidateID: "C0", Proposal: "Keep the current state and continue observing.", RiskLevel: "R0", IsNoAction: true, RequiresProtectedWrite: false, Conditions: []string{}},
+		{CandidateID: "C1", Proposal: "Run a shadow validation without routing real requests or changing the running version.", RiskLevel: "R0", IsNoAction: false, RequiresProtectedWrite: false, Conditions: []string{"Do not route production traffic", "Do not change the running version"}},
+		{CandidateID: "C2", Proposal: "Run an isolated 5% canary for at most 15 minutes with bounded error and recovery limits.", RiskLevel: "R1", IsNoAction: false, RequiresProtectedWrite: true, Conditions: []string{"Additional error rate <= 0.5 percentage points", "Verified recovery <= 60 seconds", "Separate authorization required"}},
+		{CandidateID: "C3", Proposal: "Run an isolated 10% canary for at most 15 minutes with the same limits and per-attempt human approval.", RiskLevel: "R2", IsNoAction: false, RequiresProtectedWrite: true, Conditions: []string{"Additional error rate <= 0.5 percentage points", "Verified recovery <= 60 seconds", "Per-attempt human approval"}},
+	}
+	expectedArtifactSlots = []ArtifactSlot{
+		{Name: "charter", ArtifactType: "decision_charter", IDPrefix: "chtr", Stage: StageCharterContext},
+		{Name: "context_manifest", ArtifactType: "context_manifest", IDPrefix: "ctxm", Stage: StageCharterContext},
+		{Name: "journal_admission_melchior", ArtifactType: "journal_admission", IDPrefix: "jadm", PersonaID: "melchior", Stage: StageJournalAdmission},
+		{Name: "journal_admission_balthasar", ArtifactType: "journal_admission", IDPrefix: "jadm", PersonaID: "balthasar", Stage: StageJournalAdmission},
+		{Name: "journal_admission_casper", ArtifactType: "journal_admission", IDPrefix: "jadm", PersonaID: "casper", Stage: StageJournalAdmission},
+		{Name: "delivery_receipt_melchior", ArtifactType: "trusted_delivery_receipt", IDPrefix: "drcp", PersonaID: "melchior", Stage: StageJournalAdmission},
+		{Name: "delivery_receipt_balthasar", ArtifactType: "trusted_delivery_receipt", IDPrefix: "drcp", PersonaID: "balthasar", Stage: StageJournalAdmission},
+		{Name: "delivery_receipt_casper", ArtifactType: "trusted_delivery_receipt", IDPrefix: "drcp", PersonaID: "casper", Stage: StageJournalAdmission},
+		{Name: "candidate_snapshot", ArtifactType: "candidate_snapshot", IDPrefix: "csnp", Stage: StagePersonaInvestigation},
+		{Name: "readset_melchior", ArtifactType: "read_set_snapshot", IDPrefix: "rset", PersonaID: "melchior", Stage: StageEvidenceClosure},
+		{Name: "readset_balthasar", ArtifactType: "read_set_snapshot", IDPrefix: "rset", PersonaID: "balthasar", Stage: StageEvidenceClosure},
+		{Name: "readset_casper", ArtifactType: "read_set_snapshot", IDPrefix: "rset", PersonaID: "casper", Stage: StageEvidenceClosure},
+		{Name: "confirmation_melchior", ArtifactType: "candidate_confirmation", IDPrefix: "cnfm", PersonaID: "melchior", Stage: StageEvidenceClosure},
+		{Name: "confirmation_balthasar", ArtifactType: "candidate_confirmation", IDPrefix: "cnfm", PersonaID: "balthasar", Stage: StageEvidenceClosure},
+		{Name: "confirmation_casper", ArtifactType: "candidate_confirmation", IDPrefix: "cnfm", PersonaID: "casper", Stage: StageEvidenceClosure},
+		{Name: "evidence_closure", ArtifactType: "evidence_closure", IDPrefix: "ecls", Stage: StageEvidenceClosure},
+		{Name: "sealed_ballot_melchior", ArtifactType: "sealed_ballot", IDPrefix: "sbll", PersonaID: "melchior", Stage: StageSealedBallots},
+		{Name: "sealed_ballot_balthasar", ArtifactType: "sealed_ballot", IDPrefix: "sbll", PersonaID: "balthasar", Stage: StageSealedBallots},
+		{Name: "sealed_ballot_casper", ArtifactType: "sealed_ballot", IDPrefix: "sbll", PersonaID: "casper", Stage: StageSealedBallots},
+		{Name: "ballot_set", ArtifactType: "ballot_set", IDPrefix: "bset", Stage: StageDecisionRecord},
+		{Name: "decision_record", ArtifactType: "decision_record", IDPrefix: "drec", Stage: StageDecisionRecord},
+		{Name: "trusted_report", ArtifactType: "trusted_report", IDPrefix: "rpt", Stage: StageTrustedReport},
+	}
 )
 
 var expectedStages = []struct {
-	id   StageID
-	caps []Capability
+	id        StageID
+	caps      []Capability
+	artifacts []string
 }{
-	{StageScenarioContract, []Capability{CapabilityScenarioFixture}},
-	{StageCharterContext, []Capability{CapabilityCharterContext}},
-	{StageJournalAdmission, []Capability{CapabilityJournalAdmission, CapabilityProviderDelivery}},
-	{StagePersonaInvestigation, []Capability{CapabilityPersonaRuntime}},
-	{StageEvidenceClosure, []Capability{CapabilityEvidenceClosure}},
-	{StageSealedBallots, []Capability{CapabilitySealedBallots}},
-	{StageDecisionRecord, []Capability{CapabilityDecisionRecord}},
-	{StageTrustedReport, []Capability{CapabilityTrustedReport}},
-	{StageR0EgressCheck, []Capability{CapabilityR0EgressProbe}},
-	{StageM1Gate, nil},
+	{StageScenarioContract, []Capability{CapabilityScenarioFixture}, []string{}},
+	{StageCharterContext, []Capability{CapabilityCharterContext}, []string{"charter", "context_manifest"}},
+	{StageJournalAdmission, []Capability{CapabilityJournalAdmission, CapabilityProviderDelivery}, []string{
+		"journal_admission_melchior", "journal_admission_balthasar", "journal_admission_casper",
+		"delivery_receipt_melchior", "delivery_receipt_balthasar", "delivery_receipt_casper",
+	}},
+	{StagePersonaInvestigation, []Capability{CapabilityPersonaRuntime}, []string{"candidate_snapshot"}},
+	{StageEvidenceClosure, []Capability{CapabilityEvidenceClosure}, []string{
+		"readset_melchior", "readset_balthasar", "readset_casper",
+		"confirmation_melchior", "confirmation_balthasar", "confirmation_casper", "evidence_closure",
+	}},
+	{StageSealedBallots, []Capability{CapabilitySealedBallots}, []string{
+		"sealed_ballot_melchior", "sealed_ballot_balthasar", "sealed_ballot_casper",
+	}},
+	{StageDecisionRecord, []Capability{CapabilityDecisionRecord}, []string{"ballot_set", "decision_record"}},
+	{StageTrustedReport, []Capability{CapabilityTrustedReport}, []string{"trusted_report"}},
+	{StageR0EgressCheck, []Capability{CapabilityR0EgressProbe}, []string{}},
+	{StageM1Gate, nil, []string{}},
 }
 
 var requiredNegativeCases = []struct {
@@ -208,6 +266,14 @@ var requiredNegativeCases = []struct {
 	{"duplicate_ballot", StageSealedBallots, StatusFail, "DUPLICATE_OR_CONFLICTING_BALLOT"},
 	{"witness_unavailable", StageM1Gate, StatusBlocked, "WITNESS_UNAVAILABLE"},
 	{"provider_outcome_unknown", StageJournalAdmission, StatusBlocked, "PROVIDER_OUTCOME_UNKNOWN"},
+}
+
+var supplementalNegativeCases = []struct {
+	id      string
+	stage   StageID
+	status  Status
+	blocker string
+}{
 	{"old_generation_replay", StageJournalAdmission, StatusBlocked, "OLD_GENERATION_REPLAY"},
 	{"protected_send_attempt_r0", StageR0EgressCheck, StatusFail, "PROTECTED_WRITE_ATTEMPTED_IN_R0"},
 }
@@ -247,14 +313,17 @@ func (s Scenario) Validate() error {
 	if s.RiskLevel != "R0" || s.ProtectedWritesPermitted {
 		return errors.New("M1 reference scenario must be R0 and prohibit protected writes")
 	}
-	if strings.TrimSpace(s.Goal.Statement) == "" || len(s.Goal.HardConstraints) == 0 {
-		return errors.New("goal statement and hard constraints are required")
+	if !reflect.DeepEqual(s.Goal, expectedGoal) {
+		return errors.New("goal differs from the frozen ROLLOUT-LAB-E2E-01 objective")
 	}
 	if err := validateSubjects(s.Subjects); err != nil {
 		return err
 	}
 	if err := validatePersonas(s.Personas); err != nil {
 		return err
+	}
+	if !reflect.DeepEqual(s.Candidates, expectedCandidates) {
+		return errors.New("candidates differ from the frozen C0-C3 inventory")
 	}
 	if err := validateCandidates(s.Candidates); err != nil {
 		return err
@@ -376,8 +445,8 @@ func validateMaterials(materials []Material) error {
 }
 
 func validateArtifactSlots(slots []ArtifactSlot) error {
-	if len(slots) < 10 {
-		return fmt.Errorf("artifact slot count = %d, want at least 10", len(slots))
+	if !reflect.DeepEqual(slots, expectedArtifactSlots) {
+		return fmt.Errorf("artifact slot inventory differs from the frozen %d-slot contract", len(expectedArtifactSlots))
 	}
 	seen := make(map[string]struct{}, len(slots))
 	for _, slot := range slots {
@@ -418,6 +487,9 @@ func validateStages(stages []StageSpec, slots []ArtifactSlot) error {
 		if !slices.Equal(stage.RequiredCapabilities, want.caps) {
 			return fmt.Errorf("stage %s capabilities = %v, want %v", stage.ID, stage.RequiredCapabilities, want.caps)
 		}
+		if !slices.Equal(stage.RequiredArtifacts, want.artifacts) {
+			return fmt.Errorf("stage %s artifacts = %v, want %v", stage.ID, stage.RequiredArtifacts, want.artifacts)
+		}
 		seenArtifacts := make(map[string]struct{}, len(stage.RequiredArtifacts))
 		for _, artifact := range stage.RequiredArtifacts {
 			if _, exists := seenArtifacts[artifact]; exists {
@@ -436,8 +508,9 @@ func validateStages(stages []StageSpec, slots []ArtifactSlot) error {
 }
 
 func validateNegativeCases(cases []NegativeCase, stages []StageSpec) error {
-	if len(cases) != len(requiredNegativeCases) {
-		return fmt.Errorf("negative case count = %d, want %d", len(cases), len(requiredNegativeCases))
+	wantCount := len(requiredNegativeCases) + len(supplementalNegativeCases)
+	if len(cases) != wantCount {
+		return fmt.Errorf("negative case count = %d, want %d", len(cases), wantCount)
 	}
 	stageIDs := make(map[StageID]struct{}, len(stages))
 	for _, stage := range stages {
@@ -445,8 +518,17 @@ func validateNegativeCases(cases []NegativeCase, stages []StageSpec) error {
 	}
 	for i, want := range requiredNegativeCases {
 		negative := cases[i]
-		if negative.ID != want.id || negative.Stage != want.stage || negative.ExpectedStatus != want.status || negative.ExpectedBlocker != want.blocker {
-			return fmt.Errorf("negative case[%d] = %+v, want %s/%s/%s/%s", i, negative, want.id, want.stage, want.status, want.blocker)
+		if negative.ID != want.id || negative.Stage != want.stage || negative.ExpectedStatus != want.status || negative.ExpectedBlocker != want.blocker || negative.Requirement != NegativeRequirementRequired {
+			return fmt.Errorf("required negative case[%d] = %+v, want %s/%s/%s/%s/REQUIRED", i, negative, want.id, want.stage, want.status, want.blocker)
+		}
+		if _, ok := stageIDs[negative.Stage]; !ok {
+			return fmt.Errorf("negative case %s references unknown stage %s", negative.ID, negative.Stage)
+		}
+	}
+	for i, want := range supplementalNegativeCases {
+		negative := cases[len(requiredNegativeCases)+i]
+		if negative.ID != want.id || negative.Stage != want.stage || negative.ExpectedStatus != want.status || negative.ExpectedBlocker != want.blocker || negative.Requirement != NegativeRequirementSupplemental {
+			return fmt.Errorf("supplemental negative case[%d] = %+v, want %s/%s/%s/%s/SUPPLEMENTAL", i, negative, want.id, want.stage, want.status, want.blocker)
 		}
 		if _, ok := stageIDs[negative.Stage]; !ok {
 			return fmt.Errorf("negative case %s references unknown stage %s", negative.ID, negative.Stage)

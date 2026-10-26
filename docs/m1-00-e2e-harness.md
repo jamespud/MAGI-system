@@ -50,7 +50,9 @@ backend/internal/m1e2e/testdata/rollout_lab_e2e_01.json
 - C0–C3 四个候选，其中 C0 是唯一 no-action，C2/C3 只能作为分析候选，R0 不得执行受保护写入；
 - ROLLOUT-LAB 受控材料描述与有效期；
 - 三份 Journal admission、三份 delivery receipt、Candidate、三份 ReadSet、三份确认、三份 SealedBallot、BallotSet、DecisionRecord 和 TrustedReport 的精确 artifact slot；
-- 八个负例入口：缺第三回执、材料过期、上下文撤销、重复票据、见证不可用、Provider 结果未知、旧 Generation 重放、R0 受保护发送尝试。
+- 六个必需负例入口：缺第三回执、材料过期、上下文撤销、重复票据、见证不可用、Provider 结果未知；
+- 两个补充控制负例：旧 Generation 重放、R0 受保护发送尝试。输出通过 `requirement` 明确区分 `REQUIRED` 与 `SUPPLEMENTAL`，补充控制不能替代六个必需项。
+- 固定目标/C0-C3 语义、22 个 artifact slot 的类型/前缀/Persona/阶段以及每个阶段要求的 artifact 清单均独立冻结；同时删除 slot 与阶段要求会被拒绝。
 
 ## 3. 模式隔离
 
@@ -94,6 +96,7 @@ backend/internal/m1e2e/testdata/rollout_lab_e2e_01.json
 
 - `REAL` 模式提供 `EvidenceReal`；
 - 每个 required artifact slot 都有精确 ID、digest 和 source；
+- artifact ID 必须匹配该 slot 的 `id_prefix + "_" + 64 lowercase hex` 结构；M1-00 只检查结构，不替代 M1-GATE 的原件真实性验证；
 - 失败路径返回明确 `FAIL` 或 `BLOCKED`；
 - 不修改 runner 的 `PASS_M1` 禁止规则；
 - 不由 M1-00 自己判定 M1 通过。
