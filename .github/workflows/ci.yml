@@ -84,6 +84,8 @@ jobs:
           python3 ../scripts/check-authority-contract.py
           python3 ../scripts/test-authority-contract.py
           python3 ../scripts/test-authority-review.py
+          python3 ../scripts/check-journal-admit-v2.py
+          python3 ../scripts/test-journal-admit-v2.py
 
   scripts:
     name: Operational scripts gate

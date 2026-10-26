@@ -1,0 +1,1168 @@
+{
+  "bases": {
+    "admission": {
+      "contract_version": "magi-authority-journal-v2/1",
+      "operation": "JOURNAL_ADMIT_V2",
+      "admission": {
+        "key": {
+          "case_id": "case-rollout-lab-e2e-01",
+          "round": 1,
+          "context_manifest_id": "ctxm_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "persona_id": "melchior",
+          "delivery_id": "delivery-melchior-1",
+          "provider_request_id": "provider-request-melchior-1"
+        },
+        "principal": {
+          "subject_id": "recorder-1",
+          "identity_source_id": "identity-root-1",
+          "identity_source_version": "1"
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "authority-scope-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-scope-1",
+            "epoch": 4
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "credential-scope-1",
+            "epoch": 5
+          }
+        ],
+        "mutation_set": [
+          "admission",
+          "dependency_edges",
+          "exposure_fence",
+          "journal_event",
+          "journal_high_watermark",
+          "lineage",
+          "outbox",
+          "pending_transition",
+          "provider_reservation",
+          "token_consumed",
+          "unique_binding"
+        ],
+        "admission_input": {
+          "id": "admission-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:admission-input"
+        },
+        "journal_event_input": {
+          "id": "journal-event-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:journal-event-input"
+        },
+        "dependency_edge_inputs": [
+          {
+            "id": "edge-input",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:edge-input"
+          }
+        ],
+        "high_watermark": {
+          "journal_id": "journal-melchior",
+          "expected": 5,
+          "next": 6
+        },
+        "provider_reservation": {
+          "request_id": "provider-request-melchior-1",
+          "session_scope_id": "session-scope-1",
+          "expected_status": "ABSENT",
+          "next_status": "RESERVED"
+        },
+        "pending_transition": {
+          "journal_id": "journal-melchior",
+          "expected": 0,
+          "next": 1
+        },
+        "fence": {
+          "mode": "PROVIDER_ENFORCED_LEASE",
+          "lease_id": "lease-melchior-1",
+          "lease_until": "2026-10-25T01:00:30.000Z",
+          "authority_watermark": 0,
+          "execution_generation": 7,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "authority-scope-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-scope-1",
+              "epoch": 4
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "credential-scope-1",
+              "epoch": 5
+            }
+          ],
+          "provider_capability_ref": {
+            "id": "provider-fence-capability",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:provider-fence-capability"
+          }
+        }
+      },
+      "exposure_gate": null,
+      "settlement": null,
+      "authority": {
+        "admission_commit_id": "",
+        "admission_sequence": 0,
+        "revocation_sequence": 0,
+        "revocation_scope_id": "",
+        "revocation_epoch": 0,
+        "gate_sequence": 0,
+        "settlement_sequence": 0,
+        "current_generation": 7,
+        "current_authority_epoch": 3,
+        "current_context_epoch": 4,
+        "current_credential_epoch": 5,
+        "trusted_now": "2026-10-25T01:00:00.000Z"
+      },
+      "provider": {
+        "available": true,
+        "enforces_fence": true,
+        "supports_lease": true,
+        "enforces_revocation_watermark": true,
+        "max_lease_until": "2026-10-25T01:01:00.000Z"
+      },
+      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "admission_binding": null,
+      "settlement_binding": null
+    },
+    "exposure_gate": {
+      "contract_version": "magi-authority-journal-v2/1",
+      "operation": "JOURNAL_EXPOSURE_GATE_V2",
+      "admission": {
+        "key": {
+          "case_id": "case-rollout-lab-e2e-01",
+          "round": 1,
+          "context_manifest_id": "ctxm_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "persona_id": "melchior",
+          "delivery_id": "delivery-melchior-1",
+          "provider_request_id": "provider-request-melchior-1"
+        },
+        "principal": {
+          "subject_id": "recorder-1",
+          "identity_source_id": "identity-root-1",
+          "identity_source_version": "1"
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "authority-scope-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-scope-1",
+            "epoch": 4
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "credential-scope-1",
+            "epoch": 5
+          }
+        ],
+        "mutation_set": [
+          "admission",
+          "dependency_edges",
+          "exposure_fence",
+          "journal_event",
+          "journal_high_watermark",
+          "lineage",
+          "outbox",
+          "pending_transition",
+          "provider_reservation",
+          "token_consumed",
+          "unique_binding"
+        ],
+        "admission_input": {
+          "id": "admission-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:admission-input"
+        },
+        "journal_event_input": {
+          "id": "journal-event-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:journal-event-input"
+        },
+        "dependency_edge_inputs": [
+          {
+            "id": "edge-input",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:edge-input"
+          }
+        ],
+        "high_watermark": {
+          "journal_id": "journal-melchior",
+          "expected": 5,
+          "next": 6
+        },
+        "provider_reservation": {
+          "request_id": "provider-request-melchior-1",
+          "session_scope_id": "session-scope-1",
+          "expected_status": "ABSENT",
+          "next_status": "RESERVED"
+        },
+        "pending_transition": {
+          "journal_id": "journal-melchior",
+          "expected": 0,
+          "next": 1
+        },
+        "fence": {
+          "mode": "PROVIDER_ENFORCED_LEASE",
+          "lease_id": "lease-melchior-1",
+          "lease_until": "2026-10-25T01:00:30.000Z",
+          "authority_watermark": 0,
+          "execution_generation": 7,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "authority-scope-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-scope-1",
+              "epoch": 4
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "credential-scope-1",
+              "epoch": 5
+            }
+          ],
+          "provider_capability_ref": {
+            "id": "provider-fence-capability",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:provider-fence-capability"
+          }
+        }
+      },
+      "exposure_gate": {
+        "gate_id": "gate-melchior-1",
+        "admission_commit_id": "commit-admission-melchior-1",
+        "fence_id": "lease-melchior-1",
+        "linearization_sequence": 11,
+        "trusted_now": "2026-10-25T01:00:10.000Z"
+      },
+      "settlement": null,
+      "authority": {
+        "admission_commit_id": "commit-admission-melchior-1",
+        "admission_sequence": 10,
+        "revocation_sequence": 0,
+        "revocation_scope_id": "",
+        "revocation_epoch": 0,
+        "gate_sequence": 0,
+        "settlement_sequence": 0,
+        "current_generation": 7,
+        "current_authority_epoch": 3,
+        "current_context_epoch": 4,
+        "current_credential_epoch": 5,
+        "trusted_now": "2026-10-25T01:00:10.000Z"
+      },
+      "provider": {
+        "available": true,
+        "enforces_fence": true,
+        "supports_lease": true,
+        "enforces_revocation_watermark": true,
+        "max_lease_until": "2026-10-25T01:01:00.000Z"
+      },
+      "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "admission_binding": {
+        "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "admission_commit_id": "commit-admission-melchior-1",
+        "generation": 7,
+        "status": "ADMITTED",
+        "exposure_permitted": false
+      },
+      "settlement_binding": null
+    },
+    "settlement": {
+      "contract_version": "magi-authority-journal-v2/1",
+      "operation": "JOURNAL_SETTLE_V2",
+      "admission": {
+        "key": {
+          "case_id": "case-rollout-lab-e2e-01",
+          "round": 1,
+          "context_manifest_id": "ctxm_cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "persona_id": "melchior",
+          "delivery_id": "delivery-melchior-1",
+          "provider_request_id": "provider-request-melchior-1"
+        },
+        "principal": {
+          "subject_id": "recorder-1",
+          "identity_source_id": "identity-root-1",
+          "identity_source_version": "1"
+        },
+        "execution_generation": 7,
+        "scoped_epochs": [
+          {
+            "kind": "AUTHORITY",
+            "scope_id": "authority-scope-1",
+            "epoch": 3
+          },
+          {
+            "kind": "CONTEXT",
+            "scope_id": "context-scope-1",
+            "epoch": 4
+          },
+          {
+            "kind": "CREDENTIAL",
+            "scope_id": "credential-scope-1",
+            "epoch": 5
+          }
+        ],
+        "mutation_set": [
+          "admission",
+          "dependency_edges",
+          "exposure_fence",
+          "journal_event",
+          "journal_high_watermark",
+          "lineage",
+          "outbox",
+          "pending_transition",
+          "provider_reservation",
+          "token_consumed",
+          "unique_binding"
+        ],
+        "admission_input": {
+          "id": "admission-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:admission-input"
+        },
+        "journal_event_input": {
+          "id": "journal-event-input",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "object_ref": "object:journal-event-input"
+        },
+        "dependency_edge_inputs": [
+          {
+            "id": "edge-input",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:edge-input"
+          }
+        ],
+        "high_watermark": {
+          "journal_id": "journal-melchior",
+          "expected": 5,
+          "next": 6
+        },
+        "provider_reservation": {
+          "request_id": "provider-request-melchior-1",
+          "session_scope_id": "session-scope-1",
+          "expected_status": "ABSENT",
+          "next_status": "RESERVED"
+        },
+        "pending_transition": {
+          "journal_id": "journal-melchior",
+          "expected": 0,
+          "next": 1
+        },
+        "fence": {
+          "mode": "PROVIDER_ENFORCED_LEASE",
+          "lease_id": "lease-melchior-1",
+          "lease_until": "2026-10-25T01:00:30.000Z",
+          "authority_watermark": 0,
+          "execution_generation": 7,
+          "scoped_epochs": [
+            {
+              "kind": "AUTHORITY",
+              "scope_id": "authority-scope-1",
+              "epoch": 3
+            },
+            {
+              "kind": "CONTEXT",
+              "scope_id": "context-scope-1",
+              "epoch": 4
+            },
+            {
+              "kind": "CREDENTIAL",
+              "scope_id": "credential-scope-1",
+              "epoch": 5
+            }
+          ],
+          "provider_capability_ref": {
+            "id": "provider-fence-capability",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:provider-fence-capability"
+          }
+        }
+      },
+      "exposure_gate": {
+        "gate_id": "gate-melchior-1",
+        "admission_commit_id": "commit-admission-melchior-1",
+        "fence_id": "lease-melchior-1",
+        "linearization_sequence": 11,
+        "trusted_now": "2026-10-25T01:00:10.000Z"
+      },
+      "settlement": {
+        "admission_commit_id": "commit-admission-melchior-1",
+        "provider_request_id": "provider-request-melchior-1",
+        "expected_status": "ADMITTED",
+        "next_status": "APPLIED_VERIFIED",
+        "receipt": {
+          "receipt_id": "receipt-melchior-1",
+          "verified": true,
+          "provider_request_id": "provider-request-melchior-1",
+          "session_scope_id": "session-scope-1",
+          "applied_at": "2026-10-25T01:00:12.000Z",
+          "verification_ref": {
+            "id": "provider-verification",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "object_ref": "object:provider-verification"
+          },
+          "outcome": "APPLIED_VERIFIED"
+        },
+        "pending_transition": {
+          "journal_id": "journal-melchior",
+          "expected": 1,
+          "next": 0
+        },
+        "mutation_set": [
+          "lineage",
+          "outbox",
+          "pending_transition",
+          "provider_settlement",
+          "token_consumed",
+          "unique_binding"
+        ],
+        "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
+      },
+      "authority": {
+        "admission_commit_id": "commit-admission-melchior-1",
+        "admission_sequence": 10,
+        "revocation_sequence": 0,
+        "revocation_scope_id": "",
+        "revocation_epoch": 0,
+        "gate_sequence": 11,
+        "settlement_sequence": 0,
+        "current_generation": 7,
+        "current_authority_epoch": 3,
+        "current_context_epoch": 4,
+        "current_credential_epoch": 5,
+        "trusted_now": "2026-10-25T01:00:15.000Z"
+      },
+      "provider": {
+        "available": true,
+        "enforces_fence": true,
+        "supports_lease": true,
+        "enforces_revocation_watermark": true,
+        "max_lease_until": "2026-10-25T01:01:00.000Z"
+      },
+      "request_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+      "admission_binding": {
+        "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "admission_commit_id": "commit-admission-melchior-1",
+        "generation": 7,
+        "status": "EXPOSURE_GATED",
+        "exposure_permitted": true
+      },
+      "settlement_binding": null
+    }
+  },
+  "cases": [
+    {
+      "name": "admission_valid",
+      "base": "admission",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "admission_provider_cannot_enforce_fence",
+      "base": "admission",
+      "expected": "BLOCKED",
+      "mutations": [
+        {
+          "path": "provider/enforces_fence",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "admission_provider_cannot_enforce_revocation",
+      "base": "admission",
+      "expected": "BLOCKED",
+      "mutations": [
+        {
+          "path": "provider/enforces_revocation_watermark",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "admission_query_only_is_not_a_fence",
+      "base": "admission",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "admission/fence/mode",
+          "value": "QUERY_ONLY"
+        }
+      ]
+    },
+    {
+      "name": "admission_revoked_before_commit",
+      "base": "admission",
+      "expected": "REVOKED",
+      "mutations": [
+        {
+          "path": "authority/revocation_sequence",
+          "value": 7
+        }
+      ]
+    },
+    {
+      "name": "admission_lease_expired",
+      "base": "admission",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "authority/trusted_now",
+          "value": "2026-10-25T01:00:31.000Z"
+        }
+      ]
+    },
+    {
+      "name": "admission_stale_authority_epoch",
+      "base": "admission",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "authority/current_authority_epoch",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "admission_same_key_same_bytes_is_replay_only",
+      "base": "admission",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "admission_binding",
+          "value": {
+            "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "generation": 7,
+            "status": "ADMITTED",
+            "exposure_permitted": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "admission_same_key_different_bytes_conflicts",
+      "base": "admission",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "admission_binding",
+          "value": {
+            "request_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "generation": 7,
+            "status": "ADMITTED",
+            "exposure_permitted": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "admission_old_generation_cannot_reacquire",
+      "base": "admission",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "admission_binding",
+          "value": {
+            "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "admission_commit_id": "commit-admission-melchior-0",
+            "generation": 6,
+            "status": "ADMITTED",
+            "exposure_permitted": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "admission_plan_contains_settlement",
+      "base": "admission",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement",
+          "value": {
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "expected_status": "ADMITTED",
+            "next_status": "APPLIED_VERIFIED",
+            "receipt": {
+              "receipt_id": "receipt-melchior-1",
+              "verified": true,
+              "provider_request_id": "provider-request-melchior-1",
+              "session_scope_id": "session-scope-1",
+              "applied_at": "2026-10-25T01:00:12.000Z",
+              "verification_ref": {
+                "id": "provider-verification",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "object:provider-verification"
+              },
+              "outcome": "APPLIED_VERIFIED"
+            },
+            "pending_transition": {
+              "journal_id": "journal-melchior",
+              "expected": 1,
+              "next": 0
+            },
+            "mutation_set": [
+              "lineage",
+              "outbox",
+              "pending_transition",
+              "provider_settlement",
+              "token_consumed",
+              "unique_binding"
+            ],
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
+          }
+        }
+      ]
+    },
+    {
+      "name": "admission_missing_fence",
+      "base": "admission",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "admission/fence",
+          "delete": true
+        }
+      ]
+    },
+    {
+      "name": "gate_valid",
+      "base": "exposure_gate",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "gate_revocation_precedes_gate",
+      "base": "exposure_gate",
+      "expected": "REVOKED",
+      "mutations": [
+        {
+          "path": "authority/revocation_sequence",
+          "value": 11
+        }
+      ]
+    },
+    {
+      "name": "gate_lease_expired",
+      "base": "exposure_gate",
+      "expected": "EXPIRED",
+      "mutations": [
+        {
+          "path": "authority/trusted_now",
+          "value": "2026-10-25T01:00:31.000Z"
+        },
+        {
+          "path": "exposure_gate/trusted_now",
+          "value": "2026-10-25T01:00:31.000Z"
+        }
+      ]
+    },
+    {
+      "name": "gate_provider_cannot_enforce_revocation",
+      "base": "exposure_gate",
+      "expected": "BLOCKED",
+      "mutations": [
+        {
+          "path": "provider/enforces_revocation_watermark",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "gate_wrong_generation",
+      "base": "exposure_gate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "authority/current_generation",
+          "value": 8
+        }
+      ]
+    },
+    {
+      "name": "gate_replay_returns_same_gate",
+      "base": "exposure_gate",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "authority/gate_sequence",
+          "value": 11
+        },
+        {
+          "path": "admission_binding/status",
+          "value": "EXPOSURE_GATED"
+        },
+        {
+          "path": "admission_binding/exposure_permitted",
+          "value": true
+        }
+      ]
+    },
+    {
+      "name": "gate_plan_contains_settlement",
+      "base": "exposure_gate",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement",
+          "value": {
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "expected_status": "ADMITTED",
+            "next_status": "APPLIED_VERIFIED",
+            "receipt": {
+              "receipt_id": "receipt-melchior-1",
+              "verified": true,
+              "provider_request_id": "provider-request-melchior-1",
+              "session_scope_id": "session-scope-1",
+              "applied_at": "2026-10-25T01:00:12.000Z",
+              "verification_ref": {
+                "id": "provider-verification",
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "object_ref": "object:provider-verification"
+              },
+              "outcome": "APPLIED_VERIFIED"
+            },
+            "pending_transition": {
+              "journal_id": "journal-melchior",
+              "expected": 1,
+              "next": 0
+            },
+            "mutation_set": [
+              "lineage",
+              "outbox",
+              "pending_transition",
+              "provider_settlement",
+              "token_consumed",
+              "unique_binding"
+            ],
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea"
+          }
+        }
+      ]
+    },
+    {
+      "name": "settlement_valid",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": []
+    },
+    {
+      "name": "settlement_requires_gate",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/gate_sequence",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "settlement_unverified_receipt",
+      "base": "settlement",
+      "expected": "DENIED",
+      "mutations": [
+        {
+          "path": "settlement/receipt/verified",
+          "value": false
+        }
+      ]
+    },
+    {
+      "name": "settlement_unknown_cannot_be_applied",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "APPLIED_VERIFIED"
+        }
+      ]
+    },
+    {
+      "name": "settlement_wrong_admission",
+      "base": "settlement",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "settlement/admission_commit_id",
+          "value": "commit-admission-other"
+        }
+      ]
+    },
+    {
+      "name": "settlement_provider_request_mismatch",
+      "base": "settlement",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "settlement/receipt/provider_request_id",
+          "value": "provider-request-other"
+        }
+      ]
+    },
+    {
+      "name": "settlement_duplicate_returns_original",
+      "base": "settlement",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        },
+        {
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "settlement_revoked_after_gate_is_unknown",
+      "base": "settlement",
+      "expected": "UNKNOWN",
+      "mutations": [
+        {
+          "path": "authority/revocation_sequence",
+          "value": 12
+        }
+      ]
+    },
+    {
+      "name": "settlement_missing_receipt",
+      "base": "settlement",
+      "expected": "SCHEMA",
+      "mutations": [
+        {
+          "path": "settlement/receipt",
+          "delete": true
+        }
+      ]
+    },
+    {
+      "name": "settlement_gate_binding_mismatch",
+      "base": "settlement",
+      "expected": "TOKEN_BINDING",
+      "mutations": [
+        {
+          "path": "exposure_gate/admission_commit_id",
+          "value": "commit-admission-other"
+        }
+      ]
+    },
+    {
+      "name": "admission_requires_three_distinct_epoch_kinds",
+      "base": "admission",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "admission/scoped_epochs/1/kind",
+          "value": "AUTHORITY"
+        },
+        {
+          "path": "admission/scoped_epochs/1/scope_id",
+          "value": "authority-scope-1"
+        },
+        {
+          "path": "admission/scoped_epochs/1/epoch",
+          "value": 3
+        },
+        {
+          "path": "admission/fence/scoped_epochs/1/kind",
+          "value": "AUTHORITY"
+        },
+        {
+          "path": "admission/fence/scoped_epochs/1/scope_id",
+          "value": "authority-scope-1"
+        },
+        {
+          "path": "admission/fence/scoped_epochs/1/epoch",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "name": "admission_increments_pending_from_nonzero",
+      "base": "admission",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 1
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 2
+        }
+      ]
+    },
+    {
+      "name": "settlement_decrements_pending_from_nonzero",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/pending_transition/expected",
+          "value": 2
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unknown_keeps_pending",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unknown_cannot_release_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNKNOWN"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        }
+      ]
+    },
+    {
+      "name": "settlement_unverifiable_keeps_pending",
+      "base": "settlement",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "settlement_unverifiable_cannot_release_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/receipt/outcome",
+          "value": "UNVERIFIABLE"
+        },
+        {
+          "path": "settlement/next_status",
+          "value": "UNVERIFIABLE"
+        }
+      ]
+    },
+    {
+      "name": "gate_sequence_must_follow_admission",
+      "base": "exposure_gate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "exposure_gate/linearization_sequence",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "name": "gate_time_must_match_authority_time",
+      "base": "exposure_gate",
+      "expected": "STALE",
+      "mutations": [
+        {
+          "path": "exposure_gate/trusted_now",
+          "value": "2026-10-25T01:00:11.000Z"
+        }
+      ]
+    },
+    {
+      "name": "settlement_requires_exact_gate_sequence",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/gate_sequence",
+          "value": 12
+        }
+      ]
+    },
+    {
+      "name": "admission_increments_pending_at_limit",
+      "base": "admission",
+      "expected": "STATIC_VALID",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 511
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 512
+        }
+      ]
+    },
+    {
+      "name": "admission_rejects_pending_above_limit",
+      "base": "admission",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "admission/pending_transition/expected",
+          "value": 512
+        },
+        {
+          "path": "admission/pending_transition/next",
+          "value": 513
+        }
+      ]
+    },
+    {
+      "name": "settlement_rejects_zero_pending",
+      "base": "settlement",
+      "expected": "WRITE_SET",
+      "mutations": [
+        {
+          "path": "settlement/pending_transition/expected",
+          "value": 0
+        },
+        {
+          "path": "settlement/pending_transition/next",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "name": "settlement_replay_same_original",
+      "base": "settlement",
+      "expected": "REPLAY",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        },
+        {
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "settlement_replay_different_receipt",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        },
+        {
+          "path": "settlement/receipt/verification_ref/digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "path": "settlement_binding",
+          "value": {
+            "settlement_digest": "74a66b0309a4d240365e598b80362d7466e5c5338fc2ce0ecc27d436ca0566ea",
+            "admission_commit_id": "commit-admission-melchior-1",
+            "provider_request_id": "provider-request-melchior-1",
+            "settlement_commit_id": "commit-settlement-melchior-1",
+            "generation": 7,
+            "status": "COMMITTED"
+          }
+        }
+      ],
+      "preserve_settlement_binding_digest": true
+    },
+    {
+      "name": "settlement_digest_tamper",
+      "base": "settlement",
+      "expected": "TOKEN_BINDING",
+      "rebind_settlement": false,
+      "mutations": [
+        {
+          "path": "settlement/settlement_digest",
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ]
+    },
+    {
+      "name": "settlement_missing_binding_after_commit",
+      "base": "settlement",
+      "expected": "CONFLICT",
+      "mutations": [
+        {
+          "path": "authority/settlement_sequence",
+          "value": 12
+        }
+      ]
+    }
+  ]
+}
