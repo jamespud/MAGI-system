@@ -275,7 +275,7 @@ func validateArtifacts(scenario Scenario, stage StageSpec, artifacts []ArtifactR
 		}
 		slot, ok := slots[artifact.Slot]
 		if !ok || slot.Stage != stage.ID || !artifactIDRE.MatchString(artifact.ID) || !strings.HasPrefix(artifact.ID, slot.IDPrefix+"_") ||
-			artifact.Source == "" || !digestRE.MatchString(artifact.Digest) {
+			artifact.ID != slot.IDPrefix+"_"+artifact.Digest || artifact.Source == "" || !digestRE.MatchString(artifact.Digest) {
 			return "INVALID_ARTIFACT:" + artifact.Slot
 		}
 		if _, exists := seen[artifact.Slot]; exists {

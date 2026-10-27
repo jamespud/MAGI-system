@@ -96,7 +96,7 @@ backend/internal/m1e2e/testdata/rollout_lab_e2e_01.json
 
 - `REAL` 模式提供 `EvidenceReal`；
 - 每个 required artifact slot 都有精确 ID、digest 和 source；
-- artifact ID 必须匹配该 slot 的 `id_prefix + "_" + 64 lowercase hex` 结构；M1-00 只检查结构，不替代 M1-GATE 的原件真实性验证；
+- artifact ID 必须精确等于该 slot 的 `id_prefix + "_" + Digest`，且 Digest 为 64 位 lowercase hex；M1-00 不替代 M1-GATE 的原件真实性验证；
 - 失败路径返回明确 `FAIL` 或 `BLOCKED`；
 - 不修改 runner 的 `PASS_M1` 禁止规则；
 - 不由 M1-00 自己判定 M1 通过。
@@ -135,6 +135,7 @@ backend/internal/m1e2e/testdata/rollout_lab_e2e_01.json
 SEMANTIC RED: required delivery_receipt_casper can be removed from both inventories
 SEMANTIC RED: frozen goal and C2 semantics can be changed
 SEMANTIC RED: malformed artifact ID was accepted with status EVIDENCE_READY
+F56-01 RED: artifact ID prefix+a64 with digest b64 was accepted as EVIDENCE_READY
 ```
 
 修复后：
@@ -182,3 +183,4 @@ status=BLOCKED m1_verdict=NOT_EVALUATED
 - 没有执行独立 M1-GATE，未生成 `PASS_M1`。
 - `M1_GATE` 始终为 `NOT_RUN`，这是独立验收边界。
 - artifact digest/source 的真实性与外部原件核验仍由 M1-GATE 负责；M1-00 只校验结构和槽位。
+- `jadm` / `drcp` 等证据 slot 与 M1-02A `ajc_` 提交身份的映射属于后续集成跟踪项；当前 PR 不扩展 C0 权威工件类型注册。

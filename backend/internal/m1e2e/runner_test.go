@@ -267,6 +267,43 @@ func TestRunnerRejectsMalformedArtifactIdentity(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsArtifactIDDigestMismatch(t *testing.T) {
+	scenario, err := LoadScenario()
+	if err != nil {
+		t.Fatal(err)
+	}
+	executors := allExecutors(scenario, EvidenceReal)
+	executors[StageCharterContext] = stageExecutorFunc(func(_ context.Context, _ Scenario, _ StageSpec) (StageExecution, error) {
+		return StageExecution{
+			Status: StatusEvidenceReady, EvidenceClass: EvidenceReal,
+			Artifacts: []ArtifactRef{
+				{Slot: "charter", ID: "chtr_" + strings.Repeat("a", 64), Digest: strings.Repeat("b", 64), Source: "focused-test-executor"},
+				{Slot: "context_manifest", ID: "ctxm_" + strings.Repeat("c", 64), Digest: strings.Repeat("c", 64), Source: "focused-test-executor"},
+			},
+			Assertions: []Assertion{{ID: "stage-contract", Passed: true}},
+		}, nil
+	})
+	result, err := (Runner{
+		Scenario: scenario, Mode: ModeReal, Capabilities: allCapabilities(), Executors: executors,
+	}).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StatusFail {
+		t.Fatalf("overall status = %q, want FAIL", result.Status)
+	}
+	for _, stage := range result.Stages {
+		if stage.ID != StageCharterContext {
+			continue
+		}
+		if stage.Status != StatusFail || stage.Blocker != "INVALID_ARTIFACT:charter" {
+			t.Fatalf("charter stage = %+v, want INVALID_ARTIFACT:charter", stage)
+		}
+		return
+	}
+	t.Fatal("charter stage result missing")
+}
+
 func TestRunnerResultIsDeterministicAndKeepsArtifactSlots(t *testing.T) {
 	scenario, err := LoadScenario()
 	if err != nil {
