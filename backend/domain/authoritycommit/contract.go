@@ -134,7 +134,9 @@ func ValidateReplay(req ReplayRequest) Result {
 		return denied("AUDIT_AUTHORIZATION_REQUIRED")
 	}
 	original := req.Original
-	if audit.Operation != JournalAuditRead || audit.Resource != original.ExactTargetID ||
+	if audit.Operation != JournalAuditRead || audit.TrustDomain != original.Verification.TrustDomain ||
+		audit.Resource != original.ExactTargetID || audit.Action != original.Verification.Action ||
+		audit.Tenant != original.Verification.Tenant ||
 		audit.CaseID != original.Admission.Key.CaseID || audit.Round != original.Admission.Key.Round ||
 		audit.ExecutionGeneration != original.Admission.ExecutionGeneration || !validSubject(audit.Subject) ||
 		!validScopes(audit.Scopes) {
