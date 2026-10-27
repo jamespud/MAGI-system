@@ -6,8 +6,9 @@ package authoritycommit
 import "github.com/jamespud/magi/backend/domain/authority"
 
 const (
-	ContractVersion = "magi-authority-journal-v2/1"
-	JournalAdmitV2  = "JOURNAL_ADMIT_V2"
+	ContractVersion  = "magi-authority-journal-v2/1"
+	JournalAdmitV2   = "JOURNAL_ADMIT_V2"
+	JournalAuditRead = "JOURNAL_AUDIT_READ"
 )
 
 // AdmissionRequest binds the frozen admission plan to the exact C2 request and
@@ -20,6 +21,14 @@ type AdmissionRequest struct {
 	CommitToken     string                        `json:"commit_token"`
 	Verification    authority.VerificationRequest `json:"verification"`
 	Admission       AdmissionPlan                 `json:"admission"`
+}
+
+// ReplayRequest is a historical audit read, not another admission commit. The
+// Original request is lookup material only; only AuditVerification grants the
+// right to read its committed lineage. No execution owner or lease is accepted.
+type ReplayRequest struct {
+	Original          AdmissionRequest              `json:"original"`
+	AuditVerification authority.VerificationRequest `json:"audit_verification"`
 }
 
 type PreparedObject struct {

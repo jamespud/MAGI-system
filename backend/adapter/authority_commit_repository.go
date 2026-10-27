@@ -97,12 +97,7 @@ func (r *AuthorityCommitRepository) CommitJournalAdmissionV2(
 				abort = authorityCommitResultPtr(authorityCommitFailure(authority.OutcomeConflict, "ADMISSION_KEY_CONFLICT", ""))
 				return errAuthorityCommitAbort
 			}
-			original, result := readAuthorityAdmissionCommit(tx, request.Verification.TrustDomain, binding.CommitID)
-			if result.Outcome != "" {
-				abort = authorityCommitResultPtr(authorityCommitFromAuthorityResult(result))
-				return errAuthorityCommitAbort
-			}
-			abort = authorityCommitResultPtr(original)
+			abort = authorityCommitResultPtr(authorityCommitFailure(authority.OutcomeDenied, "AUDIT_AUTHORIZATION_REQUIRED", ""))
 			return errAuthorityCommitAbort
 		}
 		token, result := lockAuthorityCommitToken(tx, request.Verification.TrustDomain, request.CommitToken)
@@ -298,6 +293,77 @@ func (r *AuthorityCommitRepository) CommitJournalAdmissionV2(
 		return authorityCommitFailure(authority.OutcomeUnknown, "COMMIT_RESPONSE_LOST", err.Error())
 	}
 	return committed
+}
+
+// ReplayJournalAdmissionV2 reads one historical admission lineage only after a
+// current, independent JOURNAL_AUDIT_READ proof succeeds. It does not require
+// the original execution owner or lease and never creates a new commit.
+func (r *AuthorityCommitRepository) ReplayJournalAdmissionV2(ctx context.Context, request authoritycommit.ReplayRequest) authoritycommit.Result {
+	if r == nil || r.db == nil || r.authority == nil {
+		return authorityCommitFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_UNAVAILABLE", "")
+	}
+	if capability := r.authority.capabilityResult(); capability != nil {
+		return authorityCommitFromAuthorityResult(*capability)
+	}
+	if result := authoritycommit.ValidateReplay(request); result.Outcome != authority.OutcomeValid {
+		return result
+	}
+	identity := authoritycommit.ProjectAdmissionIdentity(request.Original)
+	uniqueKey, err := authoritycommit.UniqueKey(identity)
+	if err != nil {
+		return authorityCommitFailure(authority.OutcomeDenied, "UNIQUE_KEY_INVALID", err.Error())
+	}
+	requestDigest, err := authoritycommit.RequestDigest(request.Original)
+	if err != nil {
+		return authorityCommitFailure(authority.OutcomeDenied, "REQUEST_DIGEST_INVALID", err.Error())
+	}
+	var replayed authoritycommit.Result
+	var abort *authoritycommit.Result
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, result := lockAuthorityHead(tx, request.AuditVerification.TrustDomain); result.Outcome != "" {
+			abort = authorityCommitResultPtr(authorityCommitFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if result := r.authority.verifyProofInTx(tx, request.AuditVerification); result.Outcome != authority.OutcomeValid {
+			abort = authorityCommitResultPtr(authorityCommitFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		binding, result := lockAuthorityUniqueBinding(tx, request.AuditVerification.TrustDomain, uniqueKey)
+		if result.Outcome != "" {
+			abort = authorityCommitResultPtr(authorityCommitFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if binding == nil {
+			abort = authorityCommitResultPtr(authorityCommitFailure(authority.OutcomeUnknown, "ADMISSION_NOT_FOUND", ""))
+			return errAuthorityCommitAbort
+		}
+		if binding.RequestDigest != requestDigest || binding.ExactTargetID != request.Original.ExactTargetID ||
+			binding.CommitToken != request.Original.CommitToken {
+			abort = authorityCommitResultPtr(authorityCommitFailure(authority.OutcomeConflict, "ADMISSION_KEY_CONFLICT", ""))
+			return errAuthorityCommitAbort
+		}
+		original, result := readAuthorityAdmissionCommit(tx, request.AuditVerification.TrustDomain, binding.CommitID)
+		if result.Outcome != "" {
+			abort = authorityCommitResultPtr(authorityCommitFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if original.Commit == nil || original.Commit.UniqueKey != binding.UniqueKey || original.Commit.CommitID != binding.CommitID ||
+			original.Commit.RequestDigest != binding.RequestDigest || original.Commit.ExactTargetID != binding.ExactTargetID ||
+			original.Commit.CommitToken != binding.CommitToken || original.Commit.AuthoritySequence != binding.AuthoritySequence ||
+			original.Commit.JournalHighWatermark != binding.JournalHighWatermark {
+			abort = authorityCommitResultPtr(authorityCommitFailure(authority.OutcomeConflict, "ADMISSION_LINEAGE_CONFLICT", ""))
+			return errAuthorityCommitAbort
+		}
+		replayed = original
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if abort != nil {
+		return *abort
+	}
+	if err != nil {
+		return authorityCommitFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_ERROR", err.Error())
+	}
+	return replayed
 }
 
 var errAuthorityCommitAbort = errors.New("authority commit aborted with typed result")

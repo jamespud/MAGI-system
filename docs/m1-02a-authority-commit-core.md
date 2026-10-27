@@ -15,7 +15,9 @@
 - C2 撤销与 credential rotation 先锁同一 authority head，再修改 scoped epoch；
 - `JOURNAL_ADMIT_V2` 在同一个事务内重新认证 C2、锁定运行 owner、执行 Journal/HWM
   与 pending CAS、分配 authority sequence，并写入完整 admission lineage；
-- 相同唯一键和相同 canonical request 只返回原记录，`ExposurePermitted=false`；
+- 相同唯一键的 commit 重试不会自动返回历史记录，而是要求独立的
+  `JOURNAL_AUDIT_READ` C2 proof；审计读取不要求原 owner lease，且
+  `ExposurePermitted=false`；
 - 相同唯一键但 target/token/request digest 不同返回 `CONFLICT`；
 - 回复丢失后可由新 repository 实例恢复原 lineage，不重新分配序号；
 - 所有 fence 行固定为 `DECLARED_BLOCKED`，没有任何可消费 Exposure Permit。
@@ -33,6 +35,8 @@
   dependency、provider reservation declaration、blocked exposure fence、pending
   transition、unique binding、token consumption、lineage 与 blocked outbox。
 - `AuthorityCommitRepository.CommitJournalAdmissionV2`：真实 MySQL 单事务消费者。
+- `AuthorityCommitRepository.ReplayJournalAdmissionV2`：独立 C2 审计读取；不复用
+  admission proof、commit token 或原 owner lease 获得读取资格。
 - C2 撤销与 rotation 对同一 authority head 的锁序和 sequence watermark。
 - 真实 MySQL 的并发、C2 当前性、Generation/lease、故障切点、回复丢失、
   token 复用和撤销竞争测试。
@@ -121,11 +125,13 @@ Authority sequence 与 local Journal HWM 是两个独立字段：
 
 | 输入 | 结果 |
 | --- | --- |
-| 同键 + 同 canonical request | `VALID/ADMITTED`, `Disposition=REPLAY`，无 exposure permission |
+| 同键 + 同 canonical request，无审计 proof | `DENIED/AUDIT_AUTHORIZATION_REQUIRED`，不返回 lineage |
+| 同键 + 有效独立 `JOURNAL_AUDIT_READ` proof | `VALID/ADMITTED`, `Disposition=REPLAY`，无 exposure permission |
 | 同键 + 不同 target/token/request digest | `CONFLICT/ADMISSION_KEY_CONFLICT` |
 | 同 token + 不同 admission key | `CONFLICT/COMMIT_TOKEN_REUSED` |
 | commit 已成功但响应丢失 | `UNKNOWN/COMMIT_RESPONSE_LOST`；重试恢复原 lineage |
-| replay 时 owner lease 已丢失 | 仍只读恢复原 lineage，不重做提交、不授权暴露 |
+| audit replay 时 owner lease 已丢失 | 仍只读恢复原 lineage，不重做提交、不授权暴露 |
+| audit scope 被撤销 | `REVOKED/SCOPE_REVOKED`，不返回 lineage |
 | C2 disabled | `DENIED/AUTHORITY_CAPABILITY_DISABLED` |
 | C2 在 Journal 锁等待期间过期 | `EXPIRED`，Journal/HWM/pending 全部回滚 |
 
@@ -149,6 +155,11 @@ CaseID + JobID + WorkerID + ExecutionGeneration
 authority sequence 的最终 UPDATE 再次用 SQL 联表条件校验 running job、worker、
 generation 和 DB lease，因此 Lease 在最后线性化点过期时 sequence 不会推进。
 
+历史 lineage 读取使用独立的 `JOURNAL_AUDIT_READ` C2 operation 和 audit scopes；
+它绑定原 case/round/generation、exact target、unique key 和 commit token，但不要求原
+execution owner/lease。操作 context scope 被撤销不会销毁历史记录；audit scope 或
+credential scope 被撤销会阻止读取。
+
 ## 6. 测试与 A-F 证据
 
 ### A. 基线与范围
@@ -168,7 +179,9 @@ generation 和 DB lease，因此 Lease 在最后线性化点过期时 sequence �
 | 持久锁内重验 owner/generation/permission/epoch/lease | 两阶段 C2 重验、`lockActiveExecution`、最终 conditional head UPDATE |
 | 一次事务完整写集 | S33 + `authority_commit_repository.go` + first-admission/fault tests |
 | Authority sequence 与 Journal HWM 分离 | `AdmissionCommit` 双字段；admission/unique/lineage 独立持久列 |
-| 同键同原件只返回原 lineage | concurrent/replay/restart tests |
+| 同键 commit 重试不自动返回 lineage | `TestAuthorityCommitMySQL_CommitRetryDoesNotAutoGrantHistoricalRead` |
+| 独立审计 proof 可恢复原 lineage | `TestAuthorityCommitMySQL_AuthorizedAuditCanReplayAfterOperationalRevocation` |
+| 无/撤销审计 proof 不能读取 | `TestAuthorityCommitMySQL_UnauthorizedAuditCannotReadHistoricalLineage`、`TestAuthorityCommitMySQL_RevokedAuditProofCannotReadHistoricalLineage` |
 | 同键不同 digest `CONFLICT` | `TestAuthorityCommitMySQL_SameKeyDifferentDigestConflictsWithoutMutation` |
 | 撤销先于 admission 时拒绝 | `TestAuthorityCommitMySQL_VerifyThenRevokeRejectsOldAuthority` |
 | Owner/Generation ABA 拒绝旧执行者 | `TestAuthorityCommitMySQL_GenerationChangeRejectsOldOwner` |
@@ -183,11 +196,12 @@ generation 和 DB lease，因此 Lease 在最后线性化点过期时 sequence �
 
 | 阶段 | RED | GREEN |
 | --- | --- | --- |
-| domain contract 缺失 | `no non-test Go files` / undefined package | 13 个 domain tests + race PASS |
+| domain contract 缺失 | `no non-test Go files` / undefined package | 14 个 domain tests + race PASS |
 | S33 缺失 | `read S33 migration: ... no such file` | schema migration repeatable PASS |
 | 撤销未进入共同顺序 | authority head missing / sequence 0 | revocation+rotation sequence `(1,1) -> (2,2)` PASS |
 | admission consumer 缺失 | `undefined: AuthorityCommitRepository` | first complete write-set PASS |
-| 并发/重放缺失 | `JOURNAL_HWM_STALE`、`OWNER_LEASE_LOST` | one NEW + seven REPLAY PASS |
+| 并发/重试缺失 | `JOURNAL_HWM_STALE`、`OWNER_LEASE_LOST` | one NEW + seven AUDIT_REQUIRED, then audited REPLAY PASS |
+| F57-01 旧请求自动读取 lineage | commit retry 返回 `VALID/REPLAY` | `DENIED/AUDIT_AUTHORIZATION_REQUIRED` PASS |
 | owner 错误码未区分 | 统一 `OWNER_LEASE_LOST` | `EXECUTION_GENERATION_STALE` / `OWNER_LEASE_EXPIRED` PASS |
 | 故障切点无效 | 注入故障仍返回 `VALID/ADMITTED` | 12 个写集切点全部回滚 PASS |
 | Journal 等待期间 proof 过期 | 错误返回 `VALID/ADMITTED` | 第二 C2 重验返回 `EXPIRED` 且写集回滚 PASS |
@@ -250,6 +264,8 @@ MySQL `adapter` 与 `bootstrap` 全部 PASS；`go vet ./...`、`gofmt -l backend
 
 - v2 admission 使用 S33 的 authority journal 表；不声称与 #53 的 local registration
   表 wire-compatible，也不把 local `REGISTERED` 升级为 authoritative admission。
+- `JOURNAL_AUDIT_READ` 是独立审计读取 operation，不是 `JOURNAL_ADMIT_V2` 的第四个
+  commit 状态，也不会创建新 authority sequence、admission 或 exposure permission。
 - Provider reservation 是 durable local declaration，不是 Provider 已接收/已应用。
 - Witness 和 provider fence capability 没有任何可配置成功路径，因此 admission 结果
   固定包含两项 blocked capability。

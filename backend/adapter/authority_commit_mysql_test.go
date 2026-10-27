@@ -440,6 +440,7 @@ type journalAdmitMySQLFixture struct {
 	owner        *entity.ExecutionContext
 	request      authoritycommit.AdmissionRequest
 	c2Request    authority.VerificationRequest
+	auditRequest authoritycommit.ReplayRequest
 	bootstrapRaw []byte
 	proofRaw     []byte
 	proofID      string
@@ -454,12 +455,18 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 	t.Helper()
 	base := newAuthorityCommitMySQL(t)
 	const (
-		exactTarget = "admission-r0"
-		operation   = "JOURNAL_ADMIT_V2"
+		exactTarget    = "admission-r0"
+		operation      = authoritycommit.JournalAdmitV2
+		auditOperation = authoritycommit.JournalAuditRead
 	)
 	signed := newC2SignedFixture(t)
+	auditScopes := []authority.ScopedEpoch{
+		{Kind: authority.ScopeAuthority, ScopeID: "audit-authority-scope", Epoch: 1},
+		{Kind: authority.ScopeContext, ScopeID: "audit-context-scope", Epoch: 2},
+		{Kind: authority.ScopeCredential, ScopeID: "credential-scope", Epoch: 5},
+	}
 	signed.policy.Resources = []string{exactTarget}
-	signed.policy.Operations = []string{operation}
+	signed.policy.Operations = []string{operation, auditOperation}
 	proofExpires := time.Now().UTC().Add(proofTTL).Truncate(time.Millisecond)
 	signed.proof.Resource = exactTarget
 	signed.proof.Operation = operation
@@ -469,15 +476,36 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 	signed.proof.Consent.Body.ExpiresAt = authorityTime(proofExpires)
 	alignAuthorityConsent(t, &signed.proof, signed.ownerA, 2)
 	signed.proofRaw, signed.proofID = authoritySignedProof(t, signed.proof, 1)
+	auditProof := signed.proof
+	auditProof.Operation = auditOperation
+	auditProof.Scopes = append([]authority.ScopedEpoch(nil), auditScopes...)
+	auditProof.Consent.Body.ConsentID = "consent-c2-audit"
+	auditProof.Consent.Body.Operation = auditOperation
+	auditProof.Consent.Body.Scopes = append([]authority.ScopedEpoch(nil), auditScopes...)
+	alignAuthorityConsent(t, &auditProof, signed.ownerA, 2)
+	auditProofRaw, auditProofID := authoritySignedProof(t, auditProof, 1)
 	signed.bootstrap.RootGrant.Resources = []string{exactTarget}
-	signed.bootstrap.RootGrant.Operations = []string{operation}
+	signed.bootstrap.RootGrant.Operations = []string{operation, auditOperation}
 	signed.bootstrap.OwnerPolicies[0] = signed.policy
+	signed.bootstrap.InitialScopes = append(append([]authority.ScopedEpoch(nil), signed.scopes...), auditScopes[0], auditScopes[1])
+	sort.Slice(signed.bootstrap.InitialScopes, func(i, j int) bool {
+		return authority.ScopeKeyCompare(
+			authority.ScopeKey{Kind: signed.bootstrap.InitialScopes[i].Kind, ScopeID: signed.bootstrap.InitialScopes[i].ScopeID},
+			authority.ScopeKey{Kind: signed.bootstrap.InitialScopes[j].Kind, ScopeID: signed.bootstrap.InitialScopes[j].ScopeID},
+		) < 0
+	})
 	signed.bootstrapRaw, signed.trust = authoritySignedBootstrap(t, signed.bootstrap, 9)
 	signed.request = authority.VerificationRequest{
 		TrustDomain: "tenant-a", ProofID: signed.proofID, Subject: signed.proof.Subject,
 		Resource: exactTarget, Action: signed.proof.Action, Tenant: signed.proof.Tenant, Operation: operation,
 		CaseID: signed.proof.CaseID, Round: signed.proof.Round, ExecutionGeneration: signed.proof.ExecutionGeneration,
 		Scopes: append([]authority.ScopedEpoch(nil), signed.proof.Scopes...),
+	}
+	auditVerification := authority.VerificationRequest{
+		TrustDomain: "tenant-a", ProofID: auditProofID, Subject: auditProof.Subject,
+		Resource: exactTarget, Action: auditProof.Action, Tenant: auditProof.Tenant, Operation: auditOperation,
+		CaseID: auditProof.CaseID, Round: auditProof.Round, ExecutionGeneration: auditProof.ExecutionGeneration,
+		Scopes: append([]authority.ScopedEpoch(nil), auditScopes...),
 	}
 
 	ctx := context.Background()
@@ -486,6 +514,9 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 	}
 	if result := base.repo.RegisterProof(ctx, signed.proofRaw, signed.proofID); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("register proof outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+	}
+	if result := base.repo.RegisterProof(ctx, auditProofRaw, auditProofID); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("register audit proof outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
 	}
 	if err := base.db.AutoMigrate(&magi.CaseModel{}, &magi.DecisionJobModel{}); err != nil {
 		t.Fatalf("migrate runtime owner tables: %v", err)
@@ -572,6 +603,7 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 			Enabled: true, RecoveryTrust: signed.trust,
 		}),
 		owner: owner, request: requester, c2Request: signed.request,
+		auditRequest: authoritycommit.ReplayRequest{Original: requester, AuditVerification: auditVerification},
 		bootstrapRaw: signed.bootstrapRaw, proofRaw: signed.proofRaw, proofID: signed.proofID,
 		proofExpires: proofExpires,
 	}
@@ -680,31 +712,37 @@ func TestAuthorityCommitMySQL_SameKeyConcurrentReturnsOneCommitAndReplays(t *tes
 	wg.Wait()
 	close(results)
 
-	var newCount, replayCount int
+	var newCount, blockedRetryCount int
 	var original *authoritycommit.AdmissionCommit
 	for result := range results {
-		if result.Outcome != authority.OutcomeValid || result.Commit == nil || result.ExposurePermitted || result.Commit.ExposurePermitted {
-			t.Fatalf("concurrent result=%+v", result)
-		}
 		switch result.Disposition {
 		case "NEW":
+			if result.Outcome != authority.OutcomeValid || result.Commit == nil || result.ExposurePermitted || result.Commit.ExposurePermitted {
+				t.Fatalf("concurrent new result=%+v", result)
+			}
 			newCount++
-		case "REPLAY":
-			replayCount++
 		default:
-			t.Fatalf("unexpected disposition %q", result.Disposition)
+			if result.Outcome != authority.OutcomeDenied || result.Code != "AUDIT_AUTHORIZATION_REQUIRED" || result.Commit != nil || result.ExposurePermitted {
+				t.Fatalf("concurrent retry result=%+v", result)
+			}
+			blockedRetryCount++
 		}
 		if original == nil {
+			if result.Commit == nil {
+				continue
+			}
 			original = result.Commit
-			continue
-		}
-		if result.Commit.CommitID != original.CommitID || result.Commit.AuthoritySequence != original.AuthoritySequence ||
-			result.Commit.LineageDigest != original.LineageDigest || result.Commit.JournalHighWatermark != original.JournalHighWatermark {
-			t.Fatalf("replay lineage=%+v original=%+v", result.Commit, original)
 		}
 	}
-	if newCount != 1 || replayCount != callers-1 {
-		t.Fatalf("new=%d replay=%d", newCount, replayCount)
+	if newCount != 1 || blockedRetryCount != callers-1 || original == nil {
+		t.Fatalf("new=%d blocked=%d original=%+v", newCount, blockedRetryCount, original)
+	}
+	replay := f.commitRepo.ReplayJournalAdmissionV2(context.Background(), f.auditRequest)
+	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Commit == nil ||
+		replay.Commit.CommitID != original.CommitID || replay.Commit.AuthoritySequence != original.AuthoritySequence ||
+		replay.Commit.LineageDigest != original.LineageDigest || replay.Commit.JournalHighWatermark != original.JournalHighWatermark ||
+		replay.ExposurePermitted || replay.Commit.ExposurePermitted {
+		t.Fatalf("audited replay=%+v original=%+v", replay, original)
 	}
 	assertAuthorityHead(t, f.authoritySQLFixture, 1, 1, 0)
 	for table, want := range map[string]int64{
@@ -763,7 +801,7 @@ func TestAuthorityCommitMySQL_ReplayAfterOwnerLossReturnsOriginalWithoutExposure
 	if err := f.db.Exec(`UPDATE decision_job SET worker_id='worker-b', lease_until=CURRENT_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE id='job-42'`).Error; err != nil {
 		t.Fatal(err)
 	}
-	replay := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	replay := f.commitRepo.ReplayJournalAdmissionV2(context.Background(), f.auditRequest)
 	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Commit == nil ||
 		replay.Commit.CommitID != first.Commit.CommitID || replay.Commit.AuthoritySequence != first.Commit.AuthoritySequence ||
 		replay.ExposurePermitted || replay.Commit.ExposurePermitted {
@@ -921,7 +959,7 @@ func TestAuthorityCommitMySQL_AfterCommitResponseLossReplaysOriginal(t *testing.
 		t.Fatalf("lost response=%+v", lost)
 	}
 	restarted := magi.NewAuthorityCommitRepository(f.db, magi.AuthorityRepositoryConfig{Enabled: true, RecoveryTrust: f.trust})
-	replay := restarted.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	replay := restarted.ReplayJournalAdmissionV2(context.Background(), f.auditRequest)
 	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Commit == nil ||
 		replay.Commit.AuthoritySequence != 1 || replay.Commit.JournalHighWatermark != 1 || replay.ExposurePermitted || replay.Commit.ExposurePermitted {
 		t.Fatalf("replay=%+v", replay)
@@ -1096,6 +1134,79 @@ func TestAuthorityCommitMySQL_ConcurrentRevocationAndAdmissionUseOneOrder(t *tes
 		}
 	default:
 		t.Fatalf("unexpected concurrent disposition %q: %+v", commitResult.Disposition, commitResult)
+	}
+}
+
+func TestAuthorityCommitMySQL_CommitRetryDoesNotAutoGrantHistoricalRead(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	first := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if first.Outcome != authority.OutcomeValid || first.Commit == nil {
+		t.Fatalf("first result=%+v", first)
+	}
+	scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "context-scope"}
+	if _, result := f.repo.RevokeScope(context.Background(), authorityRevocationCommand(t, f.authoritySQLFixture,
+		"revoke-before-unaudited-replay", scope, 4, 1, "withdraw")); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("revoke=%+v", result)
+	}
+	retry := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if retry.Outcome != authority.OutcomeDenied || retry.Code != "AUDIT_AUTHORIZATION_REQUIRED" || retry.Commit != nil || retry.ExposurePermitted {
+		t.Fatalf("retry auto-granted historical read: %+v", retry)
+	}
+}
+
+func TestAuthorityCommitMySQL_AuthorizedAuditCanReplayAfterOperationalRevocation(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	first := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if first.Outcome != authority.OutcomeValid || first.Commit == nil {
+		t.Fatalf("first result=%+v", first)
+	}
+	scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "context-scope"}
+	if _, result := f.repo.RevokeScope(context.Background(), authorityRevocationCommand(t, f.authoritySQLFixture,
+		"revoke-before-audited-replay", scope, 4, 1, "withdraw")); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("revoke=%+v", result)
+	}
+	replay := f.commitRepo.ReplayJournalAdmissionV2(context.Background(), f.auditRequest)
+	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Commit == nil ||
+		replay.Commit.CommitID != first.Commit.CommitID || replay.Commit.AuthoritySequence != first.Commit.AuthoritySequence ||
+		replay.ExposurePermitted || replay.Commit.ExposurePermitted {
+		t.Fatalf("audited replay=%+v original=%+v", replay, first)
+	}
+}
+
+func TestAuthorityCommitMySQL_UnauthorizedAuditCannotReadHistoricalLineage(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	first := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if first.Outcome != authority.OutcomeValid || first.Commit == nil {
+		t.Fatalf("first result=%+v", first)
+	}
+	unauthorized := f.auditRequest
+	unauthorized.AuditVerification = authority.VerificationRequest{}
+	replay := f.commitRepo.ReplayJournalAdmissionV2(context.Background(), unauthorized)
+	if replay.Outcome != authority.OutcomeDenied || replay.Code != "AUDIT_AUTHORIZATION_REQUIRED" || replay.Commit != nil || replay.ExposurePermitted {
+		t.Fatalf("unauthorized replay=%+v", replay)
+	}
+	oldOperationalProof := f.auditRequest
+	oldOperationalProof.AuditVerification = f.c2Request
+	replay = f.commitRepo.ReplayJournalAdmissionV2(context.Background(), oldOperationalProof)
+	if replay.Outcome != authority.OutcomeDenied || replay.Code != "AUDIT_BINDING_MISMATCH" || replay.Commit != nil || replay.ExposurePermitted {
+		t.Fatalf("old operational proof read lineage=%+v", replay)
+	}
+}
+
+func TestAuthorityCommitMySQL_RevokedAuditProofCannotReadHistoricalLineage(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	first := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if first.Outcome != authority.OutcomeValid || first.Commit == nil {
+		t.Fatalf("first result=%+v", first)
+	}
+	auditScope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "audit-context-scope"}
+	if _, result := f.repo.RevokeScope(context.Background(), authorityRevocationCommand(t, f.authoritySQLFixture,
+		"revoke-audit-read", auditScope, 2, 1, "audit access withdrawn")); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("revoke audit scope=%+v", result)
+	}
+	replay := f.commitRepo.ReplayJournalAdmissionV2(context.Background(), f.auditRequest)
+	if replay.Outcome != authority.OutcomeRevoked || replay.Code != "SCOPE_REVOKED" || replay.Commit != nil || replay.ExposurePermitted {
+		t.Fatalf("revoked audit replay=%+v", replay)
 	}
 }
 

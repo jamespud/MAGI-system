@@ -142,7 +142,10 @@ Admission 唯一键：
 
 规则：
 
-- 同键同字节 replay：返回原 admission lineage，`exposure_permitted=false`，只能 reconciliation。
+- 同键同字节 commit 重试不得仅凭原请求或 commit token 返回历史 lineage；调用方必须
+  通过独立的 `JOURNAL_AUDIT_READ` C2 operation 读取历史记录。审计读取返回原
+  admission lineage、`exposure_permitted=false`，只能 reconciliation，且不要求原
+  execution owner lease。
 - admission 的 pending transition 为 `N -> N+1`，`0 <= N < 512`；允许同一 Journal 存在多个尚未结算的 delivery。
 - settlement 只有在 `APPLIED_VERIFIED` 时执行 `N -> N-1`；`UNKNOWN` 与 `UNVERIFIABLE` 必须保持 `N -> N`，不得释放可能已暴露的 pending。
 - 即使 `UNKNOWN`/`UNVERIFIABLE` 不能确定真实读取，也必须保留 pending 和 reconciliation 线索。
@@ -303,7 +306,8 @@ INSERT INTO a45_provider_settlement (...);
 - revocation 先于 admission/gate 时 `REVOKED`；
 - gate 后撤销、settlement 未提交时 `UNKNOWN`；
 - 旧 Generation 不能重新取得 admission；
-- 同键同字节 replay 只返回 lineage；
+- 同键同字节 commit 重试只返回 `AUDIT_AUTHORIZATION_REQUIRED`；独立 authenticated
+  `JOURNAL_AUDIT_READ` 成功后只返回 lineage；
 - 同键不同字节 `CONFLICT`；
 - settlement 的 admission/fence 绑定不一致时 `TOKEN_BINDING`；
 - Admission → Gate → 首次 Settlement 在 admission binding 不变、settlement binding 不存在时成功；

@@ -599,3 +599,38 @@ func TestAdmissionRequestRejectsDuplicateDependencyIdentities(t *testing.T) {
 		t.Fatalf("duplicate dependency result=%+v", result)
 	}
 }
+
+func TestValidateReplayRequiresIndependentAuditBinding(t *testing.T) {
+	original := admissionRequest(t)
+	audit := original.Verification
+	audit.ProofID = "aprf_" + strings.Repeat("f", 64)
+	audit.Operation = authoritycommit.JournalAuditRead
+	request := authoritycommit.ReplayRequest{Original: original, AuditVerification: audit}
+	result := authoritycommit.ValidateReplay(request)
+	if result.Outcome != authority.OutcomeValid || result.Code != "ADMISSION_REPLAY_REQUEST_VALID" || result.Commit != nil || result.ExposurePermitted {
+		t.Fatalf("valid replay request=%+v", result)
+	}
+	tests := []struct {
+		name string
+		edit func(*authoritycommit.ReplayRequest)
+		code string
+	}{
+		{"missing proof", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.ProofID = "" }, "AUDIT_AUTHORIZATION_REQUIRED"},
+		{"operational operation", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.Operation = authoritycommit.JournalAdmitV2 }, "AUDIT_BINDING_MISMATCH"},
+		{"resource", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.Resource = "other" }, "AUDIT_BINDING_MISMATCH"},
+		{"case", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.CaseID = "other" }, "AUDIT_BINDING_MISMATCH"},
+		{"round", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.Round++ }, "AUDIT_BINDING_MISMATCH"},
+		{"generation", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.ExecutionGeneration++ }, "AUDIT_BINDING_MISMATCH"},
+		{"subject", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.Subject.SubjectID = "" }, "AUDIT_BINDING_MISMATCH"},
+		{"scopes", func(r *authoritycommit.ReplayRequest) { r.AuditVerification.Scopes = nil }, "AUDIT_BINDING_MISMATCH"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed := request
+			tt.edit(&changed)
+			if result := authoritycommit.ValidateReplay(changed); result.Outcome != authority.OutcomeDenied || result.Code != tt.code || result.Commit != nil || result.ExposurePermitted {
+				t.Fatalf("ValidateReplay()=%+v want DENIED/%s", result, tt.code)
+			}
+		})
+	}
+}

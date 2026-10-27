@@ -118,6 +118,31 @@ func Validate(req AdmissionRequest) Result {
 	return Result{Outcome: authority.OutcomeValid, Code: "ADMISSION_REQUEST_VALID"}
 }
 
+// ValidateReplay separates historical audit authorization from admission
+// validity. The original request is checked only for exact lookup structure;
+// its proof may already be revoked. A current JournalAuditRead proof is
+// required before any lineage may be read.
+func ValidateReplay(req ReplayRequest) Result {
+	if result := Validate(req.Original); result.Outcome != authority.OutcomeValid {
+		return result
+	}
+	audit := req.AuditVerification
+	if strings.TrimSpace(audit.ProofID) == "" {
+		return denied("AUDIT_AUTHORIZATION_REQUIRED")
+	}
+	if !strings.HasPrefix(audit.ProofID, "aprf_") || !digestPattern.MatchString(strings.TrimPrefix(audit.ProofID, "aprf_")) {
+		return denied("AUDIT_AUTHORIZATION_REQUIRED")
+	}
+	original := req.Original
+	if audit.Operation != JournalAuditRead || audit.Resource != original.ExactTargetID ||
+		audit.CaseID != original.Admission.Key.CaseID || audit.Round != original.Admission.Key.Round ||
+		audit.ExecutionGeneration != original.Admission.ExecutionGeneration || !validSubject(audit.Subject) ||
+		!validScopes(audit.Scopes) {
+		return denied("AUDIT_BINDING_MISMATCH")
+	}
+	return Result{Outcome: authority.OutcomeValid, Code: "ADMISSION_REPLAY_REQUEST_VALID"}
+}
+
 func denied(code string) Result {
 	return Result{Outcome: authority.OutcomeDenied, Code: code}
 }
