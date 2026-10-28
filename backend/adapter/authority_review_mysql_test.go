@@ -115,7 +115,7 @@ func TestReviewMySQL_CredentialRootIncarnationPinned(t *testing.T) {
 
 func TestReviewMySQL_CommandReplyLossAndConflict(t *testing.T) {
 	t.Run("revocation", func(t *testing.T) {
-		f := newAuthorityMySQL(t)
+		f := newAuthorityCommitMySQL(t)
 		ctx := context.Background()
 		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 			t.Fatal(result)
@@ -138,7 +138,7 @@ func TestReviewMySQL_CommandReplyLossAndConflict(t *testing.T) {
 	})
 
 	t.Run("credential rotation", func(t *testing.T) {
-		f := newAuthorityMySQL(t)
+		f := newAuthorityCommitMySQL(t)
 		ctx := context.Background()
 		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 			t.Fatal(result)
@@ -287,7 +287,7 @@ func TestReviewMySQL_BootstrapCredentialScopeKindRejected(t *testing.T) {
 }
 
 func TestReviewMySQL_OldRootCredentialCannotBeRotated(t *testing.T) {
-	f := newAuthorityMySQL(t)
+	f := newAuthorityCommitMySQL(t)
 	ctx := context.Background()
 	if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 		t.Fatal(result)
@@ -345,7 +345,7 @@ func authorityCredentialAtRoot(seed byte, version uint64, id, subject, root, sco
 
 func TestReviewMySQL_CommandResultTamperFailsClosed(t *testing.T) {
 	t.Run("revocation epoch", func(t *testing.T) {
-		f := newAuthorityMySQL(t)
+		f := newAuthorityCommitMySQL(t)
 		ctx := context.Background()
 		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 			t.Fatal(result)
@@ -365,7 +365,7 @@ func TestReviewMySQL_CommandResultTamperFailsClosed(t *testing.T) {
 	})
 
 	t.Run("revocation row version", func(t *testing.T) {
-		f := newAuthorityMySQL(t)
+		f := newAuthorityCommitMySQL(t)
 		ctx := context.Background()
 		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 			t.Fatal(result)
@@ -385,7 +385,7 @@ func TestReviewMySQL_CommandResultTamperFailsClosed(t *testing.T) {
 	})
 
 	t.Run("rotation credential", func(t *testing.T) {
-		f := newAuthorityMySQL(t)
+		f := newAuthorityCommitMySQL(t)
 		ctx := context.Background()
 		if _, _, result := f.repo.BootstrapRoot(ctx, f.base.bootstrapRaw); result.Outcome != authority.OutcomeValid {
 			t.Fatal(result)
