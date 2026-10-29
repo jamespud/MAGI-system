@@ -422,15 +422,16 @@ func testAuthorityCommitSchemaBindings(t *testing.T, f *authoritySQLFixture) {
 
 type journalAdmitMySQLFixture struct {
 	*authoritySQLFixture
-	commitRepo   *magi.AuthorityCommitRepository
-	owner        *entity.ExecutionContext
-	request      authoritycommit.AdmissionRequest
-	c2Request    authority.VerificationRequest
-	auditRequest authoritycommit.ReplayRequest
-	bootstrapRaw []byte
-	proofRaw     []byte
-	proofID      string
-	proofExpires time.Time
+	commitRepo            *magi.AuthorityCommitRepository
+	owner                 *entity.ExecutionContext
+	request               authoritycommit.AdmissionRequest
+	c2Request             authority.VerificationRequest
+	auditRequest          authoritycommit.ReplayRequest
+	gateAuditVerification authority.VerificationRequest
+	bootstrapRaw          []byte
+	proofRaw              []byte
+	proofID               string
+	proofExpires          time.Time
 }
 
 func newJournalAdmitMySQL(t *testing.T) *journalAdmitMySQLFixture {
@@ -470,6 +471,14 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 	gateProof.Consent.Body.Operation = authoritycommit.JournalExposureGateV2
 	alignAuthorityConsent(t, &gateProof, signed.ownerA, 2)
 	gateProofRaw, gateProofID := authoritySignedProof(t, gateProof, 1)
+	gateAuditProof := gateProof
+	gateAuditProof.Operation = auditOperation
+	gateAuditProof.Scopes = append([]authority.ScopedEpoch(nil), auditScopes...)
+	gateAuditProof.Consent.Body.ConsentID = "consent-c2-gate-audit"
+	gateAuditProof.Consent.Body.Operation = auditOperation
+	gateAuditProof.Consent.Body.Scopes = append([]authority.ScopedEpoch(nil), auditScopes...)
+	alignAuthorityConsent(t, &gateAuditProof, signed.ownerA, 2)
+	gateAuditProofRaw, gateAuditProofID := authoritySignedProof(t, gateAuditProof, 1)
 	auditProof := signed.proof
 	auditProof.Operation = auditOperation
 	auditProof.Scopes = append([]authority.ScopedEpoch(nil), auditScopes...)
@@ -502,6 +511,13 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 		Round: gateProof.Round, ExecutionGeneration: gateProof.ExecutionGeneration,
 		Scopes: append([]authority.ScopedEpoch(nil), gateProof.Scopes...),
 	}
+	gateAuditVerification := authority.VerificationRequest{
+		TrustDomain: "tenant-a", ProofID: gateAuditProofID, Subject: gateAuditProof.Subject,
+		Resource: "gate-r0", Action: gateAuditProof.Action, Tenant: gateAuditProof.Tenant,
+		Operation: auditOperation, CaseID: gateAuditProof.CaseID,
+		Round: gateAuditProof.Round, ExecutionGeneration: gateAuditProof.ExecutionGeneration,
+		Scopes: append([]authority.ScopedEpoch(nil), auditScopes...),
+	}
 	auditVerification := authority.VerificationRequest{
 		TrustDomain: "tenant-a", ProofID: auditProofID, Subject: auditProof.Subject,
 		Resource: exactTarget, Action: auditProof.Action, Tenant: auditProof.Tenant, Operation: auditOperation,
@@ -518,6 +534,9 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 	}
 	if result := base.repo.RegisterProof(ctx, gateProofRaw, gateProofID); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("register gate proof outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
+	}
+	if result := base.repo.RegisterProof(ctx, gateAuditProofRaw, gateAuditProofID); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("register gate audit proof outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
 	}
 	if result := base.repo.RegisterProof(ctx, auditProofRaw, auditProofID); result.Outcome != authority.OutcomeValid {
 		t.Fatalf("register audit proof outcome=%s code=%s detail=%s", result.Outcome, result.Code, result.Detail)
@@ -609,8 +628,9 @@ func newJournalAdmitMySQLWithProofTTL(t *testing.T, proofTTL time.Duration) *jou
 		authoritySQLFixture: base,
 		commitRepo:          commitRepo,
 		owner:               owner, request: requester, c2Request: gateVerification,
-		auditRequest: authoritycommit.ReplayRequest{Original: requester, AuditVerification: auditVerification},
-		bootstrapRaw: signed.bootstrapRaw, proofRaw: signed.proofRaw, proofID: signed.proofID,
+		auditRequest:          authoritycommit.ReplayRequest{Original: requester, AuditVerification: auditVerification},
+		gateAuditVerification: gateAuditVerification,
+		bootstrapRaw:          signed.bootstrapRaw, proofRaw: signed.proofRaw, proofID: signed.proofID,
 		proofExpires: proofExpires,
 	}
 }
@@ -1335,10 +1355,16 @@ func TestAuthorityCommitMySQL_ExposureGateSchemaSurvivesRereadWithoutPermit(t *t
 	if first.Outcome != authority.OutcomeValid || first.Attempt == nil || first.ExposurePermitted {
 		t.Fatalf("first gate=%+v", first)
 	}
-	replayed := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, gateRequest)
+	retry := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, gateRequest)
+	if retry.Outcome != authority.OutcomeDenied || retry.Code != "AUDIT_AUTHORIZATION_REQUIRED" || retry.Attempt != nil {
+		t.Fatalf("operational retry returned lineage=%+v", retry)
+	}
+	replayed := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), authoritycommit.ExposureGateReplayRequest{
+		Original: gateRequest, AuditVerification: f.gateAuditVerification,
+	})
 	if replayed.Outcome != authority.OutcomeValid || replayed.Disposition != "REPLAY" || replayed.Attempt == nil ||
 		replayed.Attempt.AuthoritySequence != first.Attempt.AuthoritySequence || replayed.ExposurePermitted {
-		t.Fatalf("replayed gate=%+v first=%+v", replayed, first)
+		t.Fatalf("audited replay=%+v first=%+v", replayed, first)
 	}
 	if replayed.Attempt.Outcome == "BLOCKED" {
 		t.Fatal("replay changed a blocked attempt into a successful gate")
@@ -1438,19 +1464,22 @@ func TestAuthorityCommitMySQL_ExposureGateConcurrentSameAttemptCreatesOneCommit(
 	close(start)
 	wg.Wait()
 	close(results)
-	var newCount, replayCount int
+	var newCount, auditRequiredCount int
 	for result := range results {
 		if result.ExposurePermitted {
 			t.Fatalf("concurrent gate permitted exposure: %+v", result)
 		}
-		if result.Disposition == "NEW" {
+		switch {
+		case result.Disposition == "NEW":
 			newCount++
-		} else if result.Disposition == "REPLAY" {
-			replayCount++
+		case result.Outcome == authority.OutcomeDenied && result.Code == "AUDIT_AUTHORIZATION_REQUIRED" && result.Attempt == nil:
+			auditRequiredCount++
+		default:
+			t.Fatalf("unexpected concurrent retry=%+v", result)
 		}
 	}
-	if newCount != 1 || replayCount != callers-1 {
-		t.Fatalf("new=%d replay=%d", newCount, replayCount)
+	if newCount != 1 || auditRequiredCount != callers-1 {
+		t.Fatalf("new=%d audit-required=%d", newCount, auditRequiredCount)
 	}
 	var gateCommits, gateTokens, gateLineages int64
 	for table, count := range map[string]*int64{
@@ -1632,10 +1661,16 @@ func TestAuthorityCommitMySQL_BlockedAttemptReplayIsTerminalAndFenceStaysBlocked
 		t.Fatalf("fence=%q err=%v", fenceState, err)
 	}
 	replayed := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
-	if replayed.Disposition != "REPLAY" || replayed.Attempt == nil ||
-		replayed.Attempt.AttemptID != first.Attempt.AttemptID || replayed.Attempt.Outcome != "BLOCKED" ||
-		replayed.ExposurePermitted {
-		t.Fatalf("blocked replay=%+v first=%+v", replayed, first)
+	if replayed.Outcome != authority.OutcomeDenied || replayed.Code != "AUDIT_AUTHORIZATION_REQUIRED" || replayed.Attempt != nil {
+		t.Fatalf("blocked operational retry=%+v first=%+v", replayed, first)
+	}
+	audited := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), authoritycommit.ExposureGateReplayRequest{
+		Original: request, AuditVerification: f.gateAuditVerification,
+	})
+	if audited.Disposition != "REPLAY" || audited.Attempt == nil ||
+		audited.Attempt.AttemptID != first.Attempt.AttemptID || audited.Attempt.Outcome != "BLOCKED" ||
+		audited.ExposurePermitted {
+		t.Fatalf("blocked audited replay=%+v first=%+v", audited, first)
 	}
 	assertAuthorityHead(t, f.authoritySQLFixture, 1, 1, 0, 0)
 
@@ -1802,7 +1837,7 @@ func TestAuthorityCommitMySQL_ExposureGateTokenCannotBeReusedAcrossAttempts(t *t
 	assertAuthorityHead(t, f.authoritySQLFixture, 2, 1, 0, 2)
 }
 
-func TestAuthorityCommitMySQL_ExposureGateAfterCommitReplyLossReturnsOriginalLineage(t *testing.T) {
+func TestAuthorityCommitMySQL_ExposureGateAfterCommitReplyLossRequiresAuditReplay(t *testing.T) {
 	f := newJournalAdmitMySQL(t)
 	admission := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
 	if admission.Outcome != authority.OutcomeValid || admission.Commit == nil {
@@ -1820,10 +1855,16 @@ func TestAuthorityCommitMySQL_ExposureGateAfterCommitReplyLossReturnsOriginalLin
 		t.Fatalf("lost reply=%+v", lost)
 	}
 	magi.SetAuthorityCommitFaultHookForTest(f.commitRepo, nil)
-	replayed := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
+	retry := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
+	if retry.Outcome != authority.OutcomeDenied || retry.Code != "AUDIT_AUTHORIZATION_REQUIRED" || retry.Attempt != nil {
+		t.Fatalf("un-audited reply-loss retry=%+v", retry)
+	}
+	replayed := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), authoritycommit.ExposureGateReplayRequest{
+		Original: request, AuditVerification: f.gateAuditVerification,
+	})
 	if replayed.Outcome != authority.OutcomeValid || replayed.Disposition != "REPLAY" || replayed.Attempt == nil ||
 		replayed.Attempt.AuthoritySequence != admission.Commit.AuthoritySequence+1 || replayed.ExposurePermitted {
-		t.Fatalf("replayed=%+v", replayed)
+		t.Fatalf("audited replayed=%+v", replayed)
 	}
 	var gateCommits int64
 	if err := f.db.Table("magi_authority_exposure_gate_commit_v2").Count(&gateCommits).Error; err != nil || gateCommits != 1 {
@@ -1855,5 +1896,162 @@ func TestAuthorityCommitMySQL_S34UpgradesExistingS33RowsWithoutMutatingThem(t *t
 	}
 	if f.db.Migrator().HasTable("magi_provider_settlement_v2") {
 		t.Fatal("S34 must not add settlement")
+	}
+}
+
+func TestAuthorityCommitMySQL_ExposureGateReplayRequiresCurrentAuditProof(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	admission := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if admission.Outcome != authority.OutcomeValid || admission.Commit == nil {
+		t.Fatalf("admission=%+v", admission)
+	}
+	request := newValidExposureGateRequest(t, f, admission.Commit.CommitID)
+	first := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
+	if first.Outcome != authority.OutcomeValid || first.Disposition != "NEW" || first.Attempt == nil {
+		t.Fatalf("gate=%+v", first)
+	}
+	retry := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
+	if retry.Outcome != authority.OutcomeDenied || retry.Code != "AUDIT_AUTHORIZATION_REQUIRED" || retry.Attempt != nil {
+		t.Fatalf("operational retry returned lineage=%+v", retry)
+	}
+	replayRequest := authoritycommit.ExposureGateReplayRequest{
+		Original: request, AuditVerification: f.gateAuditVerification,
+	}
+	replay := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), replayRequest)
+	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Attempt == nil ||
+		replay.Attempt.AttemptID != first.Attempt.AttemptID ||
+		replay.Attempt.AuthoritySequence != first.Attempt.AuthoritySequence || replay.ExposurePermitted ||
+		replay.Attempt.ExposurePermitted {
+		t.Fatalf("audited replay=%+v first=%+v", replay, first)
+	}
+	replayRequest.AuditVerification = request.Verification
+	replay = f.commitRepo.ReplayJournalExposureGateV2(context.Background(), replayRequest)
+	if replay.Outcome != authority.OutcomeDenied || replay.Code != "AUDIT_AUTHORIZATION_REQUIRED" || replay.Attempt != nil {
+		t.Fatalf("operational proof audit=%+v", replay)
+	}
+}
+
+func TestAuthorityCommitMySQL_ExposureGateReplayRevokedAuditFailsClosed(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	admission := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if admission.Outcome != authority.OutcomeValid || admission.Commit == nil {
+		t.Fatalf("admission=%+v", admission)
+	}
+	request := newValidExposureGateRequest(t, f, admission.Commit.CommitID)
+	if result := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("gate=%+v", result)
+	}
+	scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "audit-context-scope"}
+	if _, result := f.repo.RevokeScope(context.Background(), authorityRevocationCommand(t, f.authoritySQLFixture,
+		"revoke-gate-audit", scope, 2, 1, "audit withdrawn")); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("revoke=%+v", result)
+	}
+	replay := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), authoritycommit.ExposureGateReplayRequest{
+		Original: request, AuditVerification: f.gateAuditVerification,
+	})
+	if replay.Outcome != authority.OutcomeRevoked || replay.Code != "SCOPE_REVOKED" || replay.Attempt != nil || replay.ExposurePermitted {
+		t.Fatalf("revoked audit replay=%+v", replay)
+	}
+}
+
+func TestAuthorityCommitMySQL_ExposureGateProofExpiryDuringAdmissionWaitRejects(t *testing.T) {
+	f := newJournalAdmitMySQLWithProofTTL(t, 1500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	admission := f.commitRepo.CommitJournalAdmissionV2(ctx, f.owner, f.request)
+	if admission.Outcome != authority.OutcomeValid || admission.Commit == nil {
+		t.Fatalf("admission=%+v", admission)
+	}
+	request := newValidExposureGateRequest(t, f, admission.Commit.CommitID)
+
+	holder := f.db.WithContext(ctx).Begin()
+	if holder.Error != nil {
+		t.Fatal(holder.Error)
+	}
+	var locked string
+	if err := holder.Raw(`SELECT commit_id FROM magi_authority_admission_v2 WHERE trust_domain='tenant-a' AND commit_id=? FOR UPDATE`,
+		admission.Commit.CommitID).Row().Scan(&locked); err != nil {
+		_ = holder.Rollback().Error
+		t.Fatal(err)
+	}
+
+	admissionLocked := make(chan struct{}, 1)
+	magi.SetAuthorityCommitFaultHookForTest(f.commitRepo, func(point string) error {
+		if point == "gate_after_admission" {
+			admissionLocked <- struct{}{}
+		}
+		return nil
+	})
+	defer magi.SetAuthorityCommitFaultHookForTest(f.commitRepo, nil)
+
+	done := make(chan authoritycommit.ExposureGateResult, 1)
+	go func() { done <- f.commitRepo.CommitJournalExposureGateV2(ctx, f.owner, request) }()
+
+	select {
+	case result := <-done:
+		_ = holder.Rollback().Error
+		t.Fatalf("gate did not wait for admission lock: %+v", result)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if wait := time.Until(f.proofExpires) + 100*time.Millisecond; wait > 0 {
+		time.Sleep(wait)
+	}
+	if err := holder.Rollback().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-admissionLocked:
+	case <-ctx.Done():
+		t.Fatal("gate did not acquire admission lock after release")
+	}
+	select {
+	case result := <-done:
+		if result.Outcome != authority.OutcomeExpired || result.Code != "PROOF_EXPIRED" || result.ExposurePermitted {
+			t.Fatalf("expired gate=%+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	assertAuthorityHead(t, f.authoritySQLFixture, 1, 1, 0, 0)
+	for _, table := range []string{
+		"magi_authority_exposure_gate_attempt_v2",
+		"magi_authority_exposure_gate_commit_v2",
+		"magi_authority_exposure_gate_token_v2",
+		"magi_authority_exposure_gate_lineage_v2",
+		"magi_authority_exposure_gate_attestation_v2",
+	} {
+		var count int64
+		if err := f.db.Table(table).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("%s rows=%d err=%v", table, count, err)
+		}
+	}
+}
+
+func TestAuthorityCommitMySQL_ExposureGateAuditSurvivesOperationalProofRevocation(t *testing.T) {
+	f := newJournalAdmitMySQL(t)
+	admission := f.commitRepo.CommitJournalAdmissionV2(context.Background(), f.owner, f.request)
+	if admission.Outcome != authority.OutcomeValid || admission.Commit == nil {
+		t.Fatalf("admission=%+v", admission)
+	}
+	request := newValidExposureGateRequest(t, f, admission.Commit.CommitID)
+	first := f.commitRepo.CommitJournalExposureGateV2(context.Background(), f.owner, request)
+	if first.Outcome != authority.OutcomeValid || first.Attempt == nil {
+		t.Fatalf("gate=%+v", first)
+	}
+	// Revoke only the operational Gate proof's context scope. The independent
+	// audit proof uses a different context scope and remains current.
+	scope := authority.ScopeKey{Kind: authority.ScopeContext, ScopeID: "context-scope"}
+	if _, result := f.repo.RevokeScope(context.Background(), authorityRevocationCommand(t, f.authoritySQLFixture,
+		"revoke-gate-operational", scope, 4, 1, "operational proof withdrawn")); result.Outcome != authority.OutcomeValid {
+		t.Fatalf("revoke=%+v", result)
+	}
+	replay := f.commitRepo.ReplayJournalExposureGateV2(context.Background(), authoritycommit.ExposureGateReplayRequest{
+		Original: request, AuditVerification: f.gateAuditVerification,
+	})
+	if replay.Outcome != authority.OutcomeValid || replay.Disposition != "REPLAY" || replay.Attempt == nil ||
+		replay.Attempt.AttemptID != first.Attempt.AttemptID ||
+		replay.Attempt.AuthoritySequence != first.Attempt.AuthoritySequence || replay.ExposurePermitted {
+		t.Fatalf("audited replay after operational revocation=%+v", replay)
 	}
 }

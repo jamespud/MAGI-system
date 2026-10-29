@@ -109,6 +109,14 @@ type ReplayRequest struct {
 	AuditVerification authority.VerificationRequest `json:"audit_verification"`
 }
 
+// ExposureGateReplayRequest is the historical Gate read boundary. The exact
+// original Gate request is lookup material only; the audit proof authorizes
+// returning its durable lineage, never another Gate or a permit.
+type ExposureGateReplayRequest struct {
+	Original          ExposureGateRequest           `json:"original"`
+	AuditVerification authority.VerificationRequest `json:"audit_verification"`
+}
+
 type PreparedObject struct {
 	ID        string `json:"id"`
 	Digest    string `json:"digest"`

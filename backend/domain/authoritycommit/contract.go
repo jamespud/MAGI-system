@@ -314,3 +314,27 @@ func ValidateProviderCapabilityShape(capability ProviderCapability) Result {
 func ExposureGateRequestDigest(req ExposureGateRequest) (string, error) {
 	return digestWithPrefix(req, "magi:authority-journal-exposure-gate-v2:")
 }
+
+// ValidateExposureGateReplay separates historical Gate lineage lookup from a
+// current commit attempt. The original request is shape-checked only so an
+// already expired/revoked operational proof can still be identified; a current
+// JOURNAL_AUDIT_READ proof is required before the adapter returns any lineage.
+func ValidateExposureGateReplay(req ExposureGateReplayRequest) Result {
+	if result := ValidateExposureGate(req.Original); result.Outcome != authority.OutcomeValid {
+		return result
+	}
+	audit := req.AuditVerification
+	if !strings.HasPrefix(audit.ProofID, "aprf_") || !digestPattern.MatchString(strings.TrimPrefix(audit.ProofID, "aprf_")) ||
+		audit.Operation != JournalAuditRead {
+		return denied("AUDIT_AUTHORIZATION_REQUIRED")
+	}
+	original := req.Original
+	if audit.TrustDomain != original.Verification.TrustDomain || audit.Resource != original.Gate.GateID ||
+		audit.Action != original.Verification.Action || audit.Tenant != original.Verification.Tenant ||
+		audit.CaseID != original.Verification.CaseID || audit.Round != original.Verification.Round ||
+		audit.ExecutionGeneration != original.Verification.ExecutionGeneration ||
+		!validSubject(audit.Subject) || !validScopes(audit.Scopes) {
+		return denied("AUDIT_BINDING_MISMATCH")
+	}
+	return Result{Outcome: authority.OutcomeValid, Code: "EXPOSURE_GATE_REPLAY_REQUEST_VALID"}
+}

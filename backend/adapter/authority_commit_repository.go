@@ -1,6 +1,7 @@
 package magi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -365,13 +366,13 @@ func (r *AuthorityCommitRepository) CommitJournalExposureGateV2(
 			return errAuthorityCommitAbort
 		}
 		if existing != nil {
-			replayed, result := replayExposureGateAttempt(tx, *existing, requestRaw.Bytes(), requestDigest, request.CommitToken)
-			if result.Outcome != "" {
-				abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			if !bytes.Equal(existing.RawRequest, requestRaw.Bytes()) || existing.RequestDigest != requestDigest ||
+				existing.CommitToken != request.CommitToken {
+				abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "EXPOSURE_GATE_ATTEMPT_CONFLICT", ""))
 				return errAuthorityCommitAbort
 			}
-			committed = replayed
-			return nil
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeDenied, "AUDIT_AUTHORIZATION_REQUIRED", ""))
+			return errAuthorityCommitAbort
 		}
 		tokenAttempt, result := lockExposureGateAttemptByToken(tx, request.Verification.TrustDomain, request.CommitToken)
 		if result.Outcome != "" {
@@ -425,6 +426,13 @@ func (r *AuthorityCommitRepository) CommitJournalExposureGateV2(
 		trustedNow, err := databaseNow(tx)
 		if err != nil {
 			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_ERROR", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		// Admission and fence locks may have waited across the proof deadline.
+		// Re-authenticate C2 against fresh DB time before the final owner/fence
+		// checks and before allocating any common authority sequence.
+		if result := r.authority.verifyProofInTx(tx, request.Verification); result.Outcome != authority.OutcomeValid {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
 			return errAuthorityCommitAbort
 		}
 		if err := validateActiveExecutionAt(job, caseModel, owner, trustedNow); err != nil {

@@ -6,8 +6,9 @@ func SetAuthorityCommitFaultHookForTest(repo *AuthorityCommitRepository, hook fu
 	repo.faultHook = hook
 }
 
-// SetExposureGateAttestationVerifierForTest keeps the operational verifier
-// unreachable from production wiring.
+// SetExposureGateAttestationVerifierForTest injects the local test verifier.
+// This symbol exists only in the test build; it is not part of the adapter API.
 func SetExposureGateAttestationVerifierForTest(repo *AuthorityCommitRepository, verifier ExposureGateAttestationVerifier) {
-	repo.SetExposureGateAttestationVerifierForTest(verifier)
+	repo.witnessVerifier = verifier
+	repo.gateAttestationVerifier = verifier
 }

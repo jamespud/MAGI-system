@@ -25,13 +25,6 @@ type ExposureGateAttestationVerifier interface {
 	VerifyGateAttestation(request authoritycommit.ExposureGateRequest, capability authoritycommit.ProviderCapability, fence AuthorityExposureGateFenceEvidence, now time.Time) authority.Result
 }
 
-// SetExposureGateAttestationVerifierForTest is available only to this package's
-// tests through authority_commit_export_test.go. Production wiring remains off.
-func (r *AuthorityCommitRepository) SetExposureGateAttestationVerifierForTest(verifier ExposureGateAttestationVerifier) {
-	r.witnessVerifier = verifier
-	r.gateAttestationVerifier = verifier
-}
-
 func exposureGateFailure(outcome authority.Outcome, code, detail string) authoritycommit.ExposureGateResult {
 	return authoritycommit.ExposureGateResult{Outcome: outcome, Code: code, Detail: detail, ExposurePermitted: false}
 }
@@ -337,13 +330,13 @@ func (r *AuthorityCommitRepository) commitBlockedExposureGate(
 			return errAuthorityCommitAbort
 		}
 		if existing != nil {
-			replayed, typed := replayExposureGateAttempt(tx, *existing, raw.Bytes(), requestDigest, request.CommitToken)
-			if typed.Outcome != "" {
-				abort = exposureGateResultPtr(exposureGateFromAuthorityResult(typed))
+			if !bytes.Equal(existing.RawRequest, raw.Bytes()) || existing.RequestDigest != requestDigest ||
+				existing.CommitToken != request.CommitToken {
+				abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "EXPOSURE_GATE_ATTEMPT_CONFLICT", ""))
 				return errAuthorityCommitAbort
 			}
-			result = replayed
-			return nil
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeDenied, "AUDIT_AUTHORIZATION_REQUIRED", ""))
+			return errAuthorityCommitAbort
 		}
 		tokenAttempt, typed := lockExposureGateAttemptByToken(tx, request.Verification.TrustDomain, request.CommitToken)
 		if typed.Outcome != "" {

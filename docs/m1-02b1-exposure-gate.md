@@ -172,3 +172,87 @@ and GateAttempt.
 
 Production exposure remains disabled; there is no consumable permit, remote
 Provider APPLY, real Witness verification or Settlement in this slice.
+
+
+## Review follow-up: F59-01 / F59-02 / F59-03
+
+The independent review found three P1 boundaries. All were reproduced and fixed
+without changing the common-order architecture.
+
+### F59-01: C2 expiry while waiting for Admission/Fence locks
+
+RED observed on real MySQL:
+
+```text
+expired gate={Outcome:VALID Code:EXPOSURE_GATED ...}
+```
+
+The whole-request C2 proof was rechecked before `lockExposureGateAdmission`, but
+not after waiting for the Admission row lock. The adapter now executes
+`verifyProofInTx` again with fresh DB time after Admission/Fence locks and before
+the final Owner/fence checks and sequence allocation.
+
+GREEN test:
+`TestAuthorityCommitMySQL_ExposureGateProofExpiryDuringAdmissionWaitRejects`.
+It holds the real Admission row lock past the proof deadline, releases it, then
+asserts `EXPIRED/PROOF_EXPIRED`, unchanged Head (`1,1,0,0`), and zero Gate
+attempt/commit/token/lineage/attestation rows.
+
+### F59-02: historical Gate lineage needed an audit boundary
+
+Operational replay of an existing Gate attempt no longer returns history. It
+returns `DENIED/AUDIT_AUTHORIZATION_REQUIRED` with no Attempt lineage. Historical
+material is available only through
+`ReplayJournalExposureGateV2` with a current `JOURNAL_AUDIT_READ` proof.
+
+Covered paths:
+
+- ordinary commit retry returns no lineage;
+- a valid independent audit proof recovers the original Attempt/sequence;
+- an operational Gate proof is not accepted as audit authorization;
+- revoking the audit scope rejects replay;
+- revoking only the operational proof scope does not prevent the still-current
+  audit proof from reading history.
+
+The audit path never reassigns a sequence or reissues a permit.
+
+### F59-03: test verifier injection was compiled into production
+
+`SetExposureGateAttestationVerifierForTest` was removed from the normal package
+and now exists only in `authority_commit_export_test.go`. A compile-surface test
+parses the production Go file set and rejects any production top-level declaration
+with that name.
+
+### Final follow-up command evidence
+
+```text
+MAGI_TEST_MYSQL_DSN=... go test ./adapter \
+  -run '^TestAuthorityCommitMySQL_ExposureGate|^TestAuthorityCommitMySQL_S34|^TestExposureGateVerifierInjectionAbsentFromProductionPackage$'
+PASS (30.1s)
+
+go test -race ./domain/authority ./domain/authoritycommit
+PASS
+
+go vet ./adapter ./domain/authority ./domain/authoritycommit
+PASS
+```
+
+The required full adapter MySQL gate and exact-head CI were rerun after these
+changes; only the final output recorded in the PR may be cited as exact-head CI
+evidence.
+
+
+### Targeted regression note
+
+After the three fixes, the CI-equivalent full adapter MySQL command on the local
+host still reported two unrelated A2A failures:
+
+```text
+FAIL TestA2ASubmission_ConcurrentSameMessageOnMySQL
+FAIL TestA2ASnapshot_ConsistentOnMySQL
+```
+
+No `TestAuthorityCommitMySQL_ExposureGate*`, S34, verifier-surface or domain test
+failed in that run. The two A2A tests also passed on untouched baseline
+`4d969869` as well as in isolated reruns on this branch; the full local run
+remains an environment-sensitive baseline signal and is not described as green.
