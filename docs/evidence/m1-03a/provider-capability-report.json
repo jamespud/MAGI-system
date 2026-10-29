@@ -1,0 +1,59 @@
+{
+  "schema_version": "magi-provider-capability/1",
+  "issue": "44",
+  "scope": "M1-03A",
+  "assessed_at_utc": "2026-10-29T00:23:32Z",
+  "provider": {
+    "id": "anthropic-compatible-local-gateway",
+    "base_url": "http://127.0.0.1:15721"
+  },
+  "models": {
+    "outcome": "SUCCEEDED",
+    "http_status": 200,
+    "body_sha256": "fd71b4438dea68046585a59a5e30b570dcf2dc0bf70fbaff48cbd9049f377504",
+    "body_bytes": 28,
+    "body_summary": "{\"data_count\":0}",
+    "observed_at_utc": "2026-10-29T00:23:32Z"
+  },
+  "verdict": "BLOCKED",
+  "m1_gate": "NOT_RUN",
+  "blockers": [
+    "NO_VERIFIABLE_MODEL_TARGET"
+  ],
+  "capabilities": [
+    {
+      "name": "session_identity",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    },
+    {
+      "name": "enforced_fence",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    },
+    {
+      "name": "revocation_watermark",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    },
+    {
+      "name": "trusted_apply_receipt",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    },
+    {
+      "name": "response_loss_recovery",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    },
+    {
+      "name": "provider_restore_isolation",
+      "status": "NOT_RUN",
+      "reason": "NO_VERIFIABLE_MODEL_TARGET"
+    }
+  ],
+  "production_exposure_enabled": false,
+  "apply_verified_emitted": false,
+  "drcp_issued": false,
+  "remote_model_calls_attempted": 0
+}
