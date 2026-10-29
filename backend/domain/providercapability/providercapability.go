@@ -98,6 +98,9 @@ type OriginalEvidence struct {
 }
 
 type IndependentVerification struct {
+	// AttestationDigest is emitted by a separately trusted verifier. Assess cannot
+	// authenticate it; without an injected verifier the result remains UNVERIFIABLE.
+	AttestationDigest   string          `json:"attestation_digest"`
 	VerifierID          string          `json:"verifier_id"`
 	QueryRequestID      string          `json:"query_request_id"`
 	QueryResponseSHA256 string          `json:"query_response_sha256"`
@@ -134,6 +137,7 @@ type Evidence struct {
 // missing endpoint, timeout, or an empty model list is not enough.
 type UnsupportedEvidence struct {
 	ProviderID        string   `json:"provider_id"`
+	ModelID           string   `json:"model_id"`
 	InterfaceRef      string   `json:"interface_ref"`
 	ObservedAtUTC     string   `json:"observed_at_utc"`
 	RawResponseSHA256 string   `json:"raw_response_sha256"`
@@ -307,21 +311,21 @@ func assessCapability(name CapabilityName, observation Observation, target Targe
 	evidence, present := observation.CapabilityEvidence[name]
 	unsupported, hasUnsupported := observation.Unsupported[name]
 	if hasUnsupported {
-		if err := validateUnsupported(name, unsupported, observation.Provider); err != nil {
+		if err := validateUnsupported(name, unsupported, observation.Provider, target); err != nil {
 			return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: "UNSUPPORTED_EVIDENCE_INVALID"}
 		}
 		if present && len(evidence) > 0 {
 			return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: "CONFLICTING_CAPABILITY_EVIDENCE"}
 		}
 		value := unsupported
-		return CapabilityResult{Name: name, Status: StatusUnsupported, Reason: "INTERFACE_CONTRACT_CONFIRMS_UNSUPPORTED", Unsupported: &value}
+		return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: "UNSUPPORTED_CLAIM_NOT_INDEPENDENTLY_VERIFIED", Unsupported: &value}
 	}
 	if present && len(evidence) > 0 {
 		validated, reason := validateEvidenceSet(name, evidence, observation.Provider, target, models)
 		if reason != "" {
 			return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: reason}
 		}
-		return CapabilityResult{Name: name, Status: StatusVerified, Reason: "INDEPENDENT_QUERY_AND_CAPABILITY_PROOF_VALIDATED", Evidence: validated}
+		return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: "INDEPENDENT_ATTESTATION_NOT_VERIFIED", Evidence: validated}
 	}
 	if observation.Transport != nil {
 		return CapabilityResult{Name: name, Status: StatusUnverifiable, Reason: "TRANSPORT_ACK_HAS_NO_INDEPENDENT_ORIGINAL"}
@@ -374,6 +378,7 @@ func validateEvidence(item Evidence, provider Provider, target Target, models ma
 		return fmt.Errorf("EVIDENCE_DIGEST_INVALID")
 	}
 	if strings.TrimSpace(item.Original.RawResponseRef) == "" ||
+		!digestPattern.MatchString(item.Verification.AttestationDigest) ||
 		strings.TrimSpace(item.Verification.VerifierID) == "" ||
 		strings.TrimSpace(item.Verification.QueryRequestID) == "" ||
 		strings.TrimSpace(item.Verification.QueryResponseRef) == "" ||
@@ -438,9 +443,12 @@ func validateProof(capability CapabilityName, proof map[string]string, evidence 
 	return nil
 }
 
-func validateUnsupported(name CapabilityName, item UnsupportedEvidence, provider Provider) error {
+func validateUnsupported(name CapabilityName, item UnsupportedEvidence, provider Provider, target Target) error {
 	if item.ProviderID == "" || item.ProviderID != provider.ID {
 		return fmt.Errorf("UNSUPPORTED_PROVIDER_UNBOUND")
+	}
+	if item.ModelID == "" || item.ModelID != target.ModelID {
+		return fmt.Errorf("UNSUPPORTED_TARGET_UNBOUND")
 	}
 	if strings.TrimSpace(item.InterfaceRef) == "" || strings.TrimSpace(item.Reason) == "" ||
 		strings.TrimSpace(item.RawResponseRef) == "" || !validStrings(item.Reproduction) {

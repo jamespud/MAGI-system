@@ -230,3 +230,17 @@ UTC=2026-10-29T00:23:32Z
   `NOT_RUN/BLOCKED`。
 - 要解除阻塞，必须提供隔离测试目标及可独立查询的 Provider 原件，逐项完成六项测试；
   在此之前不实现 Settlement、三人格闭环或生产暴露。
+
+
+## 8. 独立复核修复（追加）
+
+独立只读复核发现并已修复两个 P0：
+
+1. 结构完整但自报的 `PASS` 不能升为 `VERIFIED`；现在固定为
+   `UNVERIFIABLE/INDEPENDENT_ATTESTATION_NOT_VERIFIED`，必须有独立 verifier。
+2. discovery 曾可能跟随 307/308 重定向并转发 Bearer 到其他路径；现在 probe
+   自身禁止重定向，并有同端口 `/v1/models -> /v1/messages` 负例。
+
+另外将 `UNSUPPORTED` 收紧为 `UNVERIFIABLE`：调用方文本、摘要和复现说明不足以
+单独证明接口能力缺失，仍需独立契约验证。修复后的 focused tests、race 和 vet
+均实际通过；原报告结论仍为 `BLOCKED`，当前没有真实目标或可信原件。

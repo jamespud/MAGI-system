@@ -193,6 +193,31 @@ func TestProbeUsesUTCAndDoesNotExposeToken(t *testing.T) {
 	}
 }
 
+func TestProbeRejectsRedirectWithoutFollowingOrReclassifyingBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected probe path %q", r.URL.Path)
+		}
+		http.Redirect(w, r, "/v1/messages", http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	models := probeModels(context.Background(), providercapability.Provider{
+		ID: "provider-a", BaseURL: server.URL,
+	}, "secret", &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}, time.Now().UTC())
+	if models.Outcome != providercapability.DiscoveryFailed {
+		t.Fatalf("outcome = %q, want FAILED", models.Outcome)
+	}
+	if models.HTTPStatus != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307", models.HTTPStatus)
+	}
+	if len(models.ModelIDs) != 0 {
+		t.Fatalf("redirect body was classified as model discovery: %+v", models)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

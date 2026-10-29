@@ -67,7 +67,12 @@ func runCLI(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	models := probeModels(ctx, provider, token, client, time.Now().UTC())
 	report := providercapability.Assess(providercapability.Observation{
 		Provider:        provider,
@@ -117,6 +122,11 @@ func parseProvider(id, rawURL string) (providercapability.Provider, error) {
 }
 
 func probeModels(ctx context.Context, provider providercapability.Provider, token string, client *http.Client, now time.Time) providercapability.ModelsObservation {
+	if client.CheckRedirect == nil {
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
 	observation := providercapability.ModelsObservation{
 		Outcome:       providercapability.DiscoveryNotRun,
 		ObservedAtUTC: now.UTC().Format(time.RFC3339),

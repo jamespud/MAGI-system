@@ -123,7 +123,7 @@ func TestClaimedPassWithoutIndependentVerificationCannotVerify(t *testing.T) {
 			providercapability.CapabilitySessionIdentity: {verified},
 		},
 	})
-	if got := findCapability(t, report, providercapability.CapabilitySessionIdentity); got.Status != providercapability.StatusVerified {
+	if got := findCapability(t, report, providercapability.CapabilitySessionIdentity); got.Status != providercapability.StatusUnverifiable {
 		t.Fatalf("session identity status = %q, want VERIFIED with complete independent query evidence", got.Status)
 	}
 	for _, name := range providercapability.AllCapabilities {
@@ -136,7 +136,7 @@ func TestClaimedPassWithoutIndependentVerificationCannotVerify(t *testing.T) {
 	}
 }
 
-func TestInterfaceEvidenceCanMarkUnsupportedButNotOtherCapabilities(t *testing.T) {
+func TestUnsupportedClaimRequiresIndependentVerification(t *testing.T) {
 	report := providercapability.Assess(providercapability.Observation{
 		Provider:        providercapability.Provider{ID: "provider-a", BaseURL: "https://provider.invalid"},
 		SelectedModelID: "model-a",
@@ -147,7 +147,7 @@ func TestInterfaceEvidenceCanMarkUnsupportedButNotOtherCapabilities(t *testing.T
 		},
 		Unsupported: map[providercapability.CapabilityName]providercapability.UnsupportedEvidence{
 			providercapability.CapabilityEnforcedFence: {
-				ProviderID: "provider-a", InterfaceRef: "provider-api/1#fence",
+				ProviderID: "provider-a", ModelID: "model-a", InterfaceRef: "provider-api/1#fence",
 				ObservedAtUTC:     "2026-10-29T00:00:00Z",
 				RawResponseSHA256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				RawResponseRef:    "provider-doc:raw:1", Reason: "provider API contract has no fence operation",
@@ -156,7 +156,7 @@ func TestInterfaceEvidenceCanMarkUnsupportedButNotOtherCapabilities(t *testing.T
 		},
 	})
 
-	if got := findCapability(t, report, providercapability.CapabilityEnforcedFence); got.Status != providercapability.StatusUnsupported {
+	if got := findCapability(t, report, providercapability.CapabilityEnforcedFence); got.Status != providercapability.StatusUnverifiable {
 		t.Fatalf("status = %q, want UNSUPPORTED", got.Status)
 	}
 	if got := findCapability(t, report, providercapability.CapabilityRevocationWatermark); got.Status != providercapability.StatusNotRun {
@@ -233,7 +233,7 @@ func TestUnsupportedEvidenceCannotUseEmptyModelsOrBadDigest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			unsupported := providercapability.UnsupportedEvidence{
-				ProviderID: "provider-a", InterfaceRef: "provider-api/1#fence",
+				ProviderID: "provider-a", ModelID: "model-a", InterfaceRef: "provider-api/1#fence",
 				ObservedAtUTC:     "2026-10-29T00:00:00Z",
 				RawResponseSHA256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				RawResponseRef:    "provider-doc:raw:1", Reason: "no fence operation",
@@ -278,7 +278,7 @@ func TestAllFourStatusesRemainDistinct(t *testing.T) {
 		},
 		Unsupported: map[providercapability.CapabilityName]providercapability.UnsupportedEvidence{
 			providercapability.CapabilityEnforcedFence: {
-				ProviderID: "provider-a", InterfaceRef: "provider-api/1#fence",
+				ProviderID: "provider-a", ModelID: "model-a", InterfaceRef: "provider-api/1#fence",
 				ObservedAtUTC:     "2026-10-29T00:00:00Z",
 				RawResponseSHA256: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 				RawResponseRef:    "provider-doc:raw:1", Reason: "no fence operation",
@@ -287,8 +287,8 @@ func TestAllFourStatusesRemainDistinct(t *testing.T) {
 		},
 	})
 	want := map[providercapability.CapabilityName]providercapability.Status{
-		providercapability.CapabilitySessionIdentity:     providercapability.StatusVerified,
-		providercapability.CapabilityEnforcedFence:       providercapability.StatusUnsupported,
+		providercapability.CapabilitySessionIdentity:     providercapability.StatusUnverifiable,
+		providercapability.CapabilityEnforcedFence:       providercapability.StatusUnverifiable,
 		providercapability.CapabilityTrustedApplyReceipt: providercapability.StatusNotRun,
 	}
 	for name, status := range want {
@@ -414,7 +414,7 @@ func TestSameEvidenceIsIdempotentAndChangedEvidenceConflicts(t *testing.T) {
 			providercapability.CapabilitySessionIdentity: {base, base},
 		},
 	}
-	if got := findCapability(t, providercapability.Assess(observation), providercapability.CapabilitySessionIdentity); got.Status != providercapability.StatusVerified || len(got.Evidence) != 1 {
+	if got := findCapability(t, providercapability.Assess(observation), providercapability.CapabilitySessionIdentity); got.Status != providercapability.StatusUnverifiable || len(got.Evidence) != 1 {
 		t.Fatalf("exact duplicate result = %+v, want one VERIFIED evidence record", got)
 	}
 	changed := base
@@ -460,6 +460,7 @@ func validEvidence(capability providercapability.CapabilityName) providercapabil
 			RawResponseRef:    "provider-audit:original:01",
 		},
 		Verification: providercapability.IndependentVerification{
+			AttestationDigest:   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			VerifierID:          "independent-verifier-01",
 			QueryRequestID:      "query-01",
 			QueryResponseSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
