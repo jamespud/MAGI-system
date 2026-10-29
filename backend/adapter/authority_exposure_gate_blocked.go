@@ -295,9 +295,11 @@ func validateExposureGateAdmissionBinding(admission *authorityAdmissionV2Row, fe
 		return authority.Result{Outcome: authority.OutcomeDenied, Code: "EXPOSURE_GATE_ADMISSION_CORRUPT", Detail: err.Error()}
 	}
 	requestDigest, err := authoritycommit.RequestDigest(admitted)
-	if err != nil || requestDigest != key.AdmissionRequestDigest || requestDigest != admission.RequestDigest ||
-		request.Witness.RequestDigest != requestDigest {
+	if err != nil || requestDigest != key.AdmissionRequestDigest || requestDigest != admission.RequestDigest {
 		return authority.Result{Outcome: authority.OutcomeConflict, Code: "EXPOSURE_GATE_ADMISSION_BINDING_MISMATCH"}
+	}
+	if request.Witness != (authoritycommit.WitnessEvidence{}) && request.Witness.RequestDigest != requestDigest {
+		return authority.Result{Outcome: authority.OutcomeConflict, Code: "EXPOSURE_GATE_WITNESS_BINDING_MISMATCH"}
 	}
 	if !slices.Equal(request.Verification.Scopes, admitted.Verification.Scopes) ||
 		request.Verification.Subject != admitted.Verification.Subject ||
