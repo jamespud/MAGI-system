@@ -637,3 +637,122 @@ func TestValidateReplayRequiresIndependentAuditBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestExposureGateAttemptBlockedIsTerminalAndNeverPermits(t *testing.T) {
+	attempt := authoritycommit.ExposureGateAttempt{
+		AttemptID: "attempt-r0", RequestDigest: strings.Repeat("a", 64),
+		Outcome: "BLOCKED", Code: "PROVIDER_CAPABILITY_UNVERIFIED",
+		GateID: "gate-r0", AdmissionCommitID: "ajc_" + strings.Repeat("b", 64),
+		BlockedReason: "missing independently verified provider fence", ExposurePermitted: false,
+	}
+	if err := authoritycommit.ValidateBlockedAttempt(attempt); err != nil {
+		t.Fatalf("blocked attempt must be a valid terminal record: %v", err)
+	}
+	attempt.ExposurePermitted = true
+	if err := authoritycommit.ValidateBlockedAttempt(attempt); err == nil {
+		t.Fatal("BLOCKED attempt must never permit exposure")
+	}
+	attempt.ExposurePermitted = false
+	attempt.AuthoritySequence = 1
+	if err := authoritycommit.ValidateBlockedAttempt(attempt); err == nil {
+		t.Fatal("BLOCKED attempt must never consume authority sequence")
+	}
+}
+
+func TestExposureGateRequestRejectsRemoteOrForgedCapability(t *testing.T) {
+	req := admissionRequest(t)
+	gate := authoritycommit.ExposureGateRequest{
+		ContractVersion: authoritycommit.ContractVersion,
+		Operation:       authoritycommit.JournalExposureGateV2,
+		ExactTargetID:   "gate-r0",
+		CommitToken:     "gate-token-r0",
+		AttemptID:       "attempt-r0",
+		Verification: authority.VerificationRequest{
+			TrustDomain: "trust-r0", ProofID: "aprf_" + strings.Repeat("e", 64),
+			Subject: req.Admission.Principal, Resource: "gate-r0", Action: "READ", Tenant: "tenant-r0",
+			Operation: authoritycommit.JournalExposureGateV2, CaseID: "case-r0", Round: 1,
+			ExecutionGeneration: 7, Scopes: req.Admission.ScopedEpochs,
+		},
+		Witness: authoritycommit.WitnessEvidence{
+			WitnessID: "witness-r0", EvidenceID: "witness-evidence-r0",
+			EvidenceDigest: strings.Repeat("f", 64), ObjectRef: "object:witness-evidence-r0",
+			AdmissionCommitID: "ajc_" + strings.Repeat("b", 64),
+			RequestDigest:     strings.Repeat("e", 64),
+			ValidUntil:        "2026-10-26T01:00:30.000Z",
+		},
+		Gate: authoritycommit.ExposureGatePlan{
+			GateID: "gate-r0", AdmissionCommitID: "ajc_" + strings.Repeat("b", 64),
+			AdmissionRequestDigest: strings.Repeat("e", 64),
+			FenceID:                "lease-r0", LinearizationSequence: 1, TrustedNow: "2026-10-26T01:00:31.000Z",
+			ProviderCapability: authoritycommit.ProviderCapability{
+				ProviderID: "provider-r0", CapabilityID: "cap-r0",
+				CapabilityDigest: strings.Repeat("c", 64),
+				VerificationRef:  authoritycommit.PreparedObject{ID: "cap-r0", Digest: strings.Repeat("d", 64), ObjectRef: "object:cap-r0"},
+				EnforcesFence:    true, SupportsLease: true, EnforcesRevocationWatermark: true,
+				MaxLeaseUntil: "2026-10-26T01:01:00.000Z",
+			},
+		},
+	}
+	if got := authoritycommit.ValidateExposureGate(gate); got.Outcome != authority.OutcomeValid || got.Code != "EXPOSURE_GATE_REQUEST_VALID" {
+		t.Fatalf("valid gate request=%+v", got)
+	}
+	gate.Gate.LinearizationSequence = 0
+	if got := authoritycommit.ValidateExposureGate(gate); got.Outcome != authority.OutcomeValid {
+		t.Fatalf("validation must not allocate a sequence: %+v", got)
+	}
+	if got := authoritycommit.ValidateExposureGate(gate); got.Outcome != authority.OutcomeValid {
+		t.Fatalf("validation must not forge provider attestation: %+v", got)
+	}
+	gate.Gate.ProviderCapability.EnforcesRevocationWatermark = false
+	if got := authoritycommit.ValidateProviderCapability(gate.Gate.ProviderCapability); got.Outcome != authority.OutcomeDenied || got.Code != "PROVIDER_CAPABILITY_INSUFFICIENT" {
+		t.Fatalf("insufficient capability=%+v", got)
+	}
+}
+
+func TestExposureGateReplayRequiresExactAuditBinding(t *testing.T) {
+	req := admissionRequest(t)
+	gate := authoritycommit.ExposureGateRequest{
+		ContractVersion: authoritycommit.ContractVersion,
+		Operation:       authoritycommit.JournalExposureGateV2,
+		ExactTargetID:   "gate-r0",
+		CommitToken:     "gate-token-r0",
+		AttemptID:       "attempt-r0",
+		Verification: authority.VerificationRequest{
+			TrustDomain: "trust-r0", ProofID: "aprf_" + strings.Repeat("e", 64),
+			Subject: req.Admission.Principal, Resource: "gate-r0", Action: "READ", Tenant: "tenant-r0",
+			Operation: authoritycommit.JournalExposureGateV2, CaseID: "case-r0", Round: 1,
+			ExecutionGeneration: 7, Scopes: req.Admission.ScopedEpochs,
+		},
+		Witness: authoritycommit.WitnessEvidence{
+			WitnessID: "witness-r0", EvidenceID: "witness-evidence-r0",
+			EvidenceDigest: strings.Repeat("f", 64), ObjectRef: "object:witness-evidence-r0",
+			AdmissionCommitID: "ajc_" + strings.Repeat("b", 64),
+			RequestDigest:     strings.Repeat("a", 64),
+			ValidUntil:        "2026-10-26T01:00:30.000Z",
+		},
+		Gate: authoritycommit.ExposureGatePlan{
+			GateID: "gate-r0", AdmissionCommitID: "ajc_" + strings.Repeat("b", 64),
+			AdmissionRequestDigest: strings.Repeat("a", 64),
+			FenceID:                "lease-r0", LinearizationSequence: 1,
+			TrustedNow: "2026-10-26T01:00:31.000Z",
+			ProviderCapability: authoritycommit.ProviderCapability{
+				ProviderID: "provider-r0", CapabilityID: "cap-r0",
+				CapabilityDigest: strings.Repeat("c", 64),
+				VerificationRef:  authoritycommit.PreparedObject{ID: "cap-r0", Digest: strings.Repeat("d", 64), ObjectRef: "object:cap-r0"},
+				EnforcesFence:    true, SupportsLease: true, EnforcesRevocationWatermark: true,
+				MaxLeaseUntil: "2026-10-26T01:01:00.000Z",
+			},
+		},
+	}
+	audit := gate.Verification
+	audit.ProofID = "aprf_" + strings.Repeat("9", 64)
+	audit.Operation = authoritycommit.JournalAuditRead
+	replay := authoritycommit.ExposureGateReplayRequest{Original: gate, AuditVerification: audit}
+	if got := authoritycommit.ValidateExposureGateReplay(replay); got.Outcome != authority.OutcomeValid || got.Code != "EXPOSURE_GATE_REPLAY_REQUEST_VALID" {
+		t.Fatalf("valid replay=%+v", got)
+	}
+	replay.AuditVerification = gate.Verification
+	if got := authoritycommit.ValidateExposureGateReplay(replay); got.Outcome != authority.OutcomeDenied || got.Code != "AUDIT_AUTHORIZATION_REQUIRED" {
+		t.Fatalf("operational proof replay=%+v", got)
+	}
+}

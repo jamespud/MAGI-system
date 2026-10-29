@@ -153,6 +153,17 @@ class JournalAdmitV2Tests(unittest.TestCase):
         # The authoritative settlement binding still points at the original receipt.
         self.assertEqual(checker.check_semantics(value), 'CONFLICT')
 
+    def test_exposure_gate_core_does_not_create_a_permit(self):
+        source = (ROOT / 'backend/adapter/authority_exposure_gate_blocked.go').read_text()
+        self.assertIn("Outcome: \"BLOCKED\"", source)
+        self.assertIn("authority_sequence, exposure_permitted, committed_at", source)
+        self.assertIn("VALUES (?, ?, ?, ?, ?, 'BLOCKED', ?, ?, ?, ?, 0, 0, ?)", source)
+        self.assertNotIn("exposure_permitted=1", source)
+        migration = (ROOT / 'docker/atlas/migrations/magi_s34_authority_exposure_gate.sql').read_text()
+        self.assertIn('magi_authority_exposure_gate_attempt_v2', migration)
+        self.assertIn('magi_authority_exposure_gate_commit_v2', migration)
+        self.assertIn('exposure_permitted TINYINT(1) NOT NULL DEFAULT 0', migration)
+
     def test_v1_contract_identity_is_unchanged(self):
         schema = json.loads((ROOT / 'docs/contracts/authority-v1/schema.json').read_text())
         self.assertEqual(schema['properties']['contract_version']['const'], 'magi-authority/1')

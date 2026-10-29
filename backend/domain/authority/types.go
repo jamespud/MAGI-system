@@ -29,6 +29,7 @@ const (
 	OutcomeStale    Outcome = "STALE"
 	OutcomeConflict Outcome = "CONFLICT"
 	OutcomeUnknown  Outcome = "UNKNOWN"
+	OutcomeBlocked  Outcome = "BLOCKED"
 )
 
 // Result is a typed verification outcome. Only VALID sets
