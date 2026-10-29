@@ -11,6 +11,84 @@ const (
 	JournalAuditRead = "JOURNAL_AUDIT_READ"
 )
 
+const JournalExposureGateV2 = "JOURNAL_EXPOSURE_GATE_V2"
+
+// ExposureGateRequest binds one durable attempt to the exact admission,
+// provider fence and independently verifiable capability evidence.
+type ExposureGateRequest struct {
+	ContractVersion string                        `json:"contract_version"`
+	Operation       string                        `json:"operation"`
+	ExactTargetID   string                        `json:"exact_target_id"`
+	CommitToken     string                        `json:"commit_token"`
+	AttemptID       string                        `json:"attempt_id"`
+	Verification    authority.VerificationRequest `json:"verification"`
+	Witness         WitnessEvidence               `json:"witness"`
+	Gate            ExposureGatePlan              `json:"gate"`
+}
+
+// WitnessEvidence binds an independently persisted predecessor receipt to the
+// exact admission and request. Its presence is not proof of independence.
+type WitnessEvidence struct {
+	WitnessID         string `json:"witness_id"`
+	EvidenceID        string `json:"evidence_id"`
+	EvidenceDigest    string `json:"evidence_digest"`
+	ObjectRef         string `json:"object_ref"`
+	AdmissionCommitID string `json:"admission_commit_id"`
+	RequestDigest     string `json:"request_digest"`
+	ValidUntil        string `json:"valid_until"`
+}
+
+// ExposureGatePlan names one attempt and the admission it may gate. Its
+// linearization sequence is allocated only when the attempt commits.
+type ExposureGatePlan struct {
+	GateID                 string             `json:"gate_id"`
+	AdmissionCommitID      string             `json:"admission_commit_id"`
+	AdmissionRequestDigest string             `json:"admission_request_digest"`
+	FenceID                string             `json:"fence_id"`
+	LinearizationSequence  uint64             `json:"linearization_sequence"`
+	TrustedNow             string             `json:"trusted_now"`
+	ProviderCapability     ProviderCapability `json:"provider_capability"`
+}
+
+// ProviderCapability is an immutable evidence declaration, not a boolean
+// trusted by this package. A commit adapter must verify its signature and binding.
+type ProviderCapability struct {
+	ProviderID                  string         `json:"provider_id"`
+	CapabilityID                string         `json:"capability_id"`
+	CapabilityDigest            string         `json:"capability_digest"`
+	VerificationRef             PreparedObject `json:"verification_ref"`
+	EnforcesFence               bool           `json:"enforces_fence"`
+	SupportsLease               bool           `json:"supports_lease"`
+	EnforcesRevocationWatermark bool           `json:"enforces_revocation_watermark"`
+	MaxLeaseUntil               string         `json:"max_lease_until"`
+}
+
+// ExposureGateAttempt is the durable terminal result for one attempt. A
+// BLOCKED attempt never receives an authority sequence or a permit.
+type ExposureGateAttempt struct {
+	AttemptID         string `json:"attempt_id"`
+	RequestDigest     string `json:"request_digest"`
+	Outcome           string `json:"outcome"`
+	Code              string `json:"code"`
+	GateID            string `json:"gate_id"`
+	AdmissionCommitID string `json:"admission_commit_id"`
+	AuthoritySequence uint64 `json:"authority_sequence"`
+	CommittedAt       string `json:"committed_at"`
+	BlockedReason     string `json:"blocked_reason,omitempty"`
+	ExposurePermitted bool   `json:"exposure_permitted"`
+}
+
+// ExposureGateResult is never a remote APPLY acknowledgement.
+type ExposureGateResult struct {
+	Outcome             authority.Outcome    `json:"outcome"`
+	Code                string               `json:"code"`
+	Detail              string               `json:"detail,omitempty"`
+	Disposition         string               `json:"disposition,omitempty"`
+	Attempt             *ExposureGateAttempt `json:"attempt"`
+	BlockedCapabilities []string             `json:"blocked_capabilities,omitempty"`
+	ExposurePermitted   bool                 `json:"exposure_permitted"`
+}
+
 // AdmissionRequest binds the frozen admission plan to the exact C2 request and
 // commit token. ExactTargetID names Admission.AdmissionInput.ID. Proof and token
 // authenticity/currentness must still be verified by the transactional adapter.

@@ -3,6 +3,7 @@ package authoritycommit
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"regexp"
 	"slices"
 	"strings"
@@ -228,4 +229,88 @@ func digestWithPrefix(value any, prefix string) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(prefix + digest))
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// ValidateBlockedAttempt enforces the terminal shape of a persisted BLOCKED
+// attempt. Such an attempt cannot consume authority order or grant exposure.
+func ValidateBlockedAttempt(attempt ExposureGateAttempt) error {
+	if !idPattern.MatchString(attempt.AttemptID) || !digestPattern.MatchString(attempt.RequestDigest) ||
+		attempt.Outcome != "BLOCKED" || strings.TrimSpace(attempt.Code) == "" ||
+		!idPattern.MatchString(attempt.GateID) || !idPattern.MatchString(attempt.AdmissionCommitID) ||
+		strings.TrimSpace(attempt.BlockedReason) == "" {
+		return errors.New("blocked exposure gate attempt is malformed")
+	}
+	if attempt.AuthoritySequence != 0 || attempt.ExposurePermitted {
+		return errors.New("blocked exposure gate attempt grants authority")
+	}
+	return nil
+}
+
+// ValidateExposureGate checks only the immutable request shape. It neither
+// verifies C2 nor allocates a sequence, issues a permit or calls a provider.
+func ValidateExposureGate(req ExposureGateRequest) Result {
+	if req.ContractVersion != ContractVersion || req.Operation != JournalExposureGateV2 || req.Verification.Operation != JournalExposureGateV2 {
+		return denied("EXPOSURE_GATE_OPERATION_INVALID")
+	}
+	if !idPattern.MatchString(req.AttemptID) || !idPattern.MatchString(req.Gate.GateID) ||
+		req.ExactTargetID != req.Gate.GateID || strings.TrimSpace(req.CommitToken) == "" {
+		return denied("EXPOSURE_GATE_REQUEST_INVALID")
+	}
+	if !idPattern.MatchString(req.Gate.AdmissionCommitID) || !strings.HasPrefix(req.Gate.AdmissionCommitID, "ajc_") ||
+		!idPattern.MatchString(req.Gate.FenceID) || !digestPattern.MatchString(req.Gate.AdmissionRequestDigest) {
+		return denied("EXPOSURE_GATE_BINDING_INVALID")
+	}
+	v := req.Verification
+	if !strings.HasPrefix(v.ProofID, "aprf_") || !digestPattern.MatchString(strings.TrimPrefix(v.ProofID, "aprf_")) ||
+		v.Subject.SubjectID == "" || v.Resource != req.Gate.GateID || v.CaseID == "" || v.Round == 0 ||
+		v.ExecutionGeneration == 0 || !validScopes(v.Scopes) {
+		return denied("EXPOSURE_GATE_REQUEST_INVALID")
+	}
+	if result := ValidateProviderCapabilityShape(req.Gate.ProviderCapability); result.Outcome != authority.OutcomeValid {
+		return result
+	}
+	witness := req.Witness
+	if witness != (WitnessEvidence{}) {
+		if !idPattern.MatchString(witness.WitnessID) || !idPattern.MatchString(witness.EvidenceID) ||
+			!digestPattern.MatchString(witness.EvidenceDigest) || !idPattern.MatchString(witness.ObjectRef) ||
+			witness.AdmissionCommitID != req.Gate.AdmissionCommitID ||
+			witness.RequestDigest != req.Gate.AdmissionRequestDigest ||
+			!digestPattern.MatchString(witness.RequestDigest) || !validUTCMillis(witness.ValidUntil) {
+			return denied("WITNESS_EVIDENCE_INVALID")
+		}
+	}
+	if _, err := canonical.CanonicalizeStruct(req); err != nil {
+		return denied("REQUEST_INVALID")
+	}
+	return Result{Outcome: authority.OutcomeValid, Code: "EXPOSURE_GATE_REQUEST_VALID"}
+}
+
+// ValidateProviderCapability checks the declared immutable evidence shape. It
+// does not verify the signature or grant a permit; the adapter separately
+// requires an attestation verifier.
+func ValidateProviderCapability(capability ProviderCapability) Result {
+	if result := ValidateProviderCapabilityShape(capability); result.Outcome != authority.OutcomeValid {
+		return result
+	}
+	if !capability.EnforcesFence || !capability.SupportsLease || !capability.EnforcesRevocationWatermark {
+		return denied("PROVIDER_CAPABILITY_INSUFFICIENT")
+	}
+	return Result{Outcome: authority.OutcomeValid, Code: "PROVIDER_CAPABILITY_DECLARED"}
+}
+
+// ValidateProviderCapabilityShape checks only identifiers/digests and does not
+// assert the provider's operational guarantees.
+func ValidateProviderCapabilityShape(capability ProviderCapability) Result {
+	if !idPattern.MatchString(capability.ProviderID) || !idPattern.MatchString(capability.CapabilityID) ||
+		!digestPattern.MatchString(capability.CapabilityDigest) ||
+		!idPattern.MatchString(capability.VerificationRef.ID) || !digestPattern.MatchString(capability.VerificationRef.Digest) ||
+		!idPattern.MatchString(capability.VerificationRef.ObjectRef) || !validUTCMillis(capability.MaxLeaseUntil) {
+		return denied("PROVIDER_CAPABILITY_INVALID")
+	}
+	return Result{Outcome: authority.OutcomeValid, Code: "PROVIDER_CAPABILITY_SHAPE_VALID"}
+}
+
+// ExposureGateRequestDigest hashes the exact canonical Gate request.
+func ExposureGateRequestDigest(req ExposureGateRequest) (string, error) {
+	return digestWithPrefix(req, "magi:authority-journal-exposure-gate-v2:")
 }

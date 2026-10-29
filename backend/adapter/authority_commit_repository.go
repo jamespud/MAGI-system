@@ -26,9 +26,11 @@ var authorityCommitBlockedCapabilities = []string{
 // and a non-consumable blocked fence declaration; it never calls a Provider or
 // creates an exposure permit.
 type AuthorityCommitRepository struct {
-	db        *gorm.DB
-	authority *AuthorityRepository
-	faultHook func(string) error
+	db                      *gorm.DB
+	authority               *AuthorityRepository
+	faultHook               func(string) error
+	witnessVerifier         ExposureGateAttestationVerifier
+	gateAttestationVerifier ExposureGateAttestationVerifier
 }
 
 func NewAuthorityCommitRepository(db *gorm.DB, cfg AuthorityRepositoryConfig) *AuthorityCommitRepository {
@@ -298,6 +300,233 @@ func (r *AuthorityCommitRepository) CommitJournalAdmissionV2(
 // ReplayJournalAdmissionV2 reads one historical admission lineage only after a
 // current, independent JOURNAL_AUDIT_READ proof succeeds. It does not require
 // the original execution owner or lease and never creates a new commit.
+// CommitJournalExposureGateV2 is the default-off Gate authority core. It
+// allocates a gate sequence only after all local authority predicates pass.
+// It never calls a provider and the returned attempt is never a consumable
+// permit; a future provider fence consumer must recheck revocation at APPLY.
+func (r *AuthorityCommitRepository) CommitJournalExposureGateV2(
+	ctx context.Context,
+	owner *entity.ExecutionContext,
+	request authoritycommit.ExposureGateRequest,
+) authoritycommit.ExposureGateResult {
+	if r == nil || r.db == nil || r.authority == nil {
+		return exposureGateFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_UNAVAILABLE", "")
+	}
+	if capability := r.authority.capabilityResult(); capability != nil {
+		return exposureGateFailure(capability.Outcome, capability.Code, capability.Detail)
+	}
+	if result := authoritycommit.ValidateExposureGate(request); result.Outcome != authority.OutcomeValid {
+		return exposureGateFailure(result.Outcome, result.Code, result.Detail)
+	}
+	if owner == nil || !owner.IsDurable() || owner.CaseID != request.Verification.CaseID ||
+		owner.ExecutionGeneration != int64(request.Verification.ExecutionGeneration) {
+		code := "OWNER_BINDING_MISMATCH"
+		outcome := authority.OutcomeDenied
+		if owner != nil && owner.IsDurable() && owner.ExecutionGeneration != int64(request.Verification.ExecutionGeneration) {
+			code = "EXECUTION_GENERATION_STALE"
+			outcome = authority.OutcomeStale
+		}
+		return exposureGateFailure(outcome, code, "")
+	}
+	requestRaw, err := canonical.CanonicalizeStruct(request)
+	if err != nil {
+		return exposureGateFailure(authority.OutcomeDenied, "REQUEST_DIGEST_INVALID", err.Error())
+	}
+	requestDigest, err := authorityCommitDigest("magi:authority-journal-exposure-gate-v2:", request)
+	if err != nil {
+		return exposureGateFailure(authority.OutcomeDenied, "REQUEST_DIGEST_INVALID", err.Error())
+	}
+	gateCommitID := exposureGateCommitID(requestDigest)
+	if r.gateAttestationVerifier == nil || r.witnessVerifier == nil ||
+		authoritycommit.ValidateProviderCapability(request.Gate.ProviderCapability).Outcome != authority.OutcomeValid ||
+		!exposureWitnessDeclared(request.Witness) {
+		return r.commitBlockedExposureGate(ctx, owner, request, requestDigest)
+	}
+
+	var committed authoritycommit.ExposureGateResult
+	var abort *authoritycommit.ExposureGateResult
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.authorityCommitFault("gate_before_head"); err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		head, result := lockAuthorityHead(tx, request.Verification.TrustDomain)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if err := r.authorityCommitFault("gate_after_head"); err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		existing, result := lockExposureGateAttempt(tx, request.Verification.TrustDomain, request.AttemptID)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if existing != nil {
+			replayed, result := replayExposureGateAttempt(tx, *existing, requestRaw.Bytes(), requestDigest, request.CommitToken)
+			if result.Outcome != "" {
+				abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+				return errAuthorityCommitAbort
+			}
+			committed = replayed
+			return nil
+		}
+		tokenAttempt, result := lockExposureGateAttemptByToken(tx, request.Verification.TrustDomain, request.CommitToken)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if tokenAttempt != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "COMMIT_TOKEN_REUSED", ""))
+			return errAuthorityCommitAbort
+		}
+		token, result := lockExposureGateToken(tx, request.Verification.TrustDomain, request.CommitToken)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if token != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "COMMIT_TOKEN_REUSED", ""))
+			return errAuthorityCommitAbort
+		}
+		if result := r.authority.verifyProofInTx(tx, request.Verification); result.Outcome != authority.OutcomeValid {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		job, caseModel, lockErr := lockActiveExecution(tx, owner)
+		if lockErr != nil {
+			code := authorityOwnerFailureCode(tx, owner, lockErr)
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeStale, code, lockErr.Error()))
+			return errAuthorityCommitAbort
+		}
+		if result := r.authority.verifyProofInTx(tx, request.Verification); result.Outcome != authority.OutcomeValid {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		admission, fence, result := lockExposureGateAdmission(tx, request)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if result := validateExposureGateAdmissionBinding(admission, fence, request, owner); result.Outcome != authority.OutcomeValid {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if admission.State != "ADMITTED" {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "ADMISSION_NOT_GATED", ""))
+			return errAuthorityCommitAbort
+		}
+		if err := r.authorityCommitFault("gate_after_admission"); err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		trustedNow, err := databaseNow(tx)
+		if err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_ERROR", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		if err := validateActiveExecutionAt(job, caseModel, owner, trustedNow); err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeStale, classifyOwnerValidationFailure(job, caseModel, owner, trustedNow), err.Error()))
+			return errAuthorityCommitAbort
+		}
+		if !mustAuthorityTime(fence.LeaseUntilString).After(trustedNow) {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeExpired, "FENCE_EXPIRED", ""))
+			return errAuthorityCommitAbort
+		}
+		capability := request.Gate.ProviderCapability
+		if capability.CapabilityID != fence.ProviderCapabilityID ||
+			capability.VerificationRef.Digest != fence.ProviderCapabilityDigest ||
+			capability.VerificationRef.ObjectRef != fence.ProviderCapabilityRef {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeConflict, "PROVIDER_CAPABILITY_BINDING_MISMATCH", ""))
+			return errAuthorityCommitAbort
+		}
+		if !mustAuthorityTime(capability.MaxLeaseUntil).After(trustedNow) {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeExpired, "PROVIDER_CAPABILITY_EXPIRED", ""))
+			return errAuthorityCommitAbort
+		}
+		if mustAuthorityTime(fence.LeaseUntilString).After(mustAuthorityTime(capability.MaxLeaseUntil)) {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeBlocked, "PROVIDER_CAPABILITY_LEASE_SHORTER_THAN_FENCE", ""))
+			return errAuthorityCommitAbort
+		}
+		verified := r.gateAttestationVerifier.VerifyGateAttestation(request, capability, AuthorityExposureGateFenceEvidence{
+			LeaseUntil: mustAuthorityTime(fence.LeaseUntilString), ProviderCapabilityID: fence.ProviderCapabilityID,
+			ProviderCapabilityDigest: fence.ProviderCapabilityDigest, ProviderCapabilityRef: fence.ProviderCapabilityRef,
+			ExecutionGeneration: fence.ExecutionGeneration,
+		}, trustedNow)
+		if verified.Outcome != authority.OutcomeValid {
+			abort = exposureGateResultPtr(exposureGateFailure(verified.Outcome, verified.Code, verified.Detail))
+			return errAuthorityCommitAbort
+		}
+		if request.Witness.RequestDigest == "" || !mustAuthorityTime(request.Witness.ValidUntil).After(trustedNow) {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeStale, "WITNESS_EVIDENCE_EXPIRED_OR_UNBOUND", ""))
+			return errAuthorityCommitAbort
+		}
+		sequence, result := advanceExposureGateAuthorityHead(tx, head, owner, job, caseModel)
+		if result.Outcome != "" {
+			abort = exposureGateResultPtr(exposureGateFromAuthorityResult(result))
+			return errAuthorityCommitAbort
+		}
+		if err := r.authorityCommitFault("gate_after_sequence"); err != nil {
+			abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT", err.Error()))
+			return errAuthorityCommitAbort
+		}
+		attempt := authoritycommit.ExposureGateAttempt{
+			AttemptID: request.AttemptID, RequestDigest: requestDigest,
+			Outcome: "EXPOSURE_GATED", Code: "EXPOSURE_GATE_COMMITTED",
+			GateID: request.Gate.GateID, AdmissionCommitID: request.Gate.AdmissionCommitID,
+			AuthoritySequence: sequence, CommittedAt: authorityFormatTime(trustedNow),
+			ExposurePermitted: false,
+		}
+		for _, step := range []struct {
+			point string
+			write func() error
+		}{
+			{"gate_write_attempt", func() error {
+				return insertExposureGateAttemptV2(tx, request, requestDigest, gateCommitID, sequence, trustedNow)
+			}},
+			{"gate_write_binding", func() error {
+				return insertExposureGateBindingV2(tx, request, requestDigest, gateCommitID, sequence)
+			}},
+			{"gate_write_token", func() error {
+				return insertExposureGateTokenV2(tx, request, requestDigest, gateCommitID)
+			}},
+			{"gate_write_lineage", func() error {
+				return insertExposureGateLineageV2(tx, request, requestDigest, gateCommitID, sequence, requestRaw.Bytes())
+			}},
+			{"gate_write_attestation", func() error {
+				return insertExposureGateAttestationV2(tx, request, gateCommitID)
+			}},
+		} {
+			if err := step.write(); err != nil {
+				abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_ERROR", err.Error()))
+				return errAuthorityCommitAbort
+			}
+			if err := r.authorityCommitFault(step.point); err != nil {
+				abort = exposureGateResultPtr(exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT", err.Error()))
+				return errAuthorityCommitAbort
+			}
+		}
+		committed = authoritycommit.ExposureGateResult{
+			Outcome: authority.OutcomeValid, Code: "EXPOSURE_GATED", Disposition: "NEW", Attempt: &attempt,
+			BlockedCapabilities: []string{"PROVIDER_FENCE_CAPABILITY_UNVERIFIED", "INDEPENDENT_WITNESS_UNAVAILABLE"},
+			ExposurePermitted:   false,
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if abort != nil {
+		return *abort
+	}
+	if err != nil {
+		return exposureGateFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_ERROR", err.Error())
+	}
+	if err := r.authorityCommitFault("gate_after_commit"); err != nil {
+		return exposureGateFailure(authority.OutcomeUnknown, "INJECTED_FAULT_AFTER_COMMIT", err.Error())
+	}
+	return committed
+}
+
 func (r *AuthorityCommitRepository) ReplayJournalAdmissionV2(ctx context.Context, request authoritycommit.ReplayRequest) authoritycommit.Result {
 	if r == nil || r.db == nil || r.authority == nil {
 		return authorityCommitFailure(authority.OutcomeUnknown, "AUTHORITY_STORE_UNAVAILABLE", "")
